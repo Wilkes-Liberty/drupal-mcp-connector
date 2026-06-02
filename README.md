@@ -110,8 +110,8 @@ Presets layer with entity allow/deny lists, per-bundle operation rules, and fiel
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/Wilkes-Liberty/drupal_mcp_server
-cd drupal_mcp_server
+git clone https://github.com/Wilkes-Liberty/drupal-mcp-server
+cd drupal-mcp-server
 npm install
 
 # 2. Configure
@@ -131,7 +131,7 @@ Most desktop and CLI MCP clients launch the connector over **stdio**. Add an ent
   "mcpServers": {
     "drupal": {
       "command": "node",
-      "args": ["/absolute/path/to/drupal_mcp_server/src/index.js"],
+      "args": ["/absolute/path/to/drupal-mcp-server/src/index.js"],
       "env": {
         "DRUPAL_BASE_URL": "https://mysite.com",
         "DRUPAL_API_TOKEN": "your-token-here"

@@ -46,4 +46,4 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
-[0.4.0]: https://github.com/Wilkes-Liberty/drupal_mcp_server/releases/tag/v0.4.0
+[0.4.0]: https://github.com/Wilkes-Liberty/drupal-mcp-server/releases/tag/v0.4.0

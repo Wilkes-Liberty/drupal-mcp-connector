@@ -17,8 +17,8 @@ This guide covers every setup path: local dev with DDEV/Lando, staging, producti
 ## 2. Install
 
 ```bash
-git clone https://github.com/Wilkes-Liberty/drupal_mcp_server
-cd drupal_mcp_server
+git clone https://github.com/Wilkes-Liberty/drupal-mcp-server
+cd drupal-mcp-server
 npm install
 ```
 
@@ -148,7 +148,7 @@ Most desktop and CLI MCP clients launch the connector as a stdio subprocess. Add
   "mcpServers": {
     "drupal": {
       "command": "node",
-      "args": ["/absolute/path/to/drupal_mcp_server/src/index.js"]
+      "args": ["/absolute/path/to/drupal-mcp-server/src/index.js"]
     }
   }
 }
@@ -161,7 +161,7 @@ To pass credentials via the environment instead of `config.json`:
   "mcpServers": {
     "drupal": {
       "command": "node",
-      "args": ["/absolute/path/to/drupal_mcp_server/src/index.js"],
+      "args": ["/absolute/path/to/drupal-mcp-server/src/index.js"],
       "env": {
         "DRUPAL_BASE_URL": "https://mysite.com",
         "DRUPAL_API_TOKEN": "your-token-here"

@@ -93,7 +93,7 @@
     "_comment": "Add under your MCP client's mcpServers config (stdio transport)",
     "drupal": {
       "command": "node",
-      "args":    ["/absolute/path/to/drupal_mcp_server/src/index.js"]
+      "args":    ["/absolute/path/to/drupal-mcp-server/src/index.js"]
     }
   },
 
