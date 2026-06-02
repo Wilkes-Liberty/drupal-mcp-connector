@@ -70,6 +70,16 @@ Read-only. User entities blocked entirely. Broad PII field redaction (`pass`, `m
 
 Good for: live production sites where any write access is unacceptable.
 
+### `write-plane`
+```json
+{ "preset": "write-plane" }
+```
+Governed write access for automated agents. Create and update are allowed on `node`, `taxonomy_term`, and `media`; deletes and GraphQL mutations are blocked, the `user` entity type is denied, and `pass`/`mail` are redacted in all responses.
+
+This preset mirrors the server-side governance profile so the connector and the server agree on what is permitted. The Drupal-side governance layer remains **authoritative** — this preset is defence in depth, not the policy of record.
+
+Good for: an OAuth2 client-credentials agent writing content through the JSON:API write plane.
+
 ---
 
 ## Overriding Preset Defaults

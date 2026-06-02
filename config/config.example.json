@@ -101,7 +101,8 @@
     "development":       "All operations allowed. Local dev only.",
     "content-editor":    "Create/edit nodes+media+terms. No deletes. No user entity access.",
     "auditor":           "Read-only. All entity types. User PII fields redacted.",
-    "production-strict": "Read-only. No user entities. Broad PII redaction."
+    "production-strict": "Read-only. No user entities. Broad PII redaction.",
+    "write-plane":       "Governed writes (no delete/mutations) on node, taxonomy_term, media. No user. Redacts pass/mail."
   },
 
   "_mcp_client_registration": {
