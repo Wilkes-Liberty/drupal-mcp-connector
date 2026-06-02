@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { clientHeaders, CLIENT_VERSION, resolveApiToken, assertSecureAuth } from "../../src/lib/config.js";
+import { clientHeaders, CLIENT_VERSION, resolveApiToken, resolveOauth, assertSecureAuth } from "../../src/lib/config.js";
 import { SecurityError } from "../../src/lib/security.js";
 
 const ORIG = process.env.MCP_CLIENT_ID;
@@ -39,6 +39,49 @@ describe("resolveApiToken", () => {
   });
 });
 
+describe("resolveOauth", () => {
+  it("is a no-op when no oauth block is present", () => {
+    const s = resolveOauth({ _name: "t", baseUrl: "https://x" });
+    expect(s.oauth).toBeUndefined();
+  });
+  it("reads clientSecret from the named env var when absent", () => {
+    process.env.MY_OAUTH_SECRET = "shh";
+    const s = resolveOauth({
+      _name: "t",
+      baseUrl: "https://x",
+      oauth: { clientId: "c", clientSecretEnv: "MY_OAUTH_SECRET", scopes: ["mcp:read"] },
+    });
+    expect(s.oauth.clientSecret).toBe("shh");
+    delete process.env.MY_OAUTH_SECRET;
+  });
+  it("leaves an explicit clientSecret untouched", () => {
+    const s = resolveOauth({
+      _name: "t",
+      baseUrl: "https://x",
+      oauth: { clientId: "c", clientSecret: "explicit", clientSecretEnv: "MY_OAUTH_SECRET" },
+    });
+    expect(s.oauth.clientSecret).toBe("explicit");
+  });
+  it("defaults tokenUrl to /oauth/token and grant to client_credentials", () => {
+    const s = resolveOauth({
+      _name: "t",
+      baseUrl: "https://x",
+      oauth: { clientId: "c", clientSecret: "s" },
+    });
+    expect(s.oauth.tokenUrl).toBe("/oauth/token");
+    expect(s.oauth.grant).toBe("client_credentials");
+  });
+  it("preserves an explicit tokenUrl and grant", () => {
+    const s = resolveOauth({
+      _name: "t",
+      baseUrl: "https://x",
+      oauth: { clientId: "c", clientSecret: "s", tokenUrl: "/custom/token", grant: "password" },
+    });
+    expect(s.oauth.tokenUrl).toBe("/custom/token");
+    expect(s.oauth.grant).toBe("password");
+  });
+});
+
 describe("assertSecureAuth", () => {
   it("does nothing when requireSecureAuth is unset", () => {
     expect(() => assertSecureAuth({ baseUrl: "http://x", username: "a", password: "b" })).not.toThrow();
@@ -52,5 +95,19 @@ describe("assertSecureAuth", () => {
   });
   it("passes with HTTPS + Bearer", () => {
     expect(() => assertSecureAuth({ requireSecureAuth: true, baseUrl: "https://x", apiToken: "t" })).not.toThrow();
+  });
+  it("passes with HTTPS + a valid oauth block (no apiToken)", () => {
+    expect(() => assertSecureAuth({
+      requireSecureAuth: true,
+      baseUrl: "https://x",
+      oauth: { clientId: "c", clientSecret: "s" },
+    })).not.toThrow();
+  });
+  it("rejects an oauth block missing a resolved clientSecret", () => {
+    expect(() => assertSecureAuth({
+      requireSecureAuth: true,
+      baseUrl: "https://x",
+      oauth: { clientId: "c" },
+    })).toThrow(SecurityError);
   });
 });

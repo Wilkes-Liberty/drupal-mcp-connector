@@ -79,6 +79,21 @@
       "graphqlEndpoint": "/graphql",
       "api":             "graphql",
       "security":        { "preset": "auditor" }
+    },
+
+    "oauth_write_plane": {
+      "_comment": "OAuth2 client_credentials grant against simple_oauth. The client secret is read from the named env var and never stored here.",
+      "baseUrl":           "https://api.example.com",
+      "requireSecureAuth": true,
+      "api":               "jsonapi",
+      "oauth": {
+        "tokenUrl":        "/oauth/token",
+        "clientId":        "mcp-agent-prod",
+        "clientSecretEnv": "MCP_AGENT_CLIENT_SECRET",
+        "scopes":          ["mcp:read", "mcp:write"],
+        "grant":           "client_credentials"
+      },
+      "security": { "preset": "write-plane" }
     }
   },
 
