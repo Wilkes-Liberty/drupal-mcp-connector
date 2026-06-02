@@ -1,0 +1,45 @@
+{
+  "name": "drupal-mcp-server",
+  "version": "0.4.0",
+  "description": "A secure, multi-site Model Context Protocol (MCP) connector for Drupal — dual-protocol JSON:API and GraphQL.",
+  "type": "module",
+  "main": "src/index.js",
+  "homepage": "https://github.com/Wilkes-Liberty/drupal_mcp_server",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Wilkes-Liberty/drupal_mcp_server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Wilkes-Liberty/drupal_mcp_server/issues"
+  },
+  "license": "MIT",
+  "author": "Wilkes & Liberty <opensource@wilkesliberty.com>",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start":        "node src/index.js",
+    "start:https":  "MCP_TRANSPORT=https node src/index.js",
+    "start:dev":    "MCP_TRANSPORT=https MCP_ALLOW_HTTP=1 MCP_PORT=3443 node src/index.js",
+    "lint":         "eslint src/",
+    "lint:fix":     "eslint src/ --fix",
+    "test":         "vitest run",
+    "test:watch":   "vitest",
+    "audit":        "npm audit --audit-level=high",
+    "check":        "npm run lint && npm run audit",
+    "syntax-check": "for f in src/lib/*.js src/tools/*.js src/index.js; do node --input-type=module --check < $f && echo \"$f ✓\"; done"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "graphql": "^16.9.0",
+    "node-fetch": "^3.3.2",
+    "ssh2": "^1.16.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "eslint-plugin-security": "^3.0.0",
+    "eslint-plugin-n": "^17.0.0",
+    "globals": "^15.0.0",
+    "vitest": "^2.1.0"
+  }
+}
