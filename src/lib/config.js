@@ -11,6 +11,7 @@ import { readFileSync }                  from "fs";
 import { resolve }                       from "path";
 import { validateBaseUrl }               from "./validate.js";
 import { SecurityError }                 from "./security.js";
+import { getAccessToken }                from "./oauth.js";
 
 /** Connector version for the X-MCP-Client identity label. Keep in sync with package.json. */
 export const CLIENT_VERSION = "0.4.0";
@@ -188,6 +189,20 @@ export function authHeaders(site) {
     return { Authorization: `Basic ${creds}` };
   }
   return {};
+}
+
+/**
+ * Async variant of authHeaders. For OAuth2 sites it resolves a Bearer token
+ * from the token manager (acquiring/refreshing as needed); for all other sites
+ * it falls back to the synchronous static-credential path.
+ * @param {object} site
+ * @returns {Promise<object>} Headers object
+ */
+export async function authHeadersAsync(site) {
+  if (site.oauth) {
+    return { Authorization: `Bearer ${await getAccessToken(site)}` };
+  }
+  return authHeaders(site);
 }
 
 // ---------------------------------------------------------------------------
