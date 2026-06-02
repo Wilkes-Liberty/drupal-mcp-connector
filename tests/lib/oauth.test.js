@@ -95,6 +95,53 @@ describe("getAccessToken", () => {
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
   });
 
+  it("dedups concurrent requests at expiry into a single token fetch", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      tokenResponse({ access_token: "tok-burst", expires_in: 3600 })
+    );
+    const site = oauthSite("s7");
+    const [a, b] = await Promise.all([getAccessToken(site), getAccessToken(site)]);
+    expect(a).toBe("tok-burst");
+    expect(b).toBe("tok-burst");
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to client_credentials when the refresh grant fails", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        tokenResponse({ access_token: "tok-a", expires_in: 30, refresh_token: "refresh-1" })
+      )
+      .mockResolvedValueOnce(
+        tokenResponse({ error: "invalid_grant" }, { ok: false, status: 400 })
+      )
+      .mockResolvedValueOnce(tokenResponse({ access_token: "tok-fresh", expires_in: 3600 }));
+    const site = oauthSite("s8");
+    expect(await getAccessToken(site)).toBe("tok-a");
+    // Refresh fails (400), so it retries with a fresh client_credentials grant.
+    expect(await getAccessToken(site)).toBe("tok-fresh");
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
+
+    const refreshBody = new URLSearchParams(vi.mocked(fetch).mock.calls[1][1].body);
+    expect(refreshBody.get("grant_type")).toBe("refresh_token");
+    const fallbackBody = new URLSearchParams(vi.mocked(fetch).mock.calls[2][1].body);
+    expect(fallbackBody.get("grant_type")).toBe("client_credentials");
+    expect(fallbackBody.get("refresh_token")).toBeNull();
+  });
+
+  it("throws OAuthError when the token response has no access_token", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      tokenResponse({ expires_in: 3600 })
+    );
+    const site = oauthSite("s9");
+    await expect(getAccessToken(site)).rejects.toThrow(OAuthError);
+    try {
+      await getAccessToken(oauthSite("s9b"));
+    } catch (err) {
+      expect(err).toBeInstanceOf(OAuthError);
+      expect(String(err.message)).not.toContain("shh");
+    }
+  });
+
   it("throws OAuthError on a non-2xx token response without leaking the secret", async () => {
     vi.mocked(fetch).mockResolvedValue(
       tokenResponse({ error: "invalid_client" }, { ok: false, status: 401 })

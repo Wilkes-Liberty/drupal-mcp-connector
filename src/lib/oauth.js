@@ -15,7 +15,11 @@ import fetch from "node-fetch";
 /** Re-acquire this many ms before the stated expiry to absorb clock skew. */
 const EXPIRY_SKEW_MS = 60_000;
 
-/** Per-site token cache, keyed by site._name → { token, expiresAt, refreshToken }. */
+/**
+ * Per-site token cache, keyed by site._name. A value is either a resolved
+ * { token, expiresAt, refreshToken } entry or an in-flight Promise of one
+ * (so concurrent acquires share a single token request).
+ */
 const cache = new Map();
 
 /**
@@ -67,12 +71,34 @@ async function requestToken(site, useRefresh, refreshToken) {
   }
 
   const data = await res.json();
+  if (!data.access_token || typeof data.access_token !== "string") {
+    throw new OAuthError(
+      `OAuth token response from ${site._name} is missing access_token.`,
+      res.status
+    );
+  }
   const expiresIn = Number(data.expires_in) || 0;
   return {
     token: data.access_token,
     expiresAt: Date.now() + expiresIn * 1000,
     refreshToken: data.refresh_token || null,
   };
+}
+
+/**
+ * Acquire a token, attempting the refresh grant when a refresh token is cached.
+ * If the refresh grant fails (revoked/expired), fall back once to a fresh
+ * client_credentials grant; only surface the error if that also fails.
+ */
+async function acquireToken(site, useRefresh, refreshToken) {
+  if (!useRefresh) {
+    return requestToken(site, false, null);
+  }
+  try {
+    return await requestToken(site, true, refreshToken);
+  } catch {
+    return requestToken(site, false, null);
+  }
 }
 
 /**
@@ -84,13 +110,33 @@ export async function getAccessToken(site) {
   const key = site._name;
   const cached = cache.get(key);
 
-  if (cached && Date.now() < cached.expiresAt - EXPIRY_SKEW_MS) {
-    return cached.token;
+  // A cached entry may be a resolved token object or an in-flight Promise from a
+  // concurrent acquire; normalize before reading its fields.
+  if (cached) {
+    const resolved = await Promise.resolve(cached);
+    if (Date.now() < resolved.expiresAt - EXPIRY_SKEW_MS) {
+      return resolved.token;
+    }
   }
 
-  const useRefresh = Boolean(cached?.refreshToken);
-  const entry = await requestToken(site, useRefresh, cached?.refreshToken);
-  cache.set(key, entry);
+  const useRefresh = Boolean(cached && !(cached instanceof Promise) && cached.refreshToken);
+  const refreshToken = useRefresh ? cached.refreshToken : null;
+
+  // Store the in-flight Promise before awaiting so concurrent callers share one
+  // request. Replace with the resolved entry on success; clear on failure so a
+  // transient error does not poison the cache.
+  const pending = acquireToken(site, useRefresh, refreshToken)
+    .then((entry) => {
+      cache.set(key, entry);
+      return entry;
+    })
+    .catch((err) => {
+      cache.delete(key);
+      throw err;
+    });
+  cache.set(key, pending);
+
+  const entry = await pending;
   return entry.token;
 }
 

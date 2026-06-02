@@ -125,9 +125,9 @@ function validateConfig(cfg) {
     // Enforce HTTPS for non-localhost — throws SecurityError for plain HTTP
     site.baseUrl = validateBaseUrl(site.baseUrl, name);
 
-    if (!site.apiToken && !(site.username && site.password)) {
+    if (!site.apiToken && !(site.username && site.password) && !site.oauth) {
       console.warn(
-        `[drupal-mcp-server] Warning: site "${name}" has no apiToken or username/password. ` +
+        `[drupal-mcp-server] Warning: site "${name}" has no apiToken, username/password, or oauth block. ` +
         "Unauthenticated requests will be limited to public content."
       );
     }

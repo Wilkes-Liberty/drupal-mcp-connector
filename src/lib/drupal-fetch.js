@@ -76,6 +76,9 @@ export async function drupalGraphqlFetch(site, body) {
   });
 
   if (!res.ok) {
+    // OAuth sites: a 401 likely means the token expired server-side. Clear the
+    // cached token so the next request re-acquires, then surface the error.
+    if (res.status === 401 && site.oauth) clearToken(site);
     const text = await res.text();
     throw new Error(`GraphQL request failed ${res.status}: ${text}`);
   }
