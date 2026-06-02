@@ -257,12 +257,19 @@ interface SiteConfig {
   requireSecureAuth?: boolean;           // Reject anon/Basic/HTTP; require HTTPS + Bearer
   username?: string;                     // Basic auth fallback (local dev)
   password?: string;
+  oauth?: {                              // OAuth2 client_credentials write plane
+    tokenUrl?: string;                   // Default: "/oauth/token"
+    clientId: string;
+    clientSecretEnv: string;             // Read the client secret from this env var
+    scopes?: string[];
+    grant?: string;                      // Default: "client_credentials"
+  };
   graphqlEndpoint?: string;              // Default: "/graphql"
   drushSsh?: {
     host: string; user: string; keyPath: string; drupalRoot: string; port?: number; // default 22
   };
   security?: {
-    preset?: "development" | "content-editor" | "auditor" | "production-strict";
+    preset?: "development" | "content-editor" | "auditor" | "production-strict" | "write-plane";
     readOnly?: boolean;
     allowDestructive?: boolean;
     allowGraphqlMutations?: boolean;

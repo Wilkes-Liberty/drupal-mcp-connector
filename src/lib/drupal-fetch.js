@@ -5,26 +5,40 @@
 import fetch from "node-fetch";
 import { createReadStream, statSync } from "fs";
 import { basename } from "path";
-import { authHeaders, clientHeaders } from "./config.js";
+import { authHeadersAsync, clientHeaders } from "./config.js";
+import { clearToken } from "./oauth.js";
 
 const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
 
 /**
  * Standard JSON:API request.
+ *
+ * For OAuth2 sites, a 401 triggers a single retry: the cached token is cleared,
+ * re-acquired, and the request is replayed once before the error surfaces.
  */
 export async function drupalFetch(site, path, options = {}) {
   const url = `${site.baseUrl}${path}`;
 
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": JSON_API_CONTENT_TYPE,
-      Accept: JSON_API_CONTENT_TYPE,
-      ...clientHeaders(),
-      ...authHeaders(site),
-      ...(options.headers || {}),
-    },
-  });
+  async function attempt() {
+    return fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": JSON_API_CONTENT_TYPE,
+        Accept: JSON_API_CONTENT_TYPE,
+        ...clientHeaders(),
+        ...(await authHeadersAsync(site)),
+        ...(options.headers || {}),
+      },
+    });
+  }
+
+  let res = await attempt();
+
+  // OAuth sites: a 401 may mean the token expired server-side. Refresh once.
+  if (res.status === 401 && site.oauth) {
+    clearToken(site);
+    res = await attempt();
+  }
 
   if (!res.ok) {
     const body = await res.text();
@@ -56,12 +70,15 @@ export async function drupalGraphqlFetch(site, body) {
       "Content-Type": "application/json",
       Accept: "application/json",
       ...clientHeaders(),
-      ...authHeaders(site),
+      ...(await authHeadersAsync(site)),
     },
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
+    // OAuth sites: a 401 likely means the token expired server-side. Clear the
+    // cached token so the next request re-acquires, then surface the error.
+    if (res.status === 401 && site.oauth) clearToken(site);
     const text = await res.text();
     throw new Error(`GraphQL request failed ${res.status}: ${text}`);
   }
@@ -94,7 +111,7 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
       "Content-Disposition": `file; filename="${filename}"`,
       Accept: JSON_API_CONTENT_TYPE,
       ...clientHeaders(),
-      ...authHeaders(site),
+      ...(await authHeadersAsync(site)),
     },
     // eslint-disable-next-line security/detect-non-literal-fs-filename -- filePath is a caller-supplied local upload path (validated upstream); fs access is the intended behavior
     body: createReadStream(filePath),

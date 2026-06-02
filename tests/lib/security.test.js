@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { assertGraphqlMutationAllowed, SecurityError } from "../../src/lib/security.js";
-import { redactCanonicalEntity, redactResource } from "../../src/lib/security.js";
+import { redactCanonicalEntity, redactResource, resolveSecurityConfig } from "../../src/lib/security.js";
 
 const allowMut = { allowGraphqlMutations: true, readOnly: false };
 const denyMut = { allowGraphqlMutations: false, readOnly: false };
@@ -33,6 +33,19 @@ describe("redactResource (JSON:API shape)", () => {
   it("is null/empty-safe", () => {
     expect(redactResource(null, sec, "user")).toBeNull();
     expect(redactResource({ type: "user--user", id: "u1" }, sec, "user")).toMatchObject({ id: "u1" });
+  });
+});
+
+describe("write-plane preset", () => {
+  it("resolves the governed write-plane profile", () => {
+    const cfg = resolveSecurityConfig({ security: { preset: "write-plane" } });
+    expect(cfg.readOnly).toBe(false);
+    expect(cfg.allowDestructive).toBe(false);
+    expect(cfg.allowGraphqlMutations).toBe(false);
+    expect(cfg.allowedEntityTypes).toEqual(["node", "taxonomy_term", "media"]);
+    expect(cfg.deniedEntityTypes).toEqual(["user"]);
+    expect(cfg.globalRedactedFields).toContain("pass");
+    expect(cfg.globalRedactedFields).toContain("mail");
   });
 });
 

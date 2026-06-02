@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **OAuth2 write-plane authentication.** Per-site `oauth` block enabling the
+  `client_credentials` grant against Drupal `simple_oauth`: token acquisition,
+  in-memory per-site caching with silent re-acquire (60s expiry skew), refresh-token
+  grant with fallback to `client_credentials`, concurrent-acquire de-duplication, and
+  a one-shot token clear + retry on `401`. The client secret is sourced from an
+  environment variable (`oauth.clientSecretEnv`) and is never stored in config or
+  surfaced in errors.
+- **`write-plane` security preset** mirroring the recommended server-side governance
+  profile: writes enabled, no deletes, no GraphQL mutations, entity access limited to
+  `node`/`taxonomy_term`/`media`, `user` entities denied, `pass`/`mail` redacted.
+
+### Changed
+- The three fetch helpers resolve auth via an async path so OAuth sites attach a
+  freshly-managed Bearer token; static token / Basic-auth sites are unchanged.
+- `requireSecureAuth` now accepts a valid `oauth` block as satisfying the Bearer
+  requirement.
+
 ## [0.4.0] - 2026-06-01
 
 The connector is now **dual-protocol**: every tool runs against an abstract backend

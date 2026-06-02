@@ -79,6 +79,21 @@
       "graphqlEndpoint": "/graphql",
       "api":             "graphql",
       "security":        { "preset": "auditor" }
+    },
+
+    "oauth_write_plane": {
+      "_comment": "OAuth2 client_credentials grant against simple_oauth. The client secret is read from the named env var and never stored here.",
+      "baseUrl":           "https://api.example.com",
+      "requireSecureAuth": true,
+      "api":               "jsonapi",
+      "oauth": {
+        "tokenUrl":        "/oauth/token",
+        "clientId":        "mcp-agent-prod",
+        "clientSecretEnv": "MCP_AGENT_CLIENT_SECRET",
+        "scopes":          ["mcp:read", "mcp:write"],
+        "grant":           "client_credentials"
+      },
+      "security": { "preset": "write-plane" }
     }
   },
 
@@ -86,7 +101,8 @@
     "development":       "All operations allowed. Local dev only.",
     "content-editor":    "Create/edit nodes+media+terms. No deletes. No user entity access.",
     "auditor":           "Read-only. All entity types. User PII fields redacted.",
-    "production-strict": "Read-only. No user entities. Broad PII redaction."
+    "production-strict": "Read-only. No user entities. Broad PII redaction.",
+    "write-plane":       "Governed writes (no delete/mutations) on node, taxonomy_term, media. No user. Redacts pass/mail."
   },
 
   "_mcp_client_registration": {

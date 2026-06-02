@@ -16,6 +16,7 @@ import { parse } from "graphql";
  *   "preset": "content-editor"     Create/edit nodes+media. No user mgmt, no deletes.
  *   "preset": "auditor"            Read-only. All entity types. User fields redacted.
  *   "preset": "production-strict"  Read-only. Explicit allowlist required. Redacts PII.
+ *   "preset": "write-plane"        Governed writes (no delete/mutations) on node, term, media.
  *
  * Presets can be overridden by adding explicit keys alongside them.
  *
@@ -97,6 +98,18 @@ const PRESETS = {
     deniedEntityTypes: ["user"],      // no user data at all
     entityRules: {},
     globalRedactedFields: ["pass", "mail", "field_private", "field_api_key", "field_token"],
+  },
+
+  "write-plane": {
+    // Mirrors the server-side governance profile for agent writes. The
+    // Drupal-side governance layer remains authoritative; this is defence in depth.
+    readOnly: false,
+    allowDestructive: false,          // no deletes
+    allowGraphqlMutations: false,     // writes go through the JSON:API plane
+    allowedEntityTypes: ["node", "taxonomy_term", "media"],
+    deniedEntityTypes: ["user"],
+    entityRules: {},
+    globalRedactedFields: ["pass", "mail"],
   },
 };
 

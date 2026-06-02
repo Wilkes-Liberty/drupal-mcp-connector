@@ -11,6 +11,7 @@ import { readFileSync }                  from "fs";
 import { resolve }                       from "path";
 import { validateBaseUrl }               from "./validate.js";
 import { SecurityError }                 from "./security.js";
+import { getAccessToken }                from "./oauth.js";
 
 /** Connector version for the X-MCP-Client identity label. Keep in sync with package.json. */
 export const CLIENT_VERSION = "0.4.0";
@@ -37,18 +38,44 @@ export function resolveApiToken(site) {
 }
 
 /**
+ * If a site declares an oauth block, source the client secret from the named
+ * env var when no explicit clientSecret is set, and apply defaults for tokenUrl
+ * and grant. Keeps the secret out of the config file.
+ */
+export function resolveOauth(site) {
+  if (!site.oauth) return site;
+  const oauth = { ...site.oauth };
+  if (!oauth.clientSecret && oauth.clientSecretEnv) {
+    oauth.clientSecret = new Map(Object.entries(process.env)).get(oauth.clientSecretEnv) || "";
+  }
+  oauth.tokenUrl = oauth.tokenUrl || "/oauth/token";
+  oauth.grant = oauth.grant || "client_credentials";
+  return { ...site, oauth };
+}
+
+/**
+ * Whether a site has a usable OAuth2 client-credentials block (clientId plus a
+ * resolved clientSecret). Used to satisfy the strong-auth requirement.
+ */
+function hasValidOauth(site) {
+  return Boolean(site.oauth?.clientId && site.oauth?.clientSecret);
+}
+
+/**
  * Opt-in strong-auth enforcement. When site.requireSecureAuth is true, the site
- * must use HTTPS and a Bearer apiToken — anonymous and basic auth are rejected.
+ * must use HTTPS and either a Bearer apiToken or a valid OAuth2 client-credentials
+ * block — anonymous and basic auth are rejected.
  */
 export function assertSecureAuth(site) {
   if (!site.requireSecureAuth) return;
   if (!String(site.baseUrl || "").startsWith("https://")) {
     throw new SecurityError(`Site "${site._name}": requireSecureAuth is set but baseUrl is not HTTPS.`);
   }
-  if (!site.apiToken) {
+  if (!site.apiToken && !hasValidOauth(site)) {
     throw new SecurityError(
-      `Site "${site._name}": requireSecureAuth is set but no Bearer apiToken is configured ` +
-      "(anonymous and basic auth are not permitted). Provide apiToken or apiTokenEnv."
+      `Site "${site._name}": requireSecureAuth is set but no Bearer apiToken or OAuth2 client ` +
+      "credentials are configured (anonymous and basic auth are not permitted). " +
+      "Provide apiToken/apiTokenEnv or an oauth block."
     );
   }
 }
@@ -98,9 +125,9 @@ function validateConfig(cfg) {
     // Enforce HTTPS for non-localhost — throws SecurityError for plain HTTP
     site.baseUrl = validateBaseUrl(site.baseUrl, name);
 
-    if (!site.apiToken && !(site.username && site.password)) {
+    if (!site.apiToken && !(site.username && site.password) && !site.oauth) {
       console.warn(
-        `[drupal-mcp-server] Warning: site "${name}" has no apiToken or username/password. ` +
+        `[drupal-mcp-server] Warning: site "${name}" has no apiToken, username/password, or oauth block. ` +
         "Unauthenticated requests will be limited to public content."
       );
     }
@@ -134,7 +161,7 @@ export function getSiteConfig(siteName) {
     throw new Error(`Unknown site: "${name}". Configured sites: ${available}`);
   }
 
-  const resolved = resolveApiToken({ ...site, _name: name });
+  const resolved = resolveOauth(resolveApiToken({ ...site, _name: name }));
   assertSecureAuth(resolved);
   return resolved;
 }
@@ -162,6 +189,20 @@ export function authHeaders(site) {
     return { Authorization: `Basic ${creds}` };
   }
   return {};
+}
+
+/**
+ * Async variant of authHeaders. For OAuth2 sites it resolves a Bearer token
+ * from the token manager (acquiring/refreshing as needed); for all other sites
+ * it falls back to the synchronous static-credential path.
+ * @param {object} site
+ * @returns {Promise<object>} Headers object
+ */
+export async function authHeadersAsync(site) {
+  if (site.oauth) {
+    return { Authorization: `Bearer ${await getAccessToken(site)}` };
+  }
+  return authHeaders(site);
 }
 
 // ---------------------------------------------------------------------------
