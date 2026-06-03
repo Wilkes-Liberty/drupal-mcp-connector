@@ -18,8 +18,9 @@ export const CLIENT_VERSION = "0.6.0";
 
 /**
  * Identity headers sent on every outbound Drupal request. Lets governance layers
- * (e.g. mcp_sentinel) label/identify connector traffic. ON by default; set
- * MCP_CLIENT_ID to override the value, or to "" to disable entirely.
+ * label/identify connector traffic. ON by default; set MCP_CLIENT_ID to override
+ * the value, or to "" to disable entirely.
+ * @returns {Object<string,string>} Header map (empty when the identity is disabled).
  */
 export function clientHeaders() {
   const id = process.env.MCP_CLIENT_ID ?? `drupal-mcp-connector/${CLIENT_VERSION}`;
@@ -30,6 +31,8 @@ export function clientHeaders() {
 /**
  * If a site declares apiTokenEnv and has no explicit apiToken, source the token
  * from that environment variable (keeps secrets out of the config file).
+ * @param {object} site Raw site config.
+ * @returns {object} The site, possibly with apiToken populated from the env var.
  */
 export function resolveApiToken(site) {
   if (site.apiToken || !site.apiTokenEnv) return site;
@@ -41,6 +44,8 @@ export function resolveApiToken(site) {
  * If a site declares an oauth block, source the client secret from the named
  * env var when no explicit clientSecret is set, and apply defaults for tokenUrl
  * and grant. Keeps the secret out of the config file.
+ * @param {object} site Raw site config.
+ * @returns {object} The site with a normalized oauth block (unchanged if no oauth).
  */
 export function resolveOauth(site) {
   if (!site.oauth) return site;
@@ -56,6 +61,8 @@ export function resolveOauth(site) {
 /**
  * Whether a site has a usable OAuth2 client-credentials block (clientId plus a
  * resolved clientSecret). Used to satisfy the strong-auth requirement.
+ * @param {object} site Resolved site config.
+ * @returns {boolean}
  */
 function hasValidOauth(site) {
   return Boolean(site.oauth?.clientId && site.oauth?.clientSecret);
@@ -65,6 +72,9 @@ function hasValidOauth(site) {
  * Opt-in strong-auth enforcement. When site.requireSecureAuth is true, the site
  * must use HTTPS and either a Bearer apiToken or a valid OAuth2 client-credentials
  * block — anonymous and basic auth are rejected.
+ * @param {object} site Resolved site config.
+ * @returns {void}
+ * @throws {SecurityError} if the site is not HTTPS, or lacks a Bearer/OAuth credential.
  */
 export function assertSecureAuth(site) {
   if (!site.requireSecureAuth) return;
@@ -80,12 +90,20 @@ export function assertSecureAuth(site) {
   }
 }
 
+/** In-memory cache of the parsed config; populated once by loadConfig(). */
 let _config = null;
 
 // ---------------------------------------------------------------------------
 // Load + validate config
 // ---------------------------------------------------------------------------
 
+/**
+ * Load and validate the connector config, caching the result for the process
+ * lifetime. Reads config/config.json when present; otherwise falls back to a
+ * single-site config built from environment variables.
+ * @returns {object} The parsed, validated config object.
+ * @throws {Error|SecurityError} if validation fails (see validateConfig).
+ */
 export function loadConfig() {
   if (_config) return _config;
 
@@ -112,6 +130,14 @@ export function loadConfig() {
   return _config;
 }
 
+/**
+ * Validate a config object in place, normalizing each site's baseUrl and warning
+ * on weak/ambiguous credential setups.
+ * @param {object} cfg Parsed config.
+ * @returns {void}
+ * @throws {Error} if `sites` is missing/malformed or a site lacks baseUrl.
+ * @throws {SecurityError} if a non-localhost baseUrl is not HTTPS (via validateBaseUrl).
+ */
 function validateConfig(cfg) {
   if (!cfg.sites || typeof cfg.sites !== "object") {
     throw new Error("Config error: 'sites' must be an object.");
@@ -166,6 +192,10 @@ export function getSiteConfig(siteName) {
   return resolved;
 }
 
+/**
+ * List the configured site names.
+ * @returns {string[]}
+ */
 export function listSiteNames() {
   return Object.keys(loadConfig().sites);
 }
@@ -209,15 +239,19 @@ export async function authHeadersAsync(site) {
 // TLS config (for HTTP transport mode)
 // ---------------------------------------------------------------------------
 
+/** Default HTTPS listen port for the HTTP transport when none is configured. */
+const DEFAULT_TLS_PORT = 3443;
+
 /**
- * Returns TLS cert + key paths from config or environment variables.
- * Used by the HTTP transport to set up HTTPS.
+ * Returns TLS cert + key paths and listen port from config or environment
+ * variables. Used by the HTTP transport to set up HTTPS.
+ * @returns {{certPath: string|null, keyPath: string|null, port: number}}
  */
 export function getTlsConfig() {
   const cfg = loadConfig();
   return {
     certPath: cfg.tls?.certPath || process.env.TLS_CERT_PATH || null,
     keyPath:  cfg.tls?.keyPath  || process.env.TLS_KEY_PATH  || null,
-    port:     Number(cfg.tls?.port || process.env.MCP_PORT || 3443),
+    port:     Number(cfg.tls?.port || process.env.MCP_PORT || DEFAULT_TLS_PORT),
   };
 }

@@ -1,5 +1,9 @@
 /**
- * Taxonomy vocabulary and term tools — backend-agnostic via resolveBackend.
+ * Tool group: Taxonomy.
+ *
+ * Vocabulary discovery and term CRUD, backend-agnostic via resolveBackend. A
+ * vocabulary is modelled as a bundle of the `taxonomy_term` entity type; reads
+ * are redacted per the site security policy.
  */
 
 import { getSiteConfig } from "../lib/config.js";
@@ -10,12 +14,24 @@ import { resolveSecurityConfig, redactCanonicalEntity } from "../lib/security.js
 // Implementations
 // ---------------------------------------------------------------------------
 
+/**
+ * List all taxonomy vocabularies (bundles of the taxonomy_term entity type).
+ *
+ * @param {object} args - { site? }.
+ * @returns {Promise<object[]>} Vocabulary bundle descriptors.
+ */
 async function listVocabularies({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
   return backend.listBundles("taxonomy_term");
 }
 
+/**
+ * List terms in a vocabulary, sorted by name, redacted per policy.
+ *
+ * @param {object} args - { site?, vocabulary, limit?, offset? }.
+ * @returns {Promise<{total: number, approximate: boolean, terms: object[]}>}
+ */
 async function getTaxonomyTerms({ site: siteName, vocabulary, limit = 50, offset = 0 }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -31,6 +47,12 @@ async function getTaxonomyTerms({ site: siteName, vocabulary, limit = 50, offset
   };
 }
 
+/**
+ * Fetch a single taxonomy term by UUID, redacted per policy.
+ *
+ * @param {object} args - { site?, vocabulary, id }.
+ * @returns {Promise<object|null>} The redacted term, or null if not found.
+ */
 async function getTaxonomyTerm({ site: siteName, vocabulary, id }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -39,6 +61,13 @@ async function getTaxonomyTerm({ site: siteName, vocabulary, id }) {
   return entity ? redactCanonicalEntity(entity, sec, "taxonomy_term") : null;
 }
 
+/**
+ * Create a taxonomy term. The description is wrapped as a plain_text formatted
+ * field; a parentId, if given, becomes a hierarchical `parent` relationship.
+ *
+ * @param {object} args - { site?, vocabulary, name, description?, weight?, parentId? }.
+ * @returns {Promise<object>} The created term descriptor.
+ */
 async function createTaxonomyTerm({ site: siteName, vocabulary, name, description, weight = 0, parentId }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
@@ -50,6 +79,13 @@ async function createTaxonomyTerm({ site: siteName, vocabulary, name, descriptio
   return backend.createEntity({ entityType: "taxonomy_term", bundle: vocabulary, attributes, relationships });
 }
 
+/**
+ * Update a term's name, description, and/or weight (partial — omitted fields
+ * are left untouched).
+ *
+ * @param {object} args - { site?, vocabulary, id, name?, description?, weight? }.
+ * @returns {Promise<object>} The updated term descriptor.
+ */
 async function updateTaxonomyTerm({ site: siteName, vocabulary, id, name, description, weight }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
@@ -60,6 +96,13 @@ async function updateTaxonomyTerm({ site: siteName, vocabulary, id, name, descri
   return backend.updateEntity({ entityType: "taxonomy_term", bundle: vocabulary, id, attributes });
 }
 
+/**
+ * Delete a taxonomy term. Destructive-allowed assertion is applied upstream by
+ * the security middleware.
+ *
+ * @param {object} args - { site?, vocabulary, id }.
+ * @returns {Promise<{success: boolean, deletedId: string}>}
+ */
 async function deleteTaxonomyTerm({ site: siteName, vocabulary, id }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);

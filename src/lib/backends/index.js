@@ -1,6 +1,11 @@
 /**
- * Backend resolution: pick a backend for a site using explicit config first,
- * then a one-time capability probe, caching the verdict per site.
+ * Backend resolution and registry.
+ *
+ * Single responsibility: choose the concrete backend adapter for a site —
+ * honoring an explicit `api` config first, otherwise running a one-time
+ * capability probe — and cache the verdict per site so resolution happens
+ * once. This is the only module that knows the protocol-name -> adapter-class
+ * mapping.
  */
 
 import { drupalFetch } from "../drupal-fetch.js";
@@ -9,21 +14,28 @@ import { JsonApiBackend } from "./jsonapi.js";
 import { GraphqlBackend } from "./graphql.js";
 import { BackendResolutionError } from "./errors.js";
 
+// Protocol name -> adapter class. Probe order follows insertion order.
 const REGISTRY = new Map([
   ["jsonapi", JsonApiBackend],
   ["graphql", GraphqlBackend],
 ]);
 
+// Per-site resolved-backend cache, keyed by site._name.
 const cache = new Map();
 
-/** Test helper: clear the per-site backend cache. */
+/**
+ * Test helper: clear the per-site backend cache.
+ * @returns {void}
+ */
 export function _clearBackendCache() {
   cache.clear();
 }
 
 /**
- * @param {object} site site config (must include _name)
- * @returns {Promise<import("./backend-interface.js").Backend>}
+ * Resolve (and cache) the backend adapter for a site.
+ * @param {object} site Site config; must include `_name` and may include `api`.
+ * @returns {Promise<import("./backend-interface.js").Backend>} A backend instance.
+ * @throws {BackendResolutionError} When no configured/probed backend is usable.
  */
 export async function resolveBackend(site) {
   if (cache.has(site._name)) return cache.get(site._name);
@@ -53,6 +65,11 @@ export async function resolveBackend(site) {
   return backend;
 }
 
+/**
+ * Normalize the `api` config into an ordered list of protocol names.
+ * @param {string|string[]|undefined|null} api Config value.
+ * @returns {string[]|null} Ordered protocol names, or null when unset/invalid.
+ */
 function normalizeApiOrder(api) {
   if (!api) return null;
   if (typeof api === "string") return [api];
@@ -60,6 +77,12 @@ function normalizeApiOrder(api) {
   return null;
 }
 
+/**
+ * Return the first configured backend that is actually reachable.
+ * @param {object} site Site config.
+ * @param {string[]} order Protocol names in preference order.
+ * @returns {Promise<?import("./backend-interface.js").Backend>} Instance or null.
+ */
 async function firstUsable(site, order) {
   for (const name of order) {
     const Cls = REGISTRY.get(name);
@@ -69,6 +92,11 @@ async function firstUsable(site, order) {
   return null;
 }
 
+/**
+ * Auto-detect a backend by probing each registered protocol in order.
+ * @param {object} site Site config.
+ * @returns {Promise<?import("./backend-interface.js").Backend>} Instance or null.
+ */
 async function probe(site) {
   for (const [name, Cls] of REGISTRY) {
     if (await isReachable(name, site)) return new Cls(site);
@@ -76,6 +104,13 @@ async function probe(site) {
   return null;
 }
 
+/**
+ * Probe whether a given protocol responds for a site. Any error counts as
+ * unreachable so probing never throws.
+ * @param {string} name Protocol name ("jsonapi" | "graphql").
+ * @param {object} site Site config.
+ * @returns {Promise<boolean>} True when the endpoint answered successfully.
+ */
 async function isReachable(name, site) {
   try {
     if (name === "jsonapi") {

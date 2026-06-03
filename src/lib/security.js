@@ -117,6 +117,12 @@ const PRESETS = {
 // Resolve effective security config for a site
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve a site's effective security config by layering explicit `security`
+ * keys over the selected preset (explicit keys win; redacted-field lists merge).
+ * @param {object} site Site config (reads site.security).
+ * @returns {object} Effective security config used by the assert/redact helpers.
+ */
 export function resolveSecurityConfig(site) {
   const raw = site.security ?? {};
   const preset = PRESETS[raw.preset ?? "development"] ?? PRESETS.development;
@@ -136,6 +142,13 @@ export function resolveSecurityConfig(site) {
   };
 }
 
+/**
+ * Shallow-merge per-entity-type rule objects, with override rules taking
+ * priority over preset rules for each entity type.
+ * @param {object} base Preset entityRules.
+ * @param {object} override Site-supplied entityRules.
+ * @returns {object} Merged entityRules.
+ */
 function mergeEntityRules(base, override) {
   const entries = Object.entries(override).map(([entityType, rules]) => {
     const baseRules = new Map(Object.entries(base)).get(entityType) ?? {};
@@ -148,7 +161,9 @@ function mergeEntityRules(base, override) {
 // SecurityError
 // ---------------------------------------------------------------------------
 
+/** Error thrown when a connector-level security policy blocks an operation. */
 export class SecurityError extends Error {
+  /** @param {string} message Human-readable reason the operation was blocked. */
   constructor(message) {
     super(message);
     this.name = "SecurityError";
@@ -159,6 +174,12 @@ export class SecurityError extends Error {
 // Assertion helpers — throw SecurityError if a check fails
 // ---------------------------------------------------------------------------
 
+/**
+ * @param {object} secConfig Resolved security config.
+ * @param {string} operationLabel Label used in the error message.
+ * @returns {void}
+ * @throws {SecurityError} if the site is configured read-only.
+ */
 export function assertNotReadOnly(secConfig, operationLabel) {
   if (secConfig.readOnly) {
     throw new SecurityError(
@@ -168,6 +189,13 @@ export function assertNotReadOnly(secConfig, operationLabel) {
   }
 }
 
+/**
+ * @param {object} secConfig Resolved security config.
+ * @param {string} entityType Entity type targeted by the delete.
+ * @param {string} id Entity id targeted by the delete.
+ * @returns {void}
+ * @throws {SecurityError} if destructive (delete) operations are disabled.
+ */
 export function assertDestructiveAllowed(secConfig, entityType, id) {
   if (!secConfig.allowDestructive) {
     throw new SecurityError(
@@ -183,6 +211,8 @@ export function assertDestructiveAllowed(secConfig, entityType, id) {
  * Uses a real parser (robust against multi-operation docs, comments, and
  * leading whitespace); falls back to a token-aware regex if the document
  * does not parse.
+ * @param {string} query GraphQL document text.
+ * @returns {boolean} True if any operation is a mutation.
  */
 function graphqlHasMutation(query) {
   try {
@@ -196,6 +226,12 @@ function graphqlHasMutation(query) {
   }
 }
 
+/**
+ * @param {object} secConfig Resolved security config.
+ * @param {string} query GraphQL document text.
+ * @returns {void} No-op for read-only (query) documents.
+ * @throws {SecurityError} if the document is a mutation and writes/mutations are disabled.
+ */
 export function assertGraphqlMutationAllowed(secConfig, query) {
   const isMutation = graphqlHasMutation(query);
   if (!isMutation) return;
@@ -212,6 +248,12 @@ export function assertGraphqlMutationAllowed(secConfig, query) {
   }
 }
 
+/**
+ * @param {object} secConfig Resolved security config.
+ * @param {string} entityType Entity type to check.
+ * @returns {void}
+ * @throws {SecurityError} if the type is denied, or not in a configured allowlist.
+ */
 export function assertEntityTypeAllowed(secConfig, entityType) {
   // Check denylist first (takes priority over allowlist)
   if (secConfig.deniedEntityTypes.includes(entityType)) {
@@ -232,6 +274,13 @@ export function assertEntityTypeAllowed(secConfig, entityType) {
   }
 }
 
+/**
+ * @param {object} secConfig Resolved security config.
+ * @param {string} entityType Entity type owning the bundle.
+ * @param {string} bundle Bundle to check.
+ * @returns {void} No-op when the entity type has no bundle rules.
+ * @throws {SecurityError} if the bundle is denied, or not in a configured allowlist.
+ */
 export function assertBundleAllowed(secConfig, entityType, bundle) {
   const rules = new Map(Object.entries(secConfig.entityRules)).get(entityType);
   if (!rules) return; // no rules = allowed
@@ -251,8 +300,14 @@ export function assertBundleAllowed(secConfig, entityType, bundle) {
   }
 }
 
+/**
+ * @param {object} secConfig Resolved security config.
+ * @param {"read"|"create"|"update"|"delete"} operation Operation to check.
+ * @param {string} entityType Entity type the operation targets.
+ * @returns {void} No-op when the type has no allowedOperations restriction.
+ * @throws {SecurityError} if the operation is not in the type's allowedOperations.
+ */
 export function assertOperationAllowed(secConfig, operation, entityType) {
-  // operation: "read" | "create" | "update" | "delete"
   const rules = new Map(Object.entries(secConfig.entityRules)).get(entityType);
   if (!rules?.allowedOperations) return; // no restriction
 
@@ -268,12 +323,29 @@ export function assertOperationAllowed(secConfig, operation, entityType) {
 // Composite assertion for read operations (most common)
 // ---------------------------------------------------------------------------
 
+/**
+ * Composite read gate: entity type, bundle (if given), and the "read" operation.
+ * @param {object} secConfig Resolved security config.
+ * @param {string} entityType Entity type to read.
+ * @param {string} [bundle] Bundle to read.
+ * @returns {void}
+ * @throws {SecurityError} if any underlying check fails.
+ */
 export function assertReadAllowed(secConfig, entityType, bundle) {
   assertEntityTypeAllowed(secConfig, entityType);
   if (bundle) assertBundleAllowed(secConfig, entityType, bundle);
   assertOperationAllowed(secConfig, "read", entityType);
 }
 
+/**
+ * Composite write gate: read-only switch, entity type, bundle (if given), and op.
+ * @param {object} secConfig Resolved security config.
+ * @param {"create"|"update"|"delete"} operation Write operation.
+ * @param {string} entityType Entity type to write.
+ * @param {string} [bundle] Bundle to write.
+ * @returns {void}
+ * @throws {SecurityError} if any underlying check fails.
+ */
 export function assertWriteAllowed(secConfig, operation, entityType, bundle) {
   assertNotReadOnly(secConfig, `${operation} ${entityType}`);
   assertEntityTypeAllowed(secConfig, entityType);
@@ -281,6 +353,15 @@ export function assertWriteAllowed(secConfig, operation, entityType, bundle) {
   assertOperationAllowed(secConfig, operation, entityType);
 }
 
+/**
+ * Composite delete gate: destructive switch plus the full write gate.
+ * @param {object} secConfig Resolved security config.
+ * @param {string} entityType Entity type to delete.
+ * @param {string} [bundle] Bundle to delete.
+ * @param {string} id Entity id to delete (used in the error message).
+ * @returns {void}
+ * @throws {SecurityError} if deletes are disabled or any write check fails.
+ */
 export function assertDeleteAllowed(secConfig, entityType, bundle, id) {
   assertDestructiveAllowed(secConfig, entityType, id);
   assertWriteAllowed(secConfig, "delete", entityType, bundle);
@@ -291,8 +372,12 @@ export function assertDeleteAllowed(secConfig, entityType, bundle, id) {
 // ---------------------------------------------------------------------------
 
 /**
- * Redact sensitive fields from a JSON:API resource object (or array of them).
- * Modifies and returns the input — call after receiving API response.
+ * Redact sensitive fields from a JSON:API resource object (or array of them),
+ * replacing their `attributes` values with "[REDACTED]".
+ * @param {?(object|object[])} resource JSON:API resource(s) to redact.
+ * @param {object} secConfig Resolved security config (supplies the field lists).
+ * @param {string} entityType Entity type, used to pick per-type redacted fields.
+ * @returns {?(object|object[])} New resource object(s); originals are not mutated.
  */
 export function redactResource(resource, secConfig, entityType) {
   if (!resource) return resource;
@@ -321,6 +406,10 @@ export function redactResource(resource, secConfig, entityType) {
 /**
  * Redact sensitive fields from a CANONICAL entity (base props + `fields`).
  * Mirrors redactResource but for the API-neutral canonical shape.
+ * @param {?object} entity Canonical entity to redact.
+ * @param {object} secConfig Resolved security config (supplies the field lists).
+ * @param {string} entityType Entity type, used to pick per-type redacted fields.
+ * @returns {?object} New entity; original is not mutated.
  */
 export function redactCanonicalEntity(entity, secConfig, entityType) {
   if (!entity) return entity;
@@ -343,7 +432,11 @@ export function redactCanonicalEntity(entity, secConfig, entityType) {
 }
 
 /**
- * Redact from a full JSON:API response (has .data which is object or array).
+ * Redact a full JSON:API response by redacting each item under `.data`.
+ * @param {?object} response JSON:API response with a `data` object or array.
+ * @param {object} secConfig Resolved security config.
+ * @param {string} entityType Entity type for the response data.
+ * @returns {?object} New response; original is not mutated.
  */
 export function redactResponse(response, secConfig, entityType) {
   if (!response?.data) return response;
@@ -359,6 +452,13 @@ export function redactResponse(response, secConfig, entityType) {
 // Security summary tool (exposed as drupal_security_info)
 // ---------------------------------------------------------------------------
 
+/**
+ * Build a human-readable summary of a site's effective security policy
+ * (exposed via the drupal_security_info tool). Lists only policy settings —
+ * no credentials.
+ * @param {object} site Site config.
+ * @returns {object} Flat summary of the resolved security settings.
+ */
 export function getSecuritySummary(site) {
   const cfg = resolveSecurityConfig(site);
   return {

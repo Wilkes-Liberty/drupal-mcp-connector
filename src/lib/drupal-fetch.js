@@ -11,10 +11,15 @@ import { clearToken } from "./oauth.js";
 const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
 
 /**
- * Standard JSON:API request.
+ * Standard JSON:API request against a site.
  *
  * For OAuth2 sites, a 401 triggers a single retry: the cached token is cleared,
  * re-acquired, and the request is replayed once before the error surfaces.
+ * @param {object} site Resolved site config (provides baseUrl + auth).
+ * @param {string} path Path appended to site.baseUrl (e.g. "/jsonapi/node/article").
+ * @param {object} [options] node-fetch options (method, body, extra headers).
+ * @returns {Promise<object|null>} Parsed JSON body, or null for a 204 No Content.
+ * @throws {Error} on any non-2xx response, with Drupal error detail when available.
  */
 export async function drupalFetch(site, path, options = {}) {
   const url = `${site.baseUrl}${path}`;
@@ -58,7 +63,11 @@ export async function drupalFetch(site, path, options = {}) {
 }
 
 /**
- * GraphQL request — posts JSON to the GraphQL endpoint.
+ * GraphQL request — posts a JSON body to the site's GraphQL endpoint.
+ * @param {object} site Resolved site config (provides baseUrl + auth).
+ * @param {object} body GraphQL request body, e.g. { query, variables }.
+ * @returns {Promise<object>} Parsed GraphQL JSON response.
+ * @throws {Error} on any non-2xx response (clears the OAuth token cache on 401).
  */
 export async function drupalGraphqlFetch(site, body) {
   const endpoint = site.graphqlEndpoint || "/graphql";
@@ -97,6 +106,13 @@ export async function drupalGraphqlFetch(site, body) {
  *   Content-Disposition: file; filename="foo.jpg"
  *
  * Returns a File entity (not a Media entity — call createMedia next).
+ * @param {object} site Resolved site config (provides baseUrl + auth).
+ * @param {string} entityType Target entity type (e.g. "media").
+ * @param {string} bundle Target bundle (e.g. "image").
+ * @param {string} fieldName File field on the bundle (e.g. "field_media_image").
+ * @param {string} filePath Local path to the file to upload.
+ * @returns {Promise<object>} Parsed JSON:API File entity response.
+ * @throws {Error} on any non-2xx response.
  */
 export async function drupalUploadFile(site, entityType, bundle, fieldName, filePath) {
   const filename = basename(filePath);

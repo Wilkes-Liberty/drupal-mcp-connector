@@ -27,6 +27,10 @@ const cache = new Map();
  * Carries the HTTP status but never the client secret.
  */
 export class OAuthError extends Error {
+  /**
+   * @param {string} message Human-readable error (never includes the secret).
+   * @param {number} [status] HTTP status from the token endpoint, if any.
+   */
   constructor(message, status) {
     super(message);
     this.name = "OAuthError";
@@ -34,6 +38,13 @@ export class OAuthError extends Error {
   }
 }
 
+/**
+ * Build the url-encoded token request body for either grant.
+ * @param {object} oauth Resolved oauth block (clientId, clientSecret, grant, scopes).
+ * @param {boolean} useRefresh Use the refresh_token grant instead of the base grant.
+ * @param {?string} refreshToken Refresh token to send when useRefresh is true.
+ * @returns {string} application/x-www-form-urlencoded body.
+ */
 function buildBody(oauth, useRefresh, refreshToken) {
   const params = new URLSearchParams();
   if (useRefresh) {
@@ -50,6 +61,14 @@ function buildBody(oauth, useRefresh, refreshToken) {
   return params.toString();
 }
 
+/**
+ * Perform a single token-endpoint request and normalize the response.
+ * @param {object} site Resolved site config with an oauth block.
+ * @param {boolean} useRefresh Whether to use the refresh_token grant.
+ * @param {?string} refreshToken Refresh token for the refresh grant.
+ * @returns {Promise<{token: string, expiresAt: number, refreshToken: ?string}>}
+ * @throws {OAuthError} on a non-2xx response or a missing access_token.
+ */
 async function requestToken(site, useRefresh, refreshToken) {
   const { oauth } = site;
   const url = `${site.baseUrl}${oauth.tokenUrl || "/oauth/token"}`;
@@ -89,6 +108,11 @@ async function requestToken(site, useRefresh, refreshToken) {
  * Acquire a token, attempting the refresh grant when a refresh token is cached.
  * If the refresh grant fails (revoked/expired), fall back once to a fresh
  * client_credentials grant; only surface the error if that also fails.
+ * @param {object} site Resolved site config with an oauth block.
+ * @param {boolean} useRefresh Attempt the refresh grant first.
+ * @param {?string} refreshToken Refresh token for the refresh grant.
+ * @returns {Promise<{token: string, expiresAt: number, refreshToken: ?string}>}
+ * @throws {OAuthError} if the base grant fails.
  */
 async function acquireToken(site, useRefresh, refreshToken) {
   if (!useRefresh) {
@@ -103,8 +127,10 @@ async function acquireToken(site, useRefresh, refreshToken) {
 
 /**
  * Return a valid access token for the site, acquiring or refreshing as needed.
+ * Concurrent callers share a single in-flight token request via the cache.
  * @param {object} site Resolved site config with an oauth block.
- * @returns {Promise<string>}
+ * @returns {Promise<string>} A non-expired access token.
+ * @throws {OAuthError} if a token cannot be acquired.
  */
 export async function getAccessToken(site) {
   const key = site._name;
@@ -143,6 +169,8 @@ export async function getAccessToken(site) {
 /**
  * Drop any cached token for the site, forcing a fresh acquire on the next call.
  * Used by the 401 retry path.
+ * @param {object} site Resolved site config (keyed by site._name).
+ * @returns {void}
  */
 export function clearToken(site) {
   cache.delete(site._name);

@@ -1,6 +1,10 @@
 /**
- * JSON:API backend adapter. Wraps drupalFetch behind the Backend interface,
- * returning canonical entities.
+ * JSON:API backend adapter.
+ *
+ * Single responsibility: implement the full Backend interface (read + write +
+ * delete) against Drupal core JSON:API, translating entity descriptors into
+ * JSON:API query strings and JSON:API resources into the shared
+ * CanonicalEntity shape. This is the read/write backend; GraphQL is read-only.
  */
 
 import { drupalFetch, drupalUploadFile } from "../drupal-fetch.js";
@@ -11,8 +15,11 @@ import {
   BASE_ATTRIBUTE_FIELDS,
 } from "../canonical.js";
 
+// Drupal exposes internal numeric ids under drupal_internal__* attributes;
+// these are dropped from canonical `fields` (the canonical id is the UUID).
 const INTERNAL_ATTR_RE = /^drupal_internal__/;
 
+// Canonical filter op -> JSON:API condition operator.
 const OP_MAP = new Map([
   ["neq", "<>"], ["gt", ">"], ["gte", ">="], ["lt", "<"], ["lte", "<="],
   ["contains", "CONTAINS"], ["in", "IN"], ["isNull", "IS NULL"],
@@ -32,6 +39,13 @@ const BUNDLE_ID_ATTR = new Map([
   ["media", "drupal_internal__id"],
 ]);
 
+/**
+ * Infer a coarse type label for a sample attribute value, recognizing common
+ * Drupal field object shapes (text-with-summary, image, uri, ...) by their key
+ * set so schema output is human-meaningful rather than just "object".
+ * @param {*} value Sample value.
+ * @returns {string} A type label, e.g. "string", "array<number>", "image".
+ */
 function inferType(value) {
   if (value === null) return "null";
   if (typeof value === "boolean") return "boolean";
@@ -49,6 +63,15 @@ function inferType(value) {
   return typeof value;
 }
 
+/**
+ * Append one filter condition to a URLSearchParams in JSON:API syntax.
+ * Equality uses the shorthand `filter[field]=value`; other operators use the
+ * verbose `filter[c_field][condition][...]` form. `in` expands to indexed
+ * value params; `isNull` omits the value entirely.
+ * @param {URLSearchParams} params Params to mutate.
+ * @param {{field: string, op?: string, value: *}} cond Filter condition.
+ * @returns {void}
+ */
 function applyFilter(params, { field, op = "eq", value }) {
   if (op === "eq") {
     params.append(`filter[${field}]`, String(value));
@@ -64,12 +87,21 @@ function applyFilter(params, { field, op = "eq", value }) {
   }
 }
 
+/**
+ * Read/write Backend adapter backed by Drupal core JSON:API.
+ */
 export class JsonApiBackend extends Backend {
+  /** @param {object} site Site config (must include `_name`). */
   constructor(site) {
     super();
     this.site = site;
   }
 
+  /**
+   * Report capabilities: full read/write/delete, exact count, server-side
+   * filter, full sort, revisions.
+   * @returns {import("./backend-interface.js").Capabilities}
+   */
   capabilities() {
     return {
       read: true, write: true, delete: true,
@@ -78,10 +110,22 @@ export class JsonApiBackend extends Backend {
     };
   }
 
+  /**
+   * Build the JSON:API collection path for an entity/bundle.
+   * @param {string} entityType
+   * @param {string} bundle
+   * @returns {string} e.g. "/jsonapi/node/article".
+   */
   resourcePath(entityType, bundle) {
     return `/jsonapi/${entityType}/${bundle}`;
   }
 
+  /**
+   * Compile an entity descriptor into JSON:API query parameters
+   * (filter/sort/sparse-fieldset/include/page).
+   * @param {import("../canonical.js").QueryDescriptor} descriptor
+   * @returns {URLSearchParams}
+   */
   compileQuery(descriptor) {
     const params = new URLSearchParams();
     const { filters = [], sort = [], fields = [], include = [], page = {} } = descriptor;
@@ -98,6 +142,13 @@ export class JsonApiBackend extends Backend {
     return params;
   }
 
+  /**
+   * Convert a JSON:API resource object into a CanonicalEntity. Base attributes
+   * (title/status/...) are promoted; drupal_internal__* and base fields are
+   * stripped from `fields`; relationships are normalized to canonical refs.
+   * @param {object} resource A JSON:API resource object.
+   * @returns {import("../canonical.js").CanonicalEntity}
+   */
   toCanonical(resource) {
     const [rawType, rawBundle] = (resource.type || "").split("--");
     const entityType = rawType || null;
@@ -125,6 +176,12 @@ export class JsonApiBackend extends Backend {
     });
   }
 
+  /**
+   * List entities for a descriptor. Server-side filter/sort/paging means the
+   * result is always exact (`approximate`/`truncated` are false).
+   * @param {import("../canonical.js").QueryDescriptor} descriptor
+   * @returns {Promise<import("./backend-interface.js").ListResult>}
+   */
   async listEntities(descriptor) {
     const params = this.compileQuery(descriptor);
     const qs = params.toString();
@@ -141,11 +198,21 @@ export class JsonApiBackend extends Backend {
     };
   }
 
+  /**
+   * Fetch a single entity by id.
+   * @param {{entityType: string, bundle: string, id: string}} ref
+   * @returns {Promise<?import("../canonical.js").CanonicalEntity>} Entity, or null.
+   */
   async getEntity({ entityType, bundle, id }) {
     const data = await drupalFetch(this.site, `${this.resourcePath(entityType, bundle)}/${id}`);
     return data?.data ? this.toCanonical(data.data) : null;
   }
 
+  /**
+   * Create an entity via JSON:API POST.
+   * @param {{entityType: string, bundle: string, attributes?: object, relationships?: object}} input
+   * @returns {Promise<import("../canonical.js").CanonicalEntity>} The created entity.
+   */
   async createEntity({ entityType, bundle, attributes = {}, relationships }) {
     const payload = { data: { type: `${entityType}--${bundle}`, attributes } };
     if (relationships) payload.data.relationships = relationships;
@@ -156,6 +223,11 @@ export class JsonApiBackend extends Backend {
     return this.toCanonical(data.data);
   }
 
+  /**
+   * Update an entity via JSON:API PATCH.
+   * @param {{entityType: string, bundle: string, id: string, attributes?: object, relationships?: object}} input
+   * @returns {Promise<import("../canonical.js").CanonicalEntity>} The updated entity.
+   */
   async updateEntity({ entityType, bundle, id, attributes = {}, relationships }) {
     const payload = { data: { type: `${entityType}--${bundle}`, id, attributes } };
     if (relationships) payload.data.relationships = relationships;
@@ -166,21 +238,38 @@ export class JsonApiBackend extends Backend {
     return this.toCanonical(data.data);
   }
 
+  /**
+   * Delete an entity via JSON:API DELETE.
+   * @param {{entityType: string, bundle: string, id: string}} ref
+   * @returns {Promise<void>}
+   */
   async deleteEntity({ entityType, bundle, id }) {
     await drupalFetch(this.site, `${this.resourcePath(entityType, bundle)}/${id}`, { method: "DELETE" });
   }
 
+  /**
+   * Discover resource types from the JSON:API entry-point links.
+   * @returns {Promise<{resourceTypes: string[]}>}
+   */
   async introspect() {
     const data = await drupalFetch(this.site, "/jsonapi");
     const resourceTypes = Object.keys(data.links || {}).filter((k) => k !== "self");
     return { resourceTypes };
   }
 
+  /**
+   * Escape hatch for direct JSON:API access (keeps passthrough tools working).
+   * @param {{path: string, options?: object}} input Request path and fetch options.
+   * @returns {Promise<*>} The raw JSON:API response.
+   */
   async rawQuery({ path, options }) {
-    // Escape hatch for direct JSON:API access (keeps passthrough tools working).
     return drupalFetch(this.site, path, options);
   }
 
+  /**
+   * List node content types with labels and descriptions.
+   * @returns {Promise<Array<{id: string, label: string, description: ?string}>>}
+   */
   async listContentTypes() {
     // page[limit]=50 is an intentional cap; matches Drupal JSON:API's default page size.
     const data = await drupalFetch(this.site, "/jsonapi/node_type/node_type?page[limit]=50");
@@ -191,6 +280,13 @@ export class JsonApiBackend extends Backend {
     }));
   }
 
+  /**
+   * List the bundles of an entity type via its config-entity resource.
+   * Attribute reads use Map(Object.entries()) to stay object-injection-safe.
+   * @param {string} entityType One of the keys in BUNDLE_ENDPOINTS.
+   * @returns {Promise<Array<{id: string, label: ?string, description: ?string}>>}
+   * @throws {Error} When no bundle endpoint is known for the entity type.
+   */
   async listBundles(entityType) {
     const endpoint = BUNDLE_ENDPOINTS.get(entityType);
     if (!endpoint) {
@@ -208,6 +304,10 @@ export class JsonApiBackend extends Backend {
     });
   }
 
+  /**
+   * List user roles.
+   * @returns {Promise<Array<{id: string, machineName: string, label: string, weight: number}>>}
+   */
   async listRoles() {
     const data = await drupalFetch(this.site, "/jsonapi/user_role/user_role");
     return (data.data || []).map((r) => ({
@@ -218,6 +318,12 @@ export class JsonApiBackend extends Backend {
     }));
   }
 
+  /**
+   * Return an exact entity count. Requests page[limit]=1 and reads the
+   * server-provided meta.count, so no full result set is transferred.
+   * @param {import("../canonical.js").QueryDescriptor} descriptor
+   * @returns {Promise<{count: number, approximate: false}>}
+   */
   async countEntities(descriptor) {
     const params = this.compileQuery({ ...descriptor, page: { limit: 1 } });
     const qs = params.toString();
@@ -226,6 +332,11 @@ export class JsonApiBackend extends Backend {
     return { count: data.meta?.count ?? (data.data || []).length, approximate: false };
   }
 
+  /**
+   * Upload a file and return its descriptor.
+   * @param {{entityType?: string, bundle: string, fieldName: string, filePath: string}} opts
+   * @returns {Promise<{id: string, drupalId: number, filename: string, uri: ?string, url: ?string, size: number, mimeType: string}>}
+   */
   async uploadFile({ entityType = "media", bundle, fieldName, filePath }) {
     const data = await drupalUploadFile(this.site, entityType, bundle, fieldName, filePath);
     const f = data.data;
@@ -240,6 +351,11 @@ export class JsonApiBackend extends Backend {
     };
   }
 
+  /**
+   * List resource types as entity/bundle pairs from the entry-point links.
+   * Only `entityType--bundle` link keys are included.
+   * @returns {Promise<Array<{resourceType: string, entityType: string, bundle: string}>>}
+   */
   async listResourceTypes() {
     const data = await drupalFetch(this.site, "/jsonapi");
     return Object.keys(data.links || {})
@@ -250,6 +366,14 @@ export class JsonApiBackend extends Backend {
       });
   }
 
+  /**
+   * Describe a bundle's fields by sampling one entity and inferring attribute
+   * types from its values. JSON:API has no schema endpoint, so an empty bundle
+   * yields a `note` and empty maps.
+   * @param {string} entityType
+   * @param {string} bundle
+   * @returns {Promise<{entityType: string, bundle: string, resourceType?: string, note?: string, attributes: object, relationships: object}>}
+   */
   async getEntitySchema(entityType, bundle) {
     const data = await drupalFetch(this.site, `${this.resourcePath(entityType, bundle)}?page[limit]=1`);
     if (!data.data?.length) {
@@ -265,8 +389,15 @@ export class JsonApiBackend extends Backend {
     return { entityType, bundle, resourceType: sample.type, attributes, relationships };
   }
 
+  /**
+   * Resolve a field name from candidates. JSON:API has no cheap
+   * field-availability check, so the first candidate is returned optimistically.
+   * @param {string} entityType
+   * @param {string} bundle
+   * @param {string[]} candidates Field names in preference order.
+   * @returns {?string} The first candidate, or null when the list is empty.
+   */
   resolveFieldName(entityType, bundle, candidates) {
-    // JSON:API has no cheap field-availability check; return the first candidate.
     return candidates[0] ?? null;
   }
 }

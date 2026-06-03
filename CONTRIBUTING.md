@@ -1,6 +1,6 @@
 # Contributing to drupal-mcp-connector
 
-Thank you for your interest in contributing! This project is maintained by [Wilkes & Liberty](https://github.com/wilkes-liberty).
+Thank you for your interest in contributing! This project was created by **Jeremy Michael Cerda** and is maintained by [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty).
 
 ## Getting Started
 
@@ -13,11 +13,11 @@ Thank you for your interest in contributing! This project is maintained by [Wilk
 ## Development Workflow
 
 ```bash
-# Run the server (stdio mode)
+# Run the server (stdio mode — default)
 node src/index.js
 
-# Run the server (HTTP mode, port 3000)
-MCP_TRANSPORT=http node src/index.js
+# Run the server (HTTPS transport, port 3443; MCP_ALLOW_HTTP=1 skips TLS for local dev)
+MCP_TRANSPORT=https MCP_ALLOW_HTTP=1 MCP_PORT=3443 node src/index.js
 
 # Run tests
 npm test
@@ -57,7 +57,7 @@ If you find a security vulnerability, please do **not** open a public issue. See
 
 - ES modules throughout (`import`/`export`)
 - 2-space indentation
-- Single quotes
+- Double quotes (enforced by ESLint)
 - Async/await (no raw Promise chains)
 - JSDoc comments on all exported functions
 

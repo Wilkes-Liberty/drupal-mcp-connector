@@ -1,18 +1,34 @@
 /**
- * Media entity tools — backend-agnostic. File upload is JSON:API-only
- * (capability-gated on read-only/GraphQL backends).
+ * Tool group: Media.
+ *
+ * Media entity CRUD, file upload, and an orphaned-media audit. Backend-agnostic
+ * for reads/writes, but file upload is JSON:API-only and is capability-gated on
+ * read-only/GraphQL backends. Reads are redacted per the site policy.
  */
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, redactCanonicalEntity } from "../lib/security.js";
 
+/**
+ * List all media types (bundles of the media entity type).
+ * @param {object} args - { site? }.
+ * @returns {Promise<object[]>} Media bundle descriptors.
+ */
 async function listMediaTypes({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
   return backend.listBundles("media");
 }
 
+/**
+ * List media entities of a type (default: image), filtered by status and/or
+ * name substring.
+ *
+ * @param {object} args - { site?, type?, status?, name?, limit?, offset? }.
+ * @returns {Promise<{total: number, approximate: boolean, offset: number,
+ *   nextOffset: number, media: object[]}>} Paged, redacted media list.
+ */
 async function listMedia({ site: siteName, type, status, name, limit = 20, offset = 0 }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -25,6 +41,11 @@ async function listMedia({ site: siteName, type, status, name, limit = 20, offse
   return { total: res.page?.total ?? items.length, approximate: res.approximate ?? false, offset, nextOffset: offset + items.length, media: items };
 }
 
+/**
+ * Fetch a single media entity by UUID, redacted per policy.
+ * @param {object} args - { site?, type, id }.
+ * @returns {Promise<object|null>} The redacted media entity, or null.
+ */
 async function getMedia({ site: siteName, type, id }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -33,12 +54,24 @@ async function getMedia({ site: siteName, type, id }) {
   return entity ? redactCanonicalEntity(entity, sec, "media") : null;
 }
 
+/**
+ * Create a media entity. Caller `fields` are spread into attributes; name and
+ * status are layered on top.
+ *
+ * @param {object} args - { site?, type, name, status?, fields? }.
+ * @returns {Promise<object>} The created media descriptor.
+ */
 async function createMedia({ site: siteName, type, name, status = true, fields = {} }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
   return backend.createEntity({ entityType: "media", bundle: type, attributes: { name, status, ...fields } });
 }
 
+/**
+ * Update a media entity (partial — omitted fields are left untouched).
+ * @param {object} args - { site?, type, id, name?, status?, fields? }.
+ * @returns {Promise<object>} The updated media descriptor.
+ */
 async function updateMedia({ site: siteName, type, id, name, status, fields = {} }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
@@ -48,6 +81,13 @@ async function updateMedia({ site: siteName, type, id, name, status, fields = {}
   return backend.updateEntity({ entityType: "media", bundle: type, id, attributes });
 }
 
+/**
+ * Delete a media entity (the underlying File entity is left intact).
+ * Destructive-allowed assertion is applied upstream by the security middleware.
+ *
+ * @param {object} args - { site?, type, id }.
+ * @returns {Promise<{success: boolean, deletedId: string}>}
+ */
 async function deleteMedia({ site: siteName, type, id }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
@@ -55,12 +95,29 @@ async function deleteMedia({ site: siteName, type, id }) {
   return { success: true, deletedId: id };
 }
 
+/**
+ * Upload a local file and create a Drupal File entity (JSON:API-only).
+ *
+ * @param {object} args - { site?, filePath, entityType?, bundle, fieldName }.
+ * @returns {Promise<object>} The created file descriptor (includes id/filename).
+ * @throws {BackendCapabilityError} If the backend cannot upload files.
+ */
 async function uploadFile({ site: siteName, filePath, entityType = "media", bundle, fieldName }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
   return backend.uploadFile({ entityType, bundle, fieldName, filePath });
 }
 
+/**
+ * Convenience flow: upload a file, then create a media entity referencing it in
+ * one step. The file is attached via the `fieldName` relationship; alt text, if
+ * provided, is carried in the relationship meta.
+ *
+ * @param {object} args - { site?, filePath, mediaType, mediaName?, fieldName, altText?, status? }.
+ *   mediaName defaults to the uploaded filename.
+ * @returns {Promise<{file: {id: string, filename: string}, media: object}>}
+ * @throws {BackendCapabilityError} If the backend cannot upload files.
+ */
 async function uploadFileAndCreateMedia({ site: siteName, filePath, mediaType, mediaName, fieldName, altText, status = true }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
@@ -76,6 +133,14 @@ async function uploadFileAndCreateMedia({ site: siteName, filePath, mediaType, m
   return { file: { id: file.id, filename: file.filename }, media };
 }
 
+/**
+ * Find media not referenced by any content. Prefers a field_usage_count filter
+ * when the site tracks usage; falls back to listing all media (annotated with a
+ * note) when usage tracking is unavailable.
+ *
+ * @param {object} args - { site?, type?, limit? }. type defaults to "image".
+ * @returns {Promise<{method: string, note?: string, count: number, media: object[]}>}
+ */
 async function findOrphanedMedia({ site: siteName, type, limit = 50 }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);

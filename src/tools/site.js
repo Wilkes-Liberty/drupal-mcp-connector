@@ -1,5 +1,9 @@
 /**
- * Site-level tools: content type discovery, resource listing, site info.
+ * Tool group: Site.
+ *
+ * Site-level discovery: base URL and available resource/query types, content
+ * type listing, and enumeration of configured named sites. Backend-agnostic
+ * (works for both JSON:API and GraphQL backends).
  */
 
 import { getSiteConfig, listSiteNames } from "../lib/config.js";
@@ -9,6 +13,12 @@ import { resolveBackend } from "../lib/backends/index.js";
 // Implementations
 // ---------------------------------------------------------------------------
 
+/**
+ * Report a site's base URL and the resource/query types its backend exposes.
+ *
+ * @param {object} args - { site? }.
+ * @returns {Promise<{site: string, baseUrl: string, resourceTypes: object[]}>}
+ */
 async function getSiteInfo({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
@@ -20,12 +30,21 @@ async function getSiteInfo({ site: siteName }) {
   };
 }
 
+/**
+ * List the content types defined on a site.
+ * @param {object} args - { site? }.
+ * @returns {Promise<object[]>} Content type descriptors (machine name + label).
+ */
 async function listContentTypes({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
   return backend.listContentTypes();
 }
 
+/**
+ * List all named sites from config.json. No backend call and no credentials.
+ * @returns {Promise<{sites: string[]}>}
+ */
 async function listConfiguredSites() {
   return { sites: listSiteNames() };
 }

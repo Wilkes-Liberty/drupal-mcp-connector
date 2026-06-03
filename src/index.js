@@ -15,11 +15,15 @@
  *   DRUPAL_BASE_URL   Single-site fallback baseUrl
  *   DRUPAL_API_TOKEN  Single-site fallback Bearer token
  *   MCP_ALLOW_HTTP    Set to "1" to allow plain HTTP on localhost only (dev)
+ *   MCP_AUTH_TOKEN    Bearer token required on /mcp in https mode (warns if unset)
+ *   MCP_BIND_HOST     Bind address for https mode when TLS is present
+ *                     (default: "0.0.0.0"; ignored without TLS, which forces loopback)
  */
 
 import { createServer as createHttpsServer } from "https";
 import { createServer as createHttpServer }  from "http";
 import { readFileSync }                      from "fs";
+import { randomUUID }                        from "node:crypto";
 
 import { Server }                   from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport }     from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -55,11 +59,18 @@ import * as drush    from "./tools/drush.js";
 
 const allModules = [nodes, taxonomy, users, media, graphql, site, entities, reports, drush];
 
+// Flatten every module's tool definitions into one ListTools payload, and merge
+// their handler maps into a single closed dispatch table keyed by tool name.
 const allDefinitions = allModules.flatMap((m) => m.definitions);
 const allHandlers    = Object.assign({}, ...allModules.map((m) => m.handlers));
 
 // ---------------------------------------------------------------------------
 // Security middleware — runs BEFORE every tool handler
+//
+// Operation intent (read/write/delete/graphql) is inferred from the tool name
+// prefix rather than trusting per-tool metadata, so a new tool that follows the
+// naming convention is gated automatically. The matched operation drives which
+// assertions from lib/security.js run against the resolved per-site policy.
 // ---------------------------------------------------------------------------
 
 const WRITE_PREFIXES       = ["drupal_create_", "drupal_update_", "drupal_upload_",
@@ -69,6 +80,13 @@ const WRITE_PREFIXES       = ["drupal_create_", "drupal_update_", "drupal_upload
   "drupal_drush_module_disable", "drupal_drush_user_create"];
 const DESTRUCTIVE_PREFIXES = ["drupal_delete_", "drupal_drush_module_disable"];
 
+/**
+ * Classify a tool's operation intent from its name prefix.
+ *
+ * @param {string} toolName - The MCP tool name being invoked.
+ * @returns {"delete"|"write"|"graphql"|"read"} Inferred operation. Destructive
+ *   prefixes are checked first so they take precedence over plain write.
+ */
 function inferOperation(toolName) {
   if (DESTRUCTIVE_PREFIXES.some((p) => toolName.startsWith(p))) return "delete";
   if (WRITE_PREFIXES.some((p) => toolName.startsWith(p)))       return "write";
@@ -76,12 +94,30 @@ function inferOperation(toolName) {
   return "read";
 }
 
+/**
+ * Derive the entity type a tool acts on, for destructive-allow assertions.
+ *
+ * @param {string} toolName - The MCP tool name.
+ * @param {object} args     - The tool arguments.
+ * @returns {string} Explicit args.entityType when present, else the suffix
+ *   parsed from the tool name (e.g. "node" from "drupal_delete_node"),
+ *   falling back to "entity".
+ */
 function extractEntityType(toolName, args) {
   if (args?.entityType) return args.entityType;
   const m = toolName.match(/^drupal_(?:delete|create|update|get|list)_(.+)$/);
   return m ? m[1] : "entity";
 }
 
+/**
+ * Apply per-site security assertions before dispatching to a tool handler.
+ *
+ * @param {string}   toolName - The MCP tool name.
+ * @param {object}   args     - Tool arguments (may carry `site`, `id`, etc.).
+ * @param {Function} handler  - The resolved tool handler.
+ * @returns {Promise<*>} The handler's result.
+ * @throws {SecurityError} If the resolved policy forbids the inferred operation.
+ */
 async function securityMiddleware(toolName, args, handler) {
   // Tools with no site context skip per-site checks
   if (toolName === "drupal_list_sites") return handler(args);
@@ -127,6 +163,16 @@ const RESOURCES = [
   },
 ];
 
+/**
+ * Resolve a resource URI to its JSON payload. URIs are matched in order; the
+ * templated forms (content-types, security-policy) capture the site name and
+ * delegate to the corresponding read-only tool handler so resources and tools
+ * always return the same shape.
+ *
+ * @param {string} uri - A drupal:// resource URI.
+ * @returns {Promise<object>} The resource data (later JSON-serialized).
+ * @throws {Error} If the URI matches no known resource.
+ */
 async function readResource(uri) {
   // drupal://sites
   if (uri === "drupal://sites") {
@@ -181,6 +227,15 @@ const PROMPTS = [
   },
 ];
 
+/**
+ * Build the message list for a named prompt, interpolating site/type/topic
+ * args into a pre-authored multi-step workflow. Unknown prompt names fall back
+ * to a generic one-line instruction so the call never fails.
+ *
+ * @param {string} name - The prompt name.
+ * @param {object} args - Prompt arguments (site, type, topic — all optional).
+ * @returns {Array<object>} MCP prompt messages.
+ */
 function getPromptMessages(name, args) {
   const site  = args?.site  ? `on the "${args.site}" site` : "on the default site";
   const type  = args?.type  || "article";
@@ -265,6 +320,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const result = await securityMiddleware(name, args ?? {}, handler);
     return toolResult(result);
   } catch (err) {
+    // Translate known error classes into clear, non-leaky isError responses;
+    // anything else falls through to toolError for a generic envelope.
     if (err instanceof SecurityError) {
       return { content: [{ type: "text", text: `Access denied: ${err.message}` }], isError: true };
     }
@@ -398,7 +455,7 @@ if (transport === "stdio") {
         mcpTransport = sessions.get(sessionId);
       } else {
         mcpTransport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => crypto.randomUUID(),
+          sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => sessions.set(id, mcpTransport),
         });
         mcpTransport.onclose = () => sessions.delete(mcpTransport.sessionId);

@@ -33,7 +33,9 @@
 export const BASE_ATTRIBUTE_FIELDS = ["title", "status", "langcode", "created", "changed", "path"];
 
 /**
- * Build a canonical entity, filling defaults.
+ * Build a canonical entity, filling defaults for any omitted optional props.
+ * @param {object} parts Source values; id/entityType/bundle required, rest optional.
+ * @param {string} parts.backend Backend tag stored as `_backend` ("jsonapi" | "graphql").
  * @returns {CanonicalEntity}
  */
 export function makeCanonicalEntity(parts) {
@@ -54,10 +56,13 @@ export function makeCanonicalEntity(parts) {
 /**
  * Normalize a JSON:API-style relationship reference (or array of them) into
  * canonical `{ id, entityType, bundle }`.
+ * @param {?(object|object[])} ref A `{ id, type }` ref, an array of them, or null.
+ * @returns {?(object|object[])} Normalized ref(s), or null when ref is falsy.
  */
 export function normalizeRelationship(ref) {
   if (!ref) return null;
   if (Array.isArray(ref)) return ref.map(normalizeRelationship);
+  // JSON:API encodes type as "entityType--bundle"; split into the two parts.
   const [entityType = null, bundle = null] = (ref.type || "").split("--");
   return { id: ref.id, entityType, bundle };
 }

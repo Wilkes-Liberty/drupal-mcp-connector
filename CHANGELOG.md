@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- HTTPS transport: import `randomUUID` from `node:crypto` for session IDs instead of
+  relying on the bare `crypto` global, which is not available unflagged on Node 18
+  (the minimum supported version).
+
+### Changed
+- Comprehensive inline-documentation pass (JSDoc on all exported functions/classes,
+  canonical descriptor/entity typedefs) and a Node coding-standards audit across `src/`.
+
 ## [0.6.0] - 2026-06-03
 
 ### Changed

@@ -1,26 +1,47 @@
 /**
- * Type-aware GraphQL selection-set and query-document builders for graphql_compose.
+ * GraphQL selection-set and query-document builders for graphql_compose.
+ *
+ * Single responsibility: turn a resolved SchemaEntry into a valid GraphQL
+ * query string. The builders are type-aware so the generated selection only
+ * requests fields the server can actually resolve (scalars are selected bare,
+ * scalar-wrapper objects get a fixed sub-selection, entity references collapse
+ * to `{ __typename id }`, and unknown wrappers are skipped to keep the query
+ * valid).
  */
 
 import { graphqlTypeToEntity } from "./graphql-names.js";
 
-// Known scalar-wrapper object types and the sub-selection to use for each.
+// graphql_compose wraps some scalars in object types; each needs an explicit
+// sub-selection because GraphQL forbids selecting an object without one.
 const OBJECT_SUBSELECTIONS = new Map([
   ["DateTime", "{ time }"],
   ["Language", "{ id }"],
   ["TextSummary", "{ value summary format }"],
 ]);
 
+// Field kinds that are selected as a bare field name (no sub-selection).
 const SCALAR_KINDS = new Set(["SCALAR", "ENUM"]);
 
-// An entity union/interface (TermUnion, MediaUnion, ...) exposes a matching
-// <Entity>Interface with an `id`. Non-entity unions (e.g. MetaTagUnion) do NOT,
-// so an inline fragment on their "interface" is invalid — we must skip them.
+/**
+ * Map an entity union type name to its companion `<Entity>Interface`.
+ * An entity union/interface (TermUnion, MediaUnion, ...) exposes a matching
+ * <Entity>Interface with an `id`. Non-entity unions (e.g. MetaTagUnion) do
+ * NOT, so an inline fragment on their "interface" would be invalid — return
+ * null so the caller skips them.
+ * @param {?string} unionTypeName e.g. "MediaUnion".
+ * @returns {?string} e.g. "MediaInterface", or null when not an entity union.
+ */
 function entityInterfaceFor(unionTypeName) {
   if (!unionTypeName || !graphqlTypeToEntity(unionTypeName)) return null;
   return unionTypeName.replace(/Union$/, "Interface");
 }
 
+/**
+ * Build the selection text for a single field, or null to skip it.
+ * @param {string} name Field name.
+ * @param {object} desc describeType() result for the field.
+ * @returns {?string} Selection fragment, or null when the field is unselectable.
+ */
 function selectField(name, desc) {
   if (SCALAR_KINDS.has(desc.kind)) return name;
 
@@ -53,7 +74,12 @@ function selectField(name, desc) {
   return null;
 }
 
-/** Build the selection set (without surrounding braces) for an entity entry. */
+/**
+ * Build the selection set (without surrounding braces) for an entity entry.
+ * Always includes `__typename` and `id` so results can be normalized later.
+ * @param {import("./graphql-schema.js").SchemaEntry} entry
+ * @returns {string} Space-joined selection fragments.
+ */
 export function buildSelection(entry) {
   const parts = ["__typename"];
   for (const [name, desc] of entry.fields) {
@@ -66,6 +92,11 @@ export function buildSelection(entry) {
   return parts.join(" ");
 }
 
+/**
+ * Render collection arguments into GraphQL argument syntax.
+ * @param {{first?: number, after?: string, sortKey?: string, reverse?: boolean}} args
+ * @returns {string} e.g. "(first: 50, sortKey: CREATED_AT)" or "" when empty.
+ */
 function formatArgs(args) {
   const out = [];
   if (args.first !== undefined && args.first !== null) out.push(`first: ${args.first}`);
@@ -75,13 +106,23 @@ function formatArgs(args) {
   return out.length ? `(${out.join(", ")})` : "";
 }
 
-/** Build a collection query document. */
+/**
+ * Build a collection (connection) query document.
+ * @param {import("./graphql-schema.js").SchemaEntry} entry
+ * @param {{first?: number, after?: string, sortKey?: string, reverse?: boolean}} [args]
+ * @returns {string} A complete GraphQL query string.
+ */
 export function buildCollectionQuery(entry, args = {}) {
   const selection = buildSelection(entry);
   return `{ ${entry.collection}${formatArgs(args)} { pageInfo { hasNextPage endCursor } nodes { ${selection} } } }`;
 }
 
-/** Build a single-entity query document. */
+/**
+ * Build a single-entity query document.
+ * @param {import("./graphql-schema.js").SchemaEntry} entry
+ * @param {string} id Entity id (UUID) to fetch.
+ * @returns {string} A complete GraphQL query string.
+ */
 export function buildSingleQuery(entry, id) {
   const selection = buildSelection(entry);
   return `{ ${entry.single}(id: ${JSON.stringify(id)}) { ${selection} } }`;

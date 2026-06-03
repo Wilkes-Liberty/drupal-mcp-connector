@@ -1,5 +1,7 @@
 /**
- * Drush bridge — execute Drush commands on a remote Drupal server via SSH.
+ * Tool group: Drush bridge.
+ *
+ * Execute a curated set of Drush commands on a remote Drupal server over SSH.
  *
  * Security model:
  *   1. SSH key auth only — password-based SSH is deliberately unsupported.
@@ -135,7 +137,7 @@ function sshDrush(site, drushArgs, timeoutMs = 30000) {
       username:    sshCfg.user,
       // eslint-disable-next-line security/detect-non-literal-fs-filename -- SSH private-key path comes from operator-controlled site config
       privateKey:  readFileSync(keyPath),
-      // Harden: disable agent forwarding and X11, enforce known host
+      // Harden: never forward the local SSH agent to the remote host.
       agentForward: false,
       readyTimeout: timeoutMs,
     });
@@ -155,6 +157,17 @@ function parseDrush(raw) {
 // Tool implementations
 // ---------------------------------------------------------------------------
 
+// Max watchdog rows fetchable in one call (mirrors the tool input maximum).
+const WATCHDOG_MAX_COUNT = 200;
+// Drupal log severity levels accepted by `drush watchdog:show --severity`.
+const VALID_SEVERITIES = ["emergency", "alert", "critical", "error", "warning", "notice", "info", "debug"];
+
+/**
+ * Rebuild all Drupal caches (`drush cache:rebuild`).
+ * @param {object} args - { site? }.
+ * @returns {Promise<{success: boolean, message: string}>}
+ * @throws {SecurityError} If the site is read-only.
+ */
 async function cacheRebuild({ site: siteName }) {
   const site = getSiteConfig(siteName);
   assertNotReadOnly(resolveSecurityConfig(site), "drush cache:rebuild");
@@ -162,6 +175,12 @@ async function cacheRebuild({ site: siteName }) {
   return { success: true, message: "Cache rebuild complete." };
 }
 
+/**
+ * Run Drupal cron (`drush cron`).
+ * @param {object} args - { site? }.
+ * @returns {Promise<{success: boolean, output: *}>}
+ * @throws {SecurityError} If the site is read-only.
+ */
 async function runCron({ site: siteName }) {
   const site = getSiteConfig(siteName);
   assertNotReadOnly(resolveSecurityConfig(site), "drush cron");
@@ -169,6 +188,11 @@ async function runCron({ site: siteName }) {
   return { success: true, output: parseDrush(out) };
 }
 
+/**
+ * Report site status (`drush status`): version, DB, paths, active config.
+ * @param {object} args - { site? }.
+ * @returns {Promise<object>} Parsed status, or { raw } if not JSON.
+ */
 async function siteStatus({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const out  = await sshDrush(site, ["status", "--format=json"]);
@@ -176,6 +200,11 @@ async function siteStatus({ site: siteName }) {
   return typeof data === "object" ? data : { raw: data };
 }
 
+/**
+ * Check whether active config matches the sync directory (`drush config:status`).
+ * @param {object} args - { site? }.
+ * @returns {Promise<object>} { status: "in_sync" } or { status: "out_of_sync", changes }.
+ */
 async function configStatus({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const out  = await sshDrush(site, ["config:status", "--format=json"]);
@@ -186,6 +215,12 @@ async function configStatus({ site: siteName }) {
   return { status: "out_of_sync", changes: data };
 }
 
+/**
+ * Export active config to the sync directory (`drush config:export`).
+ * @param {object} args - { site? }.
+ * @returns {Promise<{success: boolean, message: string}>}
+ * @throws {SecurityError} If the site is read-only.
+ */
 async function configExport({ site: siteName }) {
   const site = getSiteConfig(siteName);
   assertNotReadOnly(resolveSecurityConfig(site), "drush config:export");
@@ -193,6 +228,12 @@ async function configExport({ site: siteName }) {
   return { success: true, message: "Configuration exported to sync directory." };
 }
 
+/**
+ * Import config from the sync directory into the DB (`drush config:import`).
+ * @param {object} args - { site? }.
+ * @returns {Promise<{success: boolean, message: string}>}
+ * @throws {SecurityError} If the site is read-only.
+ */
 async function configImport({ site: siteName }) {
   const site = getSiteConfig(siteName);
   assertNotReadOnly(resolveSecurityConfig(site), "drush config:import");
@@ -200,6 +241,12 @@ async function configImport({ site: siteName }) {
   return { success: true, message: "Configuration imported from sync directory." };
 }
 
+/**
+ * Run pending database updates (`drush updatedb`).
+ * @param {object} args - { site? }.
+ * @returns {Promise<{success: boolean, updates: *}>}
+ * @throws {SecurityError} If the site is read-only.
+ */
 async function updateDb({ site: siteName }) {
   const site = getSiteConfig(siteName);
   assertNotReadOnly(resolveSecurityConfig(site), "drush updatedb");
@@ -207,6 +254,11 @@ async function updateDb({ site: siteName }) {
   return { success: true, updates: parseDrush(out) };
 }
 
+/**
+ * List modules (`drush pm:list`), optionally filtered by status.
+ * @param {object} args - { site?, status? } where status is "enabled"|"disabled".
+ * @returns {Promise<{modules: *}>}
+ */
 async function listModules({ site: siteName, status }) {
   const site = getSiteConfig(siteName);
   const args = ["pm:list", "--format=json"];
@@ -216,6 +268,11 @@ async function listModules({ site: siteName, status }) {
   return { modules: parseDrush(out) };
 }
 
+/**
+ * List modules with known security advisories (`drush pm:security`).
+ * @param {object} args - { site? }.
+ * @returns {Promise<object>} { status: "secure" } or { status: "updates_available", modules }.
+ */
 async function securityUpdates({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const out  = await sshDrush(site, ["pm:security", "--format=json"]);
@@ -226,6 +283,14 @@ async function securityUpdates({ site: siteName }) {
   return { status: "updates_available", modules: data };
 }
 
+/**
+ * Enable a module (`drush pm:enable`). The name is validated as a machine name
+ * before reaching SSH, since it is interpolated into the command.
+ * @param {object} args - { site?, moduleName }.
+ * @returns {Promise<{success: boolean, message: string}>}
+ * @throws {SecurityError} If the site is read-only.
+ * @throws {Error} If moduleName is not a valid machine name.
+ */
 async function enableModule({ site: siteName, moduleName }) {
   const site = getSiteConfig(siteName);
   assertNotReadOnly(resolveSecurityConfig(site), `pm:enable ${moduleName}`);
@@ -234,6 +299,13 @@ async function enableModule({ site: siteName, moduleName }) {
   return { success: true, message: `Module "${moduleName}" enabled.` };
 }
 
+/**
+ * Uninstall a module (`drush pm:uninstall`). Name is validated as a machine name.
+ * @param {object} args - { site?, moduleName }.
+ * @returns {Promise<{success: boolean, message: string}>}
+ * @throws {SecurityError} If the site is read-only.
+ * @throws {Error} If moduleName is not a valid machine name.
+ */
 async function disableModule({ site: siteName, moduleName }) {
   const site = getSiteConfig(siteName);
   assertNotReadOnly(resolveSecurityConfig(site), `pm:uninstall ${moduleName}`);
@@ -242,6 +314,14 @@ async function disableModule({ site: siteName, moduleName }) {
   return { success: true, message: `Module "${moduleName}" uninstalled.` };
 }
 
+/**
+ * List users via Drush (`drush user:list`), filtered by status and/or role.
+ * Drush may return an object keyed by uid; it is normalized to an array and
+ * sliced to `limit`.
+ * @param {object} args - { site?, status?, role?, limit? }.
+ * @returns {Promise<{users: object[]}>}
+ * @throws {Error} If role is supplied and not a valid machine name.
+ */
 async function drushUserList({ site: siteName, status, role, limit = 20 }) {
   const site = getSiteConfig(siteName);
   if (role) validateMachineName(role, "role");
@@ -256,6 +336,14 @@ async function drushUserList({ site: siteName, status, role, limit = 20 }) {
   return { users: users.slice(0, limit) };
 }
 
+/**
+ * Create a user (`drush user:create`) and assign roles via follow-up
+ * `user:role:add` calls. Each role is validated as a machine name first.
+ * @param {object} args - { site?, name, mail, password, roles? }.
+ * @returns {Promise<{success: boolean, message: string}>}
+ * @throws {SecurityError} If the site is read-only.
+ * @throws {Error} If any role is not a valid machine name.
+ */
 async function drushCreateUser({ site: siteName, name, mail, password, roles = [] }) {
   const site = getSiteConfig(siteName);
   assertNotReadOnly(resolveSecurityConfig(site), "user:create");
@@ -268,6 +356,13 @@ async function drushCreateUser({ site: siteName, name, mail, password, roles = [
   return { success: true, message: `User "${name}" created.` };
 }
 
+/**
+ * Run a read-only SQL query (`drush sql:query`). The query is validated against
+ * a SELECT-only allowlist before execution.
+ * @param {object} args - { site?, query }.
+ * @returns {Promise<{rows: *}>}
+ * @throws {SecurityError} If the query is not read-only.
+ */
 async function sqlQuery({ site: siteName, query }) {
   const site = getSiteConfig(siteName);
   // Throws SecurityError if query is not read-only
@@ -276,14 +371,20 @@ async function sqlQuery({ site: siteName, query }) {
   return { rows: parseDrush(out) };
 }
 
+/**
+ * Fetch recent watchdog/dblog entries (`drush watchdog:show`), filtered by type
+ * and/or severity. Count is clamped to WATCHDOG_MAX_COUNT.
+ * @param {object} args - { site?, type?, severity?, limit? }.
+ * @returns {Promise<{entries: object[]}>}
+ * @throws {Error} If type is invalid, or severity is not a recognized level.
+ */
 async function watchdog({ site: siteName, type, severity, limit = 20 }) {
   const site = getSiteConfig(siteName);
   if (type) validateMachineName(type, "type");
-  const VALID_SEVERITIES = ["emergency","alert","critical","error","warning","notice","info","debug"];
   if (severity && !VALID_SEVERITIES.includes(severity)) {
     throw new Error(`Invalid severity "${severity}". Must be one of: ${VALID_SEVERITIES.join(", ")}`);
   }
-  const args = ["watchdog:show", "--format=json", `--count=${Math.min(Number(limit), 200)}`];
+  const args = ["watchdog:show", "--format=json", `--count=${Math.min(Number(limit), WATCHDOG_MAX_COUNT)}`];
   if (type)     args.push(`--type=${type}`);
   if (severity) args.push(`--severity=${severity}`);
   const out    = await sshDrush(site, args);

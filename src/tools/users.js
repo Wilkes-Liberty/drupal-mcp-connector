@@ -1,13 +1,32 @@
 /**
- * User account management tools — backend-agnostic, security-gated (PII).
+ * Tool group: User accounts.
+ *
+ * User CRUD plus role listing, backend-agnostic. Because user records are PII,
+ * each handler asserts read/write access against the per-site policy in-handler
+ * (in addition to the name-prefix gating in index.js), and reads are redacted
+ * via redactCanonicalEntity.
  */
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, redactCanonicalEntity } from "../lib/security.js";
 
+/**
+ * Build a JSON:API relationship payload assigning the given role IDs.
+ * @param {string[]} roles - Role UUIDs.
+ * @returns {{data: Array<{type: string, id: string}>}}
+ */
 const ROLE_REL = (roles) => ({ data: roles.map((id) => ({ type: "user_role--user_role", id })) });
 
+/**
+ * List user accounts, optionally filtered by status and/or role machine name.
+ *
+ * @param {object} args - { site?, status?, role?, limit?, offset? }.
+ *   A `role` is matched on the internal role id relationship path.
+ * @returns {Promise<{total: number, approximate: boolean, offset: number,
+ *   nextOffset: number, users: object[]}>} Paged, redacted user list.
+ * @throws {SecurityError} If reading users is not permitted by policy.
+ */
 async function listUsers({ site: siteName, status, role, limit = 20, offset = 0 }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -21,6 +40,13 @@ async function listUsers({ site: siteName, status, role, limit = 20, offset = 0 
   return { total: res.page?.total ?? users.length, approximate: res.approximate ?? false, offset, nextOffset: offset + users.length, users };
 }
 
+/**
+ * Fetch a single user by UUID, with roles sideloaded, redacted per policy.
+ *
+ * @param {object} args - { site?, id }.
+ * @returns {Promise<object|null>} The redacted user, or null if not found.
+ * @throws {SecurityError} If reading users is not permitted.
+ */
 async function getUser({ site: siteName, id }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -30,6 +56,14 @@ async function getUser({ site: siteName, id }) {
   return entity ? redactCanonicalEntity(entity, sec, "user") : null;
 }
 
+/**
+ * Look up a user by exact username.
+ *
+ * @param {object} args - { site?, name }.
+ * @returns {Promise<object>} The redacted matching user.
+ * @throws {Error} If no user matches the name.
+ * @throws {SecurityError} If reading users is not permitted.
+ */
 async function getUserByName({ site: siteName, name }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -40,6 +74,14 @@ async function getUserByName({ site: siteName, name }) {
   return redactCanonicalEntity(res.entities[0], sec, "user");
 }
 
+/**
+ * Create a user account. The password is mapped to Drupal's `pass` attribute
+ * shape ([{ value }]); roles, if any, become a role relationship.
+ *
+ * @param {object} args - { site?, name, mail, password?, status?, roles?, timezone? }.
+ * @returns {Promise<object>} The created user descriptor.
+ * @throws {SecurityError} If creating users is not permitted.
+ */
 async function createUser({ site: siteName, name, mail, password, status = true, roles = [], timezone = "UTC" }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -51,6 +93,14 @@ async function createUser({ site: siteName, name, mail, password, status = true,
   return backend.createEntity({ entityType: "user", bundle: "user", attributes, relationships });
 }
 
+/**
+ * Update a user account (partial). Supplying `roles` replaces the full role
+ * set; omitting it leaves roles untouched.
+ *
+ * @param {object} args - { site?, id, name?, mail?, password?, status?, roles?, timezone? }.
+ * @returns {Promise<object>} The updated user descriptor.
+ * @throws {SecurityError} If updating users is not permitted.
+ */
 async function updateUser({ site: siteName, id, name, mail, password, status, roles, timezone }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -66,6 +116,13 @@ async function updateUser({ site: siteName, id, name, mail, password, status, ro
   return backend.updateEntity({ entityType: "user", bundle: "user", id, attributes, relationships });
 }
 
+/**
+ * Block or unblock a user by toggling its status (no deletion).
+ *
+ * @param {object} args - { site?, id, block? }. block=true sets status=false.
+ * @returns {Promise<object>} The updated user descriptor.
+ * @throws {SecurityError} If updating users is not permitted.
+ */
 async function blockUser({ site: siteName, id, block = true }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -74,6 +131,12 @@ async function blockUser({ site: siteName, id, block = true }) {
   return backend.updateEntity({ entityType: "user", bundle: "user", id, attributes: { status: !block } });
 }
 
+/**
+ * List all user roles defined on the site.
+ *
+ * @param {object} args - { site? }.
+ * @returns {Promise<object[]>} Role descriptors.
+ */
 async function listRoles({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);

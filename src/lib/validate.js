@@ -47,6 +47,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /**
  * Validate a UUID (all Drupal JSON:API entity IDs are UUIDs).
+ * @param {string} value The value to validate.
+ * @param {string} [fieldName] Human-readable name for error messages.
+ * @returns {string} The validated value.
+ * @throws {Error} if the value is not a valid UUID.
  */
 export function validateUuid(value, fieldName = "id") {
   if (typeof value !== "string" || !UUID_RE.test(value)) {
@@ -77,7 +81,10 @@ const DANGEROUS_SQL_PATTERNS = [
 /**
  * Validate that a SQL query is read-only.
  * Checks both the query prefix AND secondary injection patterns.
- * @throws {SecurityError} if the query contains write operations.
+ * @param {string} query The SQL query to validate.
+ * @returns {string} The validated query.
+ * @throws {Error} if the query is empty or exceeds the length cap.
+ * @throws {SecurityError} if the query is not read-only or matches a dangerous pattern.
  */
 export function validateSqlQuery(query) {
   if (typeof query !== "string" || !query.trim().length) {
@@ -139,10 +146,12 @@ const LOCALHOST_PATTERNS = ["localhost", "127.0.0.1", "::1", ".lndo.site", ".dde
 
 /**
  * Validate a Drupal site baseUrl.
- * Warns (but does not throw) for localhost HTTP.
- * Throws for non-localhost HTTP URLs.
- * @param {string} url
- * @param {string} siteName
+ * Warns (but does not throw) for localhost HTTP; rejects non-localhost HTTP.
+ * @param {string} url The baseUrl to validate.
+ * @param {string} [siteName] Site name for error/warning messages.
+ * @returns {string} The url with any trailing slash stripped.
+ * @throws {Error} if the value is not an http(s) URL.
+ * @throws {SecurityError} if a non-localhost URL uses plain HTTP.
  */
 export function validateBaseUrl(url, siteName = "site") {
   if (typeof url !== "string" || !url.startsWith("http")) {
@@ -179,7 +188,11 @@ export function validateBaseUrl(url, siteName = "site") {
 const MAX_PAGE_LIMIT = 200;
 
 /**
- * Clamp a page limit to a safe maximum.
+ * Clamp a page limit to a safe maximum, falling back to a default for
+ * non-numeric or out-of-range input.
+ * @param {*} value Requested limit (any type; coerced to Number).
+ * @param {number} [defaultVal] Value returned for invalid/<1 input.
+ * @returns {number} A limit in the range [1, MAX_PAGE_LIMIT].
  */
 export function clampLimit(value, defaultVal = 20) {
   const n = Number(value);
@@ -195,6 +208,11 @@ const FIELD_NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_.]*$/;
 
 /**
  * Validate a Drupal field machine name used in JSON:API filter parameters.
+ * Allows dotted paths (e.g. "field.subfield") for nested references.
+ * @param {string} value The field name to validate.
+ * @param {string} [fieldName] Human-readable name for error messages.
+ * @returns {string} The validated value.
+ * @throws {Error} if the value is not a valid field name.
  */
 export function validateFieldName(value, fieldName = "field") {
   if (typeof value !== "string" || !FIELD_NAME_RE.test(value)) {

@@ -1,9 +1,11 @@
 /**
- * GraphQL tools — require the GraphQL Compose module.
- * drupal.org/project/graphql_compose
+ * Tool group: GraphQL.
  *
- * GraphQL Compose exposes a read-only schema (no mutations). Mutations are
- * additionally gated by the per-site "allowGraphqlMutations" security flag.
+ * Raw GraphQL execution and schema introspection against a Drupal site. Require
+ * the GraphQL Compose module (drupal.org/project/graphql_compose), which
+ * exposes a read-only schema (no mutations); any mutation in a query is
+ * additionally gated by the per-site "allowGraphqlMutations" security flag,
+ * enforced by the middleware in index.js before the handler runs.
  *
  * Per-site config: set "graphqlEndpoint" to override "/graphql".
  * Auth reuses the same credentials as the JSON:API tools.
@@ -16,6 +18,15 @@ import { drupalGraphqlFetch } from "../lib/drupal-fetch.js";
 // Implementations
 // ---------------------------------------------------------------------------
 
+/**
+ * Execute a GraphQL query or mutation and normalize the response envelope.
+ *
+ * @param {object} args - { site?, query, variables?, operationName? }.
+ * @returns {Promise<{data: object, warnings?: string[]}>} On a clean response,
+ *   just `data`. When the server returns errors alongside partial `data`, the
+ *   error messages are surfaced as `warnings` rather than thrown.
+ * @throws {Error} If the response carries errors and no data at all.
+ */
 async function runGraphql({ site: siteName, query, variables = {}, operationName }) {
   const site = getSiteConfig(siteName);
   const json = await drupalGraphqlFetch(site, { query, variables, operationName });
@@ -30,6 +41,17 @@ async function runGraphql({ site: siteName, query, variables = {}, operationName
   return { data: json.data };
 }
 
+/**
+ * Introspect the GraphQL schema, either in detail for one type or as an
+ * overview. When `typeName` is given, returns that type's fields, args, and
+ * input fields. Otherwise returns the root operation types plus all non
+ * built-in, non-scalar types for readability.
+ *
+ * @param {object} args - { site?, typeName? }.
+ * @returns {Promise<object>} A single __type descriptor, or a schema overview.
+ * @throws {Error} If a requested typeName is not present in the schema, or the
+ *   overview query returns errors.
+ */
 async function introspectGraphql({ site: siteName, typeName }) {
   const site = getSiteConfig(siteName);
 

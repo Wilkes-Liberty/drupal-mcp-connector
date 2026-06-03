@@ -1,5 +1,11 @@
 /**
- * Generic entity tools — work with ANY Drupal entity type/bundle, backend-agnostic.
+ * Tool group: Generic entities.
+ *
+ * Type-agnostic CRUD plus schema/type discovery and a security summary. These
+ * tools work with ANY Drupal entity type + bundle, so each handler asserts the
+ * appropriate read/write/delete permission in-handler (the name-prefix gating
+ * in index.js cannot know the entity type from the generic tool names). Reads
+ * are redacted per the site policy.
  */
 
 import { getSiteConfig } from "../lib/config.js";
@@ -9,6 +15,14 @@ import {
   redactCanonicalEntity, getSecuritySummary,
 } from "../lib/security.js";
 
+/**
+ * List entities of any type/bundle with filters, sort, includes and paging.
+ *
+ * @param {object} args - { site?, entityType, bundle, filters?, sort?, limit?, offset?, include? }.
+ * @returns {Promise<{total: number, approximate: boolean, offset: number,
+ *   nextOffset: number, entities: object[]}>} Paged, redacted entity list.
+ * @throws {SecurityError} If reading the type/bundle is not permitted.
+ */
 async function listEntities({ site: siteName, entityType, bundle, filters = [], sort = [], limit = 20, offset = 0, include = [] }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -19,6 +33,13 @@ async function listEntities({ site: siteName, entityType, bundle, filters = [], 
   return { total: res.page?.total ?? entities.length, approximate: res.approximate ?? false, offset, nextOffset: offset + entities.length, entities };
 }
 
+/**
+ * Fetch a single entity of any type by UUID, redacted per policy.
+ *
+ * @param {object} args - { site?, entityType, bundle, id, include? }.
+ * @returns {Promise<object|null>} The redacted entity, or null if not found.
+ * @throws {SecurityError} If reading the type/bundle is not permitted.
+ */
 async function getEntity({ site: siteName, entityType, bundle, id, include = [] }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -28,6 +49,13 @@ async function getEntity({ site: siteName, entityType, bundle, id, include = [] 
   return entity ? redactCanonicalEntity(entity, sec, entityType) : null;
 }
 
+/**
+ * Create an entity of any type/bundle.
+ *
+ * @param {object} args - { site?, entityType, bundle, attributes?, relationships? }.
+ * @returns {Promise<object>} The created entity descriptor.
+ * @throws {SecurityError} If creating the type/bundle is not permitted.
+ */
 async function createEntity({ site: siteName, entityType, bundle, attributes = {}, relationships = {} }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -36,6 +64,13 @@ async function createEntity({ site: siteName, entityType, bundle, attributes = {
   return backend.createEntity({ entityType, bundle, attributes, relationships });
 }
 
+/**
+ * Update an entity of any type/bundle (partial — only supplied fields are sent).
+ *
+ * @param {object} args - { site?, entityType, bundle, id, attributes?, relationships? }.
+ * @returns {Promise<object>} The updated entity descriptor.
+ * @throws {SecurityError} If updating the type/bundle is not permitted.
+ */
 async function updateEntity({ site: siteName, entityType, bundle, id, attributes = {}, relationships = {} }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -44,6 +79,13 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   return backend.updateEntity({ entityType, bundle, id, attributes, relationships });
 }
 
+/**
+ * Delete an entity of any type/bundle. Requires allowDestructive in policy.
+ *
+ * @param {object} args - { site?, entityType, bundle, id }.
+ * @returns {Promise<{success: boolean, deletedId: string, entityType: string, bundle: string}>}
+ * @throws {SecurityError} If deleting the type/bundle is not permitted.
+ */
 async function deleteEntity({ site: siteName, entityType, bundle, id }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -53,6 +95,15 @@ async function deleteEntity({ site: siteName, entityType, bundle, id }) {
   return { success: true, deletedId: id, entityType, bundle };
 }
 
+/**
+ * Discover all resource types the backend exposes, filtered to those the policy
+ * permits reading. Accessibility is probed per type by catching the assertion
+ * (rather than indexing a policy table), which keeps the lookup injection-safe.
+ *
+ * @param {object} args - { site? }.
+ * @returns {Promise<{total: number, accessible: number, blocked: number,
+ *   resourceTypes: object[]}>} Counts plus the list of readable types.
+ */
 async function listEntityTypes({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -64,6 +115,13 @@ async function listEntityTypes({ site: siteName }) {
   return { total: all.length, accessible: accessible.length, blocked: all.length - accessible.length, resourceTypes: accessible };
 }
 
+/**
+ * Return the field/relationship schema for a type + bundle.
+ *
+ * @param {object} args - { site?, entityType, bundle }.
+ * @returns {Promise<object>} The backend's schema descriptor.
+ * @throws {SecurityError} If reading the type/bundle is not permitted.
+ */
 async function getEntitySchema({ site: siteName, entityType, bundle }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -72,6 +130,13 @@ async function getEntitySchema({ site: siteName, entityType, bundle }) {
   return backend.getEntitySchema(entityType, bundle);
 }
 
+/**
+ * Summarize the active security policy for a site (allowed/blocked/redacted).
+ * No backend call — reads policy only.
+ *
+ * @param {object} args - { site? }.
+ * @returns {Promise<object>} The security summary.
+ */
 async function securityInfo({ site: siteName }) {
   const site = getSiteConfig(siteName);
   return getSecuritySummary(site);

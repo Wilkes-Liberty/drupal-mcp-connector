@@ -4,6 +4,8 @@
 
 /**
  * Wrap a thrown error into the MCP CallTool error response shape.
+ * @param {Error|*} err The caught error (or any thrown value).
+ * @returns {{content: Array<{type: string, text: string}>, isError: true}}
  */
 export function toolError(err) {
   const message = err instanceof Error ? err.message : String(err);
@@ -14,7 +16,9 @@ export function toolError(err) {
 }
 
 /**
- * Wrap a successful result into the MCP CallTool response shape.
+ * Wrap a successful result into the MCP CallTool response shape (JSON-stringified).
+ * @param {*} data Serializable result payload.
+ * @returns {{content: Array<{type: string, text: string}>}}
  */
 export function toolResult(data) {
   return {
@@ -24,6 +28,8 @@ export function toolResult(data) {
 
 /**
  * Wrap a plain string message (for confirmations, warnings, etc.).
+ * @param {string} text Message text.
+ * @returns {{content: Array<{type: string, text: string}>}}
  */
 export function toolMessage(text) {
   return {

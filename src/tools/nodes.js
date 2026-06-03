@@ -1,20 +1,46 @@
 /**
- * Node CRUD tools — backend-agnostic (JSON:API or GraphQL) via resolveBackend.
+ * Tool group: Node CRUD.
+ *
+ * Backend-agnostic content node operations (get/list/search/create/update/
+ * delete). Every handler resolves the active backend (JSON:API or GraphQL) via
+ * resolveBackend, and read results pass through redactCanonicalEntity so the
+ * per-site security policy can strip protected fields before returning.
  */
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, redactCanonicalEntity } from "../lib/security.js";
 
+/**
+ * Build a Drupal body field descriptor from plain HTML + optional summary.
+ *
+ * @param {string} [body]    - Body HTML; when undefined the field is omitted.
+ * @param {string} [summary] - Teaser/summary text.
+ * @returns {{value: string, format: string, summary: string}|undefined}
+ *   A body attribute object, or undefined when no body was supplied (so callers
+ *   can skip the field on update rather than blanking it).
+ */
 function buildBodyAttribute(body, summary) {
   if (body === undefined) return undefined;
   return { value: body, format: "full_html", summary: summary ?? "" };
 }
 
+/**
+ * Normalize limit/offset args into the backend's page descriptor.
+ *
+ * @param {{limit?: number, offset?: number}} args
+ * @returns {{limit: number, offset: number}}
+ */
 function pageOf({ limit = 20, offset = 0 }) {
   return { limit, offset };
 }
 
+/**
+ * Fetch a single node by type + UUID, redacted per the site policy.
+ *
+ * @param {object} args - { site?, type, id }.
+ * @returns {Promise<object|null>} The redacted node, or null if not found.
+ */
 async function getNode({ site: siteName, type, id }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -23,6 +49,14 @@ async function getNode({ site: siteName, type, id }) {
   return entity ? redactCanonicalEntity(entity, sec, "node") : null;
 }
 
+/**
+ * List nodes of a content type with optional status filter, paging and sorting.
+ *
+ * @param {object} args - { site?, type, status?, filters?, limit?, offset?, sort? }.
+ *   A `status` boolean is appended to `filters` as a status equality descriptor.
+ * @returns {Promise<{total: number, approximate: boolean, offset: number,
+ *   nextOffset: number, nodes: object[]}>} Paged, redacted node list.
+ */
 async function listNodes({ site: siteName, type, status, filters = [], limit = 20, offset = 0, sort = [{ field: "changed", dir: "desc" }] }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -40,6 +74,12 @@ async function listNodes({ site: siteName, type, status, filters = [], limit = 2
   };
 }
 
+/**
+ * Search nodes by title substring (defaults to the article bundle).
+ *
+ * @param {object} args - { site?, query, type?, status?, limit? }.
+ * @returns {Promise<object[]>} Redacted matching nodes.
+ */
 async function searchContent({ site: siteName, query, type, status, limit = 10 }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -50,6 +90,14 @@ async function searchContent({ site: siteName, query, type, status, limit = 10 }
   return res.entities.map((e) => redactCanonicalEntity(e, sec, "node"));
 }
 
+/**
+ * Create a node. Caller-supplied `fields` are spread into the attribute map;
+ * title/status/body are layered on top so they win over any same-named field.
+ *
+ * @param {object} args - { site?, type, title, body?, summary?, status?, fields? }.
+ *   Defaults to status=false (draft) so content is never auto-published.
+ * @returns {Promise<object>} The created node descriptor from the backend.
+ */
 async function createNode({ site: siteName, type, title, body, summary, status = false, fields = {} }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
@@ -59,6 +107,13 @@ async function createNode({ site: siteName, type, title, body, summary, status =
   return backend.createEntity({ entityType: "node", bundle: type, attributes });
 }
 
+/**
+ * Update a node. Only supplied attributes are sent, so omitted fields are left
+ * untouched (partial update). `fields` is spread first, then known scalars.
+ *
+ * @param {object} args - { site?, type, id, title?, body?, summary?, status?, fields? }.
+ * @returns {Promise<object>} The updated node descriptor.
+ */
 async function updateNode({ site: siteName, type, id, title, body, summary, status, fields = {} }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
@@ -70,6 +125,13 @@ async function updateNode({ site: siteName, type, id, title, body, summary, stat
   return backend.updateEntity({ entityType: "node", bundle: type, id, attributes });
 }
 
+/**
+ * Permanently delete a node. The destructive-allowed assertion is applied
+ * upstream by the security middleware in index.js.
+ *
+ * @param {object} args - { site?, type, id }.
+ * @returns {Promise<{success: boolean, deletedId: string}>}
+ */
 async function deleteNode({ site: siteName, type, id }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);

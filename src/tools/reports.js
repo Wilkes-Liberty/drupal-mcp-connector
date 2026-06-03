@@ -1,7 +1,11 @@
 /**
- * Phase 3 — Audit & Reporting tools. Backend-agnostic (JSON:API or GraphQL).
- * Reports consult backend capabilities; some degrade (approximate) or gate
- * (return { unavailable }) on backends that can't do counts/filters/revisions.
+ * Tool group: Audit & reporting.
+ *
+ * Read-only content/user/SEO/accessibility audits, backend-agnostic (JSON:API
+ * or GraphQL). Reports consult backend capabilities and adapt: some mark
+ * results `approximate` when exact counts aren't available, and some gate
+ * (return a `gatedReport` { unavailable } payload) on backends that lack
+ * counts, filters, or revisions. Each handler asserts read access in-handler.
  */
 
 import { getSiteConfig } from "../lib/config.js";
@@ -15,6 +19,13 @@ import { collectEntities, gatedReport, fieldValue, daysSince } from "../lib/repo
 
 /**
  * High-level content summary: node counts by type and status.
+ * Per-type counts that the policy blocks are reported as "access_denied"
+ * rather than aborting the whole report.
+ *
+ * @param {object} args - { site? }.
+ * @returns {Promise<{site: string, approximate: boolean, grandTotal: number,
+ *   byContentType: object[]}>} Inventory sorted by total descending.
+ * @throws {SecurityError} If reading nodes is not permitted at all.
  */
 async function contentSummary({ site: siteName }) {
   const site = getSiteConfig(siteName);
@@ -49,6 +60,11 @@ async function contentSummary({ site: siteName }) {
 
 /**
  * Stale content: nodes not updated within the last N days.
+ *
+ * @param {object} args - { site?, type?, days?, status?, limit? }. The cutoff
+ *   is computed as now minus `days`, then applied as a `changed < cutoff` filter.
+ * @returns {Promise<object>} Threshold metadata and the matching node list.
+ * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function staleContent({ site: siteName, type, days = 180, status, limit = 50 }) {
   const site = getSiteConfig(siteName);
@@ -83,7 +99,12 @@ async function staleContent({ site: siteName, type, days = 180, status, limit = 
 }
 
 /**
- * Content by author: how many nodes each user has created, by type.
+ * Content by author: how many nodes each user has created, for one type.
+ * Aggregation is by author UUID (resolve names with drupal_get_user).
+ *
+ * @param {object} args - { site?, type?, limit? }. limit caps nodes scanned.
+ * @returns {Promise<object>} Authors sorted by node count descending.
+ * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function contentByAuthor({ site: siteName, type, limit = 100 }) {
   const site = getSiteConfig(siteName);
@@ -115,7 +136,11 @@ async function contentByAuthor({ site: siteName, type, limit = 100 }) {
 }
 
 /**
- * Recently published content across all or specific content types.
+ * Recently published content of a given type, newest first.
+ *
+ * @param {object} args - { site?, type?, limit? }.
+ * @returns {Promise<object>} The most recently created published nodes.
+ * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function recentlyPublished({ site: siteName, type, limit = 20 }) {
   const site = getSiteConfig(siteName);
@@ -142,7 +167,15 @@ async function recentlyPublished({ site: siteName, type, limit = 20 }) {
 }
 
 /**
- * Field completeness: what % of nodes have optional fields populated.
+ * Field completeness: what % of sampled nodes have optional fields populated.
+ * A field absent on every sampled node is treated as "not on this content
+ * type" and dropped from the results rather than counted as empty.
+ *
+ * @param {object} args - { site?, type, fields?, sampleSize? }. `type` is
+ *   required; `fields` defaults to common SEO/editorial field names.
+ * @returns {Promise<object>} Per-field populated/empty counts and percentages.
+ * @throws {Error} If no content type is supplied.
+ * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function fieldCompleteness({ site: siteName, type, fields, sampleSize = 100 }) {
   const site = getSiteConfig(siteName);
@@ -188,7 +221,14 @@ async function fieldCompleteness({ site: siteName, type, fields, sampleSize = 10
 }
 
 /**
- * Taxonomy usage: how many nodes use each term in a vocabulary.
+ * Taxonomy usage: how many nodes reference each term in a vocabulary.
+ * Per-term counts that error out are reported as null nodeCount.
+ *
+ * @param {object} args - { site?, vocabulary, contentType?, referenceField?, limit? }.
+ *   `referenceField` defaults to `field_{vocabulary}`; `contentType` to "article".
+ * @returns {Promise<object>} Terms sorted by usage, plus an unused-term count.
+ * @throws {Error} If no vocabulary is supplied.
+ * @throws {SecurityError} If reading the vocabulary is not permitted.
  */
 async function taxonomyUsage({ site: siteName, vocabulary, contentType, referenceField, limit = 100 }) {
   const site = getSiteConfig(siteName);
@@ -229,7 +269,11 @@ async function taxonomyUsage({ site: siteName, vocabulary, contentType, referenc
 
 /**
  * Revision hotspots: nodes with the most revisions (heavy edit activity).
- * Gated: returns { unavailable } on backends without revision support.
+ *
+ * @param {object} args - { site?, type?, limit? }.
+ * @returns {Promise<object>} Nodes sorted by revision count, or a gatedReport
+ *   { unavailable } payload when the backend exposes no revisions.
+ * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function revisionHotspots({ site: siteName, type, limit = 20 }) {
   const site = getSiteConfig(siteName);
@@ -273,8 +317,14 @@ async function revisionHotspots({ site: siteName, type, limit = 20 }) {
 }
 
 /**
- * User activity report: last login times, inactive users, new accounts.
- * Gated: returns { unavailable } on backends where user type lacks login/status fields.
+ * User activity report: active vs blocked counts, never-logged-in users, and
+ * accounts inactive beyond a threshold. Login is a Unix timestamp in seconds,
+ * so the cutoff is computed in seconds and rendered back to ISO for output.
+ *
+ * @param {object} args - { site?, inactiveDays?, limit? }.
+ * @returns {Promise<object>} Summary counts plus the inactive-user list, or a
+ *   gatedReport { unavailable } payload when login/status aren't exposed.
+ * @throws {SecurityError} If reading users is not permitted.
  */
 async function userActivity({ site: siteName, inactiveDays = 90, limit = 50 }) {
   const site = getSiteConfig(siteName);
@@ -331,7 +381,14 @@ async function userActivity({ site: siteName, inactiveDays = 90, limit = 50 }) {
 }
 
 /**
- * SEO audit: meta description coverage, title lengths, thin content.
+ * SEO audit: meta-description coverage, title length bounds, and thin content.
+ * Word count is computed from body HTML with tags stripped. Title thresholds
+ * (>60 too long, <20 too short) and the 300-word thin-content floor are SEO
+ * heuristics, not hard Drupal limits.
+ *
+ * @param {object} args - { site?, type?, sampleSize? }.
+ * @returns {Promise<object>} Issue lists keyed by category, with counts.
+ * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function seoAudit({ site: siteName, type, sampleSize = 100 }) {
   const site = getSiteConfig(siteName);
@@ -369,7 +426,14 @@ async function seoAudit({ site: siteName, type, sampleSize = 100 }) {
 }
 
 /**
- * Accessibility audit: alt text, heading structure, link text in body fields.
+ * Accessibility audit of body HTML: images missing alt text, inline H1s,
+ * non-descriptive link text, and tables without a caption. Detection is
+ * regex-based on the rendered body markup, so it is a heuristic pass, not a
+ * full DOM-aware a11y checker.
+ *
+ * @param {object} args - { site?, type?, sampleSize? }.
+ * @returns {Promise<object>} Issue lists keyed by category, with counts.
+ * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function accessibilityAudit({ site: siteName, type, sampleSize = 100 }) {
   const site = getSiteConfig(siteName);
