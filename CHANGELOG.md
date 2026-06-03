@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-06-03
 
 ### Added
 - **OAuth2 write-plane authentication.** Per-site `oauth` block enabling the
@@ -66,4 +66,5 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[0.5.0]: https://github.com/Wilkes-Liberty/drupal-mcp-server/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Wilkes-Liberty/drupal-mcp-server/releases/tag/v0.4.0

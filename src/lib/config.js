@@ -14,7 +14,7 @@ import { SecurityError }                 from "./security.js";
 import { getAccessToken }                from "./oauth.js";
 
 /** Connector version for the X-MCP-Client identity label. Keep in sync with package.json. */
-export const CLIENT_VERSION = "0.4.0";
+export const CLIENT_VERSION = "0.5.0";
 
 /**
  * Identity headers sent on every outbound Drupal request. Lets governance layers

@@ -242,7 +242,7 @@ function getPromptMessages(name, args) {
 // ---------------------------------------------------------------------------
 
 const server = new Server(
-  { name: "drupal-mcp-server", version: "0.4.0" },
+  { name: "drupal-mcp-server", version: "0.5.0" },
   { capabilities: { tools: {}, resources: {}, prompts: {} } }
 );
 
@@ -310,7 +310,7 @@ if (transport === "stdio") {
   const stdioTransport = new StdioServerTransport();
   await server.connect(stdioTransport);
   console.error(
-    "[drupal-mcp-server v0.4.0] stdio transport active. " +
+    "[drupal-mcp-server v0.5.0] stdio transport active. " +
     `${allDefinitions.length} tools · ${RESOURCES.length} resources · ${PROMPTS.length} prompts`
   );
 
@@ -430,7 +430,7 @@ if (transport === "stdio") {
   nodeServer.listen(port, bindHost, () => {
     const proto = hasTls ? "https" : "http";
     console.error(
-      `[drupal-mcp-server v0.4.0] Listening on ${proto}://${bindHost}:${port}/mcp\n` +
+      `[drupal-mcp-server v0.5.0] Listening on ${proto}://${bindHost}:${port}/mcp\n` +
       `  ${allDefinitions.length} tools · ${RESOURCES.length} resources · ${PROMPTS.length} prompts`
     );
   });

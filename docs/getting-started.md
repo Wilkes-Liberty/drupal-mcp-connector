@@ -134,7 +134,7 @@ node src/index.js
 You should see:
 
 ```
-[drupal-mcp-server v0.4.0] stdio transport active. 66 tools · 3 resources · 4 prompts
+[drupal-mcp-server v0.5.0] stdio transport active. 66 tools · 3 resources · 4 prompts
 ```
 
 ---
