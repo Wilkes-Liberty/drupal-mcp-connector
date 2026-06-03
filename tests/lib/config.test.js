@@ -6,11 +6,11 @@ const ORIG = process.env.MCP_CLIENT_ID;
 afterEach(() => { if (ORIG === undefined) delete process.env.MCP_CLIENT_ID; else process.env.MCP_CLIENT_ID = ORIG; });
 
 describe("clientHeaders", () => {
-  it("defaults to drupal-mcp-server/<version> on both headers", () => {
+  it("defaults to drupal-mcp-connector/<version> on both headers", () => {
     delete process.env.MCP_CLIENT_ID;
     const h = clientHeaders();
-    expect(h["X-MCP-Client"]).toBe(`drupal-mcp-server/${CLIENT_VERSION}`);
-    expect(h["User-Agent"]).toBe(`drupal-mcp-server/${CLIENT_VERSION}`);
+    expect(h["X-MCP-Client"]).toBe(`drupal-mcp-connector/${CLIENT_VERSION}`);
+    expect(h["User-Agent"]).toBe(`drupal-mcp-connector/${CLIENT_VERSION}`);
   });
   it("honors a custom MCP_CLIENT_ID", () => {
     process.env.MCP_CLIENT_ID = "acme-bot/9.9";

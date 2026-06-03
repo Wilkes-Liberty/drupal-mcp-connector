@@ -1,5 +1,6 @@
+#!/usr/bin/env node
 /**
- * drupal-mcp-server — entry point
+ * drupal-mcp-connector — entry point
  *
  * Transports:
  *   stdio (default)   Local subprocess mode for MCP clients
@@ -242,7 +243,7 @@ function getPromptMessages(name, args) {
 // ---------------------------------------------------------------------------
 
 const server = new Server(
-  { name: "drupal-mcp-server", version: "0.5.0" },
+  { name: "drupal-mcp-connector", version: "0.6.0" },
   { capabilities: { tools: {}, resources: {}, prompts: {} } }
 );
 
@@ -310,7 +311,7 @@ if (transport === "stdio") {
   const stdioTransport = new StdioServerTransport();
   await server.connect(stdioTransport);
   console.error(
-    "[drupal-mcp-server v0.5.0] stdio transport active. " +
+    "[drupal-mcp-connector v0.6.0] stdio transport active. " +
     `${allDefinitions.length} tools · ${RESOURCES.length} resources · ${PROMPTS.length} prompts`
   );
 
@@ -329,7 +330,7 @@ if (transport === "stdio") {
   const checkAuth   = makeBearerCheck(authToken);
   if (!authToken) {
     console.error(
-      "[drupal-mcp-server] WARNING: the /mcp endpoint is UNAUTHENTICATED. " +
+      "[drupal-mcp-connector] WARNING: the /mcp endpoint is UNAUTHENTICATED. " +
       "Set MCP_AUTH_TOKEN to require a bearer token, or front it with a trusted " +
       "boundary (private network / auth proxy). Acceptable only behind such a boundary."
     );
@@ -361,7 +362,7 @@ if (transport === "stdio") {
     // No TLS certs — allow only if explicitly opted in AND on localhost
     if (!allowHttp) {
       console.error(
-        "[drupal-mcp-server] FATAL: HTTP transport requires TLS certificates.\n" +
+        "[drupal-mcp-connector] FATAL: HTTP transport requires TLS certificates.\n" +
         "  Set TLS_CERT_PATH and TLS_KEY_PATH, or MCP_ALLOW_HTTP=1 for localhost-only dev.\n" +
         "  See docs/getting-started.md for TLS setup instructions."
       );
@@ -369,7 +370,7 @@ if (transport === "stdio") {
     }
 
     console.error(
-      "[drupal-mcp-server] WARNING: Running plain HTTP (MCP_ALLOW_HTTP=1). " +
+      "[drupal-mcp-connector] WARNING: Running plain HTTP (MCP_ALLOW_HTTP=1). " +
       "ONLY acceptable for local development. Never expose this to the internet."
     );
     return createHttpServer((req, res) => {
@@ -430,12 +431,12 @@ if (transport === "stdio") {
   nodeServer.listen(port, bindHost, () => {
     const proto = hasTls ? "https" : "http";
     console.error(
-      `[drupal-mcp-server v0.5.0] Listening on ${proto}://${bindHost}:${port}/mcp\n` +
+      `[drupal-mcp-connector v0.6.0] Listening on ${proto}://${bindHost}:${port}/mcp\n` +
       `  ${allDefinitions.length} tools · ${RESOURCES.length} resources · ${PROMPTS.length} prompts`
     );
   });
 
 } else {
-  console.error(`[drupal-mcp-server] Unknown MCP_TRANSPORT: "${transport}". Use "stdio" or "https".`);
+  console.error(`[drupal-mcp-connector] Unknown MCP_TRANSPORT: "${transport}". Use "stdio" or "https".`);
   process.exit(1);
 }

@@ -4,7 +4,7 @@
 
 ## Defense-in-Depth Model
 
-`drupal-mcp-server` sits between the MCP client and Drupal. Two independent layers must both permit an operation for it to proceed.
+`drupal-mcp-connector` sits between the MCP client and Drupal. Two independent layers must both permit an operation for it to proceed.
 
 ```
 MCP Client

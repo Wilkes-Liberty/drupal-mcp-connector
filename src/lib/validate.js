@@ -162,7 +162,7 @@ export function validateBaseUrl(url, siteName = "site") {
 
   if (!isHttps && isLocalhost) {
     console.warn(
-      `[drupal-mcp-server] Warning: site "${siteName}" is using plain HTTP (${url}). ` +
+      `[drupal-mcp-connector] Warning: site "${siteName}" is using plain HTTP (${url}). ` +
       "This is only acceptable for local development."
     );
   }

@@ -10,7 +10,7 @@
            │ stdio (local)              │ HTTPS (remote / multi-client)
            ▼                            ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│                   drupal-mcp-server (Node.js)                      │
+│                   drupal-mcp-connector (Node.js)                   │
 │                                                                    │
 │  src/index.js ── MCP server ── security middleware ── transports   │
 │                         │                                          │

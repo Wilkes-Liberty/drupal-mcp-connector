@@ -1,11 +1,11 @@
-# Contributing to drupal-mcp-server
+# Contributing to drupal-mcp-connector
 
 Thank you for your interest in contributing! This project is maintained by [Wilkes & Liberty](https://github.com/wilkes-liberty).
 
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/drupal-mcp-server`
+2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/drupal-mcp-connector`
 3. Install dependencies: `npm install`
 4. Set up a local Drupal site (we recommend [DDEV](https://ddev.com) or [Lando](https://lando.dev))
 5. Copy `config/config.example.json` → `config/config.json` and point it at your local Drupal

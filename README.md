@@ -1,4 +1,4 @@
-# drupal-mcp-server
+# drupal-mcp-connector
 
 > A secure, multi-site Model Context Protocol (MCP) connector for Drupal — dual-protocol JSON:API and GraphQL access, governed content tools, audit reports, and an SSH Drush bridge.
 
@@ -7,13 +7,13 @@
 [![Drupal](https://img.shields.io/badge/drupal-10%20%7C%2011-blue)](https://drupal.org)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-purple)](https://modelcontextprotocol.io)
 
-Built by [Wilkes & Liberty](https://github.com/Wilkes-Liberty).
+Created by **Jeremy Michael Cerda**. Built and maintained by [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty).
 
 ---
 
 ## What It Does
 
-`drupal-mcp-server` connects any [Model Context Protocol](https://modelcontextprotocol.io) client to one or more Drupal sites. It exposes Drupal content and configuration as a set of MCP **tools**, **resources**, and **prompts**, so an MCP client can read, audit, and (where permitted) write content through structured, governed operations instead of the admin UI:
+`drupal-mcp-connector` connects any [Model Context Protocol](https://modelcontextprotocol.io) client to one or more Drupal sites. It exposes Drupal content and configuration as a set of MCP **tools**, **resources**, and **prompts**, so an MCP client can read, audit, and (where permitted) write content through structured, governed operations instead of the admin UI:
 
 ```
 "Find all articles missing a meta description and list them."
@@ -110,8 +110,8 @@ Presets layer with entity allow/deny lists, per-bundle operation rules, and fiel
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/Wilkes-Liberty/drupal-mcp-server
-cd drupal-mcp-server
+git clone https://github.com/Wilkes-Liberty/drupal-mcp-connector
+cd drupal-mcp-connector
 npm install
 
 # 2. Configure
@@ -131,7 +131,7 @@ Most desktop and CLI MCP clients launch the connector over **stdio**. Add an ent
   "mcpServers": {
     "drupal": {
       "command": "node",
-      "args": ["/absolute/path/to/drupal-mcp-server/src/index.js"],
+      "args": ["/absolute/path/to/drupal-mcp-connector/src/index.js"],
       "env": {
         "DRUPAL_BASE_URL": "https://mysite.com",
         "DRUPAL_API_TOKEN": "your-token-here"
@@ -175,6 +175,7 @@ Governance keys off the authenticated account's role and OAuth scopes — not re
 | [Tools Reference](docs/tools-reference.md) | Full reference for all 66 tools |
 | [Security Guide](docs/security.md) | Presets, entity access control, field redaction |
 | [Security Hardening](docs/security-hardening.md) | Optional transport, identity, and secrets controls |
+| [Integration Contract](docs/integration-contract.md) | The connector ↔ Drupal-governance contract (identity, OAuth scopes, compatibility) |
 | [Whitepaper](docs/whitepaper.md) | Vision, personas, and use cases |
 
 ---
@@ -189,4 +190,4 @@ Found a vulnerability? See [SECURITY.md](SECURITY.md). Please do not open a publ
 
 ## License
 
-[MIT](LICENSE) © 2026 [Wilkes & Liberty](https://github.com/Wilkes-Liberty)
+[MIT](LICENSE) © 2026 Jeremy Michael Cerda and [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty)

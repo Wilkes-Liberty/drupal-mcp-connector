@@ -1,19 +1,44 @@
 {
-  "name": "drupal-mcp-server",
-  "version": "0.5.0",
+  "name": "drupal-mcp-connector",
+  "version": "0.6.0",
   "description": "A secure, multi-site Model Context Protocol (MCP) connector for Drupal — dual-protocol JSON:API and GraphQL.",
   "type": "module",
   "main": "src/index.js",
-  "homepage": "https://github.com/Wilkes-Liberty/drupal-mcp-server",
+  "bin": {
+    "drupal-mcp-connector": "src/index.js"
+  },
+  "files": [
+    "src/",
+    "config/config.example.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "drupal",
+    "mcp",
+    "model-context-protocol",
+    "jsonapi",
+    "json-api",
+    "graphql",
+    "connector",
+    "headless",
+    "decoupled",
+    "drush"
+  ],
+  "homepage": "https://github.com/Wilkes-Liberty/drupal-mcp-connector",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Wilkes-Liberty/drupal-mcp-server.git"
+    "url": "https://github.com/Wilkes-Liberty/drupal-mcp-connector.git"
   },
   "bugs": {
-    "url": "https://github.com/Wilkes-Liberty/drupal-mcp-server/issues"
+    "url": "https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues"
   },
   "license": "MIT",
-  "author": "Wilkes & Liberty <opensource@wilkesliberty.com>",
+  "author": "Jeremy Michael Cerda <jmcerda@wilkesliberty.com> (https://wilkesliberty.com)",
+  "contributors": [
+    "Wilkes & Liberty, LLC <opensource@wilkesliberty.com> (https://wilkesliberty.com)"
+  ],
   "engines": {
     "node": ">=18.0.0"
   },

@@ -6,7 +6,7 @@ mentioned here are examples only; none are required.
 
 ## MCP-client identity header (on by default)
 
-Every outbound Drupal request sends `X-MCP-Client: drupal-mcp-server/<version>` and a
+Every outbound Drupal request sends `X-MCP-Client: drupal-mcp-connector/<version>` and a
 matching `User-Agent`. Governance layers (e.g. the MCP Sentinel Drupal module) can use
 this to label and identify connector traffic without additional config.
 

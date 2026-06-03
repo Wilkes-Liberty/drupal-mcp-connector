@@ -14,7 +14,7 @@ import { SecurityError }                 from "./security.js";
 import { getAccessToken }                from "./oauth.js";
 
 /** Connector version for the X-MCP-Client identity label. Keep in sync with package.json. */
-export const CLIENT_VERSION = "0.5.0";
+export const CLIENT_VERSION = "0.6.0";
 
 /**
  * Identity headers sent on every outbound Drupal request. Lets governance layers
@@ -22,7 +22,7 @@ export const CLIENT_VERSION = "0.5.0";
  * MCP_CLIENT_ID to override the value, or to "" to disable entirely.
  */
 export function clientHeaders() {
-  const id = process.env.MCP_CLIENT_ID ?? `drupal-mcp-server/${CLIENT_VERSION}`;
+  const id = process.env.MCP_CLIENT_ID ?? `drupal-mcp-connector/${CLIENT_VERSION}`;
   if (!id) return {};
   return { "X-MCP-Client": id, "User-Agent": id };
 }
@@ -127,14 +127,14 @@ function validateConfig(cfg) {
 
     if (!site.apiToken && !(site.username && site.password) && !site.oauth) {
       console.warn(
-        `[drupal-mcp-server] Warning: site "${name}" has no apiToken, username/password, or oauth block. ` +
+        `[drupal-mcp-connector] Warning: site "${name}" has no apiToken, username/password, or oauth block. ` +
         "Unauthenticated requests will be limited to public content."
       );
     }
 
     if (site.apiToken && site.username) {
       console.warn(
-        `[drupal-mcp-server] Warning: site "${name}" has both apiToken and username set. ` +
+        `[drupal-mcp-connector] Warning: site "${name}" has both apiToken and username set. ` +
         "apiToken takes priority. Remove the unused credential."
       );
     }
