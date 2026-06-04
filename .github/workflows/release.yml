@@ -2,15 +2,18 @@ name: Release
 
 # Publishes to npm when a v* tag is pushed (e.g. `git push origin v0.6.2`).
 #
-# Auth note: the maintainer account uses a YubiKey (WebAuthn) for interactive
-# 2FA, which cannot run in CI. Automated publishing therefore requires a
-# **granular automation token** (npm → Access Tokens → Generate → "Automation")
-# stored as the `NPM_TOKEN` repo secret. Automation tokens bypass 2FA by design;
-# scope it to publish-only on this package.
+# Auth: npm **trusted publishing** via GitHub Actions OIDC — no token, no stored
+# secret. npm trusts this exact repo+workflow identity (configured one-time on
+# npmjs.com → package → Settings → Trusted Publisher). The `id-token: write`
+# permission below lets the runner mint the OIDC token npm exchanges for a
+# short-lived publish credential. Provenance is attached automatically.
 #
-# `--provenance` attaches a signed build-provenance statement (requires the
-# `id-token: write` permission below) so consumers can verify the tarball was
-# built by this workflow.
+# One-time setup (maintainer, on npmjs.com):
+#   Package `drupal-mcp-connector` → Settings → Trusted Publishing → GitHub Actions
+#     Organization/owner : Wilkes-Liberty
+#     Repository         : drupal-mcp-connector
+#     Workflow filename  : release.yml
+#   (Leave "Environment" blank unless this job is pinned to one.)
 
 on:
   push:
@@ -19,7 +22,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write  # required for npm provenance
+  id-token: write  # required for npm trusted publishing (OIDC) + provenance
 
 jobs:
   publish:
@@ -34,6 +37,9 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
+
+      - name: Upgrade npm (trusted publishing needs npm >= 11.5.1)
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: npm ci
@@ -54,7 +60,5 @@ jobs:
       - name: Unit tests
         run: npm test --if-present
 
-      - name: Publish
-        run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish (trusted publishing — no token)
+        run: npm publish --access public

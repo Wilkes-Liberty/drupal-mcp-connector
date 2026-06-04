@@ -66,11 +66,18 @@ Actions workflow when a `v*` tag is pushed.
    The tag push triggers `release.yml`, which re-runs lint + tests, verifies the
    tag matches `package.json`, and publishes with provenance.
 
-**One-time setup — `NPM_TOKEN` secret (required for automated publish):**
-the maintainer npm account uses a **YubiKey (WebAuthn)** for 2FA, which cannot run
-in CI. Create a **granular automation token** (npm → Access Tokens → Generate →
-*Automation*), scope it to publish this package, and store it as the `NPM_TOKEN`
-repository secret. Automation tokens bypass interactive 2FA by design.
+**One-time setup — npm trusted publishing (no token, no secret):**
+publishing authenticates via GitHub Actions **OIDC** — npm trusts this exact
+repo+workflow identity directly, so there is no `NPM_TOKEN` to create, store, or
+rotate. Configure it once on npmjs.com:
+
+> Package `drupal-mcp-connector` → **Settings → Trusted Publishing → GitHub Actions**
+> - Organization/owner: `Wilkes-Liberty`
+> - Repository: `drupal-mcp-connector`
+> - Workflow filename: `release.yml`
+> - Environment: *(leave blank)*
+
+The workflow already has `id-token: write`; provenance is attached automatically.
 
 To publish manually instead, run `npm publish --access public` in a real terminal
 (no `--otp`); npm opens a browser challenge and you tap the YubiKey. The `--otp=`
