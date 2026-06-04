@@ -8,15 +8,21 @@ on:
 
 jobs:
   lint-and-syntax:
-    name: Lint & Syntax
+    name: Lint, Syntax & Unit (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18 is the advertised floor (engines.node >=18.0.0); 0.6.1 fixed a
+        # bare-`crypto`-global break on 18. Keep it green so the floor is real.
+        node-version: ['18', '20', '22']
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -30,6 +36,9 @@ jobs:
 
       - name: Lint
         run: npm run lint --if-present
+
+      - name: Unit tests
+        run: npm test --if-present
 
   integration:
     name: Integration (Drupal)
