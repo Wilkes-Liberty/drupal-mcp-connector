@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-04
+
+First release published to npm.
+
 ### Fixed
 - HTTPS transport: import `randomUUID` from `node:crypto` for session IDs instead of
   relying on the bare `crypto` global, which is not available unflagged on Node 18
