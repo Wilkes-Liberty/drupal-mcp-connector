@@ -53,6 +53,29 @@ If you find a security vulnerability, please do **not** open a public issue. See
 - Update [docs/tools-reference.md](docs/tools-reference.md) if adding tools
 - PRs require one approval from a maintainer
 
+## Releasing
+
+Releases are cut from `master` and published to npm by the `release.yml` GitHub
+Actions workflow when a `v*` tag is pushed.
+
+1. Roll the `[Unreleased]` CHANGELOG section into a new dated version heading.
+2. Bump the version without tagging yet:
+   `npm version <x.y.z> --no-git-tag-version`
+3. Commit (`release: vX.Y.Z — …`) and tag: `git tag -a vX.Y.Z -m "vX.Y.Z"`.
+4. Push: `git push origin master && git push origin vX.Y.Z`.
+   The tag push triggers `release.yml`, which re-runs lint + tests, verifies the
+   tag matches `package.json`, and publishes with provenance.
+
+**One-time setup — `NPM_TOKEN` secret (required for automated publish):**
+the maintainer npm account uses a **YubiKey (WebAuthn)** for 2FA, which cannot run
+in CI. Create a **granular automation token** (npm → Access Tokens → Generate →
+*Automation*), scope it to publish this package, and store it as the `NPM_TOKEN`
+repository secret. Automation tokens bypass interactive 2FA by design.
+
+To publish manually instead, run `npm publish --access public` in a real terminal
+(no `--otp`); npm opens a browser challenge and you tap the YubiKey. The `--otp=`
+flag is TOTP-only and does **not** work with a security key.
+
 ## Code Style
 
 - ES modules throughout (`import`/`export`)

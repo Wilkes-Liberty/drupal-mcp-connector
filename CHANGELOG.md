@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- CI: lint/syntax/unit tests now run across a Node `18, 20, 22` matrix so the
+  advertised `engines.node >=18` floor is actually exercised (0.6.1 fixed a
+  Node-18-only break the Node-20-only CI never caught).
+- CI: `release.yml` publishes to npm on a `v*` tag with npm provenance, gated on
+  a tag↔`package.json` version match. Requires an `NPM_TOKEN` automation-token
+  repo secret (see CONTRIBUTING.md → Releasing).
+
 ## [0.6.1] - 2026-06-04
 
 First release published to npm.
