@@ -7,7 +7,7 @@
 [![Drupal](https://img.shields.io/badge/drupal-10%20%7C%2011-blue)](https://drupal.org)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-purple)](https://modelcontextprotocol.io)
 
-Created by **Jeremy Michael Cerda**. Built and maintained by [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty).
+Built by **Jeremy Michael Cerda** (jmcerda@wilkesliberty.com). Maintained by [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty).
 
 ---
 
