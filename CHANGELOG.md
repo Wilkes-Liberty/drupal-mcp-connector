@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry on Dependabot PRs and pushes it via a GitHub App token, so the required
   `CHANGELOG updated` check passes without manual edits. No-ops until the
   `CHANGELOG_APP_*` Dependabot secrets are configured.
+- CI: Dependabot patch/minor PRs now auto-merge once checks pass (majors still
+  reviewed), via the org reusable workflow.
 
 ### Changed
 - CI: bumped `actions/checkout` and `actions/setup-node` to `v6` (Node 24
