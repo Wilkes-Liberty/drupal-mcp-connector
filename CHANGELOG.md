@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-08
+
+### Fixed
+- The connector now reports its real version — sourced from `package.json` at
+  runtime — in the MCP handshake, the `X-MCP-Client` identity header, and the
+  startup logs. A hardcoded version literal had drifted and under-reported it
+  (0.7.0 still announced itself as `0.6.0`).
+
+### Documentation
+- Corrected Node version references (18 → 20) in the README and getting-started
+  guide to match `engines.node >=20.0.0`, and updated the example startup banner
+  to the current version.
+- Rewrote CONTRIBUTING.md: prerequisites, full dev-script list, a tests section,
+  accurate PR/CI gates, and the PR-then-tag release flow for protected `master`.
+
 ## [0.7.0] - 2026-06-08
 
 ### Added
@@ -108,6 +123,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[0.7.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.7.1
 [0.7.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.7.0
 [0.6.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.6.1
 [0.6.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.6.0
