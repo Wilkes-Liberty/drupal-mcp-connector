@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `no-changelog` label to bypass the check.
 - CI: a `dependabot.yml` enabling weekly version updates for npm (dev
   dependencies grouped) and GitHub Actions.
+- CI: a `changelog-autoupdate` workflow (org reusable) that writes a CHANGELOG
+  entry on Dependabot PRs and pushes it via a GitHub App token, so the required
+  `CHANGELOG updated` check passes without manual edits. No-ops until the
+  `CHANGELOG_APP_*` Dependabot secrets are configured.
 
 ### Changed
 - CI: bumped `actions/checkout` and `actions/setup-node` to `v6` (Node 24

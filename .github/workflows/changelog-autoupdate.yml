@@ -1,0 +1,16 @@
+name: Changelog autoupdate
+
+# Writes a CHANGELOG entry on Dependabot PRs (via the org reusable workflow) so
+# the required `CHANGELOG updated` check passes without manual edits. No-ops until
+# the CHANGELOG_APP_* Dependabot secrets are configured — see Wilkes-Liberty/.github.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  autoupdate:
+    uses: Wilkes-Liberty/.github/.github/workflows/changelog-autoupdate.yml@master
+    secrets:
+      app-id: ${{ secrets.CHANGELOG_APP_ID }}
+      app-private-key: ${{ secrets.CHANGELOG_APP_PRIVATE_KEY }}
