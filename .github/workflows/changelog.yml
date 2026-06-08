@@ -1,0 +1,34 @@
+name: Changelog
+
+# Fails a pull request that doesn't update CHANGELOG.md, so entries don't get
+# missed. Trivial PRs that genuinely need no entry can carry the `no-changelog`
+# label to bypass the check.
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changelog:
+    name: CHANGELOG updated
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a CHANGELOG.md entry
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate -q '.[].filename')"
+          if printf '%s\n' "$files" | grep -qx 'CHANGELOG.md'; then
+            echo "CHANGELOG.md updated ✓"
+          else
+            echo "::error::This PR does not update CHANGELOG.md. Add an entry under [Unreleased], or apply the 'no-changelog' label for trivial changes."
+            exit 1
+          fi

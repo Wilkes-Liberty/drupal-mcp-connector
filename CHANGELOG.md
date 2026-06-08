@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- CI: a `Changelog` workflow blocks any pull request that doesn't update
+  `CHANGELOG.md`. Trivial PRs that genuinely need no entry can carry the
+  `no-changelog` label to bypass the check.
+
 ### Changed
 - CI: bumped `actions/checkout` and `actions/setup-node` to `v6` (Node 24
   runtime) ahead of GitHub's June 2026 deprecation of Node 20 actions.
@@ -26,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rewrote CONTRIBUTING.md: prerequisites, full dev-script list, a tests section,
   accurate PR/CI gates, and the PR-then-tag release flow for protected `master`.
 
+### Changed
+- Restored the column-aligned `package.json` `scripts` formatting that
+  `npm version` re-flattened while cutting 0.7.0.
+
 ## [0.7.0] - 2026-06-08
 
 ### Added
@@ -35,6 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (GitHub Actions OIDC — no token/secret), gated on a tag↔`package.json` version
   match. Provenance is attached automatically. One-time trusted-publisher setup
   on npmjs.com (see CONTRIBUTING.md → Releasing).
+- Branch protection on `master`: merges require a pull request with passing CI
+  (lint, unit tests on Node 20/22, Drupal integration, CodeQL) and resolved
+  review conversations; force-pushes and branch deletion are blocked.
+
+### Fixed
+- CI now runs on the `master` default branch. The workflow had been configured
+  for a nonexistent `main` branch, so lint/syntax/unit and integration never
+  executed on pushes or PRs.
 
 ### Removed
 - **BREAKING:** dropped support for Node 18 (`engines.node` is now `>=20.0.0`).
