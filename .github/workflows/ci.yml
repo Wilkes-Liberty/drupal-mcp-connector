@@ -13,9 +13,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 18 is the advertised floor (engines.node >=18.0.0); 0.6.1 fixed a
-        # bare-`crypto`-global break on 18. Keep it green so the floor is real.
-        node-version: ['18', '20', '22']
+        # 20 is the advertised floor (engines.node >=20.0.0). vitest 4 requires
+        # Node >=20, and 18 is past end-of-life. Keep these green so the floor is real.
+        node-version: ['20', '22']
     steps:
       - uses: actions/checkout@v4
 

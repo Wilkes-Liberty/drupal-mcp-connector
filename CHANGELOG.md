@@ -7,14 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-08
+
 ### Added
-- CI: lint/syntax/unit tests now run across a Node `18, 20, 22` matrix so the
-  advertised `engines.node >=18` floor is actually exercised (0.6.1 fixed a
-  Node-18-only break the Node-20-only CI never caught).
+- CI: lint/syntax/unit tests now run across a Node `20, 22` matrix so the
+  advertised `engines.node >=20` floor is actually exercised.
 - CI: `release.yml` publishes to npm on a `v*` tag via **trusted publishing**
   (GitHub Actions OIDC — no token/secret), gated on a tag↔`package.json` version
   match. Provenance is attached automatically. One-time trusted-publisher setup
   on npmjs.com (see CONTRIBUTING.md → Releasing).
+
+### Removed
+- **BREAKING:** dropped support for Node 18 (`engines.node` is now `>=20.0.0`).
+  Node 18 reached end-of-life in April 2025, and the vitest 4 dev toolchain
+  requires Node >=20.
+
+### Changed
+- Dev dependency: bumped `vitest` `^2.1.0` → `^4.1.8`, resolving three Dependabot
+  alerts in the test toolchain (vitest UI file read/execute — critical; vite path
+  traversal and esbuild dev-server exposure — moderate). All are devDependencies
+  and do not ship to consumers.
 
 ## [0.6.1] - 2026-06-04
 
@@ -96,6 +108,8 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[0.7.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.7.0
+[0.6.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.6.1
 [0.6.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.6.0
 [0.5.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.4.0
