@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime) ahead of GitHub's June 2026 deprecation of Node 20 actions.
 - CI: added a `concurrency` group so superseded in-progress runs are cancelled,
   matching the sibling repos' CI hygiene.
+- Dependency: bumped `graphql` 16.14.0 → 16.14.1 (patch).
 
 ## [0.7.1] - 2026-06-08
 
