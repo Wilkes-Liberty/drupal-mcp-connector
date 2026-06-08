@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: a `Changelog` workflow blocks any pull request that doesn't update
   `CHANGELOG.md`. Trivial PRs that genuinely need no entry can carry the
   `no-changelog` label to bypass the check.
+- CI: a `dependabot.yml` enabling weekly version updates for npm (dev
+  dependencies grouped) and GitHub Actions.
 
 ### Changed
 - CI: bumped `actions/checkout` and `actions/setup-node` to `v6` (Node 24
