@@ -83,7 +83,9 @@ docs: update getting-started for DDEV setup
 
 - One feature or fix per PR.
 - Add a test if you're adding a tool or fixing a bug.
-- Update `CHANGELOG.md` under `[Unreleased]`.
+- Update `CHANGELOG.md` under `[Unreleased]`. A `CHANGELOG updated` CI check
+  enforces this; a trivial PR that genuinely needs no entry can carry the
+  `no-changelog` label to bypass it.
 - Update [docs/tools-reference.md](docs/tools-reference.md) if you add or change tools.
 - CI must pass before merge: lint + unit tests (Node 20 and 22), the Drupal
   integration job, and CodeQL analysis.
