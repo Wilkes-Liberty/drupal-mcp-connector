@@ -58,13 +58,25 @@ If you find a security vulnerability, please do **not** open a public issue. See
 Releases are cut from `master` and published to npm by the `release.yml` GitHub
 Actions workflow when a `v*` tag is pushed.
 
-1. Roll the `[Unreleased]` CHANGELOG section into a new dated version heading.
-2. Bump the version without tagging yet:
-   `npm version <x.y.z> --no-git-tag-version`
-3. Commit (`release: vX.Y.Z — …`) and tag: `git tag -a vX.Y.Z -m "vX.Y.Z"`.
-4. Push: `git push origin master && git push origin vX.Y.Z`.
+`master` is a protected branch (pull request + passing CI required), so the
+release commit lands via a PR — the tag is created **after** the merge, on the
+resulting `master` commit:
+
+1. Branch off `master` (e.g. `git checkout -b release/vX.Y.Z`).
+2. Roll the `[Unreleased]` CHANGELOG section into a new dated version heading,
+   and add its `[X.Y.Z]` link reference at the bottom.
+3. Bump the version without tagging yet:
+   `npm version <x.y.z> --no-git-tag-version`.
+4. Commit (`release: vX.Y.Z — …`), push the branch, and open a PR to `master`.
+5. Once CI is green, merge the PR (resolve any review threads first — the branch
+   requires conversation resolution).
+6. Update local master and tag the merge commit:
+   `git checkout master && git pull && git tag -a vX.Y.Z -m "vX.Y.Z"`.
+7. Push the tag: `git push origin vX.Y.Z`.
    The tag push triggers `release.yml`, which re-runs lint + tests, verifies the
    tag matches `package.json`, and publishes with provenance.
+8. Create the GitHub Release for the tag with the CHANGELOG notes:
+   `gh release create vX.Y.Z --title vX.Y.Z --verify-tag --latest --notes-file -`.
 
 **One-time setup — npm trusted publishing (no token, no secret):**
 publishing authenticates via GitHub Actions **OIDC** — npm trusts this exact
