@@ -34,7 +34,7 @@ import { CallToolRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema }   from "@modelcontextprotocol/sdk/types.js";
 
-import { getSiteConfig, listSiteNames, getTlsConfig } from "./lib/config.js";
+import { getSiteConfig, listSiteNames, getTlsConfig, CLIENT_VERSION } from "./lib/config.js";
 import { makeBearerCheck } from "./lib/http-auth.js";
 import { resolveSecurityConfig, assertNotReadOnly,
   assertDestructiveAllowed, assertGraphqlMutationAllowed,
@@ -298,7 +298,7 @@ function getPromptMessages(name, args) {
 // ---------------------------------------------------------------------------
 
 const server = new Server(
-  { name: "drupal-mcp-connector", version: "0.6.0" },
+  { name: "drupal-mcp-connector", version: CLIENT_VERSION },
   { capabilities: { tools: {}, resources: {}, prompts: {} } }
 );
 
@@ -368,7 +368,7 @@ if (transport === "stdio") {
   const stdioTransport = new StdioServerTransport();
   await server.connect(stdioTransport);
   console.error(
-    "[drupal-mcp-connector v0.6.0] stdio transport active. " +
+    `[drupal-mcp-connector v${CLIENT_VERSION}] stdio transport active. ` +
     `${allDefinitions.length} tools · ${RESOURCES.length} resources · ${PROMPTS.length} prompts`
   );
 
@@ -488,7 +488,7 @@ if (transport === "stdio") {
   nodeServer.listen(port, bindHost, () => {
     const proto = hasTls ? "https" : "http";
     console.error(
-      `[drupal-mcp-connector v0.6.0] Listening on ${proto}://${bindHost}:${port}/mcp\n` +
+      `[drupal-mcp-connector v${CLIENT_VERSION}] Listening on ${proto}://${bindHost}:${port}/mcp\n` +
       `  ${allDefinitions.length} tools · ${RESOURCES.length} resources · ${PROMPTS.length} prompts`
     );
   });

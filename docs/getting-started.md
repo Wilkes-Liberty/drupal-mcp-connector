@@ -6,7 +6,7 @@ This guide covers every setup path: local dev with DDEV/Lando, staging, producti
 
 ## 1. Prerequisites
 
-- **Node.js 18+** — `node --version`
+- **Node.js 20+** — `node --version`
 - **A Drupal 10 or 11 site** exposing at least one backend:
   - **JSON:API** — in core, enabled by default (required for write operations), or
   - **GraphQL** — via the [GraphQL Compose](https://www.drupal.org/project/graphql_compose) module (read-only)
@@ -134,7 +134,7 @@ node src/index.js
 You should see:
 
 ```
-[drupal-mcp-connector v0.6.0] stdio transport active. 66 tools · 3 resources · 4 prompts
+[drupal-mcp-connector v0.7.0] stdio transport active. 66 tools · 3 resources · 4 prompts
 ```
 
 ---

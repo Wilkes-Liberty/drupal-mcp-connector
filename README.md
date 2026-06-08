@@ -3,7 +3,7 @@
 > A secure, multi-site Model Context Protocol (MCP) connector for Drupal — dual-protocol JSON:API and GraphQL access, governed content tools, audit reports, and an SSH Drush bridge.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-green)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20-green)](https://nodejs.org)
 [![Drupal](https://img.shields.io/badge/drupal-10%20%7C%2011-blue)](https://drupal.org)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-purple)](https://modelcontextprotocol.io)
 
@@ -98,7 +98,7 @@ Presets layer with entity allow/deny lists, per-bundle operation rules, and fiel
 
 ## Requirements
 
-- **Node.js** 18+
+- **Node.js** 20+
 - **Drupal** 10 or 11 (JSON:API ships in core)
 - For the **GraphQL backend**: [GraphQL Compose](https://www.drupal.org/project/graphql_compose)
 - For **token auth** (recommended): [Simple OAuth](https://www.drupal.org/project/simple_oauth)

@@ -13,8 +13,11 @@ import { validateBaseUrl }               from "./validate.js";
 import { SecurityError }                 from "./security.js";
 import { getAccessToken }                from "./oauth.js";
 
-/** Connector version for the X-MCP-Client identity label. Keep in sync with package.json. */
-export const CLIENT_VERSION = "0.6.0";
+// eslint-disable-next-line security/detect-non-literal-fs-filename -- fixed path relative to this module (the package's own package.json), not user input
+const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+
+/** Connector version, sourced from package.json so it never drifts out of sync. */
+export const CLIENT_VERSION = pkg.version;
 
 /**
  * Identity headers sent on every outbound Drupal request. Lets governance layers
