@@ -40,7 +40,7 @@
     "Wilkes & Liberty, LLC <opensource@wilkesliberty.com> (https://wilkesliberty.com)"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "start":        "node src/index.js",
@@ -65,6 +65,6 @@
     "eslint-plugin-security": "^3.0.0",
     "eslint-plugin-n": "^17.0.0",
     "globals": "^15.0.0",
-    "vitest": "^2.1.0"
+    "vitest": "^4.1.8"
   }
 }
