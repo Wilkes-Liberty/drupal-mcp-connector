@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-08
+
 ### Added
 - CI: lint/syntax/unit tests now run across a Node `20, 22` matrix so the
   advertised `engines.node >=20` floor is actually exercised.
@@ -106,6 +108,8 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[0.7.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.7.0
+[0.6.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.6.1
 [0.6.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.6.0
 [0.5.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.4.0
