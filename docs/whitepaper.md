@@ -207,7 +207,7 @@ The connector currently delivers **66 tools across 9 modules**, **3 MCP resource
 
 | Module | Tools | Notes |
 |---|---|---|
-| **Nodes** | ~12 | Full CRUD, filter, sort, pagination — JSON:API |
+| **Nodes** | ~6 | Full CRUD, filter, sort, pagination — JSON:API |
 | **Taxonomy** | ~6 | Vocabularies, terms, hierarchy |
 | **Users** | ~6 | User CRUD, role management |
 | **Media** | ~6 | Media entity management |
@@ -215,7 +215,7 @@ The connector currently delivers **66 tools across 9 modules**, **3 MCP resource
 | **Site** | ~4 | Site info, resource type discovery, status |
 | **Entities** | ~8 | Generic any-entity-type read/write operations |
 | **Reports** | 10 | Read-only audit and reporting tools (staleness, coverage, counts) |
-| **Drush** | ~10 | SSH bridge: cache, cron, config sync, module management |
+| **Drush** | 15 | SSH bridge: cache, cron, config sync, module management |
 
 **Also implemented:**
 

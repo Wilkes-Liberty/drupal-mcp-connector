@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `eslint-plugin-n` `^17`→`^18`, and `globals` `^15`→`^17` (Dependabot
   dev-dependencies group). Lint and the full test suite pass on the new majors.
 
+### Fixed
+- Docs: replaced a personal email with the `opensource@wilkesliberty.com` role
+  address (README, `package.json`); corrected whitepaper tool counts (Drush
+  ~10→15, Nodes ~12→6).
+
 ## [0.7.1] - 2026-06-08
 
 ### Fixed
