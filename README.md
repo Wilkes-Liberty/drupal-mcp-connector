@@ -76,6 +76,8 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 | **Search** | Best-effort content search (title match; Search API/Solr-ready) |
 | **Reports (extra)** | Orphaned references, unpublished content, missing-field audits |
 
+**Preview writes with `dryRun`.** The node and entity create/update/delete tools accept an optional `dryRun: true` flag that validates the request and returns a preview of exactly what would be written — without committing anything to Drupal.
+
 ### MCP Resources
 Browsable, always-fresh context the client can read without calling a tool:
 - **`drupal://sites`** — configured site profiles (no credentials)

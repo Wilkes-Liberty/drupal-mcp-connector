@@ -17,7 +17,7 @@
 │        ┌────────────────┼─────────────────┐                       │
 │        ▼                ▼                 ▼                        │
 │   src/tools/       src/lib/           MCP primitives               │
-│   (66 tools)       backends/          Tools · Resources · Prompts  │
+│   (89 tools)       backends/          Tools · Resources · Prompts  │
 │                    + canonical/security                            │
 └──────────┬─────────────────────────────────────────────────────────┘
            │           backend abstraction (resolveBackend)
@@ -104,7 +104,7 @@ The GraphQL backend is introspection-driven and type-aware (handles irregular pl
 This server exposes all three MCP primitives.
 
 ### Tools
-Callable operations a client invokes on demand. All 66 tools follow the naming convention
+Callable operations a client invokes on demand. All 89 tools follow the naming convention
 `drupal_{operation}_{entity}` or `drupal_{module}_{action}`.
 
 ### Resources
