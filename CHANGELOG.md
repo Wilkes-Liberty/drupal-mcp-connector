@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-06-15
+
+First stable release. The tool surface, security model, and configuration
+schema are now considered stable and will follow semantic versioning.
+
+### Added
+- Stable **1.0** milestone: 89 tools across 20 modules with full read +
+  governed-write coverage (node/entity CRUD, revisions, moderation, scheduler,
+  fields, references, bulk operations, translations, paragraphs, structure,
+  search, and reports), `dryRun` preview on every write tool, the JSON:API and
+  GraphQL backends, the `write-plane` security preset, and multi-client launch
+  support (Claude Code, Claude Desktop, Grok Build).
+
+### Changed
+- No functional changes since 0.10.0 — this release promotes the 0.10.x feature
+  set to a stable 1.0 line.
+
 ## [0.10.0] - 2026-06-15
 
 ### Added
@@ -252,6 +269,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[1.0.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v1.0.0
 [0.10.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.10.0
 [0.9.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.9.1
 [0.9.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.9.0
