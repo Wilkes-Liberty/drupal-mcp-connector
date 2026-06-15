@@ -36,6 +36,7 @@ import { CallToolRequestSchema,
 
 import { getSiteConfig, listSiteNames, getTlsConfig, CLIENT_VERSION } from "./lib/config.js";
 import { makeBearerCheck } from "./lib/http-auth.js";
+import { createMcpRequestHandler } from "./lib/http-handler.js";
 import { resolveSecurityConfig, assertNotReadOnly,
   assertDestructiveAllowed, assertGraphqlMutationAllowed,
   SecurityError }            from "./lib/security.js";
@@ -439,46 +440,26 @@ if (transport === "stdio") {
   // Map of sessionId → transport for multi-client support
   const sessions = new Map();
 
-  const nodeServer = createNodeServer(async (req, res) => {
-    if (req.url === "/mcp" && (req.method === "POST" || req.method === "GET")) {
-      if (!checkAuth(req.headers["authorization"])) {
-        res.writeHead(401, { "WWW-Authenticate": "Bearer" }).end("Unauthorized");
-        return;
-      }
-    }
+  // Create + connect a new Streamable-HTTP transport, registering it in the
+  // session map on initialize and pruning it on close.
+  async function openSession() {
+    const mcpTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (id) => sessions.set(id, mcpTransport),
+    });
+    mcpTransport.onclose = () => sessions.delete(mcpTransport.sessionId);
+    await server.connect(mcpTransport);
+    return mcpTransport;
+  }
 
-    if (req.method === "POST" && req.url === "/mcp") {
-      const sessionId = req.headers["mcp-session-id"];
-      let mcpTransport;
-
-      if (sessionId && sessions.has(sessionId)) {
-        mcpTransport = sessions.get(sessionId);
-      } else {
-        mcpTransport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
-          onsessioninitialized: (id) => sessions.set(id, mcpTransport),
-        });
-        mcpTransport.onclose = () => sessions.delete(mcpTransport.sessionId);
-        await server.connect(mcpTransport);
-      }
-      await mcpTransport.handleRequest(req, res);
-
-    } else if (req.method === "GET" && req.url === "/mcp") {
-      const sessionId = req.headers["mcp-session-id"];
-      if (!sessionId || !sessions.has(sessionId)) {
-        res.writeHead(400).end("Missing or unknown MCP-Session-Id");
-        return;
-      }
-      await sessions.get(sessionId).handleRequest(req, res);
-
-    } else if (req.url === "/health") {
-      res.writeHead(200, { "Content-Type": "application/json" })
-        .end(JSON.stringify({ status: "ok", tools: allDefinitions.length }));
-
-    } else {
-      res.writeHead(404).end("Not found");
-    }
+  const requestHandler = createMcpRequestHandler({
+    checkAuth,
+    sessions,
+    openSession,
+    toolCount: allDefinitions.length,
   });
+
+  const nodeServer = createNodeServer(requestHandler);
 
   const hasTls   = Boolean(tlsCfg.certPath && tlsCfg.keyPath);
   // Unauthenticated plain HTTP must never bind beyond loopback. A non-loopback
