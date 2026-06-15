@@ -179,6 +179,7 @@ Governance keys off the authenticated account's role and OAuth scopes — not re
 | [Security Hardening](docs/security-hardening.md) | Optional transport, identity, and secrets controls |
 | [Deployment](docs/deployment.md) | Run the HTTPS transport in production: Docker, systemd, launchd, reverse proxy, pre-exposure checklist |
 | [Integration Contract](docs/integration-contract.md) | The connector ↔ Drupal-governance contract (identity, OAuth scopes, compatibility) |
+| [Versioning & Stability](docs/versioning.md) | Semver policy: the stable surface, deprecation process, MCP protocol + Node support |
 | [Whitepaper](docs/whitepaper.md) | Vision, personas, and use cases |
 
 ---

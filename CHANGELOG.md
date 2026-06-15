@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reference deployment for the HTTPS transport: a `Dockerfile` (+ `.dockerignore`),
   systemd unit, launchd plist + launcher, a Caddy reverse-proxy example, and a
   [Deployment guide](docs/deployment.md) with a pre-exposure checklist.
+- [Versioning & Stability policy](docs/versioning.md) defining the stable public
+  surface (tool names/inputs, resource/prompt URIs, config + env vars, transports,
+  presets), the deprecation process, MCP-protocol negotiation behavior, and Node
+  support — the contract that 1.0 will lock.
 
 ### Changed
 - Refactor: the HTTP transport's request handler is extracted from `index.js`
