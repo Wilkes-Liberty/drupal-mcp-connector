@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for Claude (Code/Desktop), Grok (Build CLI + API Remote MCP Tools), and OpenAI
   (Codex CLI + ChatGPT/Responses API), plus generic stdio and remote-HTTP
   patterns and the local-vs-remote reachability/secret tradeoffs.
+- Test coverage for the Streamable-HTTP transport's request routing (bearer-auth
+  gate, session open/reuse, `/health`, 404) via an extracted, unit-tested
+  `http-handler` module.
+
+### Changed
+- Refactor: the HTTP transport's request handler is extracted from `index.js`
+  into `src/lib/http-handler.js` (no behavior change), making the routing/auth
+  path unit-testable and ready for additional middleware (e.g. rate limiting).
 
 ## [0.8.0] - 2026-06-15
 
