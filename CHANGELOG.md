@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- CI: the CHANGELOG check now exempts Dependabot PRs automatically (author
+  `dependabot[bot]`), so dependency bumps no longer need a changelog entry or the
+  `no-changelog` label.
+
 ## [1.0.0] - 2026-06-15
 
 First stable release. The tool surface, security model, and configuration

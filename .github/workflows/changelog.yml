@@ -2,7 +2,7 @@ name: Changelog
 
 # Fails a pull request that doesn't update CHANGELOG.md, so entries don't get
 # missed. Trivial PRs that genuinely need no entry can carry the `no-changelog`
-# label to bypass the check.
+# label to bypass the check. Dependabot PRs are exempt automatically.
 
 on:
   pull_request:
@@ -19,7 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Require a CHANGELOG.md entry
-        if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog')
+                && github.event.pull_request.user.login != 'dependabot[bot]' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
