@@ -1,6 +1,6 @@
 {
   "name": "drupal-mcp-connector",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "A secure, multi-site Model Context Protocol (MCP) connector for Drupal — dual-protocol JSON:API and GraphQL.",
   "type": "module",
   "main": "src/index.js",
@@ -43,15 +43,15 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "start":        "node src/index.js",
-    "start:https":  "MCP_TRANSPORT=https node src/index.js",
-    "start:dev":    "MCP_TRANSPORT=https MCP_ALLOW_HTTP=1 MCP_PORT=3443 node src/index.js",
-    "lint":         "eslint src/",
-    "lint:fix":     "eslint src/ --fix",
-    "test":         "vitest run",
-    "test:watch":   "vitest",
-    "audit":        "npm audit --audit-level=high",
-    "check":        "npm run lint && npm run audit",
+    "start": "node src/index.js",
+    "start:https": "MCP_TRANSPORT=https node src/index.js",
+    "start:dev": "MCP_TRANSPORT=https MCP_ALLOW_HTTP=1 MCP_PORT=3443 node src/index.js",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "audit": "npm audit --audit-level=high",
+    "check": "npm run lint && npm run audit",
     "syntax-check": "for f in src/lib/*.js src/tools/*.js src/index.js; do node --input-type=module --check < $f && echo \"$f ✓\"; done"
   },
   "dependencies": {
