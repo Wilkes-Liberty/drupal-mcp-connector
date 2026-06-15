@@ -56,7 +56,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "graphql": "^16.9.0",
+    "graphql": "^17.0.0",
     "node-fetch": "^3.3.2",
     "ssh2": "^1.16.0"
   },
