@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (default 60). Over-limit `/mcp` requests get `429` + `Retry-After`; the check
   runs before auth (throttling brute force) and never limits `/health`. Off by
   default. (#4)
+- Reference deployment for the HTTPS transport: a `Dockerfile` (+ `.dockerignore`),
+  systemd unit, launchd plist + launcher, a Caddy reverse-proxy example, and a
+  [Deployment guide](docs/deployment.md) with a pre-exposure checklist.
 
 ### Changed
 - Refactor: the HTTP transport's request handler is extracted from `index.js`

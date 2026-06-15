@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+tests
+docs
+examples
+deploy
+.idea
+.playwright-mcp
+config/config.json
+*.log
+eslint.config.js
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md

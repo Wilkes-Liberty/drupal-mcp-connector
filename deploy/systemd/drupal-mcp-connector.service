@@ -1,0 +1,42 @@
+# systemd unit for the drupal-mcp-connector HTTPS transport (Linux).
+# Install to /etc/systemd/system/, adjust paths/user, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now drupal-mcp-connector
+#
+# Secrets (MCP_AUTH_TOKEN, the OAuth client secret / DRUPAL_API_TOKEN) go in the
+# EnvironmentFile below — NOT in this unit, and never in git. chmod 600 it.
+
+[Unit]
+Description=drupal-mcp-connector (MCP HTTPS transport)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mcp
+Group=mcp
+WorkingDirectory=/opt/drupal-mcp-connector
+ExecStart=/usr/bin/node src/index.js
+Restart=on-failure
+RestartSec=5
+
+Environment=MCP_TRANSPORT=https
+Environment=MCP_PORT=3443
+Environment=TLS_CERT_PATH=/etc/ssl/certs/drupal-mcp.crt
+Environment=TLS_KEY_PATH=/etc/ssl/private/drupal-mcp.key
+Environment=MCP_BIND_HOST=0.0.0.0
+Environment=MCP_RATE_LIMIT=120
+Environment=MCP_RATE_WINDOW_SEC=60
+# MCP_AUTH_TOKEN=... and the OAuth client secret live here (mode 600, not in git):
+EnvironmentFile=-/etc/drupal-mcp-connector/secrets.env
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/opt/drupal-mcp-connector
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

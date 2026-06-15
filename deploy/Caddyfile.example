@@ -1,0 +1,25 @@
+# Reverse-proxy example (Caddy) for exposing the connector to a remote/hosted
+# MCP client (e.g. Grok API, ChatGPT/Responses API).
+#
+# Pattern: Caddy terminates public TLS and proxies to the connector on loopback.
+# Run the connector bound to localhost — either with its own TLS, or in
+# loopback-HTTP mode (MCP_TRANSPORT=https MCP_ALLOW_HTTP=1, which binds 127.0.0.1
+# only). Defense in depth: keep MCP_AUTH_TOKEN set on the connector even behind
+# Caddy, and restrict to the client's egress range where possible.
+
+mcp.example.com {
+	# Only allow the AI vendor's documented egress IPs to reach /mcp.
+	@blocked not remote_ip 203.0.113.0/24 198.51.100.0/24
+	respond @blocked "Forbidden" 403
+
+	reverse_proxy 127.0.0.1:3443
+
+	# If the connector serves its own HTTPS on loopback with a private cert,
+	# use this instead of the plain reverse_proxy above:
+	# reverse_proxy https://127.0.0.1:3443 {
+	#     transport http {
+	#         # Pin the connector's CA rather than skipping verification:
+	#         tls_trusted_ca_certs /etc/ssl/certs/drupal-mcp-ca.pem
+	#     }
+	# }
+}
