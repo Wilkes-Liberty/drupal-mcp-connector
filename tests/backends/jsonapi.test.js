@@ -128,11 +128,11 @@ describe("JsonApiBackend fetch methods", () => {
   });
 
   it("getEntity returns a canonical entity or null", async () => {
-    vi.mocked(drupalFetch).mockResolvedValue({ data: { type: "node--article", id: "u1", attributes: { title: "A" } } });
-    const c = await backend.getEntity({ entityType: "node", bundle: "article", id: "u1" });
-    expect(c.id).toBe("u1");
+    vi.mocked(drupalFetch).mockResolvedValue({ data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "A" } } });
+    const c = await backend.getEntity({ entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111" });
+    expect(c.id).toBe("11111111-1111-4111-8111-111111111111");
     vi.mocked(drupalFetch).mockResolvedValue(null);
-    const none = await backend.getEntity({ entityType: "node", bundle: "article", id: "u2" });
+    const none = await backend.getEntity({ entityType: "node", bundle: "article", id: "22222222-2222-4222-8222-222222222222" });
     expect(none).toBeNull();
   });
 
@@ -147,20 +147,20 @@ describe("JsonApiBackend fetch methods", () => {
   });
 
   it("updateEntity PATCHes a JSON:API payload with id in the body", async () => {
-    vi.mocked(drupalFetch).mockResolvedValue({ data: { type: "node--article", id: "u1", attributes: { title: "Updated" } } });
-    const c = await backend.updateEntity({ entityType: "node", bundle: "article", id: "u1", attributes: { title: "Updated" } });
-    expect(c.id).toBe("u1");
+    vi.mocked(drupalFetch).mockResolvedValue({ data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Updated" } } });
+    const c = await backend.updateEntity({ entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Updated" } });
+    expect(c.id).toBe("11111111-1111-4111-8111-111111111111");
     const [, path, opts] = vi.mocked(drupalFetch).mock.calls[0];
-    expect(path).toBe("/jsonapi/node/article/u1");
+    expect(path).toBe("/jsonapi/node/article/11111111-1111-4111-8111-111111111111");
     expect(opts.method).toBe("PATCH");
-    expect(JSON.parse(opts.body)).toEqual({ data: { type: "node--article", id: "u1", attributes: { title: "Updated" } } });
+    expect(JSON.parse(opts.body)).toEqual({ data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Updated" } } });
   });
 
   it("deleteEntity issues a DELETE and resolves void", async () => {
     vi.mocked(drupalFetch).mockResolvedValue(null);
-    await expect(backend.deleteEntity({ entityType: "node", bundle: "article", id: "u1" })).resolves.toBeUndefined();
+    await expect(backend.deleteEntity({ entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111" })).resolves.toBeUndefined();
     const [, path, opts] = vi.mocked(drupalFetch).mock.calls[0];
-    expect(path).toBe("/jsonapi/node/article/u1");
+    expect(path).toBe("/jsonapi/node/article/11111111-1111-4111-8111-111111111111");
     expect(opts.method).toBe("DELETE");
   });
 
@@ -176,6 +176,36 @@ describe("JsonApiBackend fetch methods", () => {
     vi.mocked(drupalFetch).mockResolvedValue({ links: { self: { href: "s" }, "node--article": { href: "a" } } });
     const info = await backend.introspect();
     expect(info.resourceTypes).toEqual(["node--article"]);
+  });
+});
+
+describe("JsonApiBackend path-segment validation", () => {
+  const backend = new JsonApiBackend({ _name: "t", baseUrl: "https://x" });
+  beforeEach(() => vi.mocked(drupalFetch).mockReset());
+  const UUID = "11111111-1111-4111-8111-111111111111";
+
+  it("rejects a non-UUID id and makes no request (path-traversal guard)", async () => {
+    await expect(backend.getEntity({ entityType: "node", bundle: "article", id: "../../user/user/" + UUID }))
+      .rejects.toThrow(/valid UUID/i);
+    await expect(backend.deleteEntity({ entityType: "node", bundle: "article", id: "../../user/user/x" }))
+      .rejects.toThrow(/valid UUID/i);
+    await expect(backend.updateEntity({ entityType: "node", bundle: "article", id: "x/../y", attributes: {} }))
+      .rejects.toThrow(/valid UUID/i);
+    expect(vi.mocked(drupalFetch)).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-machine-name entityType or bundle", async () => {
+    await expect(backend.getEntity({ entityType: "node", bundle: "../../user", id: UUID }))
+      .rejects.toThrow(/machine name/i);
+    await expect(backend.listEntities({ entityType: "../../user", bundle: "user" }))
+      .rejects.toThrow(/machine name/i);
+    expect(vi.mocked(drupalFetch)).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid UUID + machine names and builds the expected path", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({ data: { type: "node--article", id: UUID, attributes: { title: "A" } } });
+    await backend.getEntity({ entityType: "node", bundle: "article", id: UUID });
+    expect(vi.mocked(drupalFetch).mock.calls[0][1]).toBe(`/jsonapi/node/article/${UUID}`);
   });
 });
 
@@ -204,9 +234,9 @@ describe("JsonApiBackend content_moderation fallback", () => {
   it("updateEntity retries without status when a moderated bundle rejects the published field", async () => {
     vi.mocked(drupalFetch)
       .mockRejectedValueOnce(moderatedErr())
-      .mockResolvedValueOnce({ data: { type: "node--article", id: "u1", attributes: { title: "U" } } });
-    const c = await backend.updateEntity({ entityType: "node", bundle: "article", id: "u1", attributes: { title: "U", status: true } });
-    expect(c.id).toBe("u1");
+      .mockResolvedValueOnce({ data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "U" } } });
+    const c = await backend.updateEntity({ entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "U", status: true } });
+    expect(c.id).toBe("11111111-1111-4111-8111-111111111111");
     expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(2);
     const retry = JSON.parse(vi.mocked(drupalFetch).mock.calls[1][2].body).data.attributes;
     expect(retry).not.toHaveProperty("status");
