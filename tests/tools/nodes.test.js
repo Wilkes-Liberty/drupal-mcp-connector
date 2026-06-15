@@ -114,6 +114,27 @@ describe("nodes tools (migrated)", () => {
     expect(arg.attributes).not.toHaveProperty("status");
   });
 
+  it("create_node dryRun returns a preview and does not write", async () => {
+    const out = await handlers.drupal_create_node({ type: "article", title: "T", moderationState: "draft", dryRun: true });
+    expect(out).toMatchObject({ dryRun: true, operation: "create", entityType: "node", bundle: "article" });
+    expect(out.attributes.title).toBe("T");
+    expect(out.attributes.moderation_state).toBe("draft");
+    expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("update_node dryRun returns a preview and does not write", async () => {
+    const out = await handlers.drupal_update_node({ type: "article", id: "n1", title: "New", dryRun: true });
+    expect(out).toMatchObject({ dryRun: true, operation: "update", entityType: "node", bundle: "article", id: "n1" });
+    expect(out.attributes.title).toBe("New");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("delete_node dryRun returns a preview and does not delete", async () => {
+    const out = await handlers.drupal_delete_node({ type: "article", id: "n1", dryRun: true });
+    expect(out).toMatchObject({ dryRun: true, operation: "delete", entityType: "node", bundle: "article", id: "n1" });
+    expect(backend.deleteEntity).not.toHaveBeenCalled();
+  });
+
   it("delete_node calls deleteEntity and returns success", async () => {
     backend.deleteEntity.mockResolvedValue(undefined);
     const out = await handlers.drupal_delete_node({ type: "article", id: "n1" });

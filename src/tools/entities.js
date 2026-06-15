@@ -56,10 +56,11 @@ async function getEntity({ site: siteName, entityType, bundle, id, include = [] 
  * @returns {Promise<object>} The created entity descriptor.
  * @throws {SecurityError} If creating the type/bundle is not permitted.
  */
-async function createEntity({ site: siteName, entityType, bundle, attributes = {}, relationships = {} }) {
+async function createEntity({ site: siteName, entityType, bundle, attributes = {}, relationships = {}, dryRun = false }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", entityType, bundle);
+  if (dryRun) return { dryRun: true, operation: "create", entityType, bundle, attributes, relationships };
   const backend = await resolveBackend(site);
   return backend.createEntity({ entityType, bundle, attributes, relationships });
 }
@@ -71,10 +72,11 @@ async function createEntity({ site: siteName, entityType, bundle, attributes = {
  * @returns {Promise<object>} The updated entity descriptor.
  * @throws {SecurityError} If updating the type/bundle is not permitted.
  */
-async function updateEntity({ site: siteName, entityType, bundle, id, attributes = {}, relationships = {} }) {
+async function updateEntity({ site: siteName, entityType, bundle, id, attributes = {}, relationships = {}, dryRun = false }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", entityType, bundle);
+  if (dryRun) return { dryRun: true, operation: "update", entityType, bundle, id, attributes, relationships };
   const backend = await resolveBackend(site);
   return backend.updateEntity({ entityType, bundle, id, attributes, relationships });
 }
@@ -86,10 +88,11 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
  * @returns {Promise<{success: boolean, deletedId: string, entityType: string, bundle: string}>}
  * @throws {SecurityError} If deleting the type/bundle is not permitted.
  */
-async function deleteEntity({ site: siteName, entityType, bundle, id }) {
+async function deleteEntity({ site: siteName, entityType, bundle, id, dryRun = false }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertDeleteAllowed(sec, entityType, bundle, id);
+  if (dryRun) return { dryRun: true, operation: "delete", entityType, bundle, id };
   const backend = await resolveBackend(site);
   await backend.deleteEntity({ entityType, bundle, id });
   return { success: true, deletedId: id, entityType, bundle };
@@ -209,6 +212,7 @@ export const definitions = [
         bundle:        { type: "string" },
         attributes:    { type: "object", description: "Field values keyed by Drupal machine name" },
         relationships: { type: "object", description: "Relationship data keyed by field name" },
+        dryRun:        { type: "boolean", default: false, description: "Validate and return a preview of the create without committing." },
       },
     },
   },
@@ -224,6 +228,7 @@ export const definitions = [
         id:            { type: "string" },
         attributes:    { type: "object" },
         relationships: { type: "object" },
+        dryRun:        { type: "boolean", default: false, description: "Validate and return a preview of the update without committing." },
       },
     },
   },
@@ -237,6 +242,7 @@ export const definitions = [
         entityType: { type: "string" },
         bundle:     { type: "string" },
         id:         { type: "string" },
+        dryRun:     { type: "boolean", default: false, description: "Validate and return a preview of the delete without committing." },
       },
     },
   },

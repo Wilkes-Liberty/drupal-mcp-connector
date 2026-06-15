@@ -107,9 +107,8 @@ async function searchContent({ site: siteName, query, type, status, limit = 10 }
  * @param {object} args - { site?, type, title, body?, summary?, status?, moderationState?, fields? }.
  * @returns {Promise<object>} The created node descriptor from the backend.
  */
-async function createNode({ site: siteName, type, title, body, summary, status, moderationState, fields = {} }) {
+async function createNode({ site: siteName, type, title, body, summary, status, moderationState, fields = {}, dryRun = false }) {
   const site = getSiteConfig(siteName);
-  const backend = await resolveBackend(site);
   const attributes = { title, ...fields };
   if (moderationState !== undefined) {
     attributes.moderation_state = moderationState;
@@ -118,6 +117,8 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
   }
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
+  if (dryRun) return { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes };
+  const backend = await resolveBackend(site);
   return backend.createEntity({ entityType: "node", bundle: type, attributes });
 }
 
@@ -132,15 +133,16 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
  * @param {object} args - { site?, type, id, title?, body?, summary?, status?, moderationState?, fields? }.
  * @returns {Promise<object>} The updated node descriptor.
  */
-async function updateNode({ site: siteName, type, id, title, body, summary, status, moderationState, fields = {} }) {
+async function updateNode({ site: siteName, type, id, title, body, summary, status, moderationState, fields = {}, dryRun = false }) {
   const site = getSiteConfig(siteName);
-  const backend = await resolveBackend(site);
   const attributes = { ...fields };
   if (title !== undefined) attributes.title = title;
   if (moderationState !== undefined) attributes.moderation_state = moderationState;
   else if (status !== undefined) attributes.status = status;
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
+  if (dryRun) return { dryRun: true, operation: "update", entityType: "node", bundle: type, id, attributes };
+  const backend = await resolveBackend(site);
   return backend.updateEntity({ entityType: "node", bundle: type, id, attributes });
 }
 
@@ -151,8 +153,9 @@ async function updateNode({ site: siteName, type, id, title, body, summary, stat
  * @param {object} args - { site?, type, id }.
  * @returns {Promise<{success: boolean, deletedId: string}>}
  */
-async function deleteNode({ site: siteName, type, id }) {
+async function deleteNode({ site: siteName, type, id, dryRun = false }) {
   const site = getSiteConfig(siteName);
+  if (dryRun) return { dryRun: true, operation: "delete", entityType: "node", bundle: type, id };
   const backend = await resolveBackend(site);
   await backend.deleteEntity({ entityType: "node", bundle: type, id });
   return { success: true, deletedId: id };
@@ -219,6 +222,7 @@ export const definitions = [
         status:  { type: "boolean", default: false, description: "Published flag for NON-moderated types. true to publish immediately. Ignored if moderationState is set; on a moderated type it is dropped automatically." },
         moderationState: { type: "string", description: "Moderation state for content_moderation types, e.g. 'draft' or 'published'. Takes precedence over status." },
         fields:  { type: "object", description: "Additional field values keyed by Drupal machine name" },
+        dryRun:  { type: "boolean", default: false, description: "Validate and return a preview of the write without committing." },
       },
     },
   },
@@ -237,6 +241,7 @@ export const definitions = [
         status:  { type: "boolean", description: "Published flag for NON-moderated types: true = publish, false = unpublish. Ignored if moderationState is set." },
         moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status." },
         fields:  { type: "object" },
+        dryRun:  { type: "boolean", default: false, description: "Validate and return a preview of the update without committing." },
       },
     },
   },
@@ -249,6 +254,7 @@ export const definitions = [
         site: { type: "string" },
         type: { type: "string" },
         id:   { type: "string", description: "Node UUID" },
+        dryRun: { type: "boolean", default: false, description: "Validate and return a preview of the delete without committing." },
       },
     },
   },
