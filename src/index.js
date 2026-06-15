@@ -18,6 +18,8 @@
  *   MCP_AUTH_TOKEN    Bearer token required on /mcp in https mode (warns if unset)
  *   MCP_BIND_HOST     Bind address for https mode when TLS is present
  *                     (default: "0.0.0.0"; ignored without TLS, which forces loopback)
+ *   MCP_RATE_LIMIT    Max /mcp requests per window per client IP (0/unset = off)
+ *   MCP_RATE_WINDOW_SEC  Rate-limit window in seconds (default: 60)
  */
 
 import { createServer as createHttpsServer } from "https";
@@ -37,6 +39,7 @@ import { CallToolRequestSchema,
 import { getSiteConfig, listSiteNames, getTlsConfig, CLIENT_VERSION } from "./lib/config.js";
 import { makeBearerCheck } from "./lib/http-auth.js";
 import { createMcpRequestHandler } from "./lib/http-handler.js";
+import { createRateLimiter } from "./lib/rate-limit.js";
 import { resolveSecurityConfig, assertNotReadOnly,
   assertDestructiveAllowed, assertGraphqlMutationAllowed,
   SecurityError }            from "./lib/security.js";
@@ -452,11 +455,26 @@ if (transport === "stdio") {
     return mcpTransport;
   }
 
+  // Optional fixed-window rate limiting on /mcp, keyed by client IP. Off unless
+  // MCP_RATE_LIMIT > 0. Counts are per-process; for multi-replica deployments
+  // prefer rate limiting at the reverse proxy.
+  const rateLimit     = Number(process.env.MCP_RATE_LIMIT || 0);
+  const rateWindowSec = Number(process.env.MCP_RATE_WINDOW_SEC || 60);
+  const rateLimiter   = rateLimit > 0
+    ? createRateLimiter({ limit: rateLimit, windowMs: rateWindowSec * 1000 })
+    : null;
+  if (rateLimiter) {
+    console.error(
+      `[drupal-mcp-connector] Rate limiting: ${rateLimit} req / ${rateWindowSec}s per client IP on /mcp.`
+    );
+  }
+
   const requestHandler = createMcpRequestHandler({
     checkAuth,
     sessions,
     openSession,
     toolCount: allDefinitions.length,
+    rateLimiter,
   });
 
   const nodeServer = createNodeServer(requestHandler);

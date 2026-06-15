@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test coverage for the Streamable-HTTP transport's request routing (bearer-auth
   gate, session open/reuse, `/health`, 404) via an extracted, unit-tested
   `http-handler` module.
+- Optional built-in **rate limiting** for the HTTPS transport: set
+  `MCP_RATE_LIMIT` (per-IP requests per window) and `MCP_RATE_WINDOW_SEC`
+  (default 60). Over-limit `/mcp` requests get `429` + `Retry-After`; the check
+  runs before auth (throttling brute force) and never limits `/health`. Off by
+  default. (#4)
 
 ### Changed
 - Refactor: the HTTP transport's request handler is extracted from `index.js`

@@ -80,4 +80,31 @@ describe("createMcpRequestHandler", () => {
     await handler(req("GET", "/nope"), res);
     expect(res.statusCode).toBe(404);
   });
+
+  it("returns 429 with Retry-After when the rate limiter denies", async () => {
+    const rateLimiter = { check: vi.fn(() => ({ allowed: false, retryAfterSec: 7, remaining: 0 })) };
+    const h = createMcpRequestHandler({ checkAuth: () => true, sessions, openSession, toolCount: 66, rateLimiter, clientKey: () => "ip" });
+    const res = mockRes();
+    await h(req("POST", "/mcp"), res);
+    expect(res.statusCode).toBe(429);
+    expect(res.headers["Retry-After"]).toBe("7");
+    expect(openSession).not.toHaveBeenCalled();
+  });
+
+  it("rate-limits before auth so brute-force attempts are throttled", async () => {
+    const rateLimiter = { check: () => ({ allowed: false, retryAfterSec: 1, remaining: 0 }) };
+    const h = createMcpRequestHandler({ checkAuth: () => false, sessions, openSession, toolCount: 66, rateLimiter, clientKey: () => "ip" });
+    const res = mockRes();
+    await h(req("POST", "/mcp", { authorization: "Bearer bad" }), res);
+    expect(res.statusCode).toBe(429); // limiter precedes the 401
+  });
+
+  it("does not rate-limit the /health probe", async () => {
+    const rateLimiter = { check: vi.fn(() => ({ allowed: false, retryAfterSec: 1 })) };
+    const h = createMcpRequestHandler({ checkAuth: () => true, sessions, openSession, toolCount: 66, rateLimiter, clientKey: () => "ip" });
+    const res = mockRes();
+    await h(req("GET", "/health"), res);
+    expect(res.statusCode).toBe(200);
+    expect(rateLimiter.check).not.toHaveBeenCalled();
+  });
 });
