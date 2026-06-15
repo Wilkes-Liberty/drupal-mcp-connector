@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Validate and URL-encode JSON:API path segments. The entity `id` is now checked
+  with `validateUuid` and `entityType`/`bundle` with `validateMachineName` (both
+  previously unused), and every segment is `encodeURIComponent`'d. This closes a
+  path-traversal vector where a crafted `id` (e.g. `../../user/user/<uuid>`) could
+  reach a different resource type and bypass the connector's entity-type/PII
+  policy. (Drupal core permissions were always still enforced.)
+
+### Added
+- A [Threat Model](docs/threat-model.md) documenting trust boundaries, threats &
+  mitigations, residual risks (drush SQL bridge; why filter-field names are not
+  machine-name-validated), and the 1.0 security-pass results (`npm audit` clean,
+  adversarial review).
+
 ## [0.9.0] - 2026-06-15
 
 ### Added

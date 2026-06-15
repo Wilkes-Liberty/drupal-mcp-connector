@@ -8,6 +8,7 @@
  */
 
 import { drupalFetch, drupalUploadFile } from "../drupal-fetch.js";
+import { validateUuid, validateMachineName } from "../validate.js";
 import { Backend } from "./backend-interface.js";
 import {
   makeCanonicalEntity,
@@ -132,7 +133,12 @@ export class JsonApiBackend extends Backend {
    * @returns {string} e.g. "/jsonapi/node/article".
    */
   resourcePath(entityType, bundle) {
-    return `/jsonapi/${entityType}/${bundle}`;
+    // Validate before interpolating into the URL: machine names cannot contain
+    // path separators or `..`, so this blocks path-traversal to other resources
+    // (e.g. id="../../user/user/…"). Encoding is belt-and-suspenders.
+    validateMachineName(entityType, "entityType");
+    validateMachineName(bundle, "bundle");
+    return `/jsonapi/${encodeURIComponent(entityType)}/${encodeURIComponent(bundle)}`;
   }
 
   /**
@@ -219,7 +225,8 @@ export class JsonApiBackend extends Backend {
    * @returns {Promise<?import("../canonical.js").CanonicalEntity>} Entity, or null.
    */
   async getEntity({ entityType, bundle, id }) {
-    const data = await drupalFetch(this.site, `${this.resourcePath(entityType, bundle)}/${id}`);
+    validateUuid(id);
+    const data = await drupalFetch(this.site, `${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`);
     return data?.data ? this.toCanonical(data.data) : null;
   }
 
@@ -275,12 +282,13 @@ export class JsonApiBackend extends Backend {
    * @returns {Promise<import("../canonical.js").CanonicalEntity>} The updated entity.
    */
   async updateEntity({ entityType, bundle, id, attributes = {}, relationships }) {
+    validateUuid(id);
     const buildPayload = (attrs) => {
       const payload = { data: { type: `${entityType}--${bundle}`, id, attributes: attrs } };
       if (relationships) payload.data.relationships = relationships;
       return payload;
     };
-    const data = await this.writeWithModerationFallback(`${this.resourcePath(entityType, bundle)}/${id}`, "PATCH", buildPayload, attributes);
+    const data = await this.writeWithModerationFallback(`${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`, "PATCH", buildPayload, attributes);
     return this.toCanonical(data.data);
   }
 
@@ -290,7 +298,8 @@ export class JsonApiBackend extends Backend {
    * @returns {Promise<void>}
    */
   async deleteEntity({ entityType, bundle, id }) {
-    await drupalFetch(this.site, `${this.resourcePath(entityType, bundle)}/${id}`, { method: "DELETE" });
+    validateUuid(id);
+    await drupalFetch(this.site, `${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
   /**
