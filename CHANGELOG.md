@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-15
+
 ### Added
 - **`dryRun` option** on the node + generic-entity write tools (`drupal_create_node`,
   `drupal_update_node`, `drupal_delete_node`, `drupal_entity_create`,
@@ -250,6 +252,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[0.10.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.10.0
 [0.9.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.9.1
 [0.9.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.9.0
 [0.8.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.8.0
