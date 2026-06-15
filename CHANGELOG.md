@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Docs: an OAuth2 `client_credentials` deployment guide
+  (`docs/oauth-client-credentials.md`) covering scope→role mapping, JSON:API
+  write enablement, config persistence across deploys, and secret handling, plus
+  a reusable `examples/launch-with-secret.sh` secret-manager launcher. Linked
+  from the README and getting-started.
 - `drupal_create_node` and `drupal_update_node` accept a `moderationState`
   argument (e.g. `"draft"`/`"published"`) for content types under a
   content_moderation workflow. When set, `moderation_state` is sent and `status`
