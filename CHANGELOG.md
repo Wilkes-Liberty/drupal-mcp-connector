@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `drupal_create_node` and `drupal_update_node` accept a `moderationState`
+  argument (e.g. `"draft"`/`"published"`) for content types under a
+  content_moderation workflow. When set, `moderation_state` is sent and `status`
+  is omitted (moderated entities own their published state).
 - CI: a `Changelog` workflow blocks any pull request that doesn't update
   `CHANGELOG.md`. Trivial PRs that genuinely need no entry can carry the
   `no-changelog` label to bypass the check.
@@ -31,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dev-dependencies group). Lint and the full test suite pass on the new majors.
 
 ### Fixed
+- Create/update no longer fail on content_moderation bundles. The JSON:API
+  backend now transparently retries a write without the `status` attribute when
+  Drupal rejects it as a moderated entity's published field (HTTP 403), so the
+  safe default `status:false` works on moderated types (Drupal applies the
+  workflow's default state). Affects all entity create/update paths (nodes,
+  entities, media), not just nodes. (#23)
 - Docs: replaced a personal email with the `opensource@wilkesliberty.com` role
   address (README, `package.json`); corrected whitepaper tool counts (Drush
   ~10→15, Nodes ~12→6).

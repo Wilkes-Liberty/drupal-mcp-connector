@@ -92,16 +92,30 @@ async function searchContent({ site: siteName, query, type, status, limit = 10 }
 
 /**
  * Create a node. Caller-supplied `fields` are spread into the attribute map;
- * title/status/body are layered on top so they win over any same-named field.
+ * title/status/moderation_state/body are layered on top so they win over any
+ * same-named field.
  *
- * @param {object} args - { site?, type, title, body?, summary?, status?, fields? }.
- *   Defaults to status=false (draft) so content is never auto-published.
+ * Publish state — two mutually exclusive paths:
+ *   - `moderationState` (e.g. "draft"/"published"): for content types under a
+ *     content_moderation workflow. When given, `moderation_state` is sent and
+ *     `status` is omitted (moderated entities reject a direct `status` write).
+ *   - `status` (boolean): for non-moderated types. Defaults to false (draft) so
+ *     content is never auto-published. `moderationState` takes precedence.
+ * If a moderated bundle still receives `status` (the safe default), the JSON:API
+ * backend transparently retries without it — see jsonapi.js.
+ *
+ * @param {object} args - { site?, type, title, body?, summary?, status?, moderationState?, fields? }.
  * @returns {Promise<object>} The created node descriptor from the backend.
  */
-async function createNode({ site: siteName, type, title, body, summary, status = false, fields = {} }) {
+async function createNode({ site: siteName, type, title, body, summary, status, moderationState, fields = {} }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
-  const attributes = { title, status, ...fields };
+  const attributes = { title, ...fields };
+  if (moderationState !== undefined) {
+    attributes.moderation_state = moderationState;
+  } else {
+    attributes.status = status === undefined ? false : status;
+  }
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
   return backend.createEntity({ entityType: "node", bundle: type, attributes });
@@ -111,15 +125,20 @@ async function createNode({ site: siteName, type, title, body, summary, status =
  * Update a node. Only supplied attributes are sent, so omitted fields are left
  * untouched (partial update). `fields` is spread first, then known scalars.
  *
- * @param {object} args - { site?, type, id, title?, body?, summary?, status?, fields? }.
+ * Publish state mirrors createNode: pass `moderationState` for content_moderation
+ * bundles (sends `moderation_state`, omits `status`) or `status` for non-moderated
+ * types. `moderationState` takes precedence; both are optional on update.
+ *
+ * @param {object} args - { site?, type, id, title?, body?, summary?, status?, moderationState?, fields? }.
  * @returns {Promise<object>} The updated node descriptor.
  */
-async function updateNode({ site: siteName, type, id, title, body, summary, status, fields = {} }) {
+async function updateNode({ site: siteName, type, id, title, body, summary, status, moderationState, fields = {} }) {
   const site = getSiteConfig(siteName);
   const backend = await resolveBackend(site);
   const attributes = { ...fields };
   if (title !== undefined) attributes.title = title;
-  if (status !== undefined) attributes.status = status;
+  if (moderationState !== undefined) attributes.moderation_state = moderationState;
+  else if (status !== undefined) attributes.status = status;
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
   return backend.updateEntity({ entityType: "node", bundle: type, id, attributes });
@@ -188,7 +207,7 @@ export const definitions = [
   },
   {
     name: "drupal_create_node",
-    description: "Create a new content node. Returns the new node UUID, integer ID, and URL.",
+    description: "Create a new content node. Returns the new node UUID, integer ID, and URL. For content types under an editorial (content_moderation) workflow, set moderationState (e.g. 'draft'/'published') instead of status.",
     inputSchema: {
       type: "object", required: ["type", "title"],
       properties: {
@@ -197,14 +216,15 @@ export const definitions = [
         title:   { type: "string" },
         body:    { type: "string", description: "Body field HTML" },
         summary: { type: "string", description: "Body summary / teaser" },
-        status:  { type: "boolean", default: false, description: "true to publish immediately" },
+        status:  { type: "boolean", default: false, description: "Published flag for NON-moderated types. true to publish immediately. Ignored if moderationState is set; on a moderated type it is dropped automatically." },
+        moderationState: { type: "string", description: "Moderation state for content_moderation types, e.g. 'draft' or 'published'. Takes precedence over status." },
         fields:  { type: "object", description: "Additional field values keyed by Drupal machine name" },
       },
     },
   },
   {
     name: "drupal_update_node",
-    description: "Update an existing node. Only include fields you want to change.",
+    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
@@ -214,7 +234,8 @@ export const definitions = [
         title:   { type: "string" },
         body:    { type: "string" },
         summary: { type: "string" },
-        status:  { type: "boolean", description: "true = publish, false = unpublish" },
+        status:  { type: "boolean", description: "Published flag for NON-moderated types: true = publish, false = unpublish. Ignored if moderationState is set." },
+        moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status." },
         fields:  { type: "object" },
       },
     },
