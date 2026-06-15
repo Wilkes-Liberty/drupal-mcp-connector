@@ -170,6 +170,7 @@ Governance keys off the authenticated account's role and OAuth scopes — not re
 | Doc | Description |
 |-----|-------------|
 | [Getting Started](docs/getting-started.md) | Full setup: DDEV/Lando, Simple OAuth, multi-site, transports |
+| [OAuth client_credentials](docs/oauth-client-credentials.md) | Production OAuth deploy: scope→role mapping, JSON:API writes, config persistence, secret handling, troubleshooting |
 | [Architecture](docs/architecture.md) | Backend abstraction, canonical model, and how to extend it |
 | [GraphQL Setup](docs/graphql-local-setup.md) | GraphQL Compose backend + local TLS notes |
 | [Tools Reference](docs/tools-reference.md) | Full reference for all 66 tools |

@@ -123,6 +123,15 @@ export DRUPAL_API_TOKEN=your-token
 node src/index.js
 ```
 
+### Option D — OAuth2 `client_credentials` (recommended for production write planes)
+
+For unattended machine access with a Drupal-side governance layer, use the
+`client_credentials` grant. There are non-obvious requirements — the token's
+permissions come from **OAuth2 scope→role mapping** (not the consumer's owner
+user), JSON:API must have `read_only: false` for writes, and the scope/settings
+config must live in `config/sync` to survive deploys. See the dedicated
+**[OAuth client_credentials Deployment Guide](oauth-client-credentials.md)**.
+
 ---
 
 ## 5. Test the Connection
