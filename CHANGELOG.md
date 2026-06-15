@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`dryRun` option** on the node + generic-entity write tools (`drupal_create_node`,
+  `drupal_update_node`, `drupal_delete_node`, `drupal_entity_create`,
+  `drupal_entity_update`, `drupal_entity_delete`) (#42). When `true`, the tool runs
+  the security checks and builds the final payload, then returns a preview
+  (`{ dryRun: true, operation, entityType, bundle, id?, attributes }`) **without
+  writing** — no backend call is made. Lets an agent confirm intent safely.
 - **23 new tools across 11 modules** (66 → 89 tools), toward 1.0 feature coverage:
   - **Revisions** (#37): `drupal_list_revisions`, `drupal_get_revision`, `drupal_revert_revision` (governed revert; JSON:API addresses revisions by id / latest-version / working-copy — full history enumeration needs the Drush bridge).
   - **Moderation** (#38): `drupal_set_moderation_state`, `drupal_content_by_moderation_state`, `drupal_list_moderation_states` (content_moderation).
