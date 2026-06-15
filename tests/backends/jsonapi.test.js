@@ -5,7 +5,7 @@ vi.mock("../../src/lib/drupal-fetch.js", () => ({
 }));
 import { drupalFetch, drupalUploadFile } from "../../src/lib/drupal-fetch.js";
 import { describe, it, expect } from "vitest";
-import { JsonApiBackend } from "../../src/lib/backends/jsonapi.js";
+import { JsonApiBackend, isModeratedStatusError } from "../../src/lib/backends/jsonapi.js";
 
 function paramsOf(descriptor) {
   const b = new JsonApiBackend({ _name: "t", baseUrl: "https://x" });
@@ -176,6 +176,55 @@ describe("JsonApiBackend fetch methods", () => {
     vi.mocked(drupalFetch).mockResolvedValue({ links: { self: { href: "s" }, "node--article": { href: "a" } } });
     const info = await backend.introspect();
     expect(info.resourceTypes).toEqual(["node--article"]);
+  });
+});
+
+describe("JsonApiBackend content_moderation fallback", () => {
+  const backend = new JsonApiBackend({ _name: "t", baseUrl: "https://x" });
+  beforeEach(() => vi.mocked(drupalFetch).mockReset());
+
+  const moderatedErr = () => new Error(
+    "Drupal 403 on POST /jsonapi/node/article: The current user is not allowed to POST the selected field (status). Cannot edit the published field of moderated entities."
+  );
+
+  it("createEntity retries without status when a moderated bundle rejects the published field", async () => {
+    vi.mocked(drupalFetch)
+      .mockRejectedValueOnce(moderatedErr())
+      .mockResolvedValueOnce({ data: { type: "node--article", id: "new", attributes: { title: "N" } } });
+    const c = await backend.createEntity({ entityType: "node", bundle: "article", attributes: { title: "N", status: false } });
+    expect(c.id).toBe("new");
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(2);
+    // first attempt carried status; retry stripped only status, kept other attrs
+    expect(JSON.parse(vi.mocked(drupalFetch).mock.calls[0][2].body).data.attributes).toHaveProperty("status");
+    const retry = JSON.parse(vi.mocked(drupalFetch).mock.calls[1][2].body).data.attributes;
+    expect(retry).not.toHaveProperty("status");
+    expect(retry.title).toBe("N");
+  });
+
+  it("updateEntity retries without status when a moderated bundle rejects the published field", async () => {
+    vi.mocked(drupalFetch)
+      .mockRejectedValueOnce(moderatedErr())
+      .mockResolvedValueOnce({ data: { type: "node--article", id: "u1", attributes: { title: "U" } } });
+    const c = await backend.updateEntity({ entityType: "node", bundle: "article", id: "u1", attributes: { title: "U", status: true } });
+    expect(c.id).toBe("u1");
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(2);
+    const retry = JSON.parse(vi.mocked(drupalFetch).mock.calls[1][2].body).data.attributes;
+    expect(retry).not.toHaveProperty("status");
+    expect(retry.title).toBe("U");
+  });
+});
+
+describe("isModeratedStatusError (retry guard)", () => {
+  it("matches the moderated published-field 403", () => {
+    expect(isModeratedStatusError(new Error("Drupal 403 on POST /jsonapi/node/article: Cannot edit the published field of moderated entities."))).toBe(true);
+  });
+  it("matches the 'field (status)' permission phrasing", () => {
+    expect(isModeratedStatusError(new Error("The current user is not allowed to POST the selected field (status)."))).toBe(true);
+  });
+  it("does not match unrelated errors", () => {
+    expect(isModeratedStatusError(new Error("Drupal 422 on POST /jsonapi/node/article: title is required"))).toBe(false);
+    expect(isModeratedStatusError(new Error("Drupal 403: access denied"))).toBe(false);
+    expect(isModeratedStatusError(undefined)).toBe(false);
   });
 });
 

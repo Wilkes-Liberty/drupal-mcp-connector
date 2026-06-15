@@ -19,6 +19,21 @@ import {
 // these are dropped from canonical `fields` (the canonical id is the UUID).
 const INTERNAL_ATTR_RE = /^drupal_internal__/;
 
+/**
+ * Detect the JSON:API error Drupal returns when a write attempts to set the
+ * `status` (published) field on a content_moderation-governed entity. Such
+ * entities own their published state via `moderation_state`, so a direct
+ * `status` write is refused with a 403 ("Cannot edit the published field of
+ * moderated entities" / "not allowed to … field (status)"). Used to decide
+ * whether to retry the write without `status`.
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isModeratedStatusError(err) {
+  const msg = String(err?.message || "");
+  return /published field of moderated/i.test(msg) || /field \(status\)/i.test(msg);
+}
+
 // Canonical filter op -> JSON:API condition operator.
 const OP_MAP = new Map([
   ["neq", "<>"], ["gt", ">"], ["gte", ">="], ["lt", "<"], ["lte", "<="],
@@ -209,32 +224,63 @@ export class JsonApiBackend extends Backend {
   }
 
   /**
-   * Create an entity via JSON:API POST.
+   * Issue a JSON:API write, transparently retrying once without the `status`
+   * attribute if the target bundle is under a content_moderation workflow.
+   *
+   * Moderated entities derive their published state from `moderation_state` and
+   * reject a direct `status` write with a 403. This lets create/update "just
+   * work" on moderated bundles using the connector's safe default `status:false`:
+   * the retry drops `status` and Drupal applies the workflow's default state
+   * (typically draft — i.e. still unpublished, preserving the no-auto-publish
+   * guarantee). Callers that need a specific state pass `moderation_state`
+   * explicitly, in which case `status` is absent and no retry occurs.
+   *
+   * @param {string} path JSON:API resource path.
+   * @param {"POST"|"PATCH"} method HTTP method.
+   * @param {(attrs: object) => object} buildPayload Builds the request body from an attribute map.
+   * @param {object} attributes Entity attributes (may include `status`).
+   * @returns {Promise<object>} The JSON:API response body.
+   */
+  async writeWithModerationFallback(path, method, buildPayload, attributes) {
+    try {
+      return await drupalFetch(this.site, path, { method, body: JSON.stringify(buildPayload(attributes)) });
+    } catch (err) {
+      if (!isModeratedStatusError(err) || !("status" in attributes)) throw err;
+      const withoutStatus = { ...attributes };
+      delete withoutStatus.status;
+      return drupalFetch(this.site, path, { method, body: JSON.stringify(buildPayload(withoutStatus)) });
+    }
+  }
+
+  /**
+   * Create an entity via JSON:API POST. Retries without `status` on moderated
+   * bundles — see writeWithModerationFallback.
    * @param {{entityType: string, bundle: string, attributes?: object, relationships?: object}} input
    * @returns {Promise<import("../canonical.js").CanonicalEntity>} The created entity.
    */
   async createEntity({ entityType, bundle, attributes = {}, relationships }) {
-    const payload = { data: { type: `${entityType}--${bundle}`, attributes } };
-    if (relationships) payload.data.relationships = relationships;
-    const data = await drupalFetch(this.site, this.resourcePath(entityType, bundle), {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const buildPayload = (attrs) => {
+      const payload = { data: { type: `${entityType}--${bundle}`, attributes: attrs } };
+      if (relationships) payload.data.relationships = relationships;
+      return payload;
+    };
+    const data = await this.writeWithModerationFallback(this.resourcePath(entityType, bundle), "POST", buildPayload, attributes);
     return this.toCanonical(data.data);
   }
 
   /**
-   * Update an entity via JSON:API PATCH.
+   * Update an entity via JSON:API PATCH. Retries without `status` on moderated
+   * bundles — see writeWithModerationFallback.
    * @param {{entityType: string, bundle: string, id: string, attributes?: object, relationships?: object}} input
    * @returns {Promise<import("../canonical.js").CanonicalEntity>} The updated entity.
    */
   async updateEntity({ entityType, bundle, id, attributes = {}, relationships }) {
-    const payload = { data: { type: `${entityType}--${bundle}`, id, attributes } };
-    if (relationships) payload.data.relationships = relationships;
-    const data = await drupalFetch(this.site, `${this.resourcePath(entityType, bundle)}/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
+    const buildPayload = (attrs) => {
+      const payload = { data: { type: `${entityType}--${bundle}`, id, attributes: attrs } };
+      if (relationships) payload.data.relationships = relationships;
+      return payload;
+    };
+    const data = await this.writeWithModerationFallback(`${this.resourcePath(entityType, bundle)}/${id}`, "PATCH", buildPayload, attributes);
     return this.toCanonical(data.data);
   }
 
