@@ -51,6 +51,25 @@ export MCP_BIND_HOST="127.0.0.1"   # loopback only
 `NODE_EXTRA_CA_CERTS` can be set to trust a private or self-signed CA chain for
 outbound HTTPS connections to Drupal.
 
+## Rate limiting (opt-in)
+
+The HTTPS transport can throttle `/mcp` requests per client IP with a built-in
+fixed-window limiter. It's **off by default**; enable it by setting a positive
+`MCP_RATE_LIMIT`:
+
+```sh
+export MCP_RATE_LIMIT=120        # max requests per window per client IP
+export MCP_RATE_WINDOW_SEC=60    # window length in seconds (default 60)
+```
+
+Over-limit requests get `429 Too Many Requests` with a `Retry-After` header. The
+check runs **before** auth, so repeated bad-token attempts are throttled too. The
+`/health` probe is never rate limited.
+
+Counts are kept per process, so this protects a single connector instance. For
+multi-replica deployments, prefer rate limiting at the reverse proxy (shared
+state) — or use both. See [issue #4](https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues/4).
+
 ## Keep tokens out of the config file (opt-in)
 
 Per site, set `"apiTokenEnv": "VARNAME"` instead of hard-coding `"apiToken"`. The token

@@ -22,12 +22,28 @@
  * @param {Map<string, {handleRequest: Function, sessionId?: string}>} deps.sessions Session id → transport.
  * @param {() => Promise<{handleRequest: Function}>} deps.openSession Create+connect a new transport.
  * @param {number} deps.toolCount Tool count reported by /health.
+ * @param {?{check: (key: string) => {allowed: boolean, retryAfterSec: number}}} [deps.rateLimiter]
+ *   Optional rate limiter (see rate-limit.js). Omit/null to disable.
+ * @param {(req: import("http").IncomingMessage) => string} [deps.clientKey]
+ *   Maps a request to a rate-limit key (default: client IP).
  * @returns {(req: import("http").IncomingMessage, res: import("http").ServerResponse) => Promise<void>}
  */
-export function createMcpRequestHandler({ checkAuth, sessions, openSession, toolCount }) {
+export function createMcpRequestHandler({
+  checkAuth, sessions, openSession, toolCount,
+  rateLimiter = null,
+  clientKey = (req) => req.socket?.remoteAddress || "unknown",
+}) {
   return async function handle(req, res) {
-    // Auth gate: only the /mcp endpoint requires a token; /health stays open.
     if (req.url === "/mcp" && (req.method === "POST" || req.method === "GET")) {
+      // Rate limit BEFORE auth so repeated bad-token attempts are throttled too.
+      if (rateLimiter) {
+        const verdict = rateLimiter.check(clientKey(req));
+        if (!verdict.allowed) {
+          res.writeHead(429, { "Retry-After": String(verdict.retryAfterSec) }).end("Too Many Requests");
+          return;
+        }
+      }
+      // Auth gate: only the /mcp endpoint requires a token; /health stays open.
       if (!checkAuth(req.headers["authorization"])) {
         res.writeHead(401, { "WWW-Authenticate": "Bearer" }).end("Unauthorized");
         return;
