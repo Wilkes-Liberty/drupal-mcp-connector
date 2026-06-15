@@ -56,12 +56,24 @@ import * as site     from "./tools/site.js";
 import * as entities from "./tools/entities.js";
 import * as reports  from "./tools/reports.js";
 import * as drush    from "./tools/drush.js";
+import * as revisions    from "./tools/revisions.js";
+import * as moderation   from "./tools/moderation.js";
+import * as scheduler    from "./tools/scheduler.js";
+import * as fields       from "./tools/fields.js";
+import * as references   from "./tools/references.js";
+import * as bulk         from "./tools/bulk.js";
+import * as translations from "./tools/translations.js";
+import * as paragraphs   from "./tools/paragraphs.js";
+import * as structure    from "./tools/structure.js";
+import * as search       from "./tools/search.js";
+import * as reportsExtra from "./tools/reports-extra.js";
 
 // ---------------------------------------------------------------------------
 // Aggregate tools
 // ---------------------------------------------------------------------------
 
-const allModules = [nodes, taxonomy, users, media, graphql, site, entities, reports, drush];
+const allModules = [nodes, taxonomy, users, media, graphql, site, entities, reports, drush,
+  revisions, moderation, scheduler, fields, references, bulk, translations, paragraphs, structure, search, reportsExtra];
 
 // Flatten every module's tool definitions into one ListTools payload, and merge
 // their handler maps into a single closed dispatch table keyed by tool name.
@@ -81,7 +93,9 @@ const WRITE_PREFIXES       = ["drupal_create_", "drupal_update_", "drupal_upload
   "drupal_block_",  "drupal_drush_cache", "drupal_drush_cron",
   "drupal_drush_config_export", "drupal_drush_config_import",
   "drupal_drush_updatedb", "drupal_drush_module_enable",
-  "drupal_drush_module_disable", "drupal_drush_user_create"];
+  "drupal_drush_module_disable", "drupal_drush_user_create",
+  // v1.0 feature tools that perform writes but don't start with create_/update_:
+  "drupal_bulk_", "drupal_revert_", "drupal_schedule_", "drupal_set_"];
 const DESTRUCTIVE_PREFIXES = ["drupal_delete_", "drupal_drush_module_disable"];
 
 /**
