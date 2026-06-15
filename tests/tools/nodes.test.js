@@ -82,6 +82,30 @@ describe("nodes tools (migrated)", () => {
     expect(arg.attributes.status).toBe(false);
   });
 
+  it("create_node with moderationState sends moderation_state and omits status", async () => {
+    backend.createEntity.mockResolvedValue(canonicalNode());
+    await handlers.drupal_create_node({ type: "article", title: "T", moderationState: "draft" });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes.moderation_state).toBe("draft");
+    expect(arg.attributes).not.toHaveProperty("status");
+  });
+
+  it("create_node defaults to status:false when neither status nor moderationState is given", async () => {
+    backend.createEntity.mockResolvedValue(canonicalNode());
+    await handlers.drupal_create_node({ type: "article", title: "T" });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes.status).toBe(false);
+    expect(arg.attributes).not.toHaveProperty("moderation_state");
+  });
+
+  it("update_node with moderationState sends moderation_state and omits status", async () => {
+    backend.updateEntity.mockResolvedValue(canonicalNode());
+    await handlers.drupal_update_node({ type: "article", id: "n1", moderationState: "published" });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes.moderation_state).toBe("published");
+    expect(arg.attributes).not.toHaveProperty("status");
+  });
+
   it("delete_node calls deleteEntity and returns success", async () => {
     backend.deleteEntity.mockResolvedValue(undefined);
     const out = await handlers.drupal_delete_node({ type: "article", id: "n1" });
