@@ -1,6 +1,6 @@
 {
   "name": "drupal-mcp-connector",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "A secure, multi-site Model Context Protocol (MCP) connector for Drupal — dual-protocol JSON:API and GraphQL.",
   "type": "module",
   "main": "src/index.js",
