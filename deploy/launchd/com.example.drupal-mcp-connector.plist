@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd service for the drupal-mcp-connector HTTPS transport (macOS).
+  Install to ~/Library/LaunchAgents/ (or /Library/LaunchDaemons/ for system-wide),
+  then: launchctl load -w <this file>
+
+  ProgramArguments points at a launcher script so secrets (MCP_AUTH_TOKEN, OAuth
+  client secret) can be sourced from the Keychain at start — keep them OUT of this
+  plist. See examples/launch-with-secret.sh for the pattern; the launcher should
+  `export MCP_TRANSPORT=https` etc. and `exec node src/index.js`.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.drupal-mcp-connector</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/drupal-mcp-connector/deploy/launchd/run.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/opt/drupal-mcp-connector</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MCP_TRANSPORT</key><string>https</string>
+    <key>MCP_PORT</key><string>3443</string>
+    <key>TLS_CERT_PATH</key><string>/etc/ssl/certs/drupal-mcp.crt</string>
+    <key>TLS_KEY_PATH</key><string>/etc/ssl/private/drupal-mcp.key</string>
+    <key>MCP_RATE_LIMIT</key><string>120</string>
+    <key>MCP_RATE_WINDOW_SEC</key><string>60</string>
+  </dict>
+
+  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>
+  <key>StandardErrorPath</key><string>/var/log/drupal-mcp-connector.log</string>
+  <key>StandardOutPath</key><string>/var/log/drupal-mcp-connector.log</string>
+</dict>
+</plist>
