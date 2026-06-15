@@ -12,7 +12,7 @@ Complete reference for all 89 tools across 20 modules.
 ## Navigation
 
 - [Nodes](#nodes) — 6 tools
-- [Taxonomy](#taxonomy) — 6 tools  
+- [Taxonomy](#taxonomy) — 6 tools
 - [Users](#users) — 7 tools
 - [Media](#media) — 9 tools
 - [GraphQL](#graphql) — 2 tools
@@ -20,6 +20,19 @@ Complete reference for all 89 tools across 20 modules.
 - [Entities (Generic)](#entities-generic) — 8 tools
 - [Reports](#reports) — 10 tools
 - [Drush](#drush) — 15 tools
+- [Revisions](#revisions) — 3 tools
+- [Moderation](#moderation) — 3 tools
+- [Scheduler](#scheduler) — 1 tool
+- [Fields](#fields) — 1 tool
+- [References](#references) — 1 tool
+- [Bulk](#bulk) — 2 tools
+- [Translations](#translations) — 2 tools
+- [Paragraphs](#paragraphs) — 2 tools
+- [Structure](#structure) — 4 tools
+- [Search](#search) — 1 tool
+- [Reports (Extra)](#reports-extra) — 3 tools
+
+**Total: 89 tools across 20 modules.**
 
 ---
 
@@ -80,6 +93,37 @@ The `filter` object accepts raw JSON:API filter parameters for advanced filterin
   }
 }
 ```
+
+### Preview writes with `dryRun`
+
+`drupal_create_node`, `drupal_update_node`, and `drupal_delete_node` all accept an
+optional `dryRun` boolean (default `false`). When `true`, the tool validates the
+request and returns a preview of exactly what would be written — without committing
+anything to Drupal. Use this to confirm the resolved attributes before a real write.
+
+```json
+{
+  "type": "article",
+  "title": "My New Article",
+  "body": "<p>Article body HTML</p>",
+  "dryRun": true
+}
+```
+
+Returns a preview envelope instead of a created entity:
+
+```json
+{
+  "dryRun": true,
+  "operation": "create",
+  "entityType": "node",
+  "bundle": "article",
+  "attributes": { "title": "My New Article", "body": { "value": "<p>Article body HTML</p>" } }
+}
+```
+
+For `update` the preview also includes the target `id`; for `delete` it returns
+`{ dryRun: true, operation: "delete", entityType, bundle, id }`.
 
 ---
 
@@ -218,6 +262,37 @@ Works with **any** Drupal entity type — paragraphs, commerce products, webform
 }
 ```
 
+### Preview writes with `dryRun`
+
+`drupal_entity_create`, `drupal_entity_update`, and `drupal_entity_delete` accept an
+optional `dryRun` boolean (default `false`). When `true`, the tool validates the
+request and returns a preview of the write without committing it.
+
+```json
+{
+  "entityType": "paragraph",
+  "bundle": "text",
+  "attributes": { "field_text": { "value": "<p>Hello world</p>", "format": "full_html" } },
+  "dryRun": true
+}
+```
+
+Returns a preview envelope:
+
+```json
+{
+  "dryRun": true,
+  "operation": "create",
+  "entityType": "paragraph",
+  "bundle": "text",
+  "attributes": { "field_text": { "value": "<p>Hello world</p>", "format": "full_html" } },
+  "relationships": {}
+}
+```
+
+For `update` the preview also includes the target `id`; for `delete` it returns
+`{ dryRun: true, operation: "delete", entityType, bundle, id }`.
+
 ---
 
 ## Reports
@@ -262,6 +337,296 @@ Requires `drushSsh` config block. SSH key auth only — no passwords.
 | `drupal_drush_user_create` | ✅ | Create a user with roles. Password min 12 chars. |
 
 All write operations require `security.readOnly: false`. Delete-class operations additionally require `security.allowDestructive: true`.
+
+---
+
+## Revisions
+
+Address and restore node revisions over JSON:API. JSON:API cannot enumerate full chronological history — it only addresses revisions by version id or the `latest-version` / `working-copy` aliases. For per-node revision counts use [`drupal_report_revision_hotspots`](#reports); for full history enumeration use the Drush bridge.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_list_revisions` | `type`, `id` | Surface a node's addressable revisions: the latest default revision and the working-copy (forward) revision, with version ids and links. |
+| `drupal_get_revision` | `type`, `id`, `version` | Fetch a single revision by version id or alias. Read-only; attributes redacted per security policy. |
+| `drupal_revert_revision` | `type`, `id`, `version` | Revert a node to a prior revision (governed write). Replays the target revision's editable content as a new current revision — history is preserved. Confirm before calling. |
+
+`version` accepts a numeric vid (e.g. `42`), an explicit `id:<vid>`, or the relative aliases `rel:latest-version` / `rel:working-copy`.
+
+### drupal_get_revision
+
+```json
+{
+  "type": "article",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "version": "rel:latest-version"
+}
+```
+
+### drupal_revert_revision
+
+```json
+{
+  "type": "article",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "version": 41
+}
+```
+
+---
+
+## Moderation
+
+Drive content under a `content_moderation` editorial workflow. Authoritative state transitions require the Drush bridge; these tools are best-effort over JSON:API.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_set_moderation_state` | `type`, `id`, `state` | Transition a node to a moderation state, e.g. `draft`, `needs_review`, `published`, `archived`. Governed write. |
+| `drupal_content_by_moderation_state` | `type`, `state` | List nodes of a content type currently in a given moderation state. Supports `limit` / `offset`. |
+| `drupal_list_moderation_states` | `type` | List the moderation states observed on a content type's content (best-effort; `sample` controls how many recent items to inspect). |
+
+### drupal_set_moderation_state
+
+```json
+{
+  "type": "article",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "state": "published"
+}
+```
+
+### drupal_content_by_moderation_state
+
+```json
+{
+  "type": "article",
+  "state": "needs_review",
+  "limit": 20,
+  "offset": 0
+}
+```
+
+---
+
+## Scheduler
+
+Schedule future publish/unpublish using the Drupal [Scheduler](https://www.drupal.org/project/scheduler) module. Requires Scheduler installed and enabled for the content type with the `publish_on` / `unpublish_on` fields present on the bundle — otherwise the call fails with a clear capability error.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_schedule_publish` | `type`, `id` | Set the Scheduler `publish_on` and/or `unpublish_on` fields on a node. Provide at least one of `publishOn` / `unpublishOn`. |
+
+Timestamps accept ISO 8601 (e.g. `2026-07-01T12:00:00Z`) or a Unix epoch and are passed through unchanged.
+
+### drupal_schedule_publish
+
+```json
+{
+  "type": "article",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "publishOn": "2026-07-01T12:00:00Z",
+  "unpublishOn": "2026-08-01T12:00:00Z"
+}
+```
+
+---
+
+## Fields
+
+Introspect the fields of an entity type + bundle before writing. Built on schema **sampling** (an existing entity), so results are approximate — only populated fields are visible, and required/cardinality/allowed-values are inferred from value shape. Authoritative field metadata comes from the Drush bridge (Field API).
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_describe_fields` | `site`, `type` | Return a per-field list of `{ name, type, kind, cardinality?, approximate }`. Pass `bundle` for multi-bundle types (defaults to the entity type for single-bundle types). |
+
+### drupal_describe_fields
+
+```json
+{
+  "site": "production",
+  "type": "node",
+  "bundle": "article"
+}
+```
+
+---
+
+## References
+
+Resolve a human label to an entity UUID before wiring up an entity-reference field, when you know the name but not the UUID.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_resolve_reference` | `entityType`, `bundle`, `name` | Resolve a name/title (matched as a substring) to a UUID. Returns the best match `{ id, title }` plus any ambiguous candidates. Filters on `title` for nodes and `name` for taxonomy_term / user. |
+
+### drupal_resolve_reference
+
+```json
+{
+  "entityType": "taxonomy_term",
+  "bundle": "tags",
+  "name": "Technology",
+  "limit": 10
+}
+```
+
+---
+
+## Bulk
+
+Create or update many entities of a single type + bundle in one call. Permission is checked once; each item runs independently, so the batch continues past individual failures (partial success). Returns per-item `{ index, success, id | error }` and a summary. Writes default to unpublished/draft.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_bulk_create` | `entityType`, `bundle`, `items` | Create many entities. Each item is `{ attributes?, relationships? }`. Summary: `{ created, failed }`. |
+| `drupal_bulk_update` | `entityType`, `bundle`, `items` | Update many entities. Each item requires an `id`; items missing one are reported as failures. Summary: `{ updated, failed }`. |
+
+### drupal_bulk_create
+
+```json
+{
+  "entityType": "node",
+  "bundle": "article",
+  "items": [
+    { "attributes": { "title": "First article" } },
+    { "attributes": { "title": "Second article" } }
+  ]
+}
+```
+
+### drupal_bulk_update
+
+```json
+{
+  "entityType": "node",
+  "bundle": "article",
+  "items": [
+    { "id": "550e8400-e29b-41d4-a716-446655440000", "attributes": { "title": "Updated title" } }
+  ]
+}
+```
+
+---
+
+## Translations
+
+Inspect and create entity translations (multilingual / `content_translation`). Core JSON:API serves one language per resource and does not enumerate all translations; `create_translation` requires the `content_translation` module enabled and the bundle configured as translatable. Both tools default to `node`.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_list_translations` | `type`, `id` | List the translation langcode(s) observable on an entity. Pass `entityType` to target a non-node entity (default `node`). |
+| `drupal_create_translation` | `type`, `id`, `langcode` | Create or replace a translation for a target language (governed write), setting the supplied translated field values in `attributes`. |
+
+### drupal_create_translation
+
+```json
+{
+  "type": "article",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "langcode": "de",
+  "attributes": {
+    "title": "Mein Artikel",
+    "body": { "value": "<p>Hallo Welt</p>", "format": "full_html" }
+  }
+}
+```
+
+---
+
+## Paragraphs
+
+Create and fetch [Paragraph](https://www.drupal.org/project/paragraphs) entities (content fragments). Paragraphs are **not** standalone — they must be referenced by a host entity's paragraph / Entity Reference Revisions field. The create tool returns `relationshipData` you can drop into a host field's `relationships` via [`drupal_entity_update`](#entities-generic) / [`drupal_update_node`](#nodes). Run [`drupal_get_entity_schema`](#entities-generic) (entityType `paragraph`, the bundle) first to discover fields.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_create_paragraph` | `paragraphType` | Create a Paragraph of a given bundle. Returns the paragraph plus `relationshipData` (`{ type: 'paragraph--<bundle>', id }`). Governed write. |
+| `drupal_get_paragraph` | `paragraphType`, `id` | Fetch a single Paragraph by bundle + UUID. Returns the redacted paragraph plus a `ref` for embedding in a host field. |
+
+### drupal_create_paragraph
+
+```json
+{
+  "paragraphType": "text",
+  "attributes": {
+    "field_body": { "value": "<p>A reusable text fragment</p>", "format": "full_html" }
+  }
+}
+```
+
+---
+
+## Structure
+
+Manage editable site structure — custom (content) menu links and custom content blocks. These tools operate on `menu_link_content` and `block_content` entities; they do **not** list code/plugin-defined links or blocks.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_list_menu_links` | — | List custom menu links, optionally scoped to one `menu` (e.g. `main`, `footer`). Returns title, target URI, menu, and weight. Supports `limit` / `offset` / `sort`. |
+| `drupal_create_menu_link` | `title`, `link`, `menu` | Create a custom menu link. `link` is a Drupal URI such as `internal:/about`, `entity:node/42`, or an absolute URL. |
+| `drupal_list_blocks` | — | List custom content blocks, optionally scoped to one block `type` (bundle). Returns admin label (`info`) and body. Supports `limit` / `offset` / `sort`. |
+| `drupal_create_block` | `type`, `info` | Create a custom content block. `info` is the administrative label; `body` is optional HTML. |
+
+### drupal_create_menu_link
+
+```json
+{
+  "title": "About us",
+  "link": "internal:/about",
+  "menu": "main",
+  "weight": 0
+}
+```
+
+### drupal_create_block
+
+```json
+{
+  "type": "basic",
+  "info": "Homepage callout",
+  "body": "<p>Welcome to our site.</p>"
+}
+```
+
+---
+
+## Search
+
+Best-effort content search. Title-match fallback over a content type (`mode: 'fallback'`); relevance-ranked search requires a Search API / Solr endpoint.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_search` | `query` | Search content by query string. Defaults to the `article` content type; `type` and `limit` are optional. |
+
+### drupal_search
+
+```json
+{
+  "query": "annual report",
+  "type": "article",
+  "limit": 10
+}
+```
+
+---
+
+## Reports (Extra)
+
+Additional read-only audit tools that complement the [Reports](#reports) module. Sampling-bounded scans flag `approximate` when the scan is capped.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_report_unpublished` | — | List unpublished/draft content of a type (default `article`). Returns titles, last-changed dates, and paths — surfaces forgotten drafts. |
+| `drupal_report_missing_field` | `field` | Find entities where a given field is empty (scalar or entity-reference). Bounded by `sampleSize`. |
+| `drupal_report_orphaned_references` | — | Find entities whose entity-reference fields point at targets that no longer exist. Best-effort; bounded by `sampleSize`. |
+
+### drupal_report_missing_field
+
+```json
+{
+  "type": "article",
+  "field": "field_meta_description",
+  "sampleSize": 100
+}
+```
 
 ---
 
