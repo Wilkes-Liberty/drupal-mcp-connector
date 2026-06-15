@@ -212,6 +212,16 @@ describe("JsonApiBackend content_moderation fallback", () => {
     expect(retry).not.toHaveProperty("status");
     expect(retry.title).toBe("U");
   });
+
+  it("does NOT retry on a non-moderated bundle — the first write succeeds, status is preserved", async () => {
+    // Plain Drupal (no content_moderation): POST with status succeeds, so the
+    // moderation fallback never engages and status passes through unchanged.
+    vi.mocked(drupalFetch).mockResolvedValueOnce({ data: { type: "node--page", id: "new", attributes: { title: "P", status: false } } });
+    const c = await backend.createEntity({ entityType: "node", bundle: "page", attributes: { title: "P", status: false } });
+    expect(c.id).toBe("new");
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(1); // no fallback request
+    expect(JSON.parse(vi.mocked(drupalFetch).mock.calls[0][2].body).data.attributes.status).toBe(false);
+  });
 });
 
 describe("isModeratedStatusError (retry guard)", () => {

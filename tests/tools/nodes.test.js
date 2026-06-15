@@ -98,6 +98,14 @@ describe("nodes tools (migrated)", () => {
     expect(arg.attributes).not.toHaveProperty("moderation_state");
   });
 
+  it("create_node with explicit status (non-moderated site) sends status and no moderation_state", async () => {
+    backend.createEntity.mockResolvedValue(canonicalNode());
+    await handlers.drupal_create_node({ type: "page", title: "P", status: true });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes.status).toBe(true);
+    expect(arg.attributes).not.toHaveProperty("moderation_state");
+  });
+
   it("update_node with moderationState sends moderation_state and omits status", async () => {
     backend.updateEntity.mockResolvedValue(canonicalNode());
     await handlers.drupal_update_node({ type: "article", id: "n1", moderationState: "published" });

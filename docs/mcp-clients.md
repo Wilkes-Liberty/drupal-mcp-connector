@@ -55,10 +55,18 @@ directory (so `config/config.json` resolves):
 ### Claude Code (stdio, user scope)
 
 ```bash
+# Add (launcher form — sources the secret from your keychain):
 claude mcp add drupal --scope user -- /abs/path/drupal-mcp-connector/examples/launch-with-secret.sh
-# or, token via env, no launcher:
+# Or token via env, no launcher:
 claude mcp add drupal --scope user -e DRUPAL_BASE_URL=https://drupal.example -e DRUPAL_API_TOKEN=… -- npx -y drupal-mcp-connector
+
+# Manage:
+claude mcp list           # list configured servers
+claude mcp get drupal     # show one server
+claude mcp remove drupal  # remove it
 ```
+
+For a remote endpoint instead of stdio: `claude mcp add --transport http drupal https://mcp.example.com/mcp --header "Authorization: Bearer $TOKEN"`.
 
 ### Claude Desktop (stdio)
 
@@ -83,23 +91,26 @@ access; approve it.)
 ### Grok Build (stdio CLI)
 
 Grok Build has native MCP support "the same as Claude Code" and also reads
-`AGENTS.md`, hooks, and skills. Register the connector as a stdio server — either
-via the CLI's MCP command or its MCP config file (same `command`/`args`/`env`
-JSON shape as Claude). Example entry:
+`AGENTS.md`, hooks, and skills. Manage servers with `grok mcp` (writes to
+`~/.grok/config.toml`):
 
-```json
-{
-  "mcpServers": {
-    "drupal": {
-      "command": "/abs/path/drupal-mcp-connector/examples/launch-with-secret.sh"
-    }
-  }
-}
+```bash
+# Add (stdio, launcher form):
+grok mcp add drupal --command /abs/path/drupal-mcp-connector/examples/launch-with-secret.sh
+# Or via npx with env vars:
+grok mcp add drupal --command npx --args -y drupal-mcp-connector \
+  --env DRUPAL_BASE_URL=https://drupal.example --env DRUPAL_API_TOKEN=…
+
+# Manage:
+grok mcp list             # list configured servers
+grok mcp doctor           # live test: starts the server, checks handshake + tool count
+grok mcp remove drupal    # remove it
 ```
 
-Because Grok Build runs locally, it reaches Drupal over whatever network the host
-is on (VPN/Tailscale/localhost). See xAI's Grok Build docs for the exact MCP
-config path / `mcp add` command.
+`grok mcp doctor` is the quickest verification — it should report
+`✓ handshake OK` and `✓ N tools discovered`. Because Grok Build runs locally, it
+reaches Drupal over whatever network the host is on (VPN/Tailscale/localhost).
+For a remote endpoint instead: `grok mcp add drupal --url https://mcp.example.com/mcp --type http`.
 
 ### Grok API — Remote MCP Tools (remote HTTP)
 
@@ -128,7 +139,20 @@ and reference its URL:
 
 ### Codex CLI (stdio)
 
-`~/.codex/config.toml`:
+Manage with `codex mcp` (writes to `~/.codex/config.toml`):
+
+```bash
+# Add (launcher form):
+codex mcp add drupal -- /abs/path/drupal-mcp-connector/examples/launch-with-secret.sh
+# Or via npx with env vars:
+codex mcp add drupal --env DRUPAL_BASE_URL=https://drupal.example --env DRUPAL_API_TOKEN=… -- npx -y drupal-mcp-connector
+
+# Manage:
+codex mcp list
+codex mcp remove drupal
+```
+
+Equivalent `~/.codex/config.toml` entry:
 
 ```toml
 [mcp_servers.drupal]
@@ -139,8 +163,8 @@ command = "/abs/path/drupal-mcp-connector/examples/launch-with-secret.sh"
 # env = { DRUPAL_BASE_URL = "https://drupal.example", DRUPAL_API_TOKEN = "…" }
 ```
 
-(Equivalently `codex mcp add drupal -- …`.) Codex supports stdio MCP servers in
-both the CLI and IDE extension.
+Codex supports stdio MCP servers in both the CLI and the IDE extension. Run
+`codex mcp add --help` to confirm flags on your version.
 
 ### ChatGPT & the Responses API (remote HTTP only)
 

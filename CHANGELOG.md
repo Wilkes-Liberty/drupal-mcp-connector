@@ -7,14 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-15
+
 ### Added
 - Docs: an [MCP client setup guide](docs/mcp-clients.md) with copy-paste config
-  for Claude (Code/Desktop), Grok (Build CLI + API Remote MCP Tools), and OpenAI
-  (Codex CLI + ChatGPT/Responses API), plus generic stdio and remote-HTTP
+  **and per-platform management commands** for Claude (Code `claude mcp …` /
+  Desktop), Grok (Build `grok mcp …` + API Remote MCP Tools), and OpenAI (Codex
+  `codex mcp …` + ChatGPT/Responses API), plus generic stdio and remote-HTTP
   patterns and the local-vs-remote reachability/secret tradeoffs.
 - Test coverage for the Streamable-HTTP transport's request routing (bearer-auth
   gate, session open/reuse, `/health`, 404) via an extracted, unit-tested
   `http-handler` module.
+- Regression tests confirming **non-content-moderation Drupal sites are
+  unaffected** by the moderation fallback: a plain create sends `status` and
+  succeeds on the first request with no retry (the fallback only engages on the
+  specific moderated-entity 403).
 - Optional built-in **rate limiting** for the HTTPS transport: set
   `MCP_RATE_LIMIT` (per-IP requests per window) and `MCP_RATE_WINDOW_SEC`
   (default 60). Over-limit `/mcp` requests get `429` + `Retry-After`; the check
@@ -206,6 +213,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[0.9.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.9.0
 [0.8.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.8.0
 [0.7.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.7.1
 [0.7.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.7.0
