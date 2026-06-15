@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Docs: an [MCP client setup guide](docs/mcp-clients.md) with copy-paste config
+  for Claude (Code/Desktop), Grok (Build CLI + API Remote MCP Tools), and OpenAI
+  (Codex CLI + ChatGPT/Responses API), plus generic stdio and remote-HTTP
+  patterns and the local-vs-remote reachability/secret tradeoffs.
+
 ## [0.8.0] - 2026-06-15
 
 ### Added

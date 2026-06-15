@@ -170,6 +170,7 @@ Governance keys off the authenticated account's role and OAuth scopes — not re
 | Doc | Description |
 |-----|-------------|
 | [Getting Started](docs/getting-started.md) | Full setup: DDEV/Lando, Simple OAuth, multi-site, transports |
+| [MCP Clients](docs/mcp-clients.md) | Wire the connector into Claude (Code/Desktop), Grok (Build/API), and OpenAI (Codex/ChatGPT) — copy-paste config per client |
 | [OAuth client_credentials](docs/oauth-client-credentials.md) | Production OAuth deploy: scope→role mapping, JSON:API writes, config persistence, secret handling, troubleshooting |
 | [Architecture](docs/architecture.md) | Backend abstraction, canonical model, and how to extend it |
 | [GraphQL Setup](docs/graphql-local-setup.md) | GraphQL Compose backend + local TLS notes |
