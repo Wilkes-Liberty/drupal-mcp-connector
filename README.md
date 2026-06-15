@@ -51,7 +51,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 
 ## Features
 
-### 66 Tools Across 9 Modules
+### 89 Tools Across 20 Modules
 
 | Module | Tools |
 |--------|-------|
@@ -64,6 +64,17 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 | **Site** | Site info, content-type discovery, configured-site listing |
 | **Reports** | Content summary, stale content, field completeness, SEO/accessibility audits, taxonomy usage, user activity, revision hotspots (10 read-only reports) |
 | **Drush** | Cache rebuild, cron, config sync, module management, DB updates via SSH |
+| **Revisions** | List/get entity revisions; governed revert to a prior revision |
+| **Moderation** | Set moderation state; list content by state; observed-state discovery (content_moderation) |
+| **Scheduler** | Set publish-on / unpublish-on dates (Scheduler module) |
+| **Fields** | Describe a bundle's fields (type/required/cardinality, best-effort) |
+| **References** | Resolve a human name/title to an entity UUID for relationship fields |
+| **Bulk** | Bulk create/update with per-item partial-failure reporting |
+| **Translations** | List + create entity translations |
+| **Paragraphs** | Create/get Paragraph components for embedding in host fields |
+| **Structure** | Menu links + custom blocks (list/create) |
+| **Search** | Best-effort content search (title match; Search API/Solr-ready) |
+| **Reports (extra)** | Orphaned references, unpublished content, missing-field audits |
 
 ### MCP Resources
 Browsable, always-fresh context the client can read without calling a tool:
@@ -174,7 +185,7 @@ Governance keys off the authenticated account's role and OAuth scopes — not re
 | [OAuth client_credentials](docs/oauth-client-credentials.md) | Production OAuth deploy: scope→role mapping, JSON:API writes, config persistence, secret handling, troubleshooting |
 | [Architecture](docs/architecture.md) | Backend abstraction, canonical model, and how to extend it |
 | [GraphQL Setup](docs/graphql-local-setup.md) | GraphQL Compose backend + local TLS notes |
-| [Tools Reference](docs/tools-reference.md) | Full reference for all 66 tools |
+| [Tools Reference](docs/tools-reference.md) | Full reference for all 89 tools |
 | [Security Guide](docs/security.md) | Presets, entity access control, field redaction |
 | [Security Hardening](docs/security-hardening.md) | Optional transport, identity, and secrets controls |
 | [Threat Model](docs/threat-model.md) | Trust boundaries, threats & mitigations, residual risks, and the security-pass results |

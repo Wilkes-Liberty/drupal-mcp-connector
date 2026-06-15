@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **23 new tools across 11 modules** (66 → 89 tools), toward 1.0 feature coverage:
+  - **Revisions** (#37): `drupal_list_revisions`, `drupal_get_revision`, `drupal_revert_revision` (governed revert; JSON:API addresses revisions by id / latest-version / working-copy — full history enumeration needs the Drush bridge).
+  - **Moderation** (#38): `drupal_set_moderation_state`, `drupal_content_by_moderation_state`, `drupal_list_moderation_states` (content_moderation).
+  - **Scheduler** (#39): `drupal_schedule_publish` (publish_on / unpublish_on).
+  - **Fields** (#40): `drupal_describe_fields` (bundle field schema; best-effort, Drush-enhanced).
+  - **References** (#41): `drupal_resolve_reference` (name/title → UUID).
+  - **Bulk** (#43): `drupal_bulk_create`, `drupal_bulk_update` (per-item partial-failure reporting).
+  - **Translations** (#45): `drupal_list_translations`, `drupal_create_translation`.
+  - **Paragraphs** (#44): `drupal_create_paragraph`, `drupal_get_paragraph`.
+  - **Structure** (#46): `drupal_list_menu_links`, `drupal_create_menu_link`, `drupal_list_blocks`, `drupal_create_block`.
+  - **Search** (#47): `drupal_search` (best-effort title match; Search API/Solr-ready).
+  - **Reports (extra)** (#48): `drupal_report_orphaned_references`, `drupal_report_unpublished`, `drupal_report_missing_field`.
+  - All reads are policy-redacted; all writes assert the security policy. New write verbs (`bulk_`/`revert_`/`schedule_`/`set_`) added to the middleware write-gating prefixes.
+
 ## [0.9.1] - 2026-06-15
 
 ### Security
