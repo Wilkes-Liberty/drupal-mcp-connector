@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: the CHANGELOG check now exempts Dependabot PRs automatically (author
   `dependabot[bot]`), so dependency bumps no longer need a changelog entry or the
   `no-changelog` label.
+- CI: made the Dependabot auto-merge workflow self-contained instead of calling
+  the private `Wilkes-Liberty/.github` reusable workflow. A public repo cannot use
+  a private reusable workflow, so the previous version startup-failed and
+  Dependabot PRs never auto-merged. Removed the dead `changelog-autoupdate.yml`
+  (also a private-reusable caller that needs an org GitHub App).
 
 ## [1.0.0] - 2026-06-15
 
