@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `bin/drupal-mcp-launch.sh` — launcher script for starting the connector
+  (secret-manager-friendly local launch).
+- `.playwright-mcp/` — Playwright MCP page snapshots (contact and platforms
+  pages) captured as browser-automation reference fixtures.
+
 ### Changed
 - CI: the CHANGELOG check now exempts Dependabot PRs automatically (author
   `dependabot[bot]`), so dependency bumps no longer need a changelog entry or the
