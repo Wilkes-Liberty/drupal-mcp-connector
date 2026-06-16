@@ -42,3 +42,6 @@ build/
 
 # Internal planning docs — kept local, not part of the public repo
 docs/superpowers/
+
+# Playwright MCP throwaway page snapshots
+.playwright-mcp/
