@@ -85,10 +85,11 @@ docs: update getting-started for DDEV setup
 - Add a test if you're adding a tool or fixing a bug.
 - Update `CHANGELOG.md` under `[Unreleased]`. A `CHANGELOG updated` CI check
   enforces this; a trivial PR that genuinely needs no entry can carry the
-  `no-changelog` label to bypass it.
+  `no-changelog` label to bypass it. (Dependabot PRs are exempt automatically.)
 - Update [docs/tools-reference.md](docs/tools-reference.md) if you add or change tools.
-- CI must pass before merge: lint + unit tests (Node 20 and 22), the Drupal
-  integration job, and CodeQL analysis.
+- CI must pass before merge: lint + unit tests (Node 20 and 22) and the Drupal
+  integration job. (CodeQL also runs and reports, but is not a required gate — it
+  skips dependency-only PRs, so requiring it would permanently block Dependabot.)
 - Any review conversations must be resolved before merging (a branch-protection
   requirement). Maintainer review is welcomed but not required to merge a
   green PR.
