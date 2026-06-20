@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- CI: Slack release notification (`.github/workflows/release-notify.yml`) — posts to the
+  maintainers' release channel on release tags; no-ops without the `SLACK_WEBHOOK_RELEASES` secret.
 - `bin/drupal-mcp-launch.sh` — launcher script for starting the connector
   (secret-manager-friendly local launch).
 
