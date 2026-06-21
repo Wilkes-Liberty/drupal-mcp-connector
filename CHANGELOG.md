@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Dependabot PRs never auto-merged. Removed the dead `changelog-autoupdate.yml`
   (also a private-reusable caller that needs an org GitHub App).
 
+### Fixed
+- JSON:API filter values are now DB-portable, fixing report-tool 500s on
+  PostgreSQL-backed sites. Boolean filters (e.g. `status`) serialized as
+  `'true'`/`'false'` were rejected by Postgres' `smallint` columns ("invalid
+  input syntax for type smallint"); they are now `1`/`0`.
+  `drupal_report_stale_content` filtered the integer `changed` timestamp with an
+  ISO-8601 string (same class of error); it now uses epoch seconds. MySQL coerced
+  both, which masked the bug. (#71)
+
 ## [1.0.0] - 2026-06-15
 
 First stable release. The tool surface, security model, and configuration
