@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Dependabot PRs never auto-merged. Removed the dead `changelog-autoupdate.yml`
   (also a private-reusable caller that needs an org GitHub App).
 
+### Fixed
+- JSON:API `countEntities` now returns the **exact** total by paginating through
+  `links.next`, instead of trusting `meta.count` — which Drupal core JSON:API does
+  not provide. Previously every report count collapsed to the requested page size
+  (e.g. `1` per non-empty content type), reported as exact. Counts beyond a safety
+  ceiling (1000 records) are returned and flagged `approximate`. Fixes the
+  undercount in `drupal_report_content_summary`, `drupal_report_taxonomy_usage`,
+  and `drupal_report_user_activity`. (#73)
+
 ## [1.0.0] - 2026-06-15
 
 First stable release. The tool surface, security model, and configuration
