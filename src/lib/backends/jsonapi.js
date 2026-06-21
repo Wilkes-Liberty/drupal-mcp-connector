@@ -20,6 +20,14 @@ import {
 // these are dropped from canonical `fields` (the canonical id is the UUID).
 const INTERNAL_ATTR_RE = /^drupal_internal__/;
 
+// countEntities() pagination. Drupal core JSON:API returns no total in `meta`,
+// so an exact count is obtained by walking pages until `links.next` is gone.
+// COUNT_PAGE_SIZE is Drupal's default max page size; COUNT_MAX_RECORDS bounds
+// the walk so a huge collection can't issue unbounded requests (mirrors the
+// GraphQL backend's MAX_CLIENT_RECORDS) — past it the count is approximate.
+const COUNT_PAGE_SIZE = 50;
+const COUNT_MAX_RECORDS = 1000;
+
 /**
  * Detect the JSON:API error Drupal returns when a write attempts to set the
  * `status` (published) field on a content_moderation-governed entity. Such
@@ -389,17 +397,47 @@ export class JsonApiBackend extends Backend {
   }
 
   /**
-   * Return an exact entity count. Requests page[limit]=1 and reads the
-   * server-provided meta.count, so no full result set is transferred.
+   * Count entities matching the descriptor. Drupal core JSON:API exposes no
+   * total in `meta`, so unless the site provides `meta.count` (jsonapi_extras /
+   * a custom normalizer), the count is obtained by walking pages via
+   * `links.next`. The total is exact when the walk reaches the end; if it hits
+   * the COUNT_MAX_RECORDS safety ceiling first, the partial total is returned
+   * with `approximate: true` (i.e. the true count is at least that value).
    * @param {import("../canonical.js").QueryDescriptor} descriptor
-   * @returns {Promise<{count: number, approximate: false}>}
+   * @returns {Promise<{count: number, approximate: boolean}>}
    */
   async countEntities(descriptor) {
-    const params = this.compileQuery({ ...descriptor, page: { limit: 1 } });
-    const qs = params.toString();
     const base = this.resourcePath(descriptor.entityType, descriptor.bundle);
-    const data = await drupalFetch(this.site, qs ? `${base}?${qs}` : base);
-    return { count: data.meta?.count ?? (data.data || []).length, approximate: false };
+    let total = 0;
+    let offset = 0;
+    for (;;) {
+      const params = this.compileQuery({ ...descriptor, page: { limit: COUNT_PAGE_SIZE, offset } });
+      const qs = params.toString();
+      const data = await drupalFetch(this.site, qs ? `${base}?${qs}` : base);
+
+      // Prefer an exact server-supplied total when the site exposes one
+      // (jsonapi_extras / a custom normalizer). Only the first page can carry it.
+      if (offset === 0 && typeof data?.meta?.count === "number") {
+        return { count: data.meta.count, approximate: false };
+      }
+
+      const got = (data?.data || []).length;
+      total += got;
+
+      // No further page advertised → the whole set has been walked: exact.
+      if (!data?.links?.next?.href || got === 0) {
+        return { count: total, approximate: false };
+      }
+
+      // Advance by the rows actually returned (robust to server-side page-size
+      // caps that may return fewer than COUNT_PAGE_SIZE per page).
+      offset += got;
+
+      // Bounded walk: stop and flag the partial total as approximate.
+      if (total >= COUNT_MAX_RECORDS) {
+        return { count: total, approximate: true };
+      }
+    }
   }
 
   /**
