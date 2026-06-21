@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Dependabot PRs never auto-merged. Removed the dead `changelog-autoupdate.yml`
   (also a private-reusable caller that needs an org GitHub App).
 
+### Fixed
+- `drupal_report_user_activity` now surfaces a top-level `approximate` flag when
+  any of its account counts hit the backend's safety ceiling — matching
+  `drupal_report_content_summary` and `drupal_report_taxonomy_usage`. Previously a
+  capped count (e.g. 1000 users) was presented as exact. (#75)
+
 ## [1.0.0] - 2026-06-15
 
 First stable release. The tool surface, security model, and configuration

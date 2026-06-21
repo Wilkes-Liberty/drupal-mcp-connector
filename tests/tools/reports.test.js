@@ -290,5 +290,18 @@ describe("drupal_report_user_activity", () => {
     const out = await handlers.drupal_report_user_activity({});
     expect(out.unavailable).toBeUndefined();
     expect(out.summary.activeAccounts).toBe(5);
+    expect(out.approximate).toBe(false);
+  });
+
+  it("surfaces approximate:true when any of the counts hit the ceiling", async () => {
+    backend.capabilities.mockReturnValue({ revisions: true, fieldAvailability: null });
+    backend.countEntities
+      .mockResolvedValueOnce({ count: 1000, approximate: true })  // active capped
+      .mockResolvedValueOnce({ count: 2, approximate: false })
+      .mockResolvedValueOnce({ count: 1, approximate: false });
+    backend.listEntities.mockResolvedValue({ entities: [], page: {} });
+    const out = await handlers.drupal_report_user_activity({});
+    expect(out.approximate).toBe(true);
+    expect(out.summary.activeAccounts).toBe(1000);
   });
 });
