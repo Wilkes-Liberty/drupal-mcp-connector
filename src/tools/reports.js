@@ -72,8 +72,12 @@ async function staleContent({ site: siteName, type, days = 180, status, limit = 
   assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
   const contentType = type || "article";
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
-  const filters = [{ field: "changed", op: "lt", value: cutoff }];
+  // `changed` is an integer Unix timestamp (seconds). Filter with epoch seconds,
+  // not an ISO string — PostgreSQL rejects the string against an integer column.
+  const cutoffMs = Date.now() - days * 86400000;
+  const cutoffTs = Math.floor(cutoffMs / 1000);
+  const cutoff = new Date(cutoffMs).toISOString();
+  const filters = [{ field: "changed", op: "lt", value: cutoffTs }];
   if (status !== undefined) filters.push({ field: "status", op: "eq", value: status });
   const res = await backend.listEntities({
     entityType: "node", bundle: contentType,

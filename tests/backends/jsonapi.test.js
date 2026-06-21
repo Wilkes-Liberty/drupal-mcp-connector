@@ -31,6 +31,18 @@ describe("JsonApiBackend.compileQuery", () => {
     expect(p.get("filter[status]")).toBe("1");
   });
 
+  it("serializes boolean filter values as 1/0 (DB-portable) and leaves other values unchanged", () => {
+    // Booleans must become 1/0 — Postgres rejects 'true'/'false' against smallint
+    // status/boolean columns (MySQL silently coerces them, hiding the bug).
+    expect(paramsOf({ entityType: "node", bundle: "article", filters: [{ field: "status", op: "eq", value: true }] }).get("filter[status]")).toBe("1");
+    expect(paramsOf({ entityType: "node", bundle: "article", filters: [{ field: "status", op: "eq", value: false }] }).get("filter[status]")).toBe("0");
+    // Verbose (operator) form goes through the same value path.
+    expect(paramsOf({ entityType: "node", bundle: "article", filters: [{ field: "promote", op: "lt", value: true }] }).get("filter[c_promote][condition][value]")).toBe("1");
+    // Only real booleans convert: numbers, the string "true", etc. pass through.
+    expect(paramsOf({ entityType: "node", bundle: "article", filters: [{ field: "changed", op: "lt", value: 1700000000 }] }).get("filter[c_changed][condition][value]")).toBe("1700000000");
+    expect(paramsOf({ entityType: "node", bundle: "article", filters: [{ field: "title", op: "eq", value: "true" }] }).get("filter[title]")).toBe("true");
+  });
+
   it("compiles an operator filter with the verbose condition form", () => {
     const p = paramsOf({ entityType: "node", bundle: "article", filters: [{ field: "changed", op: "lt", value: "2025-01-01" }] });
     expect(p.get("filter[c_changed][condition][path]")).toBe("changed");

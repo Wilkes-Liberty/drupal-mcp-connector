@@ -96,18 +96,33 @@ function inferType(value) {
  * @param {{field: string, op?: string, value: *}} cond Filter condition.
  * @returns {void}
  */
+/**
+ * Serialize a filter value to a DB-portable string. Booleans become "1"/"0":
+ * Drupal stores `status` and other boolean fields in integer/smallint columns,
+ * and PostgreSQL rejects the literals "true"/"false" there ("invalid input
+ * syntax for type smallint"). MySQL coerces them, which hid this. Everything
+ * else is stringified unchanged (the string "true" stays "true").
+ * @param {*} value
+ * @returns {string}
+ */
+function filterValue(value) {
+  if (value === true) return "1";
+  if (value === false) return "0";
+  return String(value);
+}
+
 function applyFilter(params, { field, op = "eq", value }) {
   if (op === "eq") {
-    params.append(`filter[${field}]`, String(value));
+    params.append(`filter[${field}]`, filterValue(value));
     return;
   }
   const key = `c_${field}`;
   params.append(`filter[${key}][condition][path]`, field);
   params.append(`filter[${key}][condition][operator]`, OP_MAP.get(op) || "=");
   if (op === "in" && Array.isArray(value)) {
-    value.forEach((v, i) => params.append(`filter[${key}][condition][value][${i}]`, String(v)));
+    value.forEach((v, i) => params.append(`filter[${key}][condition][value][${i}]`, filterValue(v)));
   } else if (op !== "isNull") {
-    params.append(`filter[${key}][condition][value]`, String(value));
+    params.append(`filter[${key}][condition][value]`, filterValue(value));
   }
 }
 

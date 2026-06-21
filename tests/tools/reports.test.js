@@ -105,6 +105,24 @@ describe("drupal_report_stale_content", () => {
     expect(out.nodes[0].status).toBe("unpublished");
     expect(typeof out.nodes[0].daysSinceUpdate).toBe("number");
   });
+
+  it("filters changed by an epoch-second integer, not an ISO string (Postgres-safe)", async () => {
+    backend.listEntities.mockResolvedValue({ entities: [], page: { total: 0 }, approximate: false });
+    await handlers.drupal_report_stale_content({ type: "article", days: 180 });
+    const desc = backend.listEntities.mock.calls[0][0];
+    const changedFilter = desc.filters.find((f) => f.field === "changed");
+    // changed is an integer Unix timestamp; an ISO string 500s on Postgres.
+    expect(typeof changedFilter.value).toBe("number");
+    expect(Number.isInteger(changedFilter.value)).toBe(true);
+    // Epoch SECONDS (10 digits), not milliseconds (13) — sanity bound.
+    expect(String(changedFilter.value).length).toBe(10);
+  });
+
+  it("still reports the human-readable cutoff date", async () => {
+    backend.listEntities.mockResolvedValue({ entities: [], page: { total: 0 }, approximate: false });
+    const out = await handlers.drupal_report_stale_content({ type: "article", days: 180 });
+    expect(out.cutoffDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
 });
 
 describe("drupal_report_content_by_author", () => {
