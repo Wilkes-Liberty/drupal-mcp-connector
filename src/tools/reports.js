@@ -350,6 +350,10 @@ async function userActivity({ site: siteName, inactiveDays = 90, limit = 50 }) {
     backend.countEntities({ entityType: "user", bundle: "user", filters: [{ field: "status", op: "eq", value: false }] }),
     backend.countEntities({ entityType: "user", bundle: "user", filters: [{ field: "status", op: "eq", value: true }, { field: "login", op: "eq", value: 0 }] }),
   ]);
+  // A count past the backend's safety ceiling comes back approximate; surface
+  // that so the summary totals aren't presented as exact (cf. contentSummary,
+  // taxonomyUsage).
+  const approximate = active.approximate || blocked.approximate || neverLoggedIn.approximate;
   let inactiveUsers = [];
   try {
     const res = await backend.listEntities({
@@ -373,6 +377,7 @@ async function userActivity({ site: siteName, inactiveDays = 90, limit = 50 }) {
     inactiveUsers = [];
   }
   return {
+    approximate,
     summary: {
       activeAccounts: active.count,
       blockedAccounts: blocked.count,
