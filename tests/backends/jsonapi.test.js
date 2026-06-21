@@ -387,6 +387,58 @@ describe("JsonApiBackend.countEntities", () => {
     vi.mocked(drupalFetch).mockResolvedValue({ data: [{ type: "node--article", id: "n1" }], meta: { count: 42 } });
     const r = await backend.countEntities({ entityType: "node", bundle: "article", filters: [{ field: "status", op: "eq", value: "1" }] });
     expect(r).toEqual({ count: 42, approximate: false });
-    expect(vi.mocked(drupalFetch).mock.calls[0][1]).toContain("page%5Blimit%5D=1");
+    // One request that doubles as the count probe and the first data page.
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(1);
+  });
+
+  const pageOf = (n, hasNext) => ({
+    data: Array.from({ length: n }, (_, i) => ({ type: "node--article", id: `n${i}` })),
+    meta: {},
+    links: hasNext ? { next: { href: "https://x/jsonapi/node/article?page[offset]=next" } } : { self: { href: "s" } },
+  });
+
+  it("paginates via links.next to an EXACT total when the site provides no meta.count", async () => {
+    // Drupal core JSON:API: meta is empty; only links.next signals more rows.
+    // 50 (full page, has next) + 13 (short page, no next) = 63.
+    vi.mocked(drupalFetch)
+      .mockResolvedValueOnce(pageOf(50, true))
+      .mockResolvedValueOnce(pageOf(13, false));
+    const r = await backend.countEntities({ entityType: "node", bundle: "article" });
+    expect(r).toEqual({ count: 63, approximate: false });
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns an exact count in one request when a single page has no next link", async () => {
+    vi.mocked(drupalFetch).mockResolvedValueOnce(pageOf(24, false));
+    const r = await backend.countEntities({ entityType: "node", bundle: "article" });
+    expect(r).toEqual({ count: 24, approximate: false });
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts an empty collection as 0 in one request", async () => {
+    vi.mocked(drupalFetch).mockResolvedValueOnce(pageOf(0, false));
+    const r = await backend.countEntities({ entityType: "node", bundle: "article" });
+    expect(r).toEqual({ count: 0, approximate: false });
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts exactly to a page boundary (50 + 50 = 100), last full page has no next", async () => {
+    // Guards against terminating on `got < PAGE_SIZE` instead of `!links.next`:
+    // a final page that is exactly full but carries no next link must still count.
+    vi.mocked(drupalFetch)
+      .mockResolvedValueOnce(pageOf(50, true))
+      .mockResolvedValueOnce(pageOf(50, false));
+    const r = await backend.countEntities({ entityType: "node", bundle: "article" });
+    expect(r).toEqual({ count: 100, approximate: false });
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops at the safety ceiling (20 pages of 50) and reports approximate:true", async () => {
+    // Every page is full and always advertises a next link → never terminates
+    // naturally; the bounded walk stops at COUNT_MAX_RECORDS (1000) and flags it.
+    vi.mocked(drupalFetch).mockResolvedValue(pageOf(50, true));
+    const r = await backend.countEntities({ entityType: "node", bundle: "article" });
+    expect(r).toEqual({ count: 1000, approximate: true });
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(20); // 1000 / 50, no runaway
   });
 });
