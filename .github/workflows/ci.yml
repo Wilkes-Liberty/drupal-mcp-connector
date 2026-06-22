@@ -21,7 +21,7 @@ jobs:
         # Node >=20, and 18 is past end-of-life. Keep these green so the floor is real.
         node-version: ['20', '22']
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -66,7 +66,7 @@ jobs:
           MYSQL_PASSWORD: drupal
           MYSQL_ROOT_PASSWORD: root
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
