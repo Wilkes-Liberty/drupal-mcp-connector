@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Bump transitive `hono` 4.12.23 → 4.12.27 (via `@modelcontextprotocol/sdk`), clearing
+  5 advisories (1 high, 4 moderate): GHSA-88fw-hqm2-52qc (CORS wildcard-with-credentials),
+  GHSA-wwfh-h76j-fc44 (serve-static path traversal), GHSA-j6c9-x7qj-28xf, GHSA-rv63-4mwf-qqc2,
+  GHSA-wgpf-jwqj-8h8p. Lockfile-only; the SDK's `^4.11.4` range already permits the fix.
+  `npm audit` clean.
+
 ### Added
 - CI: Slack release notification (`.github/workflows/release-notify.yml`) — posts to the
   maintainers' release channel on release tags; no-ops without the `SLACK_WEBHOOK_RELEASES` secret.
