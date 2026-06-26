@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { assertGraphqlMutationAllowed, SecurityError } from "../../src/lib/security.js";
 import { redactCanonicalEntity, redactResource, resolveSecurityConfig } from "../../src/lib/security.js";
+import { assertConfigReadAllowed, assertConfigWriteAllowed, getSecuritySummary } from "../../src/lib/security.js";
 
 const allowMut = { allowGraphqlMutations: true, readOnly: false };
 const denyMut = { allowGraphqlMutations: false, readOnly: false };
@@ -46,6 +47,59 @@ describe("write-plane preset", () => {
     expect(cfg.deniedEntityTypes).toEqual(["user"]);
     expect(cfg.globalRedactedFields).toContain("pass");
     expect(cfg.globalRedactedFields).toContain("mail");
+  });
+});
+
+describe("config capability presets", () => {
+  it("config-editor (Developer tier) allows config read + write", () => {
+    const cfg = resolveSecurityConfig({ security: { preset: "config-editor" } });
+    expect(cfg.allowConfigRead).toBe(true);
+    expect(cfg.allowConfigWrite).toBe(true);
+    expect(cfg.allowDestructive).toBe(false);
+    expect(cfg.allowedEntityTypes).toContain("node");
+  });
+
+  it("content-editor allows config read but not write", () => {
+    const cfg = resolveSecurityConfig({ security: { preset: "content-editor" } });
+    expect(cfg.allowConfigRead).toBe(true);
+    expect(cfg.allowConfigWrite).toBe(false);
+  });
+
+  it("development allows both; production-strict allows neither", () => {
+    expect(resolveSecurityConfig({ security: { preset: "development" } }).allowConfigWrite).toBe(true);
+    const strict = resolveSecurityConfig({ security: { preset: "production-strict" } });
+    expect(strict.allowConfigRead).toBe(false);
+    expect(strict.allowConfigWrite).toBe(false);
+  });
+
+  it("explicit keys override the preset config caps", () => {
+    const cfg = resolveSecurityConfig({ security: { preset: "content-editor", allowConfigWrite: true } });
+    expect(cfg.allowConfigWrite).toBe(true);
+  });
+
+  it("defaults to no config access when no preset/keys are given", () => {
+    const cfg = resolveSecurityConfig({});
+    // development is the implicit default preset → both true
+    expect(cfg.allowConfigRead).toBe(true);
+    expect(cfg.allowConfigWrite).toBe(true);
+  });
+
+  it("getSecuritySummary surfaces the config caps", () => {
+    const s = getSecuritySummary({ _name: "dev", security: { preset: "config-editor" } });
+    expect(s.allowConfigRead).toBe(true);
+    expect(s.allowConfigWrite).toBe(true);
+  });
+});
+
+describe("assertConfigReadAllowed / assertConfigWriteAllowed", () => {
+  it("read passes when allowed, throws when not", () => {
+    expect(() => assertConfigReadAllowed({ allowConfigRead: true })).not.toThrow();
+    expect(() => assertConfigReadAllowed({ allowConfigRead: false })).toThrow(SecurityError);
+  });
+
+  it("write passes when allowed, throws when not", () => {
+    expect(() => assertConfigWriteAllowed({ allowConfigWrite: true })).not.toThrow();
+    expect(() => assertConfigWriteAllowed({ allowConfigWrite: false })).toThrow(SecurityError);
   });
 });
 

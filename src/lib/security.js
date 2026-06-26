@@ -13,7 +13,8 @@ import { parse } from "graphql";
  * ─── Quick presets ────────────────────────────────────────────────────────
  *
  *   "preset": "development"        Everything allowed. Default if no security key.
- *   "preset": "content-editor"     Create/edit nodes+media. No user mgmt, no deletes.
+ *   "preset": "content-editor"     Create/edit nodes+media. No user mgmt, no deletes. Config read-only.
+ *   "preset": "config-editor"      content-editor + governed config read/write (Developer tier).
  *   "preset": "auditor"            Read-only. All entity types. User fields redacted.
  *   "preset": "production-strict"  Read-only. Explicit allowlist required. Redacts PII.
  *   "preset": "write-plane"        Governed writes (no delete/mutations) on node, term, media.
@@ -25,6 +26,11 @@ import { parse } from "graphql";
  *  readOnly            true  → reject all create/update/delete/graphql-mutation calls
  *  allowDestructive    false → reject all delete operations
  *  allowGraphqlMutations false → reject drupal_graphql when mutation is detected
+ *  allowConfigRead     false → reject drupal_config_get / drupal_config_list
+ *  allowConfigWrite    false → reject drupal_config_set
+ *
+ *  Config caps mirror the server-side governance profile (allow_config_read /
+ *  allow_config_write). Drupal stays authoritative; this is defence in depth.
  *
  *  allowedEntityTypes  string[] | null   null = allow all; array = allowlist
  *  deniedEntityTypes   string[]          always-blocked entity types
@@ -54,6 +60,8 @@ const PRESETS = {
     readOnly: false,
     allowDestructive: true,
     allowGraphqlMutations: true,
+    allowConfigRead: true,
+    allowConfigWrite: true,
     allowedEntityTypes: null,
     deniedEntityTypes: [],
     entityRules: {},
@@ -64,6 +72,27 @@ const PRESETS = {
     readOnly: false,
     allowDestructive: false,          // no deletes
     allowGraphqlMutations: false,
+    allowConfigRead: true,            // config read-only
+    allowConfigWrite: false,
+    allowedEntityTypes: ["node", "media", "file", "taxonomy_term", "menu_link_content"],
+    deniedEntityTypes: ["user"],
+    entityRules: {
+      node:          { allowedOperations: ["read", "create", "update"] },
+      media:         { allowedOperations: ["read", "create", "update"] },
+      file:          { allowedOperations: ["read", "create"] },
+      taxonomy_term: { allowedOperations: ["read", "create", "update"] },
+    },
+    globalRedactedFields: [],
+  },
+
+  "config-editor": {
+    // Developer tier: content-editor capabilities PLUS governed config read/write.
+    // The Drupal-side governance layer remains authoritative; this is defence in depth.
+    readOnly: false,
+    allowDestructive: false,          // no deletes
+    allowGraphqlMutations: false,
+    allowConfigRead: true,
+    allowConfigWrite: true,           // governed config writes via drupal_config_set
     allowedEntityTypes: ["node", "media", "file", "taxonomy_term", "menu_link_content"],
     deniedEntityTypes: ["user"],
     entityRules: {
@@ -79,6 +108,8 @@ const PRESETS = {
     readOnly: true,
     allowDestructive: false,
     allowGraphqlMutations: false,
+    allowConfigRead: true,            // read-only inspection of config
+    allowConfigWrite: false,
     allowedEntityTypes: null,         // read any entity type
     deniedEntityTypes: [],
     entityRules: {
@@ -94,6 +125,8 @@ const PRESETS = {
     readOnly: true,
     allowDestructive: false,
     allowGraphqlMutations: false,
+    allowConfigRead: false,           // nothing implicit; opt in per site
+    allowConfigWrite: false,
     allowedEntityTypes: null,         // set an explicit allowlist in your config
     deniedEntityTypes: ["user"],      // no user data at all
     entityRules: {},
@@ -106,6 +139,8 @@ const PRESETS = {
     readOnly: false,
     allowDestructive: false,          // no deletes
     allowGraphqlMutations: false,     // writes go through the JSON:API plane
+    allowConfigRead: true,            // config read-only
+    allowConfigWrite: false,
     allowedEntityTypes: ["node", "taxonomy_term", "media"],
     deniedEntityTypes: ["user"],
     entityRules: {},
@@ -132,6 +167,8 @@ export function resolveSecurityConfig(site) {
     readOnly:              raw.readOnly              ?? preset.readOnly,
     allowDestructive:      raw.allowDestructive      ?? preset.allowDestructive,
     allowGraphqlMutations: raw.allowGraphqlMutations ?? preset.allowGraphqlMutations,
+    allowConfigRead:       raw.allowConfigRead       ?? preset.allowConfigRead       ?? false,
+    allowConfigWrite:      raw.allowConfigWrite      ?? preset.allowConfigWrite      ?? false,
     allowedEntityTypes:    raw.allowedEntityTypes    ?? preset.allowedEntityTypes,
     deniedEntityTypes:     raw.deniedEntityTypes     ?? preset.deniedEntityTypes,
     entityRules:           mergeEntityRules(preset.entityRules, raw.entityRules ?? {}),
@@ -185,6 +222,39 @@ export function assertNotReadOnly(secConfig, operationLabel) {
     throw new SecurityError(
       `This site is configured as read-only. Operation blocked: ${operationLabel}. ` +
       "To enable writes, set security.readOnly = false in your config."
+    );
+  }
+}
+
+/**
+ * Gate config reads (drupal_config_get / drupal_config_list).
+ * @param {object} secConfig Resolved security config.
+ * @returns {void}
+ * @throws {SecurityError} if config reads are disabled for this site.
+ */
+export function assertConfigReadAllowed(secConfig) {
+  if (!secConfig.allowConfigRead) {
+    throw new SecurityError(
+      "Config reads are disabled for this site. " +
+      "To enable, use a preset with config access (e.g. config-editor) " +
+      "or set security.allowConfigRead = true in your config."
+    );
+  }
+}
+
+/**
+ * Gate config writes (drupal_config_set). Server-side governance remains
+ * authoritative; this is the connector-side defence-in-depth layer.
+ * @param {object} secConfig Resolved security config.
+ * @returns {void}
+ * @throws {SecurityError} if config writes are disabled for this site.
+ */
+export function assertConfigWriteAllowed(secConfig) {
+  if (!secConfig.allowConfigWrite) {
+    throw new SecurityError(
+      "Config writes are disabled for this site. " +
+      "To enable, use the config-editor preset (Developer tier) " +
+      "or set security.allowConfigWrite = true in your config."
     );
   }
 }
@@ -467,6 +537,8 @@ export function getSecuritySummary(site) {
     readOnly:              cfg.readOnly,
     allowDestructive:      cfg.allowDestructive,
     allowGraphqlMutations: cfg.allowGraphqlMutations,
+    allowConfigRead:       cfg.allowConfigRead,
+    allowConfigWrite:      cfg.allowConfigWrite,
     allowedEntityTypes:    cfg.allowedEntityTypes ?? "all",
     deniedEntityTypes:     cfg.deniedEntityTypes,
     entityRules:           cfg.entityRules,

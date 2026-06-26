@@ -47,12 +47,17 @@ in config or surfaced in errors.
 
 ## 3. Scopes
 
-Two OAuth2 scopes partition connector operations:
+OAuth2 scopes partition connector operations. The two base scopes:
 
 | Scope | Operations |
 |-------|-----------|
-| `mcp:read` | read / list / explain / introspect |
-| `mcp:write` | create / update / delete / write-class actions |
+| `mcp_read` | read / list / explain / introspect |
+| `mcp_write` | create / update / delete / write-class actions |
+
+Two further scopes key the governance tiers (see §5b): `mcp_config` (governed
+configuration) and `mcp_admin` (admin / break-glass). Scope names use the
+underscore form — the OAuth2 scope entity's `name` (e.g. `mcp_read`), per
+[oauth-client-credentials.md](oauth-client-credentials.md).
 
 A governance layer MAY require these scopes per tool/operation. The token's
 granted scopes are the authoritative capability set; the connector's own preset
@@ -79,6 +84,45 @@ of record.**
   require a JSON:API-enabled site with `read_only: false`.
 - **GraphQL** (GraphQL Compose) — read-only. The connector refuses write/delete on
   a GraphQL backend with a capability error before any request is sent.
+- **Server-tool bridge** — governed configuration. The connector acts as an MCP
+  *client* of Drupal's own server-side MCP tools for config operations
+  (`drupal_config_get` / `_list` / `_set`), so config writes are mediated and audited
+  by the authoritative governance layer rather than performed via drush. Configuration
+  is intentionally **not** writable over JSON:API.
+
+### 5a. Server-tool bridge transport
+
+A site opts in with a `serverTools` block:
+
+```json
+"serverTools": { "url": "/mcp" }
+```
+
+`url` is the JSON-RPC 2.0 endpoint of Drupal's MCP tool bridge
+(`mcp_server_tool_bridge` / `mcp_sentinel`), resolved against `baseUrl` (an absolute
+URL is also accepted). The connector POSTs `{ "method": "tools/call", "params": {
+"name", "arguments" } }` authenticated with the **same OAuth bearer** as JSON:API
+(a 401 triggers one token-refresh retry). The server-side tool names are
+`config_get` / `config_list` / `config_set`. Config caps on the connector side
+(`allowConfigRead` / `allowConfigWrite`, set by preset — e.g. `config-editor`) are a
+complementary client-side gate; **the Drupal-side policy remains authoritative.**
+
+### 5b. Governance tiers (reference configuration)
+
+`config/config.example.json` models four environment-keyed least-privilege tiers.
+The tier is pinned by the consumer's OAuth scopes (the authoritative signal) and
+mirrored by the connector preset:
+
+| Tier | Sites | Scopes | Preset | Config |
+|------|-------|--------|--------|--------|
+| Content | `prod`, `staging` | `mcp_read`, `mcp_write` | `content-editor` | read-only |
+| Developer | `dev` | + `mcp_config` | `config-editor` | read + write |
+| Admin (break-glass) | `dev-admin` | + `mcp_admin` | `development` | read + write |
+
+`drupal_mcp_whoami` reports the effective tier, scopes, and capabilities for a site
+(publishing is always server-gated → reported `false`). The drush bridge is wired on
+`dev` only and pinned via `drushSsh.allowedCommands` to `config:export` /
+`config:status` — the export step turns a governed live config change into YAML for a PR.
 
 ## 6. Optional context endpoint
 

@@ -51,7 +51,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 
 ## Features
 
-### 89 Tools Across 20 Modules
+### 93 Tools Across 21 Modules
 
 | Module | Tools |
 |--------|-------|
@@ -75,6 +75,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 | **Structure** | Menu links + custom blocks (list/create) |
 | **Search** | Best-effort content search (title match; Search API/Solr-ready) |
 | **Reports (extra)** | Orphaned references, unpublished content, missing-field audits |
+| **Config & Governance** | Governed config get/list/set via the server-tool bridge; `drupal_mcp_whoami` tier/capability report |
 
 **Preview writes with `dryRun`.** The node and entity create/update/delete tools accept an optional `dryRun: true` flag that validates the request and returns a preview of exactly what would be written — without committing anything to Drupal.
 
@@ -165,7 +166,7 @@ The connector works out of the box against Drupal core's JSON:API and a GraphQL 
 - Role-bound policy profiles (operation gates, entity allow/deny, field redaction)
 - Tamper-evident audit log of every governed MCP operation, attributed to the acting account
 - Content locks that prevent edits to content a human is actively editing
-- OAuth scope enforcement (`mcp:read` / `mcp:write`) per tool
+- OAuth scope enforcement (`mcp_read` / `mcp_write`) per tool
 - HMAC-signed webhooks on MCP-driven entity changes
 
 ```bash
@@ -187,7 +188,7 @@ Governance keys off the authenticated account's role and OAuth scopes — not re
 | [OAuth client_credentials](docs/oauth-client-credentials.md) | Production OAuth deploy: scope→role mapping, JSON:API writes, config persistence, secret handling, troubleshooting |
 | [Architecture](docs/architecture.md) | Backend abstraction, canonical model, and how to extend it |
 | [GraphQL Setup](docs/graphql-local-setup.md) | GraphQL Compose backend + local TLS notes |
-| [Tools Reference](docs/tools-reference.md) | Full reference for all 89 tools |
+| [Tools Reference](docs/tools-reference.md) | Full reference for all 93 tools |
 | [Security Guide](docs/security.md) | Presets, entity access control, field redaction |
 | [Security Hardening](docs/security-hardening.md) | Optional transport, identity, and secrets controls |
 | [Threat Model](docs/threat-model.md) | Trust boundaries, threats & mitigations, residual risks, and the security-pass results |
