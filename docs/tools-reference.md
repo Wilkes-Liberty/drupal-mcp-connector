@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for all 89 tools across 20 modules.
+Complete reference for all 93 tools across 21 modules.
 
 > **Tip:** Call `drupal_list_entity_types` first on an unfamiliar site to discover available resource types, and `drupal_security_info` to see the active access policy.
 
