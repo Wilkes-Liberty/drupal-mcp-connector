@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-26
+
 ### Security
 - Bump transitive `hono` 4.12.23 → 4.12.27 (via `@modelcontextprotocol/sdk`), clearing
   5 advisories (1 high, 4 moderate): GHSA-88fw-hqm2-52qc (CORS wildcard-with-credentials),
@@ -52,7 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (also a private-reusable caller that needs an org GitHub App).
 
 ### Fixed
-fix/jsonapi-postgres-filter-portability
 - JSON:API filter values are now DB-portable, fixing report-tool 500s on
   PostgreSQL-backed sites. Boolean filters (e.g. `status`) serialized as
   `'true'`/`'false'` were rejected by Postgres' `smallint` columns ("invalid
@@ -60,7 +61,6 @@ fix/jsonapi-postgres-filter-portability
   `drupal_report_stale_content` filtered the integer `changed` timestamp with an
   ISO-8601 string (same class of error); it now uses epoch seconds. MySQL coerced
   both, which masked the bug. (#71)
-fix/user-activity-approximate-flag
 - `drupal_report_user_activity` now surfaces a top-level `approximate` flag when
   any of its account counts hit the backend's safety ceiling — matching
   `drupal_report_content_summary` and `drupal_report_taxonomy_usage`. Previously a
