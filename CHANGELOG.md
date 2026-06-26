@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-26
+
 ### Fixed
 - Docs: corrected stale tool/module counts (89→93, 20→21) and the example startup
   banner version (v1.0.0→v1.1.0) in `architecture.md`, `getting-started.md`,
