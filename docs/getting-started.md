@@ -312,6 +312,37 @@ Requires SSH key access to the server (key auth only — no passwords). Add to y
 
 Then tools like `drupal_drush_cache_rebuild`, `drupal_drush_cron`, and `drupal_drush_config_status` become available. See the Drush Bridge Security section of [security.md](security.md#drush-bridge-security).
 
+Add an optional `"allowedCommands"` array to pin the bridge to specific subcommands on
+that site — every other `drupal_drush_*` tool is then blocked. For example, a developer
+site can be limited to config export/status only:
+
+```json
+"drushSsh": {
+  "host": "ssh.myhost.com", "user": "deploy", "keyPath": "~/.ssh/id_ed25519",
+  "drupalRoot": "/var/www/html/web",
+  "allowedCommands": ["config:export", "config:status"]
+}
+```
+
+---
+
+## 12a. Governance Tiers & Governed Config (optional)
+
+`config/config.example.json` ships a reference **environment-keyed least-privilege**
+layout: `prod`/`staging` (content tier), `dev` (developer tier), and `dev-admin`
+(admin/break-glass). The tier is set by the consumer's OAuth scopes and mirrored by the
+`security.preset`. Add a `serverTools` block to enable the governed configuration tools
+(`drupal_config_get` / `_list` / `_set`), which call Drupal's authoritative server-side
+MCP tools rather than drush:
+
+```json
+"serverTools": { "url": "/mcp" }
+```
+
+`drupal_config_set` requires the `config-editor` (Developer) tier (or
+`security.allowConfigWrite: true`). Call `drupal_mcp_whoami` to see the effective tier,
+scopes, and capabilities for a site. See [integration-contract.md](integration-contract.md#5a-server-tool-bridge-transport).
+
 ---
 
 ## 13. Security Checklist

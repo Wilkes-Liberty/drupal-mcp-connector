@@ -21,7 +21,7 @@ import { readFileSync }  from "fs";
 import { homedir }       from "os";
 import { join, resolve, normalize } from "path";
 import { getSiteConfig } from "../lib/config.js";
-import { resolveSecurityConfig, assertNotReadOnly } from "../lib/security.js";
+import { resolveSecurityConfig, assertNotReadOnly, SecurityError } from "../lib/security.js";
 import { validateMachineName, validateSqlQuery, sanitizeSshArg } from "../lib/validate.js";
 
 // ---------------------------------------------------------------------------
@@ -36,6 +36,26 @@ function getDrushConfig(site) {
     );
   }
   return site.drushSsh;
+}
+
+/**
+ * Enforce an optional per-site command allowlist. When `drushSsh.allowedCommands`
+ * is present, only those Drush subcommands may run on that site — every other
+ * drupal_drush_* tool is blocked. Used to pin the dev site to config:export /
+ * config:status while keeping the bridge off prod/staging entirely.
+ * @param {object} sshCfg Resolved drushSsh config block.
+ * @param {string} subcommand The Drush subcommand (drushArgs[0]).
+ * @returns {void}
+ * @throws {SecurityError} if an allowlist is set and the subcommand is not on it.
+ */
+function assertCommandAllowed(sshCfg, subcommand) {
+  const allow = sshCfg.allowedCommands;
+  if (Array.isArray(allow) && !allow.includes(subcommand)) {
+    throw new SecurityError(
+      `Drush command "${subcommand}" is not permitted on this site. ` +
+      `Allowed: ${allow.join(", ")}.`
+    );
+  }
 }
 
 /**
@@ -76,6 +96,7 @@ function resolveKeyPath(rawPath) {
  */
 function sshDrush(site, drushArgs, timeoutMs = 30000) {
   const sshCfg  = getDrushConfig(site);
+  assertCommandAllowed(sshCfg, drushArgs[0]);
   const keyPath = resolveKeyPath(sshCfg.keyPath);
 
   // Validate drupalRoot is an absolute path with no traversal

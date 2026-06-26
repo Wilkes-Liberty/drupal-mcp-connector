@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Environment-keyed governance tiers. The `config/config.example.json` template now
+  models four least-privilege tiers — `prod`/`staging` (content), `dev` (developer),
+  `dev-admin` (admin/break-glass) — each pinned by OAuth scopes and a security preset.
+- New `config-editor` security preset (Developer tier): content-editor capabilities plus
+  governed config read/write. All presets gained `allowConfigRead` / `allowConfigWrite`
+  caps (mirroring the server-side governance profile), with `assertConfigReadAllowed` /
+  `assertConfigWriteAllowed` gates. Caps are surfaced by `drupal_security_info`.
+- Governed configuration tools: `drupal_config_get`, `drupal_config_list`,
+  `drupal_config_set`. These call Drupal's authoritative server-side MCP config tools via a
+  new JSON-RPC bridge (`src/lib/server-tools.js`, per-site `serverTools.url`) — not drush —
+  and are gated by the new config caps as a defence-in-depth second layer.
+- `drupal_mcp_whoami` — reports the agent's effective tier, preset, OAuth scopes, and
+  capabilities (read/write/delete/config/publish) for a site, so permitted actions are
+  visible up front. Publishing is always reported as server-gated.
+- Per-site `drushSsh.allowedCommands` allowlist. When set, only those Drush subcommands
+  may run on that site; the example `dev` site is pinned to `config:export` /
+  `config:status`, and prod/staging carry no `drushSsh` block at all.
 - CI: Slack release notification (`.github/workflows/release-notify.yml`) — posts to the
   maintainers' release channel on release tags; no-ops without the `SLACK_WEBHOOK_RELEASES` secret.
 - `bin/drupal-mcp-launch.sh` — launcher script for starting the connector

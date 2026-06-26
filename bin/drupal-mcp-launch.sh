@@ -7,8 +7,17 @@
 #   Keychain and exposes them as the env vars the connector's per-site
 #   oauth.clientSecretEnv values point at. Secrets never live in any client
 #   config file or in this script.
-#     prod    -> Keychain item 'drupal-mcp-agent-secret'     -> MCP_AGENT_CLIENT_SECRET
-#     staging -> Keychain item 'drupal-mcp-agent-secret-stg' -> MCP_AGENT_CLIENT_SECRET_STG
+#
+#   The governance tiers map to secrets per environment, not per tier — the
+#   dev and dev-admin sites share one DDEV consumer secret:
+#     prod (content)     -> Keychain 'drupal-mcp-agent-secret'     -> MCP_AGENT_CLIENT_SECRET
+#     staging (content)  -> Keychain 'drupal-mcp-agent-secret-stg' -> MCP_AGENT_CLIENT_SECRET_STG
+#     dev (developer)    -> Keychain 'drupal-mcp-agent-secret-dev' -> MCP_AGENT_CLIENT_SECRET_DEV
+#     dev-admin (admin)  -> reuses MCP_AGENT_CLIENT_SECRET_DEV (same DDEV consumer)
+#
+# Also trusts DDEV's locally-generated (mkcert) TLS cert via NODE_EXTRA_CA_CERTS so
+# Node accepts https://*.wilkesliberty.dev. There is no per-site TLS flag in the
+# connector — cert trust is environmental, which is why it is wired here.
 set -eu
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,6 +30,23 @@ export MCP_AGENT_CLIENT_SECRET
 # launcher still works on machines that only have prod configured.
 if MCP_AGENT_CLIENT_SECRET_STG="$(security find-generic-password -s 'drupal-mcp-agent-secret-stg' -w 2>/dev/null)"; then
   export MCP_AGENT_CLIENT_SECRET_STG
+fi
+
+# Dev secret is optional — local DDEV only. Sourced into the env var the 'dev'
+# site's oauth.clientSecretEnv points at (MCP_AGENT_CLIENT_SECRET_DEV).
+if MCP_AGENT_CLIENT_SECRET_DEV="$(security find-generic-password -s 'drupal-mcp-agent-secret-dev' -w 2>/dev/null)"; then
+  export MCP_AGENT_CLIENT_SECRET_DEV
+fi
+
+# Trust DDEV's locally-generated (mkcert) root CA so Node accepts the dev site's
+# HTTPS cert. Only set when mkcert and its root exist; harmless otherwise.
+# If you also need a corporate/private CA (e.g. for api.int.wilkesliberty.com),
+# concatenate both PEMs into one file and point NODE_EXTRA_CA_CERTS at that file.
+if command -v mkcert >/dev/null 2>&1; then
+  _mkcert_root="$(mkcert -CAROOT 2>/dev/null)/rootCA.pem"
+  if [ -f "$_mkcert_root" ]; then
+    export NODE_EXTRA_CA_CERTS="$_mkcert_root"
+  fi
 fi
 
 exec node src/index.js

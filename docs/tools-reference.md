@@ -314,9 +314,38 @@ Read-only audit and analysis tools. All respect the security config.
 
 ---
 
+## Configuration & Governance
+
+Governed configuration tools mediated by Drupal's authoritative server-side MCP tools
+(via the `serverTools.url` JSON-RPC bridge — **not** drush). Each tool is additionally
+gated by the site's connector-side config caps (`allowConfigRead` / `allowConfigWrite`)
+as a defence-in-depth second layer. Requires a `serverTools` block on the site.
+
+| Tool | Required params | Cap | Description |
+|------|----------------|-----|-------------|
+| `drupal_config_get` | `name` | configRead | Read one config object (e.g. `system.site`). |
+| `drupal_config_list` | — | configRead | List config object names; optional `prefix`. |
+| `drupal_config_set` | `name`, `value` | configWrite | Set a config value (governed + audited server-side). |
+| `drupal_mcp_whoami` | — | — | Report effective tier, preset, scopes, and capabilities for a site. |
+
+`drupal_config_set` requires the `config-editor` (Developer) tier or
+`security.allowConfigWrite: true`. The typical flow is: set config via
+`drupal_config_set`, then `drupal_drush_config_export` to write YAML for a PR.
+These tools are functional only once the Drupal-side governed config tools are
+deployed; until then the server returns a tool-not-found error.
+
+> **Tip:** Call `drupal_mcp_whoami` to see what the current tier permits before
+> attempting a write — it reports `configWrite`, `delete`, and the server-gated
+> `publish: false` up front.
+
+---
+
 ## Drush
 
-Requires `drushSsh` config block. SSH key auth only — no passwords.
+Requires `drushSsh` config block. SSH key auth only — no passwords. An optional
+`drushSsh.allowedCommands` array pins a site to specific subcommands — every other
+`drupal_drush_*` tool is then blocked there. (The governance `dev` site is pinned to
+`config:export` / `config:status`; prod/staging carry no `drushSsh` block at all.)
 
 | Tool | Write? | Description |
 |------|:------:|-------------|
