@@ -19,6 +19,7 @@ Complete reference for all 89 tools across 20 modules.
 - [Site](#site) — 3 tools
 - [Entities (Generic)](#entities-generic) — 8 tools
 - [Reports](#reports) — 10 tools
+- [Configuration & Governance](#configuration--governance) — 4 tools
 - [Drush](#drush) — 15 tools
 - [Revisions](#revisions) — 3 tools
 - [Moderation](#moderation) — 3 tools
@@ -32,7 +33,7 @@ Complete reference for all 89 tools across 20 modules.
 - [Search](#search) — 1 tool
 - [Reports (Extra)](#reports-extra) — 3 tools
 
-**Total: 89 tools across 20 modules.**
+**Total: 93 tools across 21 modules.**
 
 ---
 

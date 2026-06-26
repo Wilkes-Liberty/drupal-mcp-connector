@@ -47,12 +47,17 @@ in config or surfaced in errors.
 
 ## 3. Scopes
 
-Two OAuth2 scopes partition connector operations:
+OAuth2 scopes partition connector operations. The two base scopes:
 
 | Scope | Operations |
 |-------|-----------|
-| `mcp:read` | read / list / explain / introspect |
-| `mcp:write` | create / update / delete / write-class actions |
+| `mcp_read` | read / list / explain / introspect |
+| `mcp_write` | create / update / delete / write-class actions |
+
+Two further scopes key the governance tiers (see §5b): `mcp_config` (governed
+configuration) and `mcp_admin` (admin / break-glass). Scope names use the
+underscore form — the OAuth2 scope entity's `name` (e.g. `mcp_read`), per
+[oauth-client-credentials.md](oauth-client-credentials.md).
 
 A governance layer MAY require these scopes per tool/operation. The token's
 granted scopes are the authoritative capability set; the connector's own preset
