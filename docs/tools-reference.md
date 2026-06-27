@@ -318,15 +318,20 @@ Read-only audit and analysis tools. All respect the security config.
 ## Configuration & Governance
 
 Governed configuration tools mediated by Drupal's authoritative server-side MCP tools
-(via the `serverTools.url` JSON-RPC bridge — **not** drush). Each tool is additionally
+(via the `serverTools.url` JSON-RPC bridge — **not** drush). Every config tool
+(`config_get` / `config_list` / `config_set`) requires the dedicated **`mcp_config`**
+OAuth scope server-side (config-editor / Developer tier); a content-tier token
+(`mcp_read` / `mcp_write` only) is denied on all of them. Each tool is additionally
 gated by the site's connector-side config caps (`allowConfigRead` / `allowConfigWrite`)
-as a defence-in-depth second layer. Requires a `serverTools` block on the site.
+as a defence-in-depth second layer. When OAuth scopes are configured, the connector
+checks for `mcp_config` up front and refuses without it rather than dispatching a call
+the server will deny. Requires a `serverTools` block on the site.
 
 | Tool | Required params | Cap | Description |
 |------|----------------|-----|-------------|
-| `drupal_config_get` | `name` | configRead | Read one config object (e.g. `system.site`). |
-| `drupal_config_list` | — | configRead | List config object names; optional `prefix`. |
-| `drupal_config_set` | `name`, `value` | configWrite | Set a config value (governed + audited server-side). |
+| `drupal_config_get` | `name` | configRead + `mcp_config` | Read one config object (e.g. `system.site`). |
+| `drupal_config_list` | — | configRead + `mcp_config` | List config object names; optional `prefix`. |
+| `drupal_config_set` | `name`, `value` | configWrite + `mcp_config` | Set a config value (governed + audited server-side). |
 | `drupal_mcp_whoami` | — | — | Report effective tier, preset, scopes, and capabilities for a site. |
 
 `drupal_config_set` requires the `config-editor` (Developer) tier or
