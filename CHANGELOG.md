@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `drupal_mcp_whoami` no longer over-reports configuration capabilities. Capabilities are
+  now the intersection of the connector security preset **and** the token's effective OAuth
+  scopes: `configRead` / `configWrite` require the dedicated `mcp_config` scope (config-editor
+  / Developer tier), and `write` / `delete` require `mcp_write`. Previously a content-tier
+  token (`mcp_read` / `mcp_write`) was reported with `configRead: true` even though the server
+  denies every `config_*` tool without `mcp_config`. When a site declares no OAuth scopes,
+  behaviour is unchanged (preset-only).
+
+### Changed
+- The config tools (`config_get` / `config_list` / `config_set`) now check for the
+  `mcp_config` scope up front (when OAuth scopes are configured) and fail fast with a clear
+  message instead of dispatching a call the governed server will deny — keeping connector
+  behaviour consistent with `drupal_mcp_whoami`. Aligns with mcp_sentinel isolating the config
+  tools under the dedicated `mcp_config` scope.
+
 ## [1.2.0] - 2026-06-27
 
 ### Changed

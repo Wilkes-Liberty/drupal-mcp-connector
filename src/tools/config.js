@@ -18,6 +18,8 @@ import {
   assertNotReadOnly,
   assertConfigReadAllowed,
   assertConfigWriteAllowed,
+  assertConfigScope,
+  hasScope,
 } from "../lib/security.js";
 import { callServerTool, SERVER_TOOLS } from "../lib/server-tools.js";
 
@@ -33,6 +35,7 @@ import { callServerTool, SERVER_TOOLS } from "../lib/server-tools.js";
  */
 async function configGet({ site: siteName, name }) {
   const site = getSiteConfig(siteName);
+  assertConfigScope(site, `config:get ${name}`);
   assertConfigReadAllowed(resolveSecurityConfig(site));
   return callServerTool(site, SERVER_TOOLS.configGet, { name });
 }
@@ -45,6 +48,7 @@ async function configGet({ site: siteName, name }) {
  */
 async function configList({ site: siteName, prefix }) {
   const site = getSiteConfig(siteName);
+  assertConfigScope(site, "config:list");
   assertConfigReadAllowed(resolveSecurityConfig(site));
   const args = prefix ? { prefix } : {};
   return callServerTool(site, SERVER_TOOLS.configList, args);
@@ -60,6 +64,7 @@ async function configList({ site: siteName, prefix }) {
 async function configSet({ site: siteName, name, value }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
+  assertConfigScope(site, `config:set ${name}`);
   assertNotReadOnly(sec, `config:set ${name}`);
   assertConfigWriteAllowed(sec);
   return callServerTool(site, SERVER_TOOLS.configSet, { name, value });
@@ -100,6 +105,13 @@ async function whoami({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   const summary = getSecuritySummary(site);
+  // Effective capability = connector preset AND the scope the server demands.
+  // Reporting the preset alone over-states what the token can do — e.g. the
+  // content-editor preset allows config reads locally, but every config_* tool
+  // is gated server-side on mcp_config, which the content tier does not hold.
+  // When no OAuth scopes are configured, hasScope() is a no-op (preset-only).
+  const canWrite  = !sec.readOnly && hasScope(site, "mcp_write");
+  const canConfig = hasScope(site, "mcp_config");
   return {
     site: site._name,
     tier: inferTier(site, sec),
@@ -108,11 +120,11 @@ async function whoami({ site: siteName }) {
     api: site.api ?? "auto",
     serverToolsConfigured: Boolean(site.serverTools?.url),
     capabilities: {
-      read:        true,
-      write:       !sec.readOnly,
-      delete:      sec.allowDestructive && !sec.readOnly,
-      configRead:  sec.allowConfigRead,
-      configWrite: sec.allowConfigWrite && !sec.readOnly,
+      read:        hasScope(site, "mcp_read"),
+      write:       canWrite,
+      delete:      sec.allowDestructive && canWrite,
+      configRead:  sec.allowConfigRead  && canConfig,
+      configWrite: sec.allowConfigWrite && !sec.readOnly && canConfig,
       // Publishing is always gated server-side (editorial workflow); the agent
       // never holds the publish transition. Surfaced here so it is explicit.
       publish:     false,

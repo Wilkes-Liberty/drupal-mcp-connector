@@ -23,10 +23,19 @@ import { SecurityError } from "../../src/lib/security.js";
 beforeEach(() => callServerTool.mockReset());
 
 describe("config tools — governed via server-tool bridge", () => {
-  it("config_get on a config-read tier calls the server tool", async () => {
+  it("config_get on a config tier (mcp_config) calls the server tool", async () => {
     callServerTool.mockResolvedValue({ content: [{ type: "text", text: "{}" }] });
-    await handlers.drupal_config_get({ site: "prod", name: "system.site" });
-    expect(callServerTool).toHaveBeenCalledWith(SITES.prod, "config_get", { name: "system.site" });
+    await handlers.drupal_config_get({ site: "dev", name: "system.site" });
+    expect(callServerTool).toHaveBeenCalledWith(SITES.dev, "config_get", { name: "system.site" });
+  });
+
+  it("config_get is denied on the Content tier (no mcp_config scope)", async () => {
+    // The content tier holds mcp_read/mcp_write but not mcp_config; every
+    // config_* tool is gated on mcp_config server-side, so the connector must
+    // refuse locally rather than dispatch a call the server will deny.
+    await expect(handlers.drupal_config_get({ site: "prod", name: "system.site" }))
+      .rejects.toBeInstanceOf(SecurityError);
+    expect(callServerTool).not.toHaveBeenCalled();
   });
 
   it("config_list forwards an optional prefix", async () => {
@@ -49,18 +58,23 @@ describe("config tools — governed via server-tool bridge", () => {
 });
 
 describe("drupal_mcp_whoami", () => {
-  it("reports the content tier with configWrite=false and publish=false", async () => {
+  it("reports the content tier with config read+write false (no mcp_config) and publish=false", async () => {
     const out = await handlers.drupal_mcp_whoami({ site: "prod" });
     expect(out.tier).toBe("content");
     expect(out.scopes).toEqual(["mcp_read", "mcp_write"]);
+    // The content-editor preset allows config reads locally, but without the
+    // mcp_config scope the server denies every config_* tool — so the effective
+    // capability is false. This is the over-reporting the fix closes.
+    expect(out.capabilities.configRead).toBe(false);
     expect(out.capabilities.configWrite).toBe(false);
-    expect(out.capabilities.configRead).toBe(true);
+    expect(out.capabilities.write).toBe(true);
     expect(out.capabilities.publish).toBe(false);
   });
 
-  it("reports the developer tier with configWrite=true", async () => {
+  it("reports the developer tier with config read+write true (holds mcp_config)", async () => {
     const out = await handlers.drupal_mcp_whoami({ site: "dev" });
     expect(out.tier).toBe("developer");
+    expect(out.capabilities.configRead).toBe(true);
     expect(out.capabilities.configWrite).toBe(true);
   });
 

@@ -324,6 +324,41 @@ export function assertConfigWriteAllowed(secConfig) {
 }
 
 /**
+ * Whether the site's OAuth token carries a given scope. When the site declares
+ * no OAuth scopes (no agent channel configured), scope gating is a no-op and
+ * this returns true so preset-only (non-OAuth) setups are unaffected.
+ * @param {object} site Resolved site config.
+ * @param {string} scope OAuth scope machine id (e.g. "mcp_config").
+ * @returns {boolean} True if the scope is present, or no scopes are configured.
+ */
+export function hasScope(site, scope) {
+  const scopes = site?.oauth?.scopes ?? [];
+  return scopes.length === 0 || scopes.includes(scope);
+}
+
+/**
+ * Gate the config tools (get/list/set) on the dedicated `mcp_config` OAuth
+ * scope, which the governed server requires for every config_* tool. When OAuth
+ * scopes are configured but `mcp_config` is absent, fail fast with a clear
+ * message instead of dispatching a call the server will deny — keeping the
+ * connector's behaviour and its drupal_mcp_whoami report consistent with what
+ * the token can actually exercise.
+ * @param {object} site Resolved site config.
+ * @param {string} operationLabel Label used in the error message.
+ * @returns {void}
+ * @throws {SecurityError} if scopes are configured and `mcp_config` is missing.
+ */
+export function assertConfigScope(site, operationLabel) {
+  if (!hasScope(site, "mcp_config")) {
+    throw new SecurityError(
+      "Config tools require the 'mcp_config' OAuth scope (config-editor / " +
+      "Developer tier); this token does not carry it. " +
+      `Operation blocked: ${operationLabel}.`
+    );
+  }
+}
+
+/**
  * @param {object} secConfig Resolved security config.
  * @param {string} entityType Entity type targeted by the delete.
  * @param {string} id Entity id targeted by the delete.
