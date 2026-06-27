@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-27
+
 ### Fixed
 - `drupal_mcp_whoami` no longer over-reports configuration capabilities. Capabilities are
   now the intersection of the connector security preset **and** the token's effective OAuth
