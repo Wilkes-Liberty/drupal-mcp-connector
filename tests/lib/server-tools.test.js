@@ -30,7 +30,7 @@ describe("callServerTool", () => {
     expect(opts.method).toBe("POST");
     expect(opts.headers.Authorization).toBe("Bearer tok-x");
     const body = JSON.parse(opts.body);
-    expect(body).toMatchObject({ jsonrpc: "2.0", method: "tools/call", params: { name: "config_get", arguments: { name: "system.site" } } });
+    expect(body).toMatchObject({ jsonrpc: "2.0", method: "tools/call", params: { name: SERVER_TOOLS.configGet, arguments: { name: "system.site" } } });
   });
 
   it("returns the tools/call result on success", async () => {
