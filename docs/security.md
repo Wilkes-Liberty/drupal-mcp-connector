@@ -303,7 +303,7 @@ Give that role only what the connector needs — for read-only auditing, typical
 
 Grant additional permissions only as needed. Never grant `administer nodes`, `bypass content access`, or any `administer` permission to the API user.
 
-> With the **MCP Sentinel** module installed, bind this role to an `mcp_policy_profile` and issue the connector an OAuth token (Consumer with `mcp_read`/`mcp_write` scopes). Governance and audit then key off the authenticated role and scopes server-side. See the [MCP Sentinel project page](https://www.drupal.org/project/mcp_sentinel).
+> With the **MCP Sentinel** module installed, bind this role to an `mcp_policy_profile` and issue the connector an OAuth token (Consumer with `mcp_read`/`mcp_write` scopes; add `mcp_config` for the dev/config tier, which the config tools require). Governance and audit then key off the authenticated role and scopes server-side. See the [MCP Sentinel project page](https://www.drupal.org/project/mcp_sentinel).
 
 ---
 

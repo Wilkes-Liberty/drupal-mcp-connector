@@ -268,7 +268,7 @@ The following represent intended directions, not committed release dates.
 When installed, MCP Sentinel enforces:
 
 - **Role-bound policy profiles** — operations are permitted or denied based on the authenticated Drupal account's role, not request headers
-- **OAuth scope enforcement** — `mcp_read` and `mcp_write` scopes gate read vs. write operations at the Drupal authentication layer
+- **OAuth scope enforcement** — `mcp_read` and `mcp_write` scopes gate read vs. write operations, and a dedicated `mcp_config` scope gates configuration management (dev/config tier only), at the Drupal authentication layer
 - **Tamper-evident audit log** — every connector-initiated operation is attributed to the acting account and recorded in a tamper-evident log
 - **Content locks** — prevents concurrent connector and editorial writes on the same entity
 - **HMAC-signed webhooks** — outbound event notifications for downstream integrations
