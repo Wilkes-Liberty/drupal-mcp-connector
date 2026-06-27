@@ -100,11 +100,11 @@
 
   "_security_presets": {
     "development":       "All operations allowed, incl. config read/write. Local dev / break-glass only.",
-    "content-editor":    "Create/edit nodes+media+terms. No deletes. No user entity access. Config read-only.",
-    "config-editor":     "content-editor + governed config read/write (Developer tier).",
+    "content-editor":    "Create/edit the full content set (node, media, taxonomy_term, paragraph, block_content, menu_link_content, redirect, path_alias, file). No deletes. Config read-only. Denies user + secrets/governance types.",
+    "config-editor":     "content-editor + site-building config entities (read/introspection) + governed config read/write (Developer tier). Model changes go via the config bridge, not JSON:API.",
     "auditor":           "Read-only. All entity types. User PII fields redacted. Config read-only.",
     "production-strict": "Read-only. No user entities. Broad PII redaction. No config access.",
-    "write-plane":       "Governed writes (no delete/mutations) on node, taxonomy_term, media. No user. Redacts pass/mail. Config read-only."
+    "write-plane":       "Governed writes (no delete/mutations) on the content set (node, taxonomy_term, media + structural content entities). Denies user + secrets/governance types. Redacts pass/mail. Config read-only."
   },
 
   "_server_tools": {

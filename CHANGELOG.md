@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Widened the content/developer security presets so the connector supports full content
+  building and management. `content-editor` and `write-plane` now allow `paragraph`,
+  `block_content`, `menu_link_content`, `redirect`, `path_alias`, and `file` in addition
+  to `node`/`taxonomy_term`/`media`. `config-editor` (developer tier) additionally allows
+  the site-building config entities (`node_type`, `paragraphs_type`, `block_content_type`,
+  `media_type`, `field_config`, `field_storage_config`, `entity_form_display`,
+  `entity_view_display`, `taxonomy_vocabulary`) for read/introspection — content-model
+  changes go through the governed config bridge / `drush config:import`, not JSON:API
+  entity create.
+- Corrected the server-tool bridge tool names: `mcp_server_tool_bridge` exposes Tool-API
+  tools as `tool_api.<id>`, so the governed config tools are
+  `tool_api.mcp_sentinel_config_get` / `_list` / `_set` (previously documented as bare
+  `config_get` / `_list` / `_set`, which never resolved). Updated `SERVER_TOOLS` and
+  `docs/integration-contract.md` accordingly. These tools must be registered as enabled
+  `mcp_tool_config` entities on the Drupal site; they are not exposed by default.
+
+### Security
+- Deny-hardened the content/developer presets: `oauth2_token`, `key`, `consumer`,
+  `encryption_profile`, `mcp_tool_config`, and `mcp_policy_profile` are now in
+  `deniedEntityTypes` alongside `user`, so secrets, the agent's own governance config,
+  and account data stay blocked even if an allowlist is later widened. PII-bearing
+  `webform_submission` and `profile` are intentionally left off the allowlists.
+
 ## [1.1.1] - 2026-06-26
 
 ### Fixed

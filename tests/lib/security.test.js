@@ -43,10 +43,47 @@ describe("write-plane preset", () => {
     expect(cfg.readOnly).toBe(false);
     expect(cfg.allowDestructive).toBe(false);
     expect(cfg.allowGraphqlMutations).toBe(false);
-    expect(cfg.allowedEntityTypes).toEqual(["node", "taxonomy_term", "media"]);
-    expect(cfg.deniedEntityTypes).toEqual(["user"]);
+    // Base content set plus the structural content entities.
+    expect(cfg.allowedEntityTypes).toEqual([
+      "node", "taxonomy_term", "media",
+      "paragraph", "block_content", "menu_link_content", "redirect", "path_alias", "file",
+    ]);
+    // No site-building config entities on the content tier.
+    expect(cfg.allowedEntityTypes).not.toContain("field_storage_config");
+    // Secrets/governance/account types are denied (belt-and-suspenders).
+    expect(cfg.deniedEntityTypes).toContain("user");
+    expect(cfg.deniedEntityTypes).toContain("oauth2_token");
+    expect(cfg.deniedEntityTypes).toContain("mcp_policy_profile");
     expect(cfg.globalRedactedFields).toContain("pass");
     expect(cfg.globalRedactedFields).toContain("mail");
+  });
+});
+
+describe("widened content/developer allowlists", () => {
+  const structural = ["paragraph", "block_content", "menu_link_content", "redirect", "path_alias", "file"];
+  const siteBuilder = ["node_type", "field_config", "field_storage_config", "entity_form_display", "entity_view_display", "taxonomy_vocabulary"];
+  const sensitive = ["user", "oauth2_token", "key", "consumer", "encryption_profile", "mcp_tool_config", "mcp_policy_profile"];
+
+  it("content-editor gains structural content entities but no site-building config", () => {
+    const cfg = resolveSecurityConfig({ security: { preset: "content-editor" } });
+    for (const t of structural) expect(cfg.allowedEntityTypes).toContain(t);
+    for (const t of siteBuilder) expect(cfg.allowedEntityTypes).not.toContain(t);
+    for (const t of sensitive) expect(cfg.deniedEntityTypes).toContain(t);
+  });
+
+  it("config-editor (developer) gains site-building config entities for read/introspection", () => {
+    const cfg = resolveSecurityConfig({ security: { preset: "config-editor" } });
+    for (const t of structural) expect(cfg.allowedEntityTypes).toContain(t);
+    for (const t of siteBuilder) expect(cfg.allowedEntityTypes).toContain(t);
+    for (const t of sensitive) expect(cfg.deniedEntityTypes).toContain(t);
+  });
+
+  it("PII-bearing types stay off the content/developer allowlists", () => {
+    for (const preset of ["content-editor", "config-editor", "write-plane"]) {
+      const cfg = resolveSecurityConfig({ security: { preset } });
+      expect(cfg.allowedEntityTypes).not.toContain("webform_submission");
+      expect(cfg.allowedEntityTypes).not.toContain("profile");
+    }
   });
 });
 

@@ -25,12 +25,17 @@ import { clearToken } from "./oauth.js";
 
 /**
  * Canonical server-side tool names for governed config operations.
- * Keep the mapping here so a server-side rename is a one-line change.
+ *
+ * Drupal's mcp_server_tool_bridge exposes every Tool-API tool through the MCP
+ * protocol under the derivative name `tool_api.<mcp_tool_config id>`, so the
+ * governed config tools registered against mcp_sentinel's McpConfigGet/List/Set
+ * plugins surface as `tool_api.mcp_sentinel_config_*`. Keep the mapping here so
+ * a server-side rename is a one-line change.
  */
 export const SERVER_TOOLS = {
-  configGet:  "config_get",
-  configList: "config_list",
-  configSet:  "config_set",
+  configGet:  "tool_api.mcp_sentinel_config_get",
+  configList: "tool_api.mcp_sentinel_config_list",
+  configSet:  "tool_api.mcp_sentinel_config_set",
 };
 
 // Monotonic JSON-RPC request id. A simple counter keeps ids unique per process

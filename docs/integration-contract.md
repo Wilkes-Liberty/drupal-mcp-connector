@@ -102,10 +102,15 @@ A site opts in with a `serverTools` block:
 (`mcp_server_tool_bridge` / `mcp_sentinel`), resolved against `baseUrl` (an absolute
 URL is also accepted). The connector POSTs `{ "method": "tools/call", "params": {
 "name", "arguments" } }` authenticated with the **same OAuth bearer** as JSON:API
-(a 401 triggers one token-refresh retry). The server-side tool names are
-`config_get` / `config_list` / `config_set`. Config caps on the connector side
-(`allowConfigRead` / `allowConfigWrite`, set by preset — e.g. `config-editor`) are a
-complementary client-side gate; **the Drupal-side policy remains authoritative.**
+(a 401 triggers one token-refresh retry). `mcp_server_tool_bridge` exposes Tool-API
+tools under the derivative name `tool_api.<mcp_tool_config id>`, so the governed
+config tools (mcp_sentinel's `McpConfigGet`/`List`/`Set` plugins, registered as
+`mcp_sentinel_config_get` / `_list` / `_set`) surface to the connector as
+`tool_api.mcp_sentinel_config_get` / `_list` / `_set`. Those three tools must be
+registered and enabled as `mcp_tool_config` entities on the Drupal site — they are
+**not** exposed by default. Config caps on the connector side (`allowConfigRead` /
+`allowConfigWrite`, set by preset — e.g. `config-editor`) are a complementary
+client-side gate; **the Drupal-side policy remains authoritative.**
 
 ### 5b. Governance tiers (reference configuration)
 

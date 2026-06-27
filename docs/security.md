@@ -50,9 +50,27 @@ Everything allowed. **Local development only.** Never use on a site accessible t
 ```json
 { "preset": "content-editor" }
 ```
-Allows create/update on nodes, media, taxonomy. No deletes. No access to user entities. No GraphQL mutations.
+Allows create/update across the full content set — `node`, `media`, `taxonomy_term`,
+`paragraph`, `block_content`, `menu_link_content`, `redirect`, `path_alias`, `file`.
+No deletes. No GraphQL mutations. Secrets, governance config, and account data
+(`user`, `oauth2_token`, `key`, `consumer`, `encryption_profile`, `mcp_tool_config`,
+`mcp_policy_profile`) are always denied. No site-building config entities.
 
-Good for: content staging sites, editorial workflows.
+Good for: content staging sites, editorial workflows, full page-building.
+
+### `config-editor`
+```json
+{ "preset": "config-editor" }
+```
+Developer tier. Everything `content-editor` allows, plus **read/introspection** of
+site-building config entities (`node_type`, `paragraphs_type`, `block_content_type`,
+`media_type`, `field_config`, `field_storage_config`, `entity_form_display`,
+`entity_view_display`, `taxonomy_vocabulary`) and governed config read/write via
+`drupal_config_set`. Build/change the content model through the governed config bridge
+(or `drush config:import`), **not** `drupal_entity_create` — config entities are not
+written over JSON:API. Same secrets/governance/account denylist as `content-editor`.
+
+Good for: a developer-tier agent that builds the content model on a dev environment.
 
 ### `auditor`
 ```json
@@ -74,7 +92,13 @@ Good for: live production sites where any write access is unacceptable.
 ```json
 { "preset": "write-plane" }
 ```
-Governed write access for automated agents. Create and update are allowed on `node`, `taxonomy_term`, and `media`; deletes and GraphQL mutations are blocked, the `user` entity type is denied, and `pass`/`mail` are redacted in all responses.
+Governed write access for automated agents. Create and update are allowed on the
+content set — `node`, `taxonomy_term`, `media`, plus the structural content entities
+`paragraph`, `block_content`, `menu_link_content`, `redirect`, `path_alias`, `file`.
+Deletes and GraphQL mutations are blocked; secrets/governance/account types (`user`,
+`oauth2_token`, `key`, `consumer`, `encryption_profile`, `mcp_tool_config`,
+`mcp_policy_profile`) are denied; and `pass`/`mail` are redacted in all responses.
+Site-building config entities are not included (developer tier only).
 
 This preset mirrors the server-side governance profile so the connector and the server agree on what is permitted. The Drupal-side governance layer remains **authoritative** — this preset is defence in depth, not the policy of record.
 

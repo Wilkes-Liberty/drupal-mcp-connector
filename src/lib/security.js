@@ -13,11 +13,17 @@ import { parse } from "graphql";
  * ─── Quick presets ────────────────────────────────────────────────────────
  *
  *   "preset": "development"        Everything allowed. Default if no security key.
- *   "preset": "content-editor"     Create/edit nodes+media. No user mgmt, no deletes. Config read-only.
- *   "preset": "config-editor"      content-editor + governed config read/write (Developer tier).
+ *   "preset": "content-editor"     Create/edit content (nodes, media, terms, paragraphs, blocks,
+ *                                  menu links, redirects, aliases, files). No deletes. Config read-only.
+ *   "preset": "config-editor"      content-editor + site-building config READ + governed config
+ *                                  read/write (Developer tier). Model changes go via the config bridge.
  *   "preset": "auditor"            Read-only. All entity types. User fields redacted.
  *   "preset": "production-strict"  Read-only. Explicit allowlist required. Redacts PII.
- *   "preset": "write-plane"        Governed writes (no delete/mutations) on node, term, media.
+ *   "preset": "write-plane"        Governed writes (no delete/mutations) on the content set
+ *                                  (node, term, media + structural content entities).
+ *
+ * Secrets, the agent's own governance config, and account data (see SENSITIVE_DENY)
+ * are always denied on the content/developer tiers, regardless of the allowlist.
  *
  * Presets can be overridden by adding explicit keys alongside them.
  *
@@ -52,6 +58,57 @@ import { parse } from "graphql";
  */
 
 // ---------------------------------------------------------------------------
+// Shared entity-type groups
+// ---------------------------------------------------------------------------
+//
+// The connector allowlist is deliberately safe-by-default: the Drupal site
+// exposes secret-, governance-, and PII-bearing entity types over JSON:API
+// (oauth2_token, key, consumer, mcp_tool_config, profile, webform_submission,
+// …), so anything not explicitly listed stays denied. Widen these groups to
+// grant capability; never flip a content/developer tier to allowedEntityTypes:
+// null.
+
+// Content (fieldable) entities used to build and manage page content. All are
+// JSON:API-writable, so the standard entity tools create/update them directly.
+const CONTENT_STRUCTURAL = [
+  "paragraph",
+  "block_content",
+  "menu_link_content",
+  "redirect",
+  "path_alias",
+  "file",
+];
+
+// Content-model *config* entities. Allowlisted for READ / introspection only —
+// they are config entities, so building/changing them goes through the governed
+// config bridge (config_set → mcp_sentinel) or `drush config:import`, NOT
+// drupal_entity_create. Granted to the developer tier only.
+const SITE_BUILDER_CONFIG = [
+  "node_type",
+  "paragraphs_type",
+  "block_content_type",
+  "media_type",
+  "field_config",
+  "field_storage_config",
+  "entity_form_display",
+  "entity_view_display",
+  "taxonomy_vocabulary",
+];
+
+// Always-blocked: secrets, the agent's own governance config, and account data.
+// Belt-and-suspenders denylist — these stay blocked even if a future change
+// widens an allowlist. (deniedEntityTypes takes priority over allowedEntityTypes.)
+const SENSITIVE_DENY = [
+  "user",
+  "oauth2_token",
+  "key",
+  "consumer",
+  "encryption_profile",
+  "mcp_tool_config",
+  "mcp_policy_profile",
+];
+
+// ---------------------------------------------------------------------------
 // Preset definitions
 // ---------------------------------------------------------------------------
 
@@ -74,8 +131,10 @@ const PRESETS = {
     allowGraphqlMutations: false,
     allowConfigRead: true,            // config read-only
     allowConfigWrite: false,
-    allowedEntityTypes: ["node", "media", "file", "taxonomy_term", "menu_link_content"],
-    deniedEntityTypes: ["user"],
+    // Full content building: base content types + structural content entities
+    // (paragraphs, custom blocks, menu links, redirects, aliases, files).
+    allowedEntityTypes: ["node", "media", "taxonomy_term", ...CONTENT_STRUCTURAL],
+    deniedEntityTypes: [...SENSITIVE_DENY],
     entityRules: {
       node:          { allowedOperations: ["read", "create", "update"] },
       media:         { allowedOperations: ["read", "create", "update"] },
@@ -93,8 +152,11 @@ const PRESETS = {
     allowGraphqlMutations: false,
     allowConfigRead: true,
     allowConfigWrite: true,           // governed config writes via drupal_config_set
-    allowedEntityTypes: ["node", "media", "file", "taxonomy_term", "menu_link_content"],
-    deniedEntityTypes: ["user"],
+    // content-editor's content set PLUS site-building config entities, the
+    // latter for READ / introspection only — model changes go through the
+    // governed config bridge (drupal_config_set) / drush config:import.
+    allowedEntityTypes: ["node", "media", "taxonomy_term", ...CONTENT_STRUCTURAL, ...SITE_BUILDER_CONFIG],
+    deniedEntityTypes: [...SENSITIVE_DENY],
     entityRules: {
       node:          { allowedOperations: ["read", "create", "update"] },
       media:         { allowedOperations: ["read", "create", "update"] },
@@ -141,8 +203,10 @@ const PRESETS = {
     allowGraphqlMutations: false,     // writes go through the JSON:API plane
     allowConfigRead: true,            // config read-only
     allowConfigWrite: false,
-    allowedEntityTypes: ["node", "taxonomy_term", "media"],
-    deniedEntityTypes: ["user"],
+    // Full content building on the content tier: base content + structural
+    // content entities. No site-building config entities (developer tier only).
+    allowedEntityTypes: ["node", "taxonomy_term", "media", ...CONTENT_STRUCTURAL],
+    deniedEntityTypes: [...SENSITIVE_DENY],
     entityRules: {},
     globalRedactedFields: ["pass", "mail"],
   },
