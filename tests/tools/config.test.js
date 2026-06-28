@@ -47,7 +47,8 @@ describe("config tools — governed via server-tool bridge", () => {
   it("config_set on the Developer tier reaches the server tool", async () => {
     callServerTool.mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
     await handlers.drupal_config_set({ site: "dev", name: "system.site", value: { name: "X" } });
-    expect(callServerTool).toHaveBeenCalledWith(SITES.dev, "config_set", { name: "system.site", value: { name: "X" } });
+    // The public `value` map is forwarded to the server tool under the `data` key.
+    expect(callServerTool).toHaveBeenCalledWith(SITES.dev, "config_set", { name: "system.site", data: { name: "X" } });
   });
 
   it("config_set is denied on the Content tier (configWrite=false)", async () => {

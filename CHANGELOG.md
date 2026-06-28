@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-06-27
+
+### Fixed
+- `drupal_config_set` now forwards the configuration map under the `data` key the
+  server-side tool requires, instead of `value`. The governed tool
+  (`tool_api.mcp_sentinel_config_set`) declares its inputs as `name` plus `data` (a
+  map of top-level keys to new values, applied as a partial update). Previously the
+  connector sent `{ name, value }`, so every `config_set` was rejected with
+  `-32602 Invalid parameters … Missing required properties: \`data\``. The public
+  tool surface is unchanged — callers still pass `value` (a map); it is translated to
+  `data` at the call site. `config_get` / `config_list` were unaffected.
+
 ## [1.3.1] - 2026-06-27
 
 ### Fixed

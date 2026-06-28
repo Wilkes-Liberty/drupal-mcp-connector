@@ -57,6 +57,11 @@ async function configList({ site: siteName, prefix }) {
 /**
  * Set a configuration value. Governed and audited server-side; the connector
  * additionally enforces the config-write cap before dispatching.
+ *
+ * The public `value` is a map of top-level config keys to their new values; the
+ * server-side tool (mcp_sentinel McpConfigSetTool) takes that map under the key
+ * `data` and applies a partial `$editable->set($key, $value)` per entry, so we
+ * translate `value` → `data` at the call site.
  * @param {object} args - { site?, name, value }.
  * @returns {Promise<*>} The server tool's result.
  * @throws {SecurityError} if the site is read-only or config writes are disabled.
@@ -67,7 +72,7 @@ async function configSet({ site: siteName, name, value }) {
   assertConfigScope(site, `config:set ${name}`);
   assertNotReadOnly(sec, `config:set ${name}`);
   assertConfigWriteAllowed(sec);
-  return callServerTool(site, SERVER_TOOLS.configSet, { name, value });
+  return callServerTool(site, SERVER_TOOLS.configSet, { name, data: value });
 }
 
 // ---------------------------------------------------------------------------
@@ -163,7 +168,7 @@ export const definitions = [
       properties: {
         site:  { type: "string" },
         name:  { type: "string" },
-        value: { description: "The configuration value to set (object, array, or scalar)." },
+        value: { type: "object", description: "A map of top-level config keys to their new values (e.g. { \"slogan\": \"Information Technology\" }). Other keys in the object are preserved server-side." },
       },
     },
   },
