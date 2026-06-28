@@ -166,7 +166,7 @@ The connector works out of the box against Drupal core's JSON:API and a GraphQL 
 - Role-bound policy profiles (operation gates, entity allow/deny, field redaction)
 - Tamper-evident audit log of every governed MCP operation, attributed to the acting account
 - Content locks that prevent edits to content a human is actively editing
-- OAuth scope enforcement (`mcp_read` / `mcp_write`) per tool
+- OAuth scope enforcement (`mcp_read` / `mcp_write` / `mcp_config`) per tool
 - HMAC-signed webhooks on MCP-driven entity changes
 
 ```bash
