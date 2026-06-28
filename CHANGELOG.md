@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-06-27
+
+### Fixed
+- The server-tool bridge client now performs the MCP Streamable-HTTP session handshake
+  before calling governed config tools. It POSTs `initialize`, reads the `Mcp-Session-Id`
+  response header, sends `notifications/initialized`, then issues `tools/call` carrying that
+  session id — caching the session per site and re-initialising transparently on server-side
+  expiry. Previously it POSTed a bare `tools/call` with no session, which Drupal's
+  session-mandatory `mcp_server` rejected with `-32600` ("A valid session id is REQUIRED for
+  non-initialize requests"), so `drupal_config_get` / `_list` / `_set` always failed. Responses
+  are now parsed for both `application/json` and `text/event-stream` (SSE) transports, and the
+  request advertises `MCP-Protocol-Version: 2025-06-18`. The existing 401 → token-refresh retry
+  is preserved and layered with a single session re-init/replay.
+
 ## [1.3.0] - 2026-06-27
 
 ### Fixed

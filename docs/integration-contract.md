@@ -100,9 +100,15 @@ A site opts in with a `serverTools` block:
 
 `url` is the JSON-RPC 2.0 endpoint of Drupal's MCP tool bridge
 (`mcp_server_tool_bridge` / `mcp_sentinel`), resolved against `baseUrl` (an absolute
-URL is also accepted). The connector POSTs `{ "method": "tools/call", "params": {
-"name", "arguments" } }` authenticated with the **same OAuth bearer** as JSON:API
-(a 401 triggers one token-refresh retry). `mcp_server_tool_bridge` exposes Tool-API
+URL is also accepted). `/mcp` is the canonical path: `mcp_server` declares the route at
+`/_mcp` but a route subscriber rewrites it to the `mcp_server.base_path` container
+parameter (`/mcp`). Because `mcp_server` is session-mandatory, the connector performs
+the MCP Streamable-HTTP session handshake per site — `initialize` (reading the
+`Mcp-Session-Id` response header) → `notifications/initialized` → `tools/call` carrying
+that session id — caching the session and transparently re-initialising it on server-side
+expiry. JSON and `text/event-stream` (SSE) responses are both handled. The `tools/call`
+payload is `{ "method": "tools/call", "params": { "name", "arguments" } }`, authenticated
+with the **same OAuth bearer** as JSON:API (a 401 triggers one token-refresh retry). `mcp_server_tool_bridge` exposes Tool-API
 tools under the derivative name `tool_api.<mcp_tool_config id>`, so the governed
 config tools (mcp_sentinel's `McpConfigGet`/`List`/`Set` plugins, registered as
 `mcp_sentinel_config_get` / `_list` / `_set`) surface to the connector as
