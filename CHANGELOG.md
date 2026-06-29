@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Audit command suite — 22 new read-only audit tools across four groups**, expanding
+  the connector from content reporting into link/404 integrity and configuration
+  posture. All follow the existing `drupal_report_*` / `drupal_audit_*` convention
+  (auto-classified read-only), degrade with a `gatedReport`/`gated` payload when a
+  required source is absent, and flag `approximate`/`truncated` when sampling-bounded.
+  - **Links & 404 integrity** (`reports-links.js`): `drupal_report_404_log`,
+    `drupal_report_redirect_health`, `drupal_report_broken_links`,
+    `drupal_report_alias_coverage`, `drupal_report_menu_integrity`,
+    `drupal_report_broken_embeds`.
+  - **Config & site-health** (`reports-config.js`): `drupal_report_config_drift`,
+    `drupal_audit_config_best_practices`, `drupal_report_module_audit`,
+    `drupal_report_permission_audit`, `drupal_report_status_report`,
+    `drupal_report_text_format_audit`, `drupal_report_cache_config`.
+  - **Content quality & governance** (`reports-content.js`):
+    `drupal_report_duplicate_content`, `drupal_report_workflow_bottlenecks`,
+    `drupal_report_translation_coverage`, `drupal_report_scheduled_content`,
+    `drupal_report_readability`, `drupal_report_orphan_pages`,
+    `drupal_report_pii_exposure`, `drupal_report_seo_meta_coverage`.
+  - **Composite** (`audit-composite.js`): `drupal_audit_site_health` — a scored
+    dashboard that runs a configurable battery of the above and rolls them into one
+    letter grade, with each section degrading independently.
+- **`drupal-full-audit` MCP prompt** — walks a client through running the composite
+  audit and turning the dashboard into a prioritized action plan.
+- **Opt-in live link checking.** `drupal_report_broken_links` performs no network
+  egress by default; with `checkLive: true` it verifies links via a bounded,
+  SSRF-guarded checker (`src/lib/link-checker.js`) that refuses
+  loopback/private/link-local/metadata addresses, requires a host allowlist for
+  external hosts, and caps concurrency, timeout, and link count. Configurable per site
+  via an optional `audit` block (`linkCheckAllowedHosts`, `linkCheckConcurrency`,
+  `linkCheckTimeoutMs`, `linkCheckMaxLinks`).
+- **Self-sufficient privileged audits.** Log/config/module/permission/requirements
+  audits read their data through the connector's own **drush bridge** (`watchdog:show`,
+  `config:status`/`config:get`, `pm:list`/`pm:security`, `role:list`,
+  `core:requirements`, and a read-only `sql:query` to enumerate `filter.format.*`), so
+  they work against stock Drupal with **no companion module required**. The
+  config-inspection audits additionally prefer the existing governed config server-tool
+  when a site has `serverTools` configured. Each returns a `gated`/`unavailable` payload
+  (never throws) when no source is configured.
+
+### Changed
+- `sshDrush` and `parseDrush` are now exported from `src/tools/drush.js`, and a
+  `toolResultData` helper is exported from `src/lib/server-tools.js`, so the audit tool
+  groups can reuse the hardened drush bridge and the existing governed config transport.
+
+### Security
+- The drush bridge no longer logs secret-bearing flag values (`--password`/`--token`/
+  `--secret`/`--api-key`) in clear text — they are redacted to `***` in the operational
+  stderr log line (`redactSecretArgs`). Clears a `js/clear-text-logging` finding.
+
 ## [1.5.1] - 2026-06-29
 
 ### Fixed

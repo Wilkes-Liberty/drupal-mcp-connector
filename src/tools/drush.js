@@ -93,8 +93,12 @@ function resolveKeyPath(rawPath) {
  *
  * Security: args are individually shell-escaped via sanitizeSshArg().
  * No raw user input is ever interpolated directly into the command string.
+ *
+ * Exported so the audit tool groups can reuse the hardened bridge for their
+ * drush fallback paths (e.g. config:status, pm:list, watchdog:show) without
+ * re-implementing SSH handling.
  */
-function sshDrush(site, drushArgs, timeoutMs = 30000) {
+export function sshDrush(site, drushArgs, timeoutMs = 30000) {
   const sshCfg  = getDrushConfig(site);
   assertCommandAllowed(sshCfg, drushArgs[0]);
   const keyPath = resolveKeyPath(sshCfg.keyPath);
@@ -110,7 +114,7 @@ function sshDrush(site, drushArgs, timeoutMs = 30000) {
   const drushBin    = `${drupalRoot}/vendor/bin/drush`;
   const command     = `cd ${sanitizeSshArg(drupalRoot)} && ${drushBin} ${escapedArgs} --yes`;
 
-  console.error(`[drush-bridge] ${site._name}: drush ${drushArgs.join(" ")}`);
+  console.error(`[drush-bridge] ${site._name}: drush ${redactSecretArgs(drushArgs)}`);
 
   return new Promise((resolve, reject) => {
     const conn  = new Client();
@@ -166,9 +170,27 @@ function sshDrush(site, drushArgs, timeoutMs = 30000) {
 }
 
 /**
- * Parse Drush JSON output; fall back to raw string if not JSON.
+ * Redact secret-bearing flag values from a Drush argument list for safe logging.
+ * `user:create` passes `--password=…`, and other admin flows may pass tokens/keys;
+ * the operational log must not echo them in clear text.
+ * @param {string[]} drushArgs The Drush subcommand + flags.
+ * @returns {string} A space-joined, secret-redacted rendering for the log line.
  */
-function parseDrush(raw) {
+export function redactSecretArgs(drushArgs) {
+  const SECRET_FLAG = /^(--(?:password|pass|token|secret|client[-_]?secret|api[-_]?key|key)=)(.*)$/i;
+  return drushArgs
+    .map((arg) => {
+      const m = String(arg).match(SECRET_FLAG);
+      return m ? `${m[1]}***` : arg;
+    })
+    .join(" ");
+}
+
+/**
+ * Parse Drush JSON output; fall back to raw string if not JSON.
+ * Exported for reuse by the audit tool groups' drush fallback paths.
+ */
+export function parseDrush(raw) {
   if (!raw) return null;
   try   { return JSON.parse(raw); }
   catch { return raw; }

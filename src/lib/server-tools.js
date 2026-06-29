@@ -310,6 +310,23 @@ export async function callServerTool(site, toolName, args = {}) {
 }
 
 /**
+ * Extract the structured data a server tool returned, for callers (the audit
+ * tools) that need to inspect the payload rather than relay it. Prefers the MCP
+ * `structuredContent` field; otherwise parses the joined text content as JSON,
+ * falling back to the raw text when it isn't JSON.
+ * @param {object} result MCP tools/call result (as returned by callServerTool).
+ * @returns {*} Parsed structured data, raw text, or null when empty.
+ */
+export function toolResultData(result) {
+  if (!result) return null;
+  if (result.structuredContent !== undefined) return result.structuredContent;
+  const text = extractTextContent(result);
+  if (!text) return null;
+  try { return JSON.parse(text); }
+  catch { return text; }
+}
+
+/**
  * Pull the concatenated text from an MCP tool result's content array.
  * @param {object} result MCP tools/call result.
  * @returns {string} Joined text content (empty string if none).
