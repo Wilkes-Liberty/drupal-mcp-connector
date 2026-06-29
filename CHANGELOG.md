@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-29
+
 ### Added
 - **`drupal_update_paragraph`** — update an existing Paragraph entity's field values
   in place (partial JSON:API PATCH) by bundle + UUID, so component / key-capability
