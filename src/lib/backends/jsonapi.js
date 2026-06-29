@@ -254,6 +254,29 @@ export class JsonApiBackend extends Backend {
   }
 
   /**
+   * Read the raw `path` field (alias + pid + langcode) and internal id of an
+   * entity. The canonical entity only surfaces `path.alias` as `url`, but a
+   * correct in-place alias *update* must round-trip the existing alias's `pid`
+   * (Drupal `PathItem::postSave` creates a duplicate alias when `pid` is absent)
+   * — so this method exposes it. Returns nulls for entities/backends without a
+   * path field. See DEV-116.
+   * @param {{entityType: string, bundle: string, id: string}} ref
+   * @returns {Promise<{alias: ?string, pid: ?(number|string), langcode: ?string, drupalId: ?(number|string)}>}
+   */
+  async getPathInfo({ entityType, bundle, id }) {
+    validateUuid(id);
+    const data = await drupalFetch(this.site, `${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`);
+    const attrs = data?.data?.attributes ?? {};
+    const path = attrs.path ?? null;
+    return {
+      alias: path?.alias ?? null,
+      pid: path?.pid ?? null,
+      langcode: path?.langcode ?? attrs.langcode ?? null,
+      drupalId: attrs.drupal_internal__nid ?? attrs.drupal_internal__id ?? null,
+    };
+  }
+
+  /**
    * Issue a JSON:API write, transparently retrying once without the `status`
    * attribute if the target bundle is under a content_moderation workflow.
    *
