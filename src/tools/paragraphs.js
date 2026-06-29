@@ -85,6 +85,34 @@ async function createParagraph({ site: siteName, paragraphType, attributes = {} 
 }
 
 /**
+ * Update an existing paragraph's field values. Mirrors createParagraph but
+ * targets an existing paragraph by UUID via a partial JSON:API PATCH, so only
+ * the supplied attributes are changed. The host entity's reference to the
+ * paragraph is unaffected (same UUID), so updating a paragraph in place is the
+ * way to maintain component / key-capability paragraphs without re-embedding.
+ *
+ * @param {object} args - { site?, paragraphType, id, attributes? }.
+ *   `attributes` are the paragraph field values to change, keyed by Drupal
+ *   machine name (e.g. { field_body: { value, format } }).
+ * @returns {Promise<{paragraph: object, ref: {id: string, type: string},
+ *   relationshipData: {type: string, id: string}, note: string}>}
+ *   The updated paragraph plus the (unchanged) embedding ref.
+ * @throws {Error} If id is missing.
+ * @throws {SecurityError} If updating paragraphs of this bundle is not permitted.
+ */
+async function updateParagraph({ site: siteName, paragraphType, id, attributes = {} }) {
+  if (!id) throw new Error("A paragraph 'id' (UUID) is required to update an existing paragraph.");
+  const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  assertWriteAllowed(sec, "update", "paragraph", paragraphType);
+  const backend = await resolveBackend(site);
+  const paragraph = await backend.updateEntity({ entityType: "paragraph", bundle: paragraphType, id, attributes });
+  const bundle = paragraph.bundle || paragraphType;
+  const ref = embedRef(bundle, paragraph.id);
+  return { paragraph, ref, relationshipData: ref, note: EMBED_NOTE };
+}
+
+/**
  * Fetch a single paragraph by bundle + UUID, redacted per the site policy, and
  * annotate it with the embedding ref.
  *
@@ -123,6 +151,20 @@ export const definitions = [
     },
   },
   {
+    name: "drupal_update_paragraph",
+    description:
+      "Update an existing Paragraph entity's field values by paragraph type (bundle) and UUID. Only the attributes you pass are changed (partial update); the host entity's reference to this paragraph is unchanged (same UUID), so this maintains a component paragraph in place without re-embedding. Use drupal_get_entity_schema (entityType 'paragraph', the bundle) to discover fields. Governed by the site security policy.",
+    inputSchema: {
+      type: "object", required: ["paragraphType", "id"],
+      properties: {
+        site:          { type: "string", description: "Named site (omit for default)" },
+        paragraphType: { type: "string", description: "Paragraph type / bundle machine name, e.g. 'text', 'image', 'cta'" },
+        id:            { type: "string", description: "Paragraph UUID" },
+        attributes:    { type: "object", description: "Paragraph field values to change, keyed by Drupal machine name, e.g. { field_body: { value: '<p>..</p>', format: 'full_html' } }" },
+      },
+    },
+  },
+  {
     name: "drupal_get_paragraph",
     description:
       "Fetch a single Paragraph entity by paragraph type (bundle) and UUID. Returns the redacted paragraph plus a `ref` ({ type: 'paragraph--<bundle>', id }) you can use to embed it in a host entity's paragraph / ERR field. Note: paragraphs are referenced (by target_id + target_revision_id in the entity API, or by UUID over JSON:API) from a host field rather than queried standalone in production. Governed by the site security policy.",
@@ -139,5 +181,6 @@ export const definitions = [
 
 export const handlers = {
   drupal_create_paragraph: createParagraph,
+  drupal_update_paragraph: updateParagraph,
   drupal_get_paragraph:    getParagraph,
 };

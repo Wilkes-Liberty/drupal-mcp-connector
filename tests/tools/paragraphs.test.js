@@ -78,6 +78,36 @@ describe("paragraphs tools", () => {
     expect(arg.attributes).toEqual({});
   });
 
+  it("exposes drupal_update_paragraph", () => {
+    expect(definitions.map((d) => d.name)).toContain("drupal_update_paragraph");
+  });
+
+  it("update_paragraph patches an existing paragraph's field values", async () => {
+    backend.updateEntity.mockResolvedValue(canonicalParagraph({ fields: { field_body: { value: "Updated", format: "full_html" } } }));
+    const out = await handlers.drupal_update_paragraph({
+      paragraphType: "text", id: "p-uuid-1",
+      attributes: { field_body: { value: "Updated", format: "full_html" } },
+    });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg).toMatchObject({ entityType: "paragraph", bundle: "text", id: "p-uuid-1" });
+    expect(arg.attributes.field_body).toEqual({ value: "Updated", format: "full_html" });
+    expect(out.ref).toEqual({ type: "paragraph--text", id: "p-uuid-1" });
+    expect(out.relationshipData).toEqual({ type: "paragraph--text", id: "p-uuid-1" });
+  });
+
+  it("update_paragraph requires an id", async () => {
+    await expect(handlers.drupal_update_paragraph({ paragraphType: "text", attributes: {} }))
+      .rejects.toThrow(/id/i);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("update_paragraph is blocked on a read-only policy", async () => {
+    setSecurity({ readOnly: true });
+    await expect(handlers.drupal_update_paragraph({ paragraphType: "text", id: "p-uuid-1", attributes: { field_body: "x" } }))
+      .rejects.toThrow();
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
   it("get_paragraph fetches a paragraph by bundle + UUID", async () => {
     backend.getEntity.mockResolvedValue(canonicalParagraph());
     const out = await handlers.drupal_get_paragraph({ paragraphType: "text", id: "p-uuid-1" });
