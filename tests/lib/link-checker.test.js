@@ -32,8 +32,9 @@ describe("link-checker", () => {
         { internalHost: "example.com", fetchImpl }
       );
       expect(fetchImpl).not.toHaveBeenCalled();
-      expect(results.find((r) => r.url.includes("127.0.0.1")).reason).toMatch(/private|loopback/);
-      expect(results.find((r) => r.url.includes("external.org")).reason).toMatch(/allowlist/);
+      const byUrl = Object.fromEntries(results.map((r) => [r.url, r]));
+      expect(byUrl["http://127.0.0.1/a"].reason).toMatch(/private|loopback/);
+      expect(byUrl["https://external.org/b"].reason).toMatch(/allowlist/);
     });
 
     it("checks allowlisted hosts and reports ok for 2xx/3xx", async () => {
