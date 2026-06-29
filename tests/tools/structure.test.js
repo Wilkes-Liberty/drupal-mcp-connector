@@ -48,6 +48,7 @@ describe("structure tools", () => {
       "drupal_create_menu_link",
       "drupal_list_blocks",
       "drupal_list_menu_links",
+      "drupal_update_menu_link",
     ]);
   });
 
@@ -94,6 +95,61 @@ describe("structure tools", () => {
     await handlers.drupal_create_menu_link({ title: "Home", link: "internal:/", menu: "main" });
     const arg = backend.createEntity.mock.calls[0][0];
     expect(arg.attributes.weight).toBe(0);
+  });
+
+  it("create_menu_link is enabled by default and accepts parent", async () => {
+    backend.createEntity.mockResolvedValue(canonicalMenuLink());
+    await handlers.drupal_create_menu_link({ title: "Child", link: "entity:node/5", menu: "main", parent: "menu_link_content:abc" });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes.enabled).toBe(true);
+    expect(arg.attributes.parent).toBe("menu_link_content:abc");
+    expect(arg.attributes.link).toEqual({ uri: "entity:node/5" });
+  });
+
+  it("create_menu_link honors an explicit enabled:false and omits parent when not given", async () => {
+    backend.createEntity.mockResolvedValue(canonicalMenuLink());
+    await handlers.drupal_create_menu_link({ title: "Hidden", link: "internal:/x", menu: "main", enabled: false });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes.enabled).toBe(false);
+    expect(arg.attributes).not.toHaveProperty("parent");
+  });
+
+  it("create_menu_link retries once on the 422 'path inaccessible' race", async () => {
+    const err = new Error("Drupal 422 on POST /jsonapi/menu_link_content/menu_link_content: The path '/sentinel' is inaccessible.");
+    backend.createEntity.mockRejectedValueOnce(err).mockResolvedValueOnce(canonicalMenuLink());
+    const out = await handlers.drupal_create_menu_link({ title: "Sentinel", link: "internal:/sentinel", menu: "main" });
+    expect(backend.createEntity).toHaveBeenCalledTimes(2);
+    expect(out.id).toBe("ml1");
+  });
+
+  it("create_menu_link does not retry on unrelated errors", async () => {
+    backend.createEntity.mockRejectedValue(new Error("Drupal 403 on POST /jsonapi/...: Forbidden"));
+    await expect(handlers.drupal_create_menu_link({ title: "X", link: "internal:/a", menu: "main" })).rejects.toThrow(/403/);
+    expect(backend.createEntity).toHaveBeenCalledTimes(1);
+  });
+
+  it("update_menu_link preserves the current enabled state on an unrelated edit", async () => {
+    backend.getEntity.mockResolvedValue(canonicalMenuLink({ fields: { enabled: true, link: { uri: "internal:/" }, menu_name: "main", weight: 0 } }));
+    backend.updateEntity.mockResolvedValue(canonicalMenuLink());
+    await handlers.drupal_update_menu_link({ id: "ml1", title: "Renamed" });
+    expect(backend.getEntity).toHaveBeenCalledWith({ entityType: "menu_link_content", bundle: "menu_link_content", id: "ml1" });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes.title).toBe("Renamed");
+    expect(arg.attributes.enabled).toBe(true);
+  });
+
+  it("update_menu_link applies an explicit enabled + parent without a read-back", async () => {
+    backend.updateEntity.mockResolvedValue(canonicalMenuLink());
+    await handlers.drupal_update_menu_link({ id: "ml1", enabled: true, parent: "menu_link_content:p" });
+    expect(backend.getEntity).not.toHaveBeenCalled();
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes.enabled).toBe(true);
+    expect(arg.attributes.parent).toBe("menu_link_content:p");
+  });
+
+  it("update_menu_link requires id", async () => {
+    await expect(handlers.drupal_update_menu_link({ title: "X" })).rejects.toThrow(/id/i);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
   // --- blocks ---------------------------------------------------------------
