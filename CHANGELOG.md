@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-29
+
 ### Added
 - **Audit command suite — 22 new read-only audit tools across four groups**, expanding
   the connector from content reporting into link/404 integrity and configuration
