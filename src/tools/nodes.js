@@ -9,7 +9,118 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { resolveSecurityConfig, redactCanonicalEntity } from "../lib/security.js";
+import { resolveSecurityConfig, redactCanonicalEntity, assertWriteAllowed } from "../lib/security.js";
+import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
+
+/** Fallback language for an alias when the node exposes none. */
+const DEFAULT_ALIAS_LANGCODE = "en";
+
+/**
+ * Normalize a URL-alias path for storage/comparison: trim, ensure a single
+ * leading slash, drop a trailing slash (except root).
+ * @param {*} value A raw alias.
+ * @returns {?string} The normalized alias, or null when empty.
+ */
+function normalizeAlias(value) {
+  if (value === undefined || value === null) return null;
+  let s = String(value).trim();
+  if (!s) return null;
+  if (!s.startsWith("/")) s = `/${s}`;
+  if (s.length > 1) s = s.replace(/\/+$/, "");
+  return s;
+}
+
+/**
+ * Resolve the `path` attribute to send on an alias-aware node write so the alias
+ * actually persists, and decide whether a rename redirect is needed.
+ *
+ * The bug (DEV-116): JSON:API deserializes `{ alias, pathauto }` onto the node's
+ * `path` field, dropping the existing alias's `pid`; Drupal's `PathItem::postSave`
+ * then *creates a duplicate* `path_alias` (the older one stays canonical) instead
+ * of updating in place. The fix is to round-trip the existing `pid` so the update
+ * is in place. DEV-114's path-omitted "preserve" had the same defect (no `pid`),
+ * so it is fixed here too.
+ *
+ * @param {object} args - { backend, type, id, providedPath, isCreate }.
+ * @returns {Promise<{pathAttr: (object|undefined), redirect: ?object}>}
+ *   `pathAttr` is the `path` value to send (or undefined to omit, letting pathauto
+ *   run on create); `redirect` is `{ from, to, nid }` when a rename redirect is due.
+ */
+async function resolvePathWrite({ backend, type, id, providedPath, isCreate }) {
+  const info = id
+    ? await backend.getPathInfo({ entityType: "node", bundle: type, id }).catch(() => ({}))
+    : {};
+  const oldAlias = normalizeAlias(info.alias);
+  const langcode = info.langcode || DEFAULT_ALIAS_LANGCODE;
+
+  if (providedPath && typeof providedPath === "object") {
+    // Explicit alias set/replace → manual alias, round-trip the existing pid so
+    // Drupal updates in place rather than creating a duplicate.
+    if (providedPath.alias) {
+      const newAlias = normalizeAlias(providedPath.alias);
+      const pathAttr = { alias: newAlias, pathauto: false, langcode };
+      if (info.pid !== undefined && info.pid !== null) pathAttr.pid = info.pid;
+      const redirect = !isCreate && oldAlias && oldAlias !== newAlias
+        ? { from: oldAlias, to: newAlias, nid: info.drupalId }
+        : null;
+      return { pathAttr, redirect };
+    }
+    // Caller passed `path` without an alias (e.g. re-enabling pathauto) — respect it as-is.
+    return { pathAttr: providedPath, redirect: null };
+  }
+
+  // No explicit path on update → preserve the current alias *with its pid* so the
+  // save can neither revert nor duplicate it.
+  if (!isCreate && oldAlias) {
+    const pathAttr = { alias: oldAlias, pathauto: false, langcode };
+    if (info.pid !== undefined && info.pid !== null) pathAttr.pid = info.pid;
+    return { pathAttr, redirect: null };
+  }
+
+  // Create without an explicit path → omit it so pathauto generates the alias.
+  return { pathAttr: undefined, redirect: null };
+}
+
+/**
+ * Best-effort create a 301 redirect from a node's old alias to the node after a
+ * rename, so the previous URL keeps resolving. Governed like any redirect write;
+ * never fails the node update (failures are reported, not thrown). Idempotent:
+ * skips when a redirect already exists for the source.
+ *
+ * @param {object} backend Resolved backend.
+ * @param {object} sec Resolved security config.
+ * @param {{from: string, to: string, nid: ?(number|string)}} redirect
+ * @returns {Promise<object>} Outcome `{ created, ... }` for the response.
+ */
+async function createRenameRedirect(backend, sec, redirect) {
+  try {
+    assertWriteAllowed(sec, "create", REDIRECT_ENTITY_TYPE, REDIRECT_ENTITY_TYPE);
+  } catch {
+    return { created: false, reason: "redirect creation not permitted by policy", source: redirect.from };
+  }
+  // Prefer an alias-independent target so a future rename can't break the redirect.
+  const target = redirect.nid !== undefined && redirect.nid !== null
+    ? `entity:node/${redirect.nid}`
+    : redirect.to;
+  const sourceStored = redirect.from.replace(/^\/+/, "");
+  try {
+    const existing = await backend.listEntities({
+      entityType: REDIRECT_ENTITY_TYPE, bundle: REDIRECT_ENTITY_TYPE,
+      filters: [{ field: "redirect_source.path", op: "eq", value: sourceStored }],
+      page: { limit: 1 },
+    }).catch(() => null);
+    if (existing?.entities?.length) {
+      return { created: false, reason: "redirect already exists", source: redirect.from };
+    }
+    await backend.createEntity({
+      entityType: REDIRECT_ENTITY_TYPE, bundle: REDIRECT_ENTITY_TYPE,
+      attributes: buildRedirectAttributes(redirect.from, target, 301),
+    });
+    return { created: true, source: redirect.from, target };
+  } catch (err) {
+    return { created: false, reason: err?.message || String(err), source: redirect.from };
+  }
+}
 
 /**
  * Build a Drupal body field descriptor from plain HTML + optional summary.
@@ -119,7 +230,16 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
   if (bodyAttr) attributes.body = bodyAttr;
   if (dryRun) return { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes };
   const backend = await resolveBackend(site);
-  return backend.createEntity({ entityType: "node", bundle: type, attributes });
+  // Alias handling: an explicit `path.alias` is set as a manual alias; otherwise
+  // `path` is omitted so pathauto generates the alias (DEV-116).
+  const { pathAttr } = await resolvePathWrite({ backend, type, id: null, providedPath: attributes.path, isCreate: true });
+  if (pathAttr === undefined) delete attributes.path;
+  else attributes.path = pathAttr;
+  const created = await backend.createEntity({ entityType: "node", bundle: type, attributes });
+  // Honest response: re-read so the persisted alias (explicit or pathauto-generated)
+  // is reflected rather than the pre-alias write response.
+  const fresh = await backend.getEntity({ entityType: "node", bundle: type, id: created.id }).catch(() => null);
+  return fresh ?? created;
 }
 
 /**
@@ -149,13 +269,21 @@ async function updateNode({ site: siteName, type, id, title, body, summary, stat
   if (bodyAttr) attributes.body = bodyAttr;
   if (dryRun) return { dryRun: true, operation: "update", entityType: "node", bundle: type, id, attributes };
   const backend = await resolveBackend(site);
-  // Preserve the existing URL alias when the caller didn't set `path`: read the
-  // current alias and re-pin it (pathauto off) so the save can't revert it.
-  if (attributes.path === undefined) {
-    const current = await backend.getEntity({ entityType: "node", bundle: type, id });
-    if (current?.url) attributes.path = { alias: current.url, pathauto: 0 };
-  }
-  return backend.updateEntity({ entityType: "node", bundle: type, id, attributes });
+  const sec = resolveSecurityConfig(site);
+  // Alias handling (DEV-116): an explicit `path.alias` is set in place by
+  // round-tripping the existing alias's pid (no duplicate); a path-less update
+  // re-pins the current alias *with its pid* so the save can't revert/duplicate
+  // it. A rename (alias changed) also gets a 301 redirect from the old path.
+  const { pathAttr, redirect } = await resolvePathWrite({ backend, type, id, providedPath: attributes.path, isCreate: false });
+  if (pathAttr === undefined) delete attributes.path;
+  else attributes.path = pathAttr;
+  await backend.updateEntity({ entityType: "node", bundle: type, id, attributes });
+  const redirectResult = redirect ? await createRenameRedirect(backend, sec, redirect) : null;
+  // Honest response: re-read persisted state so the returned `url` is the alias
+  // that actually resolves, never the just-sent value.
+  const fresh = await backend.getEntity({ entityType: "node", bundle: type, id }).catch(() => null);
+  if (fresh && redirectResult) return { ...fresh, _redirect: redirectResult };
+  return fresh ?? { id };
 }
 
 /**

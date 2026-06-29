@@ -83,6 +83,32 @@ function assertStatusCode(code) {
   return code;
 }
 
+/** Entity type id for redirects, exported so side-effect callers can reuse it. */
+export const REDIRECT_ENTITY_TYPE = REDIRECT_TYPE;
+
+/**
+ * Build the JSON:API attribute map for a `redirect` entity from a plain
+ * source/target, applying the leading-slash and link-URI normalization that
+ * keeps a created redirect live. Exported so other tools (e.g. the node
+ * rename-redirect side-effect in nodes.js) create redirects identically.
+ *
+ * @param {string} source Old path (leading slash optional; stripped).
+ * @param {string} target Destination path / `entity:node/ID` / absolute URL.
+ * @param {number} [statusCode] HTTP redirect code (default 301).
+ * @param {string} [language] Redirect language (default 'und').
+ * @returns {object} The redirect attribute map for backend.createEntity.
+ * @throws {Error} If the status code is unsupported.
+ */
+export function buildRedirectAttributes(source, target, statusCode = 301, language = "und") {
+  assertStatusCode(statusCode);
+  return {
+    redirect_source: { path: normalizeSource(source), query: null },
+    redirect_redirect: { uri: normalizeTargetUri(target) },
+    status_code: statusCode,
+    language,
+  };
+}
+
 /**
  * Create an active URL redirect.
  *
@@ -98,18 +124,14 @@ function assertStatusCode(code) {
 async function createRedirect({ site: siteName, source, target, statusCode = 301, language = "und" }) {
   if (!source) throw new Error("A redirect 'source' path is required (e.g. '/old-path').");
   if (!target) throw new Error("A redirect 'target' is required (a path, 'entity:node/ID', or an absolute URL).");
-  assertStatusCode(statusCode);
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", REDIRECT_TYPE, REDIRECT_TYPE);
   const backend = await resolveBackend(site);
-  const attributes = {
-    redirect_source: { path: normalizeSource(source), query: null },
-    redirect_redirect: { uri: normalizeTargetUri(target) },
-    status_code: statusCode,
-    language,
-  };
-  return backend.createEntity({ entityType: REDIRECT_TYPE, bundle: REDIRECT_TYPE, attributes });
+  return backend.createEntity({
+    entityType: REDIRECT_TYPE, bundle: REDIRECT_TYPE,
+    attributes: buildRedirectAttributes(source, target, statusCode, language),
+  });
 }
 
 /**

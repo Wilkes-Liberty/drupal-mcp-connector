@@ -57,6 +57,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--secret`/`--api-key`) in clear text — they are redacted to `***` in the operational
   stderr log line (`redactSecretArgs`). Clears a `js/clear-text-logging` finding.
 
+## [1.5.1] - 2026-06-29
+
+### Fixed
+- **Node URL aliases set via the connector now actually persist (DEV-116).** Setting an
+  alias with `drupal_update_node` (`fields.path = { alias, pathauto: 0 }`) returned
+  success but silently reverted, causing nav 404s. Root cause: JSON:API deserialized the
+  `path` field without the existing alias's **`pid`**, so Drupal's `PathItem::postSave`
+  *created a duplicate* `path_alias` (the older one stayed canonical) instead of updating
+  in place. The connector now reads the current alias's `pid` (new
+  `backend.getPathInfo`) and round-trips it, so the alias is **updated in place** — one
+  canonical alias, no duplicate. Verified end-to-end over JSON:API on Drupal 11.
+- **Path-less updates no longer create duplicate aliases.** The DEV-114 "preserve" path
+  re-pinned the current alias *without* its `pid`, hitting the same duplicate bug; it now
+  round-trips the `pid` too.
+- **Honest write responses.** `drupal_create_node` / `drupal_update_node` now **re-read**
+  the node after writing and return the *persisted* `url`, instead of echoing the
+  requested value (which masked the revert).
+
+### Added
+- **Automatic rename redirect.** When an explicit alias change replaces a different
+  existing alias, the connector creates a 301 redirect from the old path to the node
+  (`entity:node/<id>`, alias-independent), so the previous URL keeps resolving. Idempotent
+  — skipped when a redirect for that source already exists or the alias is unchanged.
+- **`backend.getPathInfo(ref)`** on the backend interface — exposes the raw `path` field
+  (`alias` / `pid` / `langcode`) and internal id; default returns nulls (read-only/
+  path-less backends are unaffected). `buildRedirectAttributes()` is now exported from the
+  redirects module for reuse.
+
+### Notes
+- Connector-created nodes still rely on Pathauto to generate their alias when no explicit
+  `path` is given. A **separate, server-side** Pathauto pattern misconfiguration (some
+  `pathauto.pattern.*` had `bundles` stored as a sequential array instead of the
+  associative map the `entity_bundle` condition requires) prevented alias generation for
+  affected bundles (e.g. `industry`, `platform`); that fix lives in the Drupal site
+  (webcms), not in the connector.
+
 ## [1.5.0] - 2026-06-29
 
 ### Added
