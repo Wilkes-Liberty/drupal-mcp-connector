@@ -65,6 +65,7 @@ import * as bulk         from "./tools/bulk.js";
 import * as translations from "./tools/translations.js";
 import * as paragraphs   from "./tools/paragraphs.js";
 import * as structure    from "./tools/structure.js";
+import * as redirects    from "./tools/redirects.js";
 import * as search       from "./tools/search.js";
 import * as reportsExtra from "./tools/reports-extra.js";
 import * as config       from "./tools/config.js";
@@ -74,7 +75,7 @@ import * as config       from "./tools/config.js";
 // ---------------------------------------------------------------------------
 
 const allModules = [nodes, taxonomy, users, media, graphql, site, entities, reports, drush,
-  revisions, moderation, scheduler, fields, references, bulk, translations, paragraphs, structure, search, reportsExtra, config];
+  revisions, moderation, scheduler, fields, references, bulk, translations, paragraphs, structure, redirects, search, reportsExtra, config];
 
 // Flatten every module's tool definitions into one ListTools payload, and merge
 // their handler maps into a single closed dispatch table keyed by tool name.

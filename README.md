@@ -73,6 +73,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 | **Translations** | List + create entity translations |
 | **Paragraphs** | Create/get Paragraph components for embedding in host fields |
 | **Structure** | Menu links + custom blocks (list/create) |
+| **Redirects** | Create active URL redirects (301/302) + update/repoint existing redirects (Redirect module) |
 | **Search** | Best-effort content search (title match; Search API/Solr-ready) |
 | **Reports (extra)** | Orphaned references, unpublished content, missing-field audits |
 | **Config & Governance** | Governed config get/list/set via the server-tool bridge; `drupal_mcp_whoami` tier/capability report |
