@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-29
+
 ### Added
 - **Redirect tools** (`drupal_create_redirect`, `drupal_update_redirect`) for the
   contrib Redirect module. `drupal_create_redirect` produces a redirect that serves
