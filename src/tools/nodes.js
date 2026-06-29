@@ -130,6 +130,12 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
  * bundles (sends `moderation_state`, omits `status`) or `status` for non-moderated
  * types. `moderationState` takes precedence; both are optional on update.
  *
+ * Alias hardening: a partial update that doesn't touch `path` can still lose the
+ * node's URL alias when a module (e.g. Pathauto, in automatic mode) regenerates
+ * it on save. To preserve the existing alias, when the caller supplies no `path`
+ * the current alias is read back and re-pinned (`{ alias, pathauto: 0 }`). Pass
+ * `fields.path` explicitly to set/replace the alias yourself.
+ *
  * @param {object} args - { site?, type, id, title?, body?, summary?, status?, moderationState?, fields? }.
  * @returns {Promise<object>} The updated node descriptor.
  */
@@ -143,6 +149,12 @@ async function updateNode({ site: siteName, type, id, title, body, summary, stat
   if (bodyAttr) attributes.body = bodyAttr;
   if (dryRun) return { dryRun: true, operation: "update", entityType: "node", bundle: type, id, attributes };
   const backend = await resolveBackend(site);
+  // Preserve the existing URL alias when the caller didn't set `path`: read the
+  // current alias and re-pin it (pathauto off) so the save can't revert it.
+  if (attributes.path === undefined) {
+    const current = await backend.getEntity({ entityType: "node", bundle: type, id });
+    if (current?.url) attributes.path = { alias: current.url, pathauto: 0 };
+  }
   return backend.updateEntity({ entityType: "node", bundle: type, id, attributes });
 }
 
