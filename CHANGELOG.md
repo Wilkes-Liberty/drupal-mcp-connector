@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-29
+
+### Added
+- **Redirect tools** (`drupal_create_redirect`, `drupal_update_redirect`) for the
+  contrib Redirect module. `drupal_create_redirect` produces a redirect that serves
+  its 301 (or chosen code) immediately: the source path's leading slash is stripped
+  to the module's stored, slash-less form (the classic "redirect saved but never
+  fires" cause), the destination is normalized to a Drupal link-field URI (a bare
+  path is wrapped as `internal:`, while `entity:node/ID` and absolute URLs pass
+  through), and `status_code` defaults to 301 with 302 (and 303/307/308) accepted.
+  `drupal_update_redirect` repoints an existing redirect's source/target or changes
+  its status code via a partial update — the path to activate/fix a redirect that
+  isn't firing. Both are governed by the per-site security policy (redirect writes /
+  `administer redirects`). Resolves the gap where connector-created redirects were
+  inactive and could not be enabled (DEV-111).
+
 ## [1.3.2] - 2026-06-27
 
 ### Fixed
