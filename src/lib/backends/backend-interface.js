@@ -72,6 +72,16 @@ export class Backend {
   async getEntity(_ref) { return notImplemented("getEntity"); }
 
   /**
+   * Read the raw `path` field (alias/pid/langcode) and internal id of an entity,
+   * for callers that must round-trip the alias `pid` on an in-place update (the
+   * canonical entity only exposes `path.alias` as `url`). Optional capability:
+   * the default returns nulls so read-only/path-less backends are safe. See DEV-116.
+   * @param {{entityType: string, bundle: string, id: string}} _ref
+   * @returns {Promise<{alias: ?string, pid: ?(number|string), langcode: ?string, drupalId: ?(number|string)}>}
+   */
+  async getPathInfo(_ref) { return { alias: null, pid: null, langcode: null, drupalId: null }; }
+
+  /**
    * Create an entity.
    * @param {{entityType: string, bundle: string, attributes?: object, relationships?: object}} _input
    * @returns {Promise<import("../canonical.js").CanonicalEntity>}
