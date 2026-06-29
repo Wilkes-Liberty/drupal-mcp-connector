@@ -23,6 +23,40 @@ import {
 const MENU_LINK_TYPE = "menu_link_content";
 const BLOCK_TYPE = "block_content";
 
+// The intermittent menu-link create failure: Drupal's LinkAccessConstraint
+// rejects a link whose target it can't (yet) resolve/access, surfacing as a
+// "422 … path '/…' is inaccessible" error. For a valid, published alias this is
+// a transient path-validator/access-cache race (it warms during the first
+// attempt), so a single retry clears it. Prefer an `entity:node/<id>` target
+// over `internal:/<alias>` to avoid the alias-resolution step entirely.
+const INACCESSIBLE_PATH_RE = /\b422\b[\s\S]*inaccessible/i;
+const MENU_LINK_RETRY_DELAY_MS = 250;
+
+/**
+ * Resolve after `ms` milliseconds.
+ * @param {number} ms Delay in milliseconds.
+ * @returns {Promise<void>}
+ */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Run a menu-link write, retrying once on the transient "422 path inaccessible"
+ * race. Any other error propagates immediately (no blind retries).
+ * @param {() => Promise<object>} fn The backend write to attempt.
+ * @returns {Promise<object>} The write result.
+ */
+async function writeMenuLinkWithRetry(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!INACCESSIBLE_PATH_RE.test(String(err?.message))) throw err;
+    await sleep(MENU_LINK_RETRY_DELAY_MS);
+    return fn();
+  }
+}
+
 /**
  * Normalize limit/offset args into the backend's page descriptor.
  *
@@ -73,13 +107,21 @@ async function listMenuLinks({ site: siteName, menu, limit = 20, offset = 0, sor
  *
  * The `link` field is a Drupal link field: it takes a `{ uri }` object where the
  * URI is a Drupal-style target, e.g. `internal:/about`, `entity:node/42`, or an
- * absolute `https://…` URL.
+ * absolute `https://…` URL. Prefer the `entity:node/<id>` form when linking to a
+ * node — it avoids the alias-resolution step that can trip the intermittent
+ * "path inaccessible" race.
  *
- * @param {object} args - { site?, title, link, menu, weight? }.
+ * The link is created **enabled by default** so it renders immediately, and the
+ * `enabled` flag is always sent explicitly (the JSON:API write path could
+ * otherwise land the link disabled — the "menu links created disabled" gap).
+ * `parent` (a parent link plugin id such as `menu_link_content:<uuid>`) can be
+ * set at creation so child links nest without a follow-up update.
+ *
+ * @param {object} args - { site?, title, link, menu, weight?, parent?, enabled? }.
  * @returns {Promise<object>} The created menu-link descriptor from the backend.
  * @throws {SecurityError} If creating menu_link_content is not permitted.
  */
-async function createMenuLink({ site: siteName, title, link, menu, weight }) {
+async function createMenuLink({ site: siteName, title, link, menu, weight, parent, enabled }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", MENU_LINK_TYPE, MENU_LINK_TYPE);
@@ -89,8 +131,46 @@ async function createMenuLink({ site: siteName, title, link, menu, weight }) {
     link: { uri: link },
     menu_name: menu,
     weight: weight === undefined ? 0 : weight,
+    enabled: enabled === undefined ? true : enabled,
   };
-  return backend.createEntity({ entityType: MENU_LINK_TYPE, bundle: MENU_LINK_TYPE, attributes });
+  if (parent !== undefined) attributes.parent = parent;
+  return writeMenuLinkWithRetry(() =>
+    backend.createEntity({ entityType: MENU_LINK_TYPE, bundle: MENU_LINK_TYPE, attributes }));
+}
+
+/**
+ * Update a custom menu link by UUID. Only the supplied fields are sent (partial
+ * update). Crucially, `enabled` is always re-asserted — to the caller's value
+ * when changing it, otherwise to the link's current value read back from the
+ * site — so an unrelated edit (rename, re-weight, re-parent) can never silently
+ * regress a live link to disabled. Set `parent` to re-nest a link.
+ *
+ * @param {object} args - { site?, id, title?, link?, menu?, weight?, parent?, enabled? }.
+ * @returns {Promise<object>} The updated menu-link descriptor from the backend.
+ * @throws {Error} If id is missing.
+ * @throws {SecurityError} If updating menu_link_content is not permitted.
+ */
+async function updateMenuLink({ site: siteName, id, title, link, menu, weight, parent, enabled }) {
+  if (!id) throw new Error("A menu link 'id' (UUID) is required to update an existing menu link.");
+  const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  assertWriteAllowed(sec, "update", MENU_LINK_TYPE, MENU_LINK_TYPE);
+  const backend = await resolveBackend(site);
+  const attributes = {};
+  if (title !== undefined) attributes.title = title;
+  if (link !== undefined) attributes.link = { uri: link };
+  if (menu !== undefined) attributes.menu_name = menu;
+  if (weight !== undefined) attributes.weight = weight;
+  if (parent !== undefined) attributes.parent = parent;
+  if (enabled !== undefined) {
+    attributes.enabled = enabled;
+  } else {
+    const current = await backend.getEntity({ entityType: MENU_LINK_TYPE, bundle: MENU_LINK_TYPE, id });
+    const currentEnabled = current?.fields?.enabled;
+    attributes.enabled = currentEnabled === undefined ? true : currentEnabled;
+  }
+  return writeMenuLinkWithRetry(() =>
+    backend.updateEntity({ entityType: MENU_LINK_TYPE, bundle: MENU_LINK_TYPE, id, attributes }));
 }
 
 // ---------------------------------------------------------------------------
@@ -165,15 +245,34 @@ export const definitions = [
   },
   {
     name: "drupal_create_menu_link",
-    description: "Create a custom menu link. The link target is a Drupal URI such as 'internal:/about', 'entity:node/42', or an absolute 'https://…' URL. Checked against the site security config.",
+    description: "Create a custom menu link, enabled by default so it renders immediately. The link target is a Drupal URI such as 'internal:/about', 'entity:node/42', or an absolute 'https://…' URL — prefer 'entity:node/<id>' when linking to a node (avoids the alias-resolution 'path inaccessible' race). Set 'parent' (a parent link plugin id like 'menu_link_content:<uuid>') to nest the link, and 'enabled: false' to create it disabled. Checked against the site security config.",
     inputSchema: {
       type: "object", required: ["title", "link", "menu"],
       properties: {
-        site:   { type: "string" },
-        title:  { type: "string", description: "Link label shown in the menu" },
-        link:   { type: "string", description: "Target URI, e.g. 'internal:/about', 'entity:node/42', or 'https://example.com'" },
-        menu:   { type: "string", description: "Menu machine name to place the link in, e.g. 'main' or 'footer'" },
-        weight: { type: "number", default: 0, description: "Ordering weight within the menu (lower sorts first)" },
+        site:    { type: "string" },
+        title:   { type: "string", description: "Link label shown in the menu" },
+        link:    { type: "string", description: "Target URI, e.g. 'entity:node/42', 'internal:/about', or 'https://example.com'" },
+        menu:    { type: "string", description: "Menu machine name to place the link in, e.g. 'main' or 'footer'" },
+        weight:  { type: "number", default: 0, description: "Ordering weight within the menu (lower sorts first)" },
+        parent:  { type: "string", description: "Parent link plugin id to nest under, e.g. 'menu_link_content:<uuid>'. Omit for a top-level link." },
+        enabled: { type: "boolean", default: true, description: "Whether the link is enabled (renders). Defaults to true." },
+      },
+    },
+  },
+  {
+    name: "drupal_update_menu_link",
+    description: "Update a custom menu link by UUID (rename, re-weight, re-target, re-parent, enable/disable). Only the fields you pass change. The link's enabled state is preserved across edits — an unrelated change will not disable a live link — unless you pass 'enabled' explicitly. Checked against the site security config.",
+    inputSchema: {
+      type: "object", required: ["id"],
+      properties: {
+        site:    { type: "string" },
+        id:      { type: "string", description: "Menu link UUID" },
+        title:   { type: "string", description: "New link label. Omit to leave unchanged." },
+        link:    { type: "string", description: "New target URI (e.g. 'entity:node/42'). Omit to leave unchanged." },
+        menu:    { type: "string", description: "Move the link to this menu. Omit to leave unchanged." },
+        weight:  { type: "number", description: "New ordering weight. Omit to leave unchanged." },
+        parent:  { type: "string", description: "New parent link plugin id (e.g. 'menu_link_content:<uuid>'), or '' for top level. Omit to leave unchanged." },
+        enabled: { type: "boolean", description: "Enable/disable the link. Omit to preserve the current state." },
       },
     },
   },
@@ -213,6 +312,7 @@ export const definitions = [
 export const handlers = {
   drupal_list_menu_links:  listMenuLinks,
   drupal_create_menu_link: createMenuLink,
+  drupal_update_menu_link: updateMenuLink,
   drupal_list_blocks:      listBlocks,
   drupal_create_block:     createBlock,
 };

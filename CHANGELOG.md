@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-29
+
+### Added
+- **`drupal_update_paragraph`** — update an existing Paragraph entity's field values
+  in place (partial JSON:API PATCH) by bundle + UUID, so component / key-capability
+  paragraphs can be maintained end-to-end without re-embedding (DEV-114).
+- **`drupal_update_menu_link`** — update a menu link by UUID (rename, re-weight,
+  re-target, re-parent, enable/disable). `enabled` is preserved across edits unless
+  passed explicitly (DEV-114).
+- **`drupal_create_menu_link`** now accepts **`parent`** (nest under a parent link
+  plugin id) and **`enabled`** on create, and creates links **enabled by default** so
+  they render immediately — closing the "menu links created disabled / no parent on
+  create" gap (DEV-114).
+
+### Fixed
+- **Menu links no longer silently regress to disabled.** Every menu-link write now
+  asserts `enabled` explicitly (default true on create; the current value re-pinned on
+  update), so an unrelated edit can't drop a live link to disabled through the JSON:API
+  write path (DEV-114).
+- **Node updates preserve the existing URL alias.** When `drupal_update_node` is called
+  without a `path`, the connector reads the current alias and re-pins it
+  (`{ alias, pathauto: 0 }`) so a save can't let Pathauto revert the alias to a stale
+  value. Pass `fields.path` to set the alias explicitly (DEV-114).
+- **Intermittent `drupal_create_menu_link` 422 "path '/…' is inaccessible".** This is a
+  transient path-validator/access-cache race in Drupal's `LinkAccessConstraint`; menu-link
+  create/update now retries once after a short delay when it hits that specific error.
+  Prefer an `entity:node/<id>` target over `internal:/<alias>` to avoid the alias
+  resolution step entirely (DEV-114).
+
 ## [1.4.0] - 2026-06-29
 
 ### Added

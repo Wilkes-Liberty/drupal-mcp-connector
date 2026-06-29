@@ -71,8 +71,8 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 | **References** | Resolve a human name/title to an entity UUID for relationship fields |
 | **Bulk** | Bulk create/update with per-item partial-failure reporting |
 | **Translations** | List + create entity translations |
-| **Paragraphs** | Create/get Paragraph components for embedding in host fields |
-| **Structure** | Menu links + custom blocks (list/create) |
+| **Paragraphs** | Create/update/get Paragraph components for embedding in host fields |
+| **Structure** | Menu links (list/create/update, incl. `parent` + `enabled`) + custom blocks (list/create) |
 | **Redirects** | Create active URL redirects (301/302) + update/repoint existing redirects (Redirect module) |
 | **Search** | Best-effort content search (title match; Search API/Solr-ready) |
 | **Reports (extra)** | Orphaned references, unpublished content, missing-field audits |

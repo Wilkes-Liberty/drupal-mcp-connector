@@ -107,11 +107,38 @@ describe("nodes tools (migrated)", () => {
   });
 
   it("update_node with moderationState sends moderation_state and omits status", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: null }));
     backend.updateEntity.mockResolvedValue(canonicalNode());
     await handlers.drupal_update_node({ type: "article", id: "n1", moderationState: "published" });
     const arg = backend.updateEntity.mock.calls[0][0];
     expect(arg.attributes.moderation_state).toBe("published");
     expect(arg.attributes).not.toHaveProperty("status");
+  });
+
+  it("update_node without a path preserves the existing alias (reads it back and re-pins)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: "/keep-me" }));
+    backend.updateEntity.mockResolvedValue(canonicalNode({ url: "/keep-me" }));
+    await handlers.drupal_update_node({ type: "article", id: "n1", title: "New" });
+    expect(backend.getEntity).toHaveBeenCalledWith({ entityType: "node", bundle: "article", id: "n1" });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes.path).toEqual({ alias: "/keep-me", pathauto: 0 });
+    expect(arg.attributes.title).toBe("New");
+  });
+
+  it("update_node with an explicit path in fields uses it and does not read back", async () => {
+    backend.updateEntity.mockResolvedValue(canonicalNode());
+    await handlers.drupal_update_node({ type: "article", id: "n1", fields: { path: { alias: "/explicit" } } });
+    expect(backend.getEntity).not.toHaveBeenCalled();
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes.path).toEqual({ alias: "/explicit" });
+  });
+
+  it("update_node sends no path when there is no existing alias to preserve", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: null }));
+    backend.updateEntity.mockResolvedValue(canonicalNode({ url: null }));
+    await handlers.drupal_update_node({ type: "article", id: "n1", title: "New" });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes).not.toHaveProperty("path");
   });
 
   it("create_node dryRun returns a preview and does not write", async () => {
