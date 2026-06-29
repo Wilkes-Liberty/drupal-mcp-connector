@@ -40,10 +40,20 @@ vi.mock("ssh2", () => {
   return { Client: FakeClient };
 });
 
-import { handlers } from "../../src/tools/drush.js";
+import { handlers, redactSecretArgs } from "../../src/tools/drush.js";
 import { SecurityError } from "../../src/lib/security.js";
 
 beforeEach(() => { lastCommand = ""; });
+
+describe("redactSecretArgs", () => {
+  it("masks password/token/secret flag values but keeps the rest", () => {
+    expect(redactSecretArgs(["user:create", "alice", "--mail=a@b.com", "--password=hunter2"]))
+      .toBe("user:create alice --mail=a@b.com --password=***");
+    expect(redactSecretArgs(["config:get", "system.site"])).toBe("config:get system.site");
+    expect(redactSecretArgs(["x", "--client-secret=abc", "--api_key=xyz"]))
+      .toBe("x --client-secret=*** --api_key=***");
+  });
+});
 
 describe("drushSsh.allowedCommands enforcement", () => {
   it("permits a whitelisted command (config:status)", async () => {

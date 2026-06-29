@@ -52,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `toolResultData` helper is exported from `src/lib/server-tools.js`, so the audit tool
   groups can reuse the hardened drush bridge and the existing governed config transport.
 
+### Security
+- The drush bridge no longer logs secret-bearing flag values (`--password`/`--token`/
+  `--secret`/`--api-key`) in clear text — they are redacted to `***` in the operational
+  stderr log line (`redactSecretArgs`). Clears a `js/clear-text-logging` finding.
+
 ## [1.5.0] - 2026-06-29
 
 ### Added

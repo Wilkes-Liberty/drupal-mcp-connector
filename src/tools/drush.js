@@ -114,7 +114,7 @@ export function sshDrush(site, drushArgs, timeoutMs = 30000) {
   const drushBin    = `${drupalRoot}/vendor/bin/drush`;
   const command     = `cd ${sanitizeSshArg(drupalRoot)} && ${drushBin} ${escapedArgs} --yes`;
 
-  console.error(`[drush-bridge] ${site._name}: drush ${drushArgs.join(" ")}`);
+  console.error(`[drush-bridge] ${site._name}: drush ${redactSecretArgs(drushArgs)}`);
 
   return new Promise((resolve, reject) => {
     const conn  = new Client();
@@ -167,6 +167,23 @@ export function sshDrush(site, drushArgs, timeoutMs = 30000) {
       readyTimeout: timeoutMs,
     });
   });
+}
+
+/**
+ * Redact secret-bearing flag values from a Drush argument list for safe logging.
+ * `user:create` passes `--password=…`, and other admin flows may pass tokens/keys;
+ * the operational log must not echo them in clear text.
+ * @param {string[]} drushArgs The Drush subcommand + flags.
+ * @returns {string} A space-joined, secret-redacted rendering for the log line.
+ */
+export function redactSecretArgs(drushArgs) {
+  const SECRET_FLAG = /^(--(?:password|pass|token|secret|client[-_]?secret|api[-_]?key|key)=)(.*)$/i;
+  return drushArgs
+    .map((arg) => {
+      const m = String(arg).match(SECRET_FLAG);
+      return m ? `${m[1]}***` : arg;
+    })
+    .join(" ");
 }
 
 /**
