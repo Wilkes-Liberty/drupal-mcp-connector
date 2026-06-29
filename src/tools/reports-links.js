@@ -6,8 +6,8 @@
  * link inventory with optional live checking, URL-alias coverage, menu-link
  * integrity, and embedded-entity references. Backend-neutral where the data
  * lives in entities (redirect / path_alias / menu_link_content / node body);
- * privileged where it lives in the dblog (404 log), which routes through the
- * Sentinel server-tool or the drush bridge.
+ * self-sufficient via the connector's own drush bridge where the data lives in
+ * the dblog (404 log). No companion module is required.
  *
  * Each handler asserts read access in-handler, returns a `gatedReport` payload
  * (never throws) when its source is unavailable, and flags `approximate`/
@@ -19,7 +19,6 @@ import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
 import { collectEntities, gatedReport, fieldValue } from "../lib/reports-support.js";
-import { callServerTool, SERVER_TOOLS } from "../lib/server-tools.js";
 import { runPrivileged } from "../lib/audit-sources.js";
 import { sshDrush, parseDrush } from "./drush.js";
 import {
@@ -74,9 +73,9 @@ function internalTarget(uri, baseHost) {
 
 /**
  * Aggregate Drupal "page not found" events into the top missing URLs, ranked by
- * hit count — the classic 404 audit and a redirect-candidate list. Data comes
- * from the Sentinel server-tool when configured, else `drush watchdog:show`
- * filtered to the "page not found" type; gated when neither is available.
+ * hit count — the classic 404 audit and a redirect-candidate list.
+ * Self-sufficient via the connector's drush bridge (`drush watchdog:show`
+ * filtered to the "page not found" type); gated when drush isn't configured.
  *
  * @param {object} args - { site?, limit? }.
  * @returns {Promise<object>} Ranked missing paths, or a gated payload.
@@ -88,7 +87,6 @@ async function log404({ site: siteName, limit = 25 }) {
   const max = Math.min(Number(limit) || 25, 200);
 
   const res = await runPrivileged(site, {
-    serverTool: () => callServerTool(site, SERVER_TOOLS.log404, { limit: max }),
     drush: async () => {
       // dblog records 404s under the "page not found" type; the message/location
       // carries the requested path. Filter client-side and aggregate.
@@ -100,7 +98,7 @@ async function log404({ site: siteName, limit = 25 }) {
   });
 
   if (!res.source) {
-    return gatedReport("report_404_log", "server-tool/drush", res.attempts.join("; "));
+    return gatedReport("report_404_log", "drush", res.attempts.join("; "));
   }
 
   const counts = new Map();
@@ -446,7 +444,7 @@ async function menuIntegrity({ site: siteName, limit = 1000 }) {
     approximate: links.length >= limit,
     summary: { disabled: disabled.length, placeholderTargets: placeholderTargets.length, externalLinks: externalLinks.length },
     findings: { disabled, placeholderTargets, externalLinks },
-    note: "Deep target-existence checks (unpublished/deleted entity targets) require the Sentinel server-tool; structural issues are reported here.",
+    note: "Structural issues are reported here. Deep target-existence checks (unpublished/deleted entity targets) are not resolved — menu targets address entities by internal id, which JSON:API can't probe by UUID.",
   };
 }
 
@@ -505,7 +503,7 @@ async function brokenEmbeds({ site: siteName, type, sampleSize = 100 }) {
     byType: [...byType.entries()].map(([entityType, count]) => ({ entityType, count })),
     malformed,
     usage,
-    note: "Embed target-existence verification is gated on a future Sentinel server-tool (JSON:API can't probe a media UUID without its bundle); malformed-UUID embeds are flagged here.",
+    note: "Malformed-UUID embeds are flagged here. Full embed target-existence verification is not performed (JSON:API can't probe a media UUID without its bundle).",
   };
 }
 
@@ -516,7 +514,7 @@ async function brokenEmbeds({ site: siteName, type, sampleSize = 100 }) {
 export const definitions = [
   {
     name: "drupal_report_404_log",
-    description: "Aggregate Drupal 'page not found' (404) log events into the top missing URLs ranked by hit count — the redirect-candidate list. Uses the governed Sentinel server-tool when configured, else the drush watchdog bridge; returns an 'unavailable' payload when neither is configured.",
+    description: "Aggregate Drupal 'page not found' (404) log events into the top missing URLs ranked by hit count — the redirect-candidate list. Self-sufficient via the connector's drush watchdog bridge; returns an 'unavailable' payload when drush isn't configured for the site.",
     inputSchema: {
       type: "object",
       properties: {
@@ -564,7 +562,7 @@ export const definitions = [
   },
   {
     name: "drupal_report_menu_integrity",
-    description: "Audit custom menu links (menu_link_content): disabled links, links with no usable target (route:<nojs>/empty placeholders), and external links. Structural; deep target-existence checks require the Sentinel server-tool.",
+    description: "Audit custom menu links (menu_link_content): disabled links, links with no usable target (route:<nojs>/empty placeholders), and external links. Structural; deep target-existence checks are not performed (JSON:API can't probe a target by internal id).",
     inputSchema: {
       type: "object",
       properties: {

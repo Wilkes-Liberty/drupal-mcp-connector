@@ -2,11 +2,11 @@
  * Privileged-source resolution for the audit tool groups.
  *
  * Single responsibility: run an audit that needs privileged log/config/module
- * data through the best available source, in priority order — the governed
- * Sentinel server-tool first, the drush SSH bridge as a fallback — and report a
- * clean "unavailable" outcome (never throw) when neither is configured or both
- * fail. This keeps the connector shippable before the companion mcp_sentinel
- * methods land: the tools degrade to a gated payload instead of erroring.
+ * data through the best available source, in priority order — an optional
+ * governed server-tool first (when a callback is supplied), the connector's own
+ * drush SSH bridge otherwise — and report a clean "unavailable" outcome (never
+ * throw) when no source is configured or all fail. The drush bridge makes the
+ * audits self-sufficient against stock Drupal; no companion module is required.
  */
 
 /**
@@ -30,10 +30,11 @@ export function drushConfigured(site) {
 /**
  * Run a privileged audit through the first source that succeeds.
  *
- * Tries the Sentinel server-tool (when `serverTools` is configured), then the
- * drush bridge (when `drushSsh` is configured). Either callback may be omitted
- * when that source can't serve the audit. Failures are accumulated, not thrown,
- * so the caller can surface them in a gated payload.
+ * Tries the optional governed server-tool (when a `serverTool` callback is given
+ * and `serverTools` is configured), then the connector's own drush bridge (when a
+ * `drush` callback is given and `drushSsh` is configured). Either callback may be
+ * omitted when that source can't serve the audit. Failures are accumulated, not
+ * thrown, so the caller can surface them in a gated payload.
  *
  * @param {object} site Resolved site config.
  * @param {object} sources

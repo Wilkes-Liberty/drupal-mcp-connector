@@ -39,16 +39,6 @@ export const SERVER_TOOLS = {
   configGet:  "tool_api.mcp_sentinel_config_get",
   configList: "tool_api.mcp_sentinel_config_list",
   configSet:  "tool_api.mcp_sentinel_config_set",
-  // Read-only audit methods. These surface privileged log/config/module/
-  // permission/requirements data the standard JSON:API/GraphQL backends do not
-  // expose. They are companion work in the mcp_sentinel repo; until they ship,
-  // a call returns a tool-not-found error which the audit tools treat as a
-  // gated/unavailable source (and fall back to the drush bridge where one exists).
-  log404:         "tool_api.mcp_sentinel_log_404",
-  configStatus:   "tool_api.mcp_sentinel_config_status",
-  moduleList:     "tool_api.mcp_sentinel_module_list",
-  permissionList: "tool_api.mcp_sentinel_permission_list",
-  requirements:   "tool_api.mcp_sentinel_requirements",
 };
 
 /** MCP protocol version advertised on the handshake and every subsequent POST. */

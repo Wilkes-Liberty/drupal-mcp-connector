@@ -671,15 +671,15 @@ Additional read-only audit tools that complement the [Reports](#reports) module.
 
 ## Reports — Links & 404
 
-Read-only link- and 404-integrity audits. Entity-backed audits (redirect, alias, menu, embeds) run against the configured backend and return a `gatedReport` payload when the resource isn't exposed; the 404 log uses the governed Sentinel server-tool, falling back to the drush watchdog bridge.
+Read-only link- and 404-integrity audits. Entity-backed audits (redirect, alias, menu, embeds) run against the configured backend and return a `gatedReport` payload when the resource isn't exposed; the 404 log is self-sufficient via the connector's drush watchdog bridge. No companion module is required.
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_report_404_log` | — | Aggregate "page not found" events into the top missing URLs ranked by hit count (redirect candidates). Server-tool, else drush watchdog; gated when neither is configured. |
+| `drupal_report_404_log` | — | Aggregate "page not found" events into the top missing URLs ranked by hit count (redirect candidates). Via the drush watchdog bridge; gated when drush isn't configured. |
 | `drupal_report_redirect_health` | — | Audit the Redirect table for duplicate sources, self-redirects, and chains/loops. Deterministic from the redirect entity list. |
 | `drupal_report_broken_links` | — | Inventory internal/external/image links in published bodies and flag malformed hrefs. With `checkLive: true`, verifies links via a bounded, SSRF-guarded checker (no network egress otherwise). |
 | `drupal_report_alias_coverage` | — | Nodes whose URL is still `/node/N` (no alias), plus conflicting aliases when `path_alias` is exposed. |
-| `drupal_report_menu_integrity` | — | Custom menu links that are disabled, placeholder-targeted, or external. Deep target resolution requires the Sentinel server-tool. |
+| `drupal_report_menu_integrity` | — | Custom menu links that are disabled, placeholder-targeted, or external. Deep target-existence resolution isn't performed (JSON:API can't probe a target by internal id). |
 | `drupal_report_broken_embeds` | — | Embedded-entity usage by type in published bodies, flagging malformed `data-entity-uuid` embeds. |
 
 ### drupal_report_broken_links
@@ -699,17 +699,17 @@ Read-only link- and 404-integrity audits. Entity-backed audits (redirect, alias,
 
 ## Reports — Config & Health
 
-Read-only configuration-posture audits. These read privileged data (config objects, the module list, role permissions, the requirements report) via the governed Sentinel server-tool first, falling back to the drush bridge where one exists, and return `unavailable` when neither is configured. The config-inspection audits also require connector-side config-read access (the `auditor` / `config-editor` / `development` presets; opt-in under `production-strict`).
+Read-only configuration-posture audits. These read privileged data (config objects, the module list, role permissions, the requirements report) through the connector's own **drush bridge** — so they're self-sufficient against stock Drupal with **no companion module required**. The config-inspection audits additionally prefer the existing governed config server-tool when a site has `serverTools` configured, and return `unavailable` when no source is configured. They also require connector-side config-read access (the `auditor` / `config-editor` / `development` presets; opt-in under `production-strict`).
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_report_config_drift` | — | Active-vs-sync config as an added/changed/removed breakdown. Server-tool, else `drush config:status`. |
+| `drupal_report_config_drift` | — | Active-vs-sync config as an added/changed/removed breakdown. Via the drush bridge (`drush config:status`). |
 | `drupal_audit_config_best_practices` | — | Lint key config for prod-readiness/security: error display, CSS/JS aggregation, page cache, open registration, missing 404/403 pages, insecure uploads. Severity-ranked. |
-| `drupal_report_module_audit` | — | Development/debug modules enabled in production plus modules with known security advisories. Server-tool, else `drush pm:list` + `pm:security`. |
-| `drupal_report_permission_audit` | — | Dangerous grants to anonymous/authenticated roles and admin permissions held by non-admin roles. Server-tool, else `drush role:list`. |
-| `drupal_report_status_report` | — | Drupal status-report requirements at warning/error severity (pending updates, overdue cron, missing deps). Server-tool, else `drush core:requirements`. |
-| `drupal_report_text_format_audit` | — | Text formats permitting unfiltered HTML (`filter_html` not enabled). Server-tool; requires config-read. |
-| `drupal_report_cache_config` | — | Cache posture from `system.performance` (CSS/JS aggregation, anonymous page-cache max-age) with recommendations. Server-tool; requires config-read. |
+| `drupal_report_module_audit` | — | Development/debug modules enabled in production plus modules with known security advisories. Via the drush bridge (`drush pm:list` + `pm:security`). |
+| `drupal_report_permission_audit` | — | Dangerous grants to anonymous/authenticated roles and admin permissions held by non-admin roles. Via the drush bridge (`drush role:list`). |
+| `drupal_report_status_report` | — | Drupal status-report requirements at warning/error severity (pending updates, overdue cron, missing deps). Via the drush bridge (`drush core:requirements`). |
+| `drupal_report_text_format_audit` | — | Text formats permitting unfiltered HTML (`filter_html` not enabled). Via the drush bridge (or the governed config server-tool when configured); requires config-read. |
+| `drupal_report_cache_config` | — | Cache posture from `system.performance` (CSS/JS aggregation, anonymous page-cache max-age) with recommendations. Via the drush bridge (or the governed config server-tool when configured); requires config-read. |
 
 ---
 

@@ -38,17 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   external hosts, and caps concurrency, timeout, and link count. Configurable per site
   via an optional `audit` block (`linkCheckAllowedHosts`, `linkCheckConcurrency`,
   `linkCheckTimeoutMs`, `linkCheckMaxLinks`).
-- **Privileged-source bridge for audits.** Log/config/module/permission/requirements
-  audits call the governed Sentinel server-tool first, fall back to the drush bridge
-  where one exists, and report `unavailable` when neither is configured. New
-  `SERVER_TOOLS` entries (`log_404`, `config_status`, `module_list`, `permission_list`,
-  `requirements`) name the companion server-side methods, which are tracked separately
-  in the `mcp_sentinel` project.
+- **Self-sufficient privileged audits.** Log/config/module/permission/requirements
+  audits read their data through the connector's own **drush bridge** (`watchdog:show`,
+  `config:status`/`config:get`, `pm:list`/`pm:security`, `role:list`,
+  `core:requirements`, and a read-only `sql:query` to enumerate `filter.format.*`), so
+  they work against stock Drupal with **no companion module required**. The
+  config-inspection audits additionally prefer the existing governed config server-tool
+  when a site has `serverTools` configured. Each returns a `gated`/`unavailable` payload
+  (never throws) when no source is configured.
 
 ### Changed
 - `sshDrush` and `parseDrush` are now exported from `src/tools/drush.js`, and a
   `toolResultData` helper is exported from `src/lib/server-tools.js`, so the audit tool
-  groups can reuse the hardened drush bridge and the server-tool transport.
+  groups can reuse the hardened drush bridge and the existing governed config transport.
 
 ## [1.5.0] - 2026-06-29
 

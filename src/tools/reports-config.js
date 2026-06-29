@@ -5,12 +5,14 @@
  * best-practice / security config linter, enabled-module review, role/permission
  * review, the Drupal "status report" requirements, text-format safety, and cache
  * posture. These read privileged data (config objects, the module list, the
- * requirements report) through the governed Sentinel server-tool first, falling
- * back to the drush bridge where one exists, and returning a `gatedReport`
- * payload (never throwing) when neither source is available.
+ * requirements report) through the connector's own **drush bridge** — so they are
+ * self-sufficient against stock Drupal with no companion module. The
+ * config-inspection audits additionally prefer the existing governed config
+ * server-tool when a site has `serverTools` configured (drush is the fallback).
+ * Each returns a `gatedReport` payload (never throws) when no source is configured.
  *
- * The config-inspection audits additionally assert connector-side config-read
- * access, mirroring the governed config tools — so they run under the auditor /
+ * The config-inspection audits also assert connector-side config-read access,
+ * mirroring the governed config tools — so they run under the auditor /
  * config-editor / development presets and require an explicit opt-in under
  * production-strict.
  */
@@ -19,7 +21,7 @@ import { getSiteConfig } from "../lib/config.js";
 import { resolveSecurityConfig, assertConfigReadAllowed } from "../lib/security.js";
 import { gatedReport } from "../lib/reports-support.js";
 import { callServerTool, SERVER_TOOLS, toolResultData } from "../lib/server-tools.js";
-import { runPrivileged } from "../lib/audit-sources.js";
+import { runPrivileged, serverToolsConfigured, drushConfigured } from "../lib/audit-sources.js";
 import { sshDrush, parseDrush } from "./drush.js";
 
 // ---------------------------------------------------------------------------
@@ -42,13 +44,52 @@ function dig(obj, path) {
 }
 
 /**
- * Fetch and parse a single config object via the governed server tool.
+ * Whether a config source is available for a site — either the governed
+ * server-tool bridge or the connector's own drush bridge. The config-inspection
+ * audits are self-sufficient with drush alone; the server-tool is an optional,
+ * preferred (governed) path.
+ * @param {object} site Resolved site config.
+ * @returns {boolean}
+ */
+function configSourceAvailable(site) {
+  return serverToolsConfigured(site) || drushConfigured(site);
+}
+
+/**
+ * Read and parse a single config object. Prefers the existing governed config
+ * server-tool when the bridge is configured, otherwise falls back to the
+ * connector's drush bridge (`drush config:get`) — so the audit needs no
+ * companion module.
  * @param {object} site Resolved site config.
  * @param {string} name Config object name.
  * @returns {Promise<*>} Parsed config object (or null/text).
  */
-async function getConfig(site, name) {
-  return toolResultData(await callServerTool(site, SERVER_TOOLS.configGet, { name }));
+async function readConfig(site, name) {
+  if (serverToolsConfigured(site)) {
+    try { return toolResultData(await callServerTool(site, SERVER_TOOLS.configGet, { name })); }
+    catch (err) { if (!drushConfigured(site)) throw err; }
+  }
+  return parseDrush(await sshDrush(site, ["config:get", name, "--format=json"]));
+}
+
+/**
+ * List config object names matching a prefix. Prefers the governed config_list
+ * server-tool; falls back to a read-only `drush sql:query` against the active
+ * config table (SELECT-only, allowlisted). The prefix is a hardcoded literal at
+ * each call site (no user input), so the LIKE clause is safe.
+ * @param {object} site Resolved site config.
+ * @param {string} prefix Config name prefix, e.g. "filter.format.".
+ * @returns {Promise<string[]>} Config object names.
+ */
+async function listConfigNames(site, prefix) {
+  if (serverToolsConfigured(site)) {
+    try { return pickConfigNames(toolResultData(await callServerTool(site, SERVER_TOOLS.configList, { prefix }))); }
+    catch (err) { if (!drushConfigured(site)) throw err; }
+  }
+  const out = await sshDrush(site, ["sql:query", `SELECT name FROM config WHERE collection = '' AND name LIKE '${prefix}%'`]);
+  const parsed = parseDrush(out);
+  if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+  return String(parsed || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 }
 
 /**
@@ -69,8 +110,9 @@ function finding(severity, id, message, extra = {}) {
 
 /**
  * Report whether active configuration matches the sync directory, as a
- * structured added/changed/deleted breakdown. Uses the Sentinel server-tool when
- * configured, else `drush config:status`; gated when neither is available.
+ * structured added/changed/deleted breakdown. Self-sufficient via the
+ * connector's drush bridge (`drush config:status`); gated when drush isn't
+ * configured for the site.
  *
  * @param {object} args - { site? }.
  * @returns {Promise<object>} Drift summary, or a gated payload.
@@ -78,13 +120,12 @@ function finding(severity, id, message, extra = {}) {
 async function configDrift({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const res = await runPrivileged(site, {
-    serverTool: () => callServerTool(site, SERVER_TOOLS.configStatus, {}).then(toolResultData),
     drush: async () => {
       const out = await sshDrush(site, ["config:status", "--format=json"]);
       return parseDrush(out);
     },
   });
-  if (!res.source) return gatedReport("report_config_drift", "server-tool/drush", res.attempts.join("; "));
+  if (!res.source) return gatedReport("report_config_drift", "drush", res.attempts.join("; "));
 
   const rows = normalizeRows(res.data);
   if (!rows.length) {
@@ -193,18 +234,19 @@ const BEST_PRACTICE_CHECKS = [
 
 /**
  * Lint key configuration objects for production-readiness and security and
- * return severity-ranked findings. Reads each config object via the governed
- * server tool; requires config-read access and a configured server-tools bridge.
+ * return severity-ranked findings. Reads each config object via the connector's
+ * drush bridge (or the governed config server-tool when configured); requires
+ * config-read access. Self-sufficient — no companion module required.
  *
  * @param {object} args - { site? }.
- * @returns {Promise<object>} Findings, or a gated payload when the bridge is absent.
+ * @returns {Promise<object>} Findings, or a gated payload when no config source is available.
  * @throws {SecurityError} When config reads are disabled for the site.
  */
 async function configBestPractices({ site: siteName }) {
   const site = getSiteConfig(siteName);
   assertConfigReadAllowed(resolveSecurityConfig(site));
-  if (!site.serverTools?.url) {
-    return gatedReport("audit_config_best_practices", "server-tool", "serverTools.url not configured for this site");
+  if (!configSourceAvailable(site)) {
+    return gatedReport("audit_config_best_practices", "drush/server-tool", "no config source: configure drushSsh or serverTools for this site");
   }
 
   const findings = [];
@@ -212,7 +254,7 @@ async function configBestPractices({ site: siteName }) {
   const errors = [];
   for (const check of BEST_PRACTICE_CHECKS) {
     try {
-      const cfg = await getConfig(site, check.config);
+      const cfg = await readConfig(site, check.config);
       checked.push(check.config);
       const result = check.evaluate(cfg || {});
       if (Array.isArray(result)) findings.push(...result.filter(Boolean));
@@ -249,8 +291,8 @@ const DEV_MODULES = new Set([
 
 /**
  * Audit enabled modules: development/debug modules that should be off in
- * production, plus modules with known security advisories. Uses the Sentinel
- * server-tool when configured, else `drush pm:list` + `pm:security`.
+ * production, plus modules with known security advisories. Self-sufficient via
+ * the connector's drush bridge (`drush pm:list` + `pm:security`).
  *
  * @param {object} args - { site? }.
  * @returns {Promise<object>} Module findings, or a gated payload.
@@ -258,7 +300,6 @@ const DEV_MODULES = new Set([
 async function moduleAudit({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const res = await runPrivileged(site, {
-    serverTool: () => callServerTool(site, SERVER_TOOLS.moduleList, {}).then(toolResultData),
     drush: async () => {
       const list = parseDrush(await sshDrush(site, ["pm:list", "--format=json", "--status=enabled"]));
       let security = null;
@@ -267,7 +308,7 @@ async function moduleAudit({ site: siteName }) {
       return { list, security };
     },
   });
-  if (!res.source) return gatedReport("report_module_audit", "server-tool/drush", res.attempts.join("; "));
+  if (!res.source) return gatedReport("report_module_audit", "drush", res.attempts.join("; "));
 
   const modules = normalizeModules(res.data);
   const enabledDevModules = modules
@@ -347,8 +388,8 @@ const PRIVILEGED_ROLES = new Set(["administrator", "admin"]);
 
 /**
  * Audit role permissions for dangerous grants to the anonymous/authenticated
- * roles and for non-admin roles holding administrative permissions. Uses the
- * Sentinel server-tool when configured, else `drush role:list`.
+ * roles and for non-admin roles holding administrative permissions.
+ * Self-sufficient via the connector's drush bridge (`drush role:list`).
  *
  * @param {object} args - { site? }.
  * @returns {Promise<object>} Permission findings, or a gated payload.
@@ -356,10 +397,9 @@ const PRIVILEGED_ROLES = new Set(["administrator", "admin"]);
 async function permissionAudit({ site: siteName }) {
   const site = getSiteConfig(siteName);
   const res = await runPrivileged(site, {
-    serverTool: () => callServerTool(site, SERVER_TOOLS.permissionList, {}).then(toolResultData),
     drush: async () => parseDrush(await sshDrush(site, ["role:list", "--format=json"])),
   });
-  if (!res.source) return gatedReport("report_permission_audit", "server-tool/drush", res.attempts.join("; "));
+  if (!res.source) return gatedReport("report_permission_audit", "drush", res.attempts.join("; "));
 
   const roles = normalizeRoles(res.data);
   const dangerous = new Set(DANGEROUS_PERMS.map((p) => p.toLowerCase()));
@@ -405,8 +445,8 @@ function normalizeRoles(data) {
 /**
  * Surface the Drupal "status report" (system requirements) entries at warning or
  * error severity — pending updates, overdue cron, missing dependencies, writable
- * settings, etc. Uses the Sentinel server-tool when configured, else
- * `drush core:requirements`.
+ * settings, etc. Self-sufficient via the connector's drush bridge
+ * (`drush core:requirements`).
  *
  * @param {object} args - { site?, minSeverity? } where minSeverity is "warning"|"error".
  * @returns {Promise<object>} Requirement findings, or a gated payload.
@@ -414,10 +454,9 @@ function normalizeRoles(data) {
 async function statusReport({ site: siteName, minSeverity = "warning" }) {
   const site = getSiteConfig(siteName);
   const res = await runPrivileged(site, {
-    serverTool: () => callServerTool(site, SERVER_TOOLS.requirements, {}).then(toolResultData),
     drush: async () => parseDrush(await sshDrush(site, ["core:requirements", "--format=json"])),
   });
-  if (!res.source) return gatedReport("report_status_report", "server-tool/drush", res.attempts.join("; "));
+  if (!res.source) return gatedReport("report_status_report", "drush", res.attempts.join("; "));
 
   const wantError = minSeverity === "error";
   const rows = normalizeRows(res.data).map((r) => ({
@@ -456,7 +495,8 @@ function normalizeSeverity(sev) {
 /**
  * Audit text formats for ones that permit unfiltered HTML (no `filter_html`
  * restriction enabled), which are dangerous if exposed to untrusted roles. Reads
- * `filter.format.*` via the governed server tool; server-tool only.
+ * `filter.format.*` via the connector's drush bridge (or the governed config
+ * server-tool when configured). Self-sufficient — no companion module required.
  *
  * @param {object} args - { site? }.
  * @returns {Promise<object>} Text-format findings, or a gated payload.
@@ -465,14 +505,14 @@ function normalizeSeverity(sev) {
 async function textFormatAudit({ site: siteName }) {
   const site = getSiteConfig(siteName);
   assertConfigReadAllowed(resolveSecurityConfig(site));
-  if (!site.serverTools?.url) {
-    return gatedReport("report_text_format_audit", "server-tool", "serverTools.url not configured for this site");
+  if (!configSourceAvailable(site)) {
+    return gatedReport("report_text_format_audit", "drush/server-tool", "no config source: configure drushSsh or serverTools for this site");
   }
 
-  const names = pickConfigNames(toolResultData(await callServerTool(site, SERVER_TOOLS.configList, { prefix: "filter.format." })));
+  const names = await listConfigNames(site, "filter.format.");
   const findings = [];
   for (const name of names) {
-    const cfg = await getConfig(site, name);
+    const cfg = await readConfig(site, name);
     if (!cfg || dig(cfg, "status") === false) continue;
     const filters = cfg.filters ?? {};
     const htmlFilter = filters.filter_html;
@@ -505,7 +545,8 @@ function pickConfigNames(data) {
 /**
  * Report the site's cache posture from `system.performance`: CSS/JS aggregation
  * and the anonymous page-cache max-age, with plain recommendations. Reads config
- * via the governed server tool; server-tool only.
+ * via the connector's drush bridge (or the governed config server-tool when
+ * configured). Self-sufficient — no companion module required.
  *
  * @param {object} args - { site? }.
  * @returns {Promise<object>} Cache posture, or a gated payload.
@@ -514,11 +555,11 @@ function pickConfigNames(data) {
 async function cacheConfig({ site: siteName }) {
   const site = getSiteConfig(siteName);
   assertConfigReadAllowed(resolveSecurityConfig(site));
-  if (!site.serverTools?.url) {
-    return gatedReport("report_cache_config", "server-tool", "serverTools.url not configured for this site");
+  if (!configSourceAvailable(site)) {
+    return gatedReport("report_cache_config", "drush/server-tool", "no config source: configure drushSsh or serverTools for this site");
   }
 
-  const perf = await getConfig(site, "system.performance") || {};
+  const perf = await readConfig(site, "system.performance") || {};
   const cssAgg = dig(perf, "css.preprocess");
   const jsAgg = dig(perf, "js.preprocess");
   const pageMaxAge = dig(perf, "cache.page.max_age");
@@ -541,7 +582,7 @@ async function cacheConfig({ site: siteName }) {
 export const definitions = [
   {
     name: "drupal_report_config_drift",
-    description: "Report whether active configuration matches the sync directory, as an added/changed/removed breakdown. Uses the governed Sentinel server-tool when configured, else drush config:status; returns 'unavailable' when neither is configured.",
+    description: "Report whether active configuration matches the sync directory, as an added/changed/removed breakdown. Self-sufficient via the connector's drush bridge (drush config:status); returns 'unavailable' when drush isn't configured for the site.",
     inputSchema: { type: "object", properties: { site: { type: "string" } } },
   },
   {
@@ -551,17 +592,17 @@ export const definitions = [
   },
   {
     name: "drupal_report_module_audit",
-    description: "Audit enabled modules: development/debug modules that should be off in production, plus modules with known security advisories. Uses the Sentinel server-tool when configured, else drush pm:list + pm:security.",
+    description: "Audit enabled modules: development/debug modules that should be off in production, plus modules with known security advisories. Self-sufficient via the connector's drush bridge (drush pm:list + pm:security).",
     inputSchema: { type: "object", properties: { site: { type: "string" } } },
   },
   {
     name: "drupal_report_permission_audit",
-    description: "Audit role permissions: dangerous grants to the anonymous/authenticated roles and administrative permissions held by non-admin roles. Uses the Sentinel server-tool when configured, else drush role:list.",
+    description: "Audit role permissions: dangerous grants to the anonymous/authenticated roles and administrative permissions held by non-admin roles. Self-sufficient via the connector's drush bridge (drush role:list).",
     inputSchema: { type: "object", properties: { site: { type: "string" } } },
   },
   {
     name: "drupal_report_status_report",
-    description: "Surface the Drupal status report (system requirements) entries at warning/error severity — pending updates, overdue cron, missing dependencies, writable settings. Uses the Sentinel server-tool when configured, else drush core:requirements.",
+    description: "Surface the Drupal status report (system requirements) entries at warning/error severity — pending updates, overdue cron, missing dependencies, writable settings. Self-sufficient via the connector's drush bridge (drush core:requirements).",
     inputSchema: {
       type: "object",
       properties: {
@@ -572,12 +613,12 @@ export const definitions = [
   },
   {
     name: "drupal_report_text_format_audit",
-    description: "Audit text formats for ones that permit unfiltered HTML (filter_html not enabled), which are dangerous if exposed to untrusted roles. Reads filter.format.* via the governed server-tool; requires config-read access.",
+    description: "Audit text formats for ones that permit unfiltered HTML (filter_html not enabled), which are dangerous if exposed to untrusted roles. Reads filter.format.* via the connector's drush bridge (or the governed config server-tool when configured); requires config-read access.",
     inputSchema: { type: "object", properties: { site: { type: "string" } } },
   },
   {
     name: "drupal_report_cache_config",
-    description: "Report the site's cache posture (CSS/JS aggregation, anonymous page-cache max-age) from system.performance with plain recommendations. Reads config via the governed server-tool; requires config-read access.",
+    description: "Report the site's cache posture (CSS/JS aggregation, anonymous page-cache max-age) from system.performance with plain recommendations. Reads config via the connector's drush bridge (or the governed config server-tool when configured); requires config-read access.",
     inputSchema: { type: "object", properties: { site: { type: "string" } } },
   },
 ];

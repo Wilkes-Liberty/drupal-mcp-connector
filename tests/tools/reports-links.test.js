@@ -67,16 +67,16 @@ describe("reports-links", () => {
       expect(res.report).toBe("report_404_log");
     });
 
-    it("aggregates and ranks via the server-tool", async () => {
-      h.site.serverTools = { url: "/mcp" };
-      callServerTool.mockResolvedValue({ entries: [{ path: "/a" }, { path: "/a" }, { location: "/b" }] });
+    it("aggregates and ranks via the drush watchdog bridge", async () => {
+      h.site.drushSsh = { host: "h" };
+      sshDrush.mockResolvedValue(JSON.stringify([{ path: "/a" }, { path: "/a" }, { location: "/b" }]));
       const res = await handlers.drupal_report_404_log({ limit: 10 });
-      expect(res.source).toBe("server-tool");
+      expect(res.source).toBe("drush");
       expect(res.findings[0]).toEqual({ path: "/a", hits: 2 });
       expect(res.distinctPaths).toBe(2);
     });
 
-    it("falls back to drush watchdog when server-tool absent", async () => {
+    it("normalizes bare message paths into leading-slash paths", async () => {
       h.site.drushSsh = { host: "h" };
       sshDrush.mockResolvedValue(JSON.stringify([{ message: "missing/x" }, { message: "missing/x" }]));
       const res = await handlers.drupal_report_404_log({});
