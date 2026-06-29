@@ -51,7 +51,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 
 ## Features
 
-### 93 Tools Across 21 Modules
+### 119 Tools Across 26 Modules
 
 | Module | Tools |
 |--------|-------|
@@ -76,6 +76,10 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 | **Redirects** | Create active URL redirects (301/302) + update/repoint existing redirects (Redirect module) |
 | **Search** | Best-effort content search (title match; Search API/Solr-ready) |
 | **Reports (extra)** | Orphaned references, unpublished content, missing-field audits |
+| **Reports — Links & 404** | 404-log → redirect candidates, redirect-table health (chains/loops/duplicates), body-link inventory with opt-in live checking, URL-alias coverage, menu-link integrity, embedded-entity scan |
+| **Reports — Config & Health** | Config drift, best-practice/security config linter, module audit (dev/debug + security updates), permission audit, Drupal status report, text-format safety, cache posture |
+| **Reports — Content Quality** | Duplicate content, workflow bottlenecks, translation coverage, scheduled content, readability (Flesch), orphan pages, PII exposure (masked), structured-meta SEO coverage |
+| **Audit (composite)** | `drupal_audit_site_health` — scored content/links/config dashboard with a roll-up grade |
 | **Config & Governance** | Governed config get/list/set via the server-tool bridge; `drupal_mcp_whoami` tier/capability report |
 
 **Preview writes with `dryRun`.** The node and entity create/update/delete tools accept an optional `dryRun: true` flag that validates the request and returns a preview of exactly what would be written — without committing anything to Drupal.
@@ -89,6 +93,7 @@ Browsable, always-fresh context the client can read without calling a tool:
 ### MCP Prompts
 Workflow templates usable as slash-commands from any MCP client:
 - `drupal-content-audit` — walk through a full site content audit
+- `drupal-full-audit` — run the composite content/links/config audit and turn the scored dashboard into a prioritized action plan
 - `drupal-create-article` — guided article creation with all fields
 - `drupal-seo-fix` — find and fix SEO gaps
 - `drupal-user-cleanup` — identify and handle inactive accounts
@@ -189,7 +194,7 @@ Governance keys off the authenticated account's role and OAuth scopes — not re
 | [OAuth client_credentials](docs/oauth-client-credentials.md) | Production OAuth deploy: scope→role mapping, JSON:API writes, config persistence, secret handling, troubleshooting |
 | [Architecture](docs/architecture.md) | Backend abstraction, canonical model, and how to extend it |
 | [GraphQL Setup](docs/graphql-local-setup.md) | GraphQL Compose backend + local TLS notes |
-| [Tools Reference](docs/tools-reference.md) | Full reference for all 93 tools |
+| [Tools Reference](docs/tools-reference.md) | Full reference for all 119 tools |
 | [Security Guide](docs/security.md) | Presets, entity access control, field redaction |
 | [Security Hardening](docs/security-hardening.md) | Optional transport, identity, and secrets controls |
 | [Threat Model](docs/threat-model.md) | Trust boundaries, threats & mitigations, residual risks, and the security-pass results |

@@ -93,8 +93,12 @@ function resolveKeyPath(rawPath) {
  *
  * Security: args are individually shell-escaped via sanitizeSshArg().
  * No raw user input is ever interpolated directly into the command string.
+ *
+ * Exported so the audit tool groups can reuse the hardened bridge for their
+ * drush fallback paths (e.g. config:status, pm:list, watchdog:show) without
+ * re-implementing SSH handling.
  */
-function sshDrush(site, drushArgs, timeoutMs = 30000) {
+export function sshDrush(site, drushArgs, timeoutMs = 30000) {
   const sshCfg  = getDrushConfig(site);
   assertCommandAllowed(sshCfg, drushArgs[0]);
   const keyPath = resolveKeyPath(sshCfg.keyPath);
@@ -167,8 +171,9 @@ function sshDrush(site, drushArgs, timeoutMs = 30000) {
 
 /**
  * Parse Drush JSON output; fall back to raw string if not JSON.
+ * Exported for reuse by the audit tool groups' drush fallback paths.
  */
-function parseDrush(raw) {
+export function parseDrush(raw) {
   if (!raw) return null;
   try   { return JSON.parse(raw); }
   catch { return raw; }

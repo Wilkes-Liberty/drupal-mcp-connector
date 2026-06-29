@@ -39,6 +39,16 @@ export const SERVER_TOOLS = {
   configGet:  "tool_api.mcp_sentinel_config_get",
   configList: "tool_api.mcp_sentinel_config_list",
   configSet:  "tool_api.mcp_sentinel_config_set",
+  // Read-only audit methods. These surface privileged log/config/module/
+  // permission/requirements data the standard JSON:API/GraphQL backends do not
+  // expose. They are companion work in the mcp_sentinel repo; until they ship,
+  // a call returns a tool-not-found error which the audit tools treat as a
+  // gated/unavailable source (and fall back to the drush bridge where one exists).
+  log404:         "tool_api.mcp_sentinel_log_404",
+  configStatus:   "tool_api.mcp_sentinel_config_status",
+  moduleList:     "tool_api.mcp_sentinel_module_list",
+  permissionList: "tool_api.mcp_sentinel_permission_list",
+  requirements:   "tool_api.mcp_sentinel_requirements",
 };
 
 /** MCP protocol version advertised on the handshake and every subsequent POST. */
@@ -307,6 +317,23 @@ export async function callServerTool(site, toolName, args = {}) {
     }
     return result;
   }
+}
+
+/**
+ * Extract the structured data a server tool returned, for callers (the audit
+ * tools) that need to inspect the payload rather than relay it. Prefers the MCP
+ * `structuredContent` field; otherwise parses the joined text content as JSON,
+ * falling back to the raw text when it isn't JSON.
+ * @param {object} result MCP tools/call result (as returned by callServerTool).
+ * @returns {*} Parsed structured data, raw text, or null when empty.
+ */
+export function toolResultData(result) {
+  if (!result) return null;
+  if (result.structuredContent !== undefined) return result.structuredContent;
+  const text = extractTextContent(result);
+  if (!text) return null;
+  try { return JSON.parse(text); }
+  catch { return text; }
 }
 
 /**

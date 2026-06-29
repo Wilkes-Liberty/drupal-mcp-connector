@@ -78,6 +78,13 @@
         "port":            22,
         "allowedCommands": ["config:export", "config:status"]
       },
+      "audit": {
+        "_comment": "Optional. Controls drupal_report_broken_links live checking (off unless checkLive:true is passed). linkCheckAllowedHosts gates external hosts; same-origin links are always allowed when checking live.",
+        "linkCheckAllowedHosts": ["www.drupal.org", "wilkesliberty.com"],
+        "linkCheckConcurrency":  5,
+        "linkCheckTimeoutMs":    5000,
+        "linkCheckMaxLinks":     200
+      },
       "security": { "preset": "config-editor" }
     },
 
@@ -108,7 +115,11 @@
   },
 
   "_server_tools": {
-    "_comment": "serverTools.url is the JSON-RPC endpoint of the Drupal-side governed MCP tools (mcp_server_tool_bridge / mcp_sentinel), resolved against baseUrl. Required for drupal_config_get/list/set. Authenticated with the same OAuth bearer."
+    "_comment": "serverTools.url is the JSON-RPC endpoint of the Drupal-side governed MCP tools (mcp_server_tool_bridge / mcp_sentinel), resolved against baseUrl. Required for drupal_config_get/list/set and the privileged audits (config/module/permission/status/404-log). Authenticated with the same OAuth bearer."
+  },
+
+  "_audit_tools": {
+    "_comment": "The audit tool groups (drupal_report_* links/config/content, drupal_audit_site_health) are read-only. Privileged audits (404 log, config drift/best-practices, module/permission/status) prefer the Sentinel server-tool, fall back to the drush bridge where one exists, and report 'unavailable' when neither is configured. drupal_report_broken_links does no outbound HTTP unless called with checkLive:true; see each site's optional 'audit' block for live-check limits."
   },
 
   "_mcp_client_registration": {

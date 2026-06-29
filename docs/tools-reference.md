@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for all 93 tools across 21 modules.
+Complete reference for all 119 tools across 26 modules.
 
 > **Tip:** Call `drupal_list_entity_types` first on an unfamiliar site to discover available resource types, and `drupal_security_info` to see the active access policy.
 
@@ -32,8 +32,12 @@ Complete reference for all 93 tools across 21 modules.
 - [Structure](#structure) — 4 tools
 - [Search](#search) — 1 tool
 - [Reports (Extra)](#reports-extra) — 3 tools
+- [Reports — Links & 404](#reports--links--404) — 6 tools
+- [Reports — Config & Health](#reports--config--health) — 7 tools
+- [Reports — Content Quality](#reports--content-quality) — 8 tools
+- [Audit (Composite)](#audit-composite) — 1 tool
 
-**Total: 93 tools across 21 modules.**
+**Total: 119 tools across 26 modules.**
 
 ---
 
@@ -665,6 +669,85 @@ Additional read-only audit tools that complement the [Reports](#reports) module.
 
 ---
 
+## Reports — Links & 404
+
+Read-only link- and 404-integrity audits. Entity-backed audits (redirect, alias, menu, embeds) run against the configured backend and return a `gatedReport` payload when the resource isn't exposed; the 404 log uses the governed Sentinel server-tool, falling back to the drush watchdog bridge.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_report_404_log` | — | Aggregate "page not found" events into the top missing URLs ranked by hit count (redirect candidates). Server-tool, else drush watchdog; gated when neither is configured. |
+| `drupal_report_redirect_health` | — | Audit the Redirect table for duplicate sources, self-redirects, and chains/loops. Deterministic from the redirect entity list. |
+| `drupal_report_broken_links` | — | Inventory internal/external/image links in published bodies and flag malformed hrefs. With `checkLive: true`, verifies links via a bounded, SSRF-guarded checker (no network egress otherwise). |
+| `drupal_report_alias_coverage` | — | Nodes whose URL is still `/node/N` (no alias), plus conflicting aliases when `path_alias` is exposed. |
+| `drupal_report_menu_integrity` | — | Custom menu links that are disabled, placeholder-targeted, or external. Deep target resolution requires the Sentinel server-tool. |
+| `drupal_report_broken_embeds` | — | Embedded-entity usage by type in published bodies, flagging malformed `data-entity-uuid` embeds. |
+
+### drupal_report_broken_links
+
+```json
+{
+  "type": "article",
+  "sampleSize": 100,
+  "checkLive": false,
+  "includeExternal": false
+}
+```
+
+> **Live checking is opt-in.** With `checkLive: false` (default) no outbound HTTP is made. With `checkLive: true`, internal links are checked and external links only when `includeExternal: true` and the host is in the site's `audit.linkCheckAllowedHosts`. The checker refuses loopback/private/link-local/metadata addresses and caps concurrency, timeout, and link count.
+
+---
+
+## Reports — Config & Health
+
+Read-only configuration-posture audits. These read privileged data (config objects, the module list, role permissions, the requirements report) via the governed Sentinel server-tool first, falling back to the drush bridge where one exists, and return `unavailable` when neither is configured. The config-inspection audits also require connector-side config-read access (the `auditor` / `config-editor` / `development` presets; opt-in under `production-strict`).
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_report_config_drift` | — | Active-vs-sync config as an added/changed/removed breakdown. Server-tool, else `drush config:status`. |
+| `drupal_audit_config_best_practices` | — | Lint key config for prod-readiness/security: error display, CSS/JS aggregation, page cache, open registration, missing 404/403 pages, insecure uploads. Severity-ranked. |
+| `drupal_report_module_audit` | — | Development/debug modules enabled in production plus modules with known security advisories. Server-tool, else `drush pm:list` + `pm:security`. |
+| `drupal_report_permission_audit` | — | Dangerous grants to anonymous/authenticated roles and admin permissions held by non-admin roles. Server-tool, else `drush role:list`. |
+| `drupal_report_status_report` | — | Drupal status-report requirements at warning/error severity (pending updates, overdue cron, missing deps). Server-tool, else `drush core:requirements`. |
+| `drupal_report_text_format_audit` | — | Text formats permitting unfiltered HTML (`filter_html` not enabled). Server-tool; requires config-read. |
+| `drupal_report_cache_config` | — | Cache posture from `system.performance` (CSS/JS aggregation, anonymous page-cache max-age) with recommendations. Server-tool; requires config-read. |
+
+---
+
+## Reports — Content Quality
+
+Read-only, backend-neutral content-quality audits. Each samples via the configured backend and flags `approximate` when sampling-bounded; audits needing a field the site doesn't expose (moderation state, scheduler dates) return a `gated` note instead of failing.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_report_duplicate_content` | — | Duplicate / near-duplicate titles within a content type (normalized grouping). |
+| `drupal_report_workflow_bottlenecks` | — | Content stuck in a non-published moderation state beyond N days (default 30). Gated without `moderation_state`. |
+| `drupal_report_translation_coverage` | — | Content distribution by language with lagging-language flags. |
+| `drupal_report_scheduled_content` | — | Scheduler publish/unpublish dates split into pending (future) and overdue (past). Gated without scheduler fields. |
+| `drupal_report_readability` | — | Flesch Reading Ease per body plus structural issues (no H2s, multiple H1s). |
+| `drupal_report_orphan_pages` | — | Published pages with no inbound internal links from the sampled set. |
+| `drupal_report_pii_exposure` | — | Emails / US SSNs / phone numbers in published bodies; matched values are masked in the output. |
+| `drupal_report_seo_meta_coverage` | — | Per-field structured-meta coverage (metatag, meta description) and nodes missing all meta. |
+
+### drupal_report_pii_exposure
+
+```json
+{
+  "type": "article",
+  "sampleSize": 100,
+  "kinds": ["email", "ssn", "phone"]
+}
+```
+
+---
+
+## Audit (Composite)
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_audit_site_health` | — | Runs a configurable battery of the content, link, and config audits and rolls them into one scored dashboard with a letter grade. Each section degrades independently — gated/errored sections are recorded, not fatal. Accepts `sections[]` to run a subset and `type` / `sampleSize` to scope the scan. |
+
+---
+
 ## MCP Resources
 
 Browsable resources (not tools) — the client reads these for ambient site context.
@@ -682,6 +765,7 @@ Slash-command workflow templates.
 | Name | Arguments | Description |
 |------|-----------|-------------|
 | `drupal-content-audit` | `site?` | Full content audit: inventory, staleness, SEO, a11y |
+| `drupal-full-audit` | `site?`, `type?` | Composite content/links/config audit → prioritized action plan |
 | `drupal-create-article` | `site?`, `topic` | Research, draft, and publish an article |
 | `drupal-seo-fix` | `site?`, `type?` | Find and fix SEO gaps interactively |
 | `drupal-user-cleanup` | `site?` | Audit and clean up user accounts |

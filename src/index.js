@@ -68,6 +68,10 @@ import * as structure    from "./tools/structure.js";
 import * as redirects    from "./tools/redirects.js";
 import * as search       from "./tools/search.js";
 import * as reportsExtra from "./tools/reports-extra.js";
+import * as reportsLinks   from "./tools/reports-links.js";
+import * as reportsConfig  from "./tools/reports-config.js";
+import * as reportsContent from "./tools/reports-content.js";
+import * as auditComposite from "./tools/audit-composite.js";
 import * as config       from "./tools/config.js";
 
 // ---------------------------------------------------------------------------
@@ -75,7 +79,8 @@ import * as config       from "./tools/config.js";
 // ---------------------------------------------------------------------------
 
 const allModules = [nodes, taxonomy, users, media, graphql, site, entities, reports, drush,
-  revisions, moderation, scheduler, fields, references, bulk, translations, paragraphs, structure, redirects, search, reportsExtra, config];
+  revisions, moderation, scheduler, fields, references, bulk, translations, paragraphs, structure, redirects, search, reportsExtra,
+  reportsLinks, reportsConfig, reportsContent, auditComposite, config];
 
 // Flatten every module's tool definitions into one ListTools payload, and merge
 // their handler maps into a single closed dispatch table keyed by tool name.
@@ -247,6 +252,14 @@ const PROMPTS = [
     description: "Identify inactive, never-logged-in, or overly permissioned user accounts and take action.",
     arguments:   [{ name: "site", description: "Target site", required: false }],
   },
+  {
+    name:        "drupal-full-audit",
+    description: "Run a full site-health audit — content, link/404 integrity, and configuration posture — and turn the scored dashboard into a prioritized action plan.",
+    arguments:   [
+      { name: "site", description: "Named site to audit (omit for default)", required: false },
+      { name: "type", description: "Primary content type to audit",          required: false },
+    ],
+  },
 ];
 
 /**
@@ -308,6 +321,19 @@ function getPromptMessages(name, args) {
         "4. Identify: (a) accounts inactive 90+ days, (b) never-logged-in accounts, (c) accounts with admin roles that look like test/temp accounts.\n" +
         "5. For each category, recommend action (block, delete, or keep) with reasoning.\n" +
         "6. Ask for approval before making any changes."
+      }},
+    ],
+    "drupal-full-audit": [
+      { role: "user", content: { type: "text", text:
+        `Please run a full site-health audit ${site} and turn it into a prioritized action plan.\n\n` +
+        `1. Call drupal_audit_site_health (type: "${type}") for the scored dashboard and overall grade.\n` +
+        "2. For any section reporting high-severity findings, drill in with the matching tool for detail:\n" +
+        "   - links/404: drupal_report_404_log, drupal_report_redirect_health, drupal_report_broken_links (checkLive only with approval).\n" +
+        "   - config: drupal_audit_config_best_practices, drupal_report_module_audit, drupal_report_permission_audit.\n" +
+        "   - content: drupal_report_pii_exposure, drupal_report_duplicate_content, drupal_report_readability.\n" +
+        "3. For sections reported 'unavailable', note what (server-tool bridge or drush) would enable them — do not treat unavailable as 'passing'.\n" +
+        "4. Synthesize a prioritized plan: (a) high-severity/security fixes first, (b) content-quality improvements, (c) process recommendations.\n" +
+        "5. Present counts, severity, and specific node/config references; propose redirects for the top 404s. Ask before making any changes."
       }},
     ],
   };
