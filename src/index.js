@@ -46,46 +46,10 @@ import { resolveSecurityConfig, assertNotReadOnly,
 import { toolError, toolResult }    from "./lib/errors.js";
 import { BackendCapabilityError, BackendResolutionError } from "./lib/backends/errors.js";
 
-// Tool modules
-import * as nodes    from "./tools/nodes.js";
-import * as taxonomy from "./tools/taxonomy.js";
-import * as users    from "./tools/users.js";
-import * as media    from "./tools/media.js";
-import * as graphql  from "./tools/graphql.js";
-import * as site     from "./tools/site.js";
-import * as entities from "./tools/entities.js";
-import * as reports  from "./tools/reports.js";
-import * as drush    from "./tools/drush.js";
-import * as revisions    from "./tools/revisions.js";
-import * as moderation   from "./tools/moderation.js";
-import * as scheduler    from "./tools/scheduler.js";
-import * as fields       from "./tools/fields.js";
-import * as references   from "./tools/references.js";
-import * as bulk         from "./tools/bulk.js";
-import * as translations from "./tools/translations.js";
-import * as paragraphs   from "./tools/paragraphs.js";
-import * as structure    from "./tools/structure.js";
-import * as redirects    from "./tools/redirects.js";
-import * as search       from "./tools/search.js";
-import * as reportsExtra from "./tools/reports-extra.js";
-import * as reportsLinks   from "./tools/reports-links.js";
-import * as reportsConfig  from "./tools/reports-config.js";
-import * as reportsContent from "./tools/reports-content.js";
-import * as auditComposite from "./tools/audit-composite.js";
-import * as config       from "./tools/config.js";
-
-// ---------------------------------------------------------------------------
-// Aggregate tools
-// ---------------------------------------------------------------------------
-
-const allModules = [nodes, taxonomy, users, media, graphql, site, entities, reports, drush,
-  revisions, moderation, scheduler, fields, references, bulk, translations, paragraphs, structure, redirects, search, reportsExtra,
-  reportsLinks, reportsConfig, reportsContent, auditComposite, config];
-
-// Flatten every module's tool definitions into one ListTools payload, and merge
-// their handler maps into a single closed dispatch table keyed by tool name.
-const allDefinitions = allModules.flatMap((m) => m.definitions);
-const allHandlers    = Object.assign({}, ...allModules.map((m) => m.handlers));
+// Tools — aggregated (single source of truth, side-effect-free) and per-tool prompts
+import { allDefinitions, allHandlers, definitionsByName } from "./tools/index.js";
+import { buildToolPrompts, getToolPromptMessages } from "./lib/tool-prompts.js";
+import { inferOperation } from "./lib/operations.js";
 
 // ---------------------------------------------------------------------------
 // Security middleware — runs BEFORE every tool handler
@@ -95,31 +59,6 @@ const allHandlers    = Object.assign({}, ...allModules.map((m) => m.handlers));
 // naming convention is gated automatically. The matched operation drives which
 // assertions from lib/security.js run against the resolved per-site policy.
 // ---------------------------------------------------------------------------
-
-const WRITE_PREFIXES       = ["drupal_create_", "drupal_update_", "drupal_upload_",
-  "drupal_block_",  "drupal_drush_cache", "drupal_drush_cron",
-  "drupal_drush_config_export", "drupal_drush_config_import",
-  "drupal_drush_updatedb", "drupal_drush_module_enable",
-  "drupal_drush_module_disable", "drupal_drush_user_create",
-  // v1.0 feature tools that perform writes but don't start with create_/update_:
-  "drupal_bulk_", "drupal_revert_", "drupal_schedule_", "drupal_set_",
-  // Governed config write (also gated inside the handler by the config-write cap):
-  "drupal_config_set"];
-const DESTRUCTIVE_PREFIXES = ["drupal_delete_", "drupal_drush_module_disable"];
-
-/**
- * Classify a tool's operation intent from its name prefix.
- *
- * @param {string} toolName - The MCP tool name being invoked.
- * @returns {"delete"|"write"|"graphql"|"read"} Inferred operation. Destructive
- *   prefixes are checked first so they take precedence over plain write.
- */
-function inferOperation(toolName) {
-  if (DESTRUCTIVE_PREFIXES.some((p) => toolName.startsWith(p))) return "delete";
-  if (WRITE_PREFIXES.some((p) => toolName.startsWith(p)))       return "write";
-  if (toolName === "drupal_graphql")                             return "graphql";
-  return "read";
-}
 
 /**
  * Derive the entity type a tool acts on, for destructive-allow assertions.
@@ -262,6 +201,14 @@ const PROMPTS = [
   },
 ];
 
+// Per-tool prompts: one slash-command prompt for every Drupal tool, derived from
+// the tool definitions so the set always matches the tools. Merged after the
+// hand-authored workflow prompts above (names never collide — workflow prompts use
+// composite verbs, tool prompts mirror the `drupal_*` tool names).
+const WORKFLOW_PROMPT_NAMES = new Set(PROMPTS.map((p) => p.name));
+const TOOL_PROMPTS = buildToolPrompts(allDefinitions);
+const ALL_PROMPTS  = [...PROMPTS, ...TOOL_PROMPTS];
+
 /**
  * Build the message list for a named prompt, interpolating site/type/topic
  * args into a pre-authored multi-step workflow. Unknown prompt names fall back
@@ -396,14 +343,17 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   }
 });
 
-// Prompts
-server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: PROMPTS }));
+// Prompts — hand-authored workflows + one generated prompt per tool
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: ALL_PROMPTS }));
 
 server.setRequestHandler(GetPromptRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-  const known = PROMPTS.find((p) => p.name === name);
+  const known = ALL_PROMPTS.find((p) => p.name === name);
   if (!known) throw new Error(`Unknown prompt: "${name}"`);
-  return { description: known.description, messages: getPromptMessages(name, args) };
+  const messages = WORKFLOW_PROMPT_NAMES.has(name)
+    ? getPromptMessages(name, args)
+    : getToolPromptMessages(name, args, definitionsByName);
+  return { description: known.description, messages };
 });
 
 // ---------------------------------------------------------------------------
@@ -417,7 +367,7 @@ if (transport === "stdio") {
   await server.connect(stdioTransport);
   console.error(
     `[drupal-mcp-connector v${CLIENT_VERSION}] stdio transport active. ` +
-    `${allDefinitions.length} tools · ${RESOURCES.length} resources · ${PROMPTS.length} prompts`
+    `${allDefinitions.length} tools · ${RESOURCES.length} resources · ${ALL_PROMPTS.length} prompts`
   );
 
 } else if (transport === "https" || transport === "http") {
@@ -532,7 +482,7 @@ if (transport === "stdio") {
     const proto = hasTls ? "https" : "http";
     console.error(
       `[drupal-mcp-connector v${CLIENT_VERSION}] Listening on ${proto}://${bindHost}:${port}/mcp\n` +
-      `  ${allDefinitions.length} tools · ${RESOURCES.length} resources · ${PROMPTS.length} prompts`
+      `  ${allDefinitions.length} tools · ${RESOURCES.length} resources · ${ALL_PROMPTS.length} prompts`
     );
   });
 

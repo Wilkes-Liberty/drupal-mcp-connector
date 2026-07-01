@@ -45,3 +45,10 @@ docs/superpowers/
 
 # Playwright MCP throwaway page snapshots
 .playwright-mcp/
+
+# .claude/ is excluded by the global gitignore, but the generated slash-command
+# files under .claude/commands/ are a shipped, committed artifact. Re-include just
+# that subtree (keeping local settings like settings.local.json ignored).
+!.claude/
+.claude/*
+!.claude/commands/
