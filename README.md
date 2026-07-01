@@ -91,12 +91,38 @@ Browsable, always-fresh context the client can read without calling a tool:
 - **`drupal://{site}/security-policy`** — the active security configuration
 
 ### MCP Prompts
-Workflow templates usable as slash-commands from any MCP client:
+Prompts are exposed as slash-commands in **any** MCP client (Claude, Gemini, Codex,
+and other MCP-aware agents). Two kinds ship with the connector:
+
+**Workflow templates** — multi-step guided flows:
 - `drupal-content-audit` — walk through a full site content audit
 - `drupal-full-audit` — run the composite content/links/config audit and turn the scored dashboard into a prioritized action plan
 - `drupal-create-article` — guided article creation with all fields
 - `drupal-seo-fix` — find and fix SEO gaps
 - `drupal-user-cleanup` — identify and handle inactive accounts
+
+**One prompt per tool** — every `drupal_*` tool is also exposed as a
+`drupal-<tool>` prompt (e.g. `drupal-create-node`, `drupal-list-nodes`,
+`drupal-report-seo-audit`), derived automatically from the tool set so it never
+drifts. Each prompt takes the tool's parameters as arguments and drives a single,
+governed call to that tool. These are protocol-native, so they work everywhere the
+prompts capability is supported — the client renders them per its own convention
+(e.g. Claude Code shows `/mcp__drupal__drupal-create-node`).
+
+#### Claude Code slash commands (`/drupal-*`)
+For the literal bare `/drupal-<tool>` form in **Claude Code specifically**, the
+connector also ships generated command files under `.claude/commands/`. Because
+Claude Code project commands are per-project, copy them into your own project (or
+regenerate from the installed package):
+
+```bash
+mkdir -p .claude/commands
+cp node_modules/drupal-mcp-connector/.claude/commands/drupal-*.md .claude/commands/
+# …or, from a clone of the connector:  npm run generate:commands
+```
+
+Other MCP agents don't need this step — they get the same coverage from the per-tool
+prompts above.
 
 ### Security Model
 Defense-in-depth with four one-line presets, enforced connector-side and complemented by Drupal-side governance:

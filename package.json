@@ -9,6 +9,8 @@
   },
   "files": [
     "src/",
+    "scripts/generate-commands.js",
+    ".claude/commands/",
     "config/config.example.json",
     "README.md",
     "CHANGELOG.md",
@@ -46,6 +48,7 @@
     "start": "node src/index.js",
     "start:https": "MCP_TRANSPORT=https node src/index.js",
     "start:dev": "MCP_TRANSPORT=https MCP_ALLOW_HTTP=1 MCP_PORT=3443 node src/index.js",
+    "generate:commands": "node scripts/generate-commands.js",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",

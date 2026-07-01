@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A slash command for every tool.** All 119 `drupal_*` tools are now exposed as
+  `drupal-<tool>` MCP prompts (e.g. `drupal-create-node`), generated dynamically from
+  the tool definitions at startup and merged with the 5 existing workflow prompts.
+  Being protocol-native prompts, they surface as slash commands in **any** MCP client
+  (Claude, Gemini, Codex, …); each takes the tool's parameters as arguments and drives
+  a single governed call to that tool, with destructive tools flagged to confirm first.
+- **Claude Code command files** — `npm run generate:commands` writes one
+  `.claude/commands/drupal-<tool>.md` per tool, giving the literal `/drupal-<tool>`
+  form in Claude Code. Each file is scoped via `allowed-tools` to only its own
+  `mcp__drupal__<tool>`. The committed files are kept in sync by a staleness test.
+- New `src/tools/index.js` — single source of truth aggregating every tool
+  definition/handler, shared by the server, the per-tool prompts, and the command
+  generator so the three can never drift. Operation classification (write/destructive)
+  extracted to `src/lib/operations.js` and reused for the confirm-first warnings.
+
 ## [1.6.0] - 2026-06-29
 
 ### Added
