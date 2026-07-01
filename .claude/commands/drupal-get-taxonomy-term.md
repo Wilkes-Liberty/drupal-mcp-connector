@@ -1,6 +1,6 @@
 ---
 description: "Fetch a single taxonomy term by UUID."
-argument-hint: "[site] <vocabulary> <id>"
+argument-hint: "<vocabulary> <id> [site]"
 allowed-tools: mcp__drupal__drupal_get_taxonomy_term
 ---
 

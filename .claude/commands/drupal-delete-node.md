@@ -1,6 +1,6 @@
 ---
 description: "Permanently delete a node. Irreversible — confirm with the user before calling."
-argument-hint: "[site] <type> <id> [dryRun]"
+argument-hint: "<type> <id> [site] [dryRun]"
 allowed-tools: mcp__drupal__drupal_delete_node
 ---
 

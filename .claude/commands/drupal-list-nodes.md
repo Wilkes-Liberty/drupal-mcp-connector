@@ -1,6 +1,6 @@
 ---
 description: "List nodes of a given content type. Supports status filtering, pagination, sorting, and structured filter descriptors."
-argument-hint: "[site] <type> [status] [limit] [offset] [filters] [sort]"
+argument-hint: "<type> [site] [status] [limit] [offset] [filters] [sort]"
 allowed-tools: mcp__drupal__drupal_list_nodes
 ---
 

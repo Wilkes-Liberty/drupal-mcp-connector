@@ -1,6 +1,6 @@
 ---
 description: "Create an active URL redirect (contrib Redirect module). The redirect serves its 301 (or chosen code) immediately: 'source' is the old path (a leading slash is fine — it is normalized to the module's stored, slash-less form so the redirect actually matches and fires), and 'target' is the destination as a path ('/new'), an 'entity:node/ID', or an absolute URL. status_code defaults to 301; pass 302 for a temporary redirect. Governed by the site security policy (needs redirect write / 'administer redirects')."
-argument-hint: "[site] <source> <target> [statusCode] [language]"
+argument-hint: "<source> <target> [site] [statusCode] [language]"
 allowed-tools: mcp__drupal__drupal_create_redirect
 ---
 

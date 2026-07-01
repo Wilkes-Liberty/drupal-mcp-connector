@@ -1,6 +1,6 @@
 ---
 description: "List the translation langcode(s) for a Drupal entity (multilingual / content_translation). Reports the language(s) observable on the resource. Core JSON:API serves one language per resource and does not enumerate all translations — see the returned note. Defaults to node."
-argument-hint: "[site] [entityType] <type> <id>"
+argument-hint: "<type> <id> [site] [entityType]"
 allowed-tools: mcp__drupal__drupal_list_translations
 ---
 

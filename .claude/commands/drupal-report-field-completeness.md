@@ -1,6 +1,6 @@
 ---
 description: "Score how completely optional fields are filled in for a content type. Finds nodes missing summaries, images, meta descriptions, tags, etc."
-argument-hint: "[site] <type> [fields] [sampleSize]"
+argument-hint: "<type> [site] [fields] [sampleSize]"
 allowed-tools: mcp__drupal__drupal_report_field_completeness
 ---
 

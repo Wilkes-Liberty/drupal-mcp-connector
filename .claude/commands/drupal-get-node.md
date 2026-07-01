@@ -1,6 +1,6 @@
 ---
 description: "Fetch a single Drupal content node by UUID and content type. Returns title, body, status, path alias, and all attributes."
-argument-hint: "[site] <type> <id>"
+argument-hint: "<type> <id> [site]"
 allowed-tools: mcp__drupal__drupal_get_node
 ---
 

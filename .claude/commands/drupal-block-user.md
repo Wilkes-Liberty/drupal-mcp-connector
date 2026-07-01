@@ -1,6 +1,6 @@
 ---
 description: "Block or unblock a Drupal user account without deleting it."
-argument-hint: "[site] <id> [block]"
+argument-hint: "<id> [site] [block]"
 allowed-tools: mcp__drupal__drupal_block_user
 ---
 

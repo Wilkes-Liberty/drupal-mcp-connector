@@ -1,6 +1,6 @@
 ---
 description: "Surface the addressable revisions of a content node: the latest default revision and the working-copy (forward) revision, with their version ids and links. NOTE: JSON:API cannot enumerate full chronological revision history — it only addresses revisions by id or the latest/working-copy aliases. Full history enumeration requires the Drush bridge. Use drupal_report_revision_hotspots for per-node revision counts."
-argument-hint: "[site] <type> <id>"
+argument-hint: "<type> <id> [site]"
 allowed-tools: mcp__drupal__drupal_list_revisions
 ---
 

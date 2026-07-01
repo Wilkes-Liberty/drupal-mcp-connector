@@ -1,6 +1,6 @@
 ---
 description: "Search nodes by title substring. Returns title, path alias, and body summary."
-argument-hint: "[site] <query> [type] [status] [limit]"
+argument-hint: "<query> [site] [type] [status] [limit]"
 allowed-tools: mcp__drupal__drupal_search_content
 ---
 

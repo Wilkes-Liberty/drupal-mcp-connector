@@ -1,6 +1,6 @@
 ---
 description: "Delete a media entity. Does not delete the underlying File entity. Confirm with the user before calling."
-argument-hint: "[site] <type> <id>"
+argument-hint: "<type> <id> [site]"
 allowed-tools: mcp__drupal__drupal_delete_media
 ---
 

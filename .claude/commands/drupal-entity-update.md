@@ -1,6 +1,6 @@
 ---
 description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change."
-argument-hint: "[site] <entityType> <bundle> <id> [attributes] [relationships] [dryRun]"
+argument-hint: "<entityType> <bundle> <id> [site] [attributes] [relationships] [dryRun]"
 allowed-tools: mcp__drupal__drupal_entity_update
 ---
 

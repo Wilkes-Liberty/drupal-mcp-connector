@@ -1,6 +1,6 @@
 ---
 description: "Find entities of a content type where a given field is empty (e.g. a missing meta description, image, or summary). Works for scalar fields and entity-reference fields. Sampling-bounded — flags 'approximate' when the scan is capped."
-argument-hint: "[site] [type] <field> [sampleSize]"
+argument-hint: "<field> [site] [type] [sampleSize]"
 allowed-tools: mcp__drupal__drupal_report_missing_field
 ---
 

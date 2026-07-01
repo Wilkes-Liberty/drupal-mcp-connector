@@ -1,6 +1,6 @@
 ---
 description: "List entities of any Drupal entity type and bundle. Supports structured filters, sorting, pagination, and relationship includes. Use drupal_list_entity_types first to discover available types."
-argument-hint: "[site] <entityType> <bundle> [filters] [sort] [include] [limit] [offset]"
+argument-hint: "<entityType> <bundle> [site] [filters] [sort] [include] [limit] [offset]"
 allowed-tools: mcp__drupal__drupal_entity_list
 ---
 

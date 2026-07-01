@@ -1,6 +1,6 @@
 ---
 description: "Read a single Drupal configuration object by name (e.g. \"system.site\") via the governed server-side config tool. Requires config read access."
-argument-hint: "[site] <name>"
+argument-hint: "<name> [site]"
 allowed-tools: mcp__drupal__drupal_config_get
 ---
 

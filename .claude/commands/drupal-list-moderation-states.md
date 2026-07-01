@@ -1,6 +1,6 @@
 ---
 description: "List the moderation states observed on a content type's content (best-effort; authoritative transitions require the Drush bridge)."
-argument-hint: "[site] <type> [sample]"
+argument-hint: "<type> [site] [sample]"
 allowed-tools: mcp__drupal__drupal_list_moderation_states
 ---
 

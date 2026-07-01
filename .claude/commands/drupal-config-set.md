@@ -1,6 +1,6 @@
 ---
 description: "Set a Drupal configuration value via the governed server-side config tool. Audited and gated server-side; requires the config-editor (Developer) tier. Then export to YAML for a PR."
-argument-hint: "[site] <name> <value>"
+argument-hint: "<name> <value> [site]"
 allowed-tools: mcp__drupal__drupal_config_set
 ---
 

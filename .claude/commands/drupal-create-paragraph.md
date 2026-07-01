@@ -1,6 +1,6 @@
 ---
 description: "Create a Paragraph entity of a given paragraph type (bundle). Paragraphs are content fragments that are NOT standalone — they must be referenced by a host entity's paragraph / Entity Reference Revisions field. Returns the created paragraph plus `relationshipData` ({ type: 'paragraph--<bundle>', id: <uuid> }) to drop into a host field's relationships via drupal_entity_update / drupal_update_node. Use drupal_get_entity_schema (entityType 'paragraph', the bundle) first to discover fields. Governed by the site security policy."
-argument-hint: "[site] <paragraphType> [attributes]"
+argument-hint: "<paragraphType> [site] [attributes]"
 allowed-tools: mcp__drupal__drupal_create_paragraph
 ---
 

@@ -1,6 +1,6 @@
 ---
 description: "Count how many nodes use each term in a vocabulary. Identifies over-used, under-used, and orphaned terms."
-argument-hint: "[site] <vocabulary> [contentType] [referenceField] [limit]"
+argument-hint: "<vocabulary> [site] [contentType] [referenceField] [limit]"
 allowed-tools: mcp__drupal__drupal_report_taxonomy_usage
 ---
 

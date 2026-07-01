@@ -1,6 +1,6 @@
 ---
 description: "Transition a content node to a moderation state (content_moderation), e.g. 'draft', 'needs_review', 'published', 'archived'. Governed write."
-argument-hint: "[site] <type> <id> <state>"
+argument-hint: "<type> <id> <state> [site]"
 allowed-tools: mcp__drupal__drupal_set_moderation_state
 ---
 

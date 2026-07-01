@@ -1,6 +1,6 @@
 ---
 description: "Update a Drupal user account. Only include fields you want to change. Can reassign roles by providing a full replacement role list."
-argument-hint: "[site] <id> [name] [mail] [password] [status] [roles] [timezone]"
+argument-hint: "<id> [site] [name] [mail] [password] [status] [roles] [timezone]"
 allowed-tools: mcp__drupal__drupal_update_user
 ---
 

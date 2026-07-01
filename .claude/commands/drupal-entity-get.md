@@ -1,6 +1,6 @@
 ---
 description: "Fetch a single entity of any Drupal entity type by UUID."
-argument-hint: "[site] <entityType> <bundle> <id> [include]"
+argument-hint: "<entityType> <bundle> <id> [site] [include]"
 allowed-tools: mcp__drupal__drupal_entity_get
 ---
 

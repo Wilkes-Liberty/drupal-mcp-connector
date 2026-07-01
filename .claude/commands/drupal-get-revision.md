@@ -1,6 +1,6 @@
 ---
 description: "Fetch a single revision of a content node by version id or alias. `version` may be a numeric vid (e.g. 42), an explicit 'id:<vid>', or the relative aliases 'rel:latest-version' / 'rel:working-copy'. Read-only; attributes are redacted per security policy."
-argument-hint: "[site] <type> <id> <version>"
+argument-hint: "<type> <id> <version> [site]"
 allowed-tools: mcp__drupal__drupal_get_revision
 ---
 

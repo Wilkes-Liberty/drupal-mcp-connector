@@ -1,6 +1,6 @@
 ---
 description: "Create a media entity. For remote video (YouTube/Vimeo), pass the URL via fields.field_media_oembed_video. For file-based media, use drupal_upload_file first to get a file UUID, then pass it in fields."
-argument-hint: "[site] <type> <name> [status] [fields]"
+argument-hint: "<type> <name> [site] [status] [fields]"
 allowed-tools: mcp__drupal__drupal_create_media
 ---
 

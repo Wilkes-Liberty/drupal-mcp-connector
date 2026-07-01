@@ -1,6 +1,6 @@
 ---
 description: "Uninstall a Drupal module. Irreversible for module-stored data. Confirm with user."
-argument-hint: "[site] <moduleName>"
+argument-hint: "<moduleName> [site]"
 allowed-tools: mcp__drupal__drupal_drush_module_disable
 ---
 

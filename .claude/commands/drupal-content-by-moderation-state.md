@@ -1,6 +1,6 @@
 ---
 description: "List nodes of a content type currently in a given moderation state (e.g. what is in 'draft' or 'needs_review')."
-argument-hint: "[site] <type> <state> [limit] [offset]"
+argument-hint: "<type> <state> [site] [limit] [offset]"
 allowed-tools: mcp__drupal__drupal_content_by_moderation_state
 ---
 

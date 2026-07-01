@@ -1,6 +1,6 @@
 ---
 description: "Update an existing redirect by UUID: repoint its source or target, or change its status code (e.g. 301↔302). Only the fields you pass are changed (partial update). Use this to activate/fix a redirect that isn't firing (e.g. one created with a stale source). Governed by the site security policy."
-argument-hint: "[site] <id> [source] [target] [statusCode]"
+argument-hint: "<id> [site] [source] [target] [statusCode]"
 allowed-tools: mcp__drupal__drupal_update_redirect
 ---
 

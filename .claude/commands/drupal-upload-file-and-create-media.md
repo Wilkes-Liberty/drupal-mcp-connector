@@ -1,6 +1,6 @@
 ---
 description: "Convenience tool: upload a local file and immediately create a Media entity in one step. Best for the common 'add an image' workflow."
-argument-hint: "[site] <filePath> <mediaType> [mediaName] <fieldName> [altText] [status]"
+argument-hint: "<filePath> <mediaType> <fieldName> [site] [mediaName] [altText] [status]"
 allowed-tools: mcp__drupal__drupal_upload_file_and_create_media
 ---
 

@@ -1,6 +1,6 @@
 ---
 description: "Update an existing Paragraph entity's field values by paragraph type (bundle) and UUID. Only the attributes you pass are changed (partial update); the host entity's reference to this paragraph is unchanged (same UUID), so this maintains a component paragraph in place without re-embedding. Use drupal_get_entity_schema (entityType 'paragraph', the bundle) to discover fields. Governed by the site security policy."
-argument-hint: "[site] <paragraphType> <id> [attributes]"
+argument-hint: "<paragraphType> <id> [site] [attributes]"
 allowed-tools: mcp__drupal__drupal_update_paragraph
 ---
 

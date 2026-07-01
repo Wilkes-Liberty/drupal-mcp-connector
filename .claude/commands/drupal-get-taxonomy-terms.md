@@ -1,6 +1,6 @@
 ---
 description: "List all terms in a taxonomy vocabulary, sorted by name."
-argument-hint: "[site] <vocabulary> [limit] [offset]"
+argument-hint: "<vocabulary> [site] [limit] [offset]"
 allowed-tools: mcp__drupal__drupal_get_taxonomy_terms
 ---
 

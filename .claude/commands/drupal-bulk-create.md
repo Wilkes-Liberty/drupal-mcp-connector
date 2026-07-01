@@ -1,6 +1,6 @@
 ---
 description: "Create many entities of a single type + bundle in one call. Permission is checked once; each item is created independently, so the batch continues past individual failures (partial success). Returns per-item { index, success, id | error } and a summary { created, failed }. Writes default to unpublished/draft."
-argument-hint: "[site] <entityType> <bundle> <items>"
+argument-hint: "<entityType> <bundle> <items> [site]"
 allowed-tools: mcp__drupal__drupal_bulk_create
 ---
 

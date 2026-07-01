@@ -36,24 +36,22 @@ export function inferOperation(toolName) {
   return "read";
 }
 
+// Generic entity tools carry their target type/bundle in ARGS, not the tool name,
+// so the security middleware gates them inside their handlers (assertDeleteAllowed /
+// assertWriteAllowed with full context) and inferOperation() intentionally leaves
+// them classified "read". For the user-facing confirm-first WARNING, though, we
+// still want the destructive hint to show, so classify them by name here.
+const DESTRUCTIVE_ENTITY_TOOLS = new Set(["drupal_entity_delete"]);
+
 /**
- * Whether a tool deletes/destroys data (used to surface a confirm-first warning
- * in prompts and slash commands).
+ * Whether a tool deletes/destroys data — used to surface a confirm-first warning
+ * in prompts and slash commands. Broader than inferOperation()'s "delete": it also
+ * covers the generic `drupal_entity_delete` tool, which the prefix-based classifier
+ * does not match (see note above).
  *
  * @param {string} toolName - The MCP tool name.
  * @returns {boolean} True for destructive tools.
  */
 export function isDestructiveTool(toolName) {
-  return inferOperation(toolName) === "delete";
-}
-
-/**
- * Whether a tool mutates state (write or delete), for the same warning surface.
- *
- * @param {string} toolName - The MCP tool name.
- * @returns {boolean} True for write or destructive tools.
- */
-export function isWriteTool(toolName) {
-  const op = inferOperation(toolName);
-  return op === "write" || op === "delete";
+  return inferOperation(toolName) === "delete" || DESTRUCTIVE_ENTITY_TOOLS.has(toolName);
 }

@@ -1,6 +1,6 @@
 ---
 description: "Create a new taxonomy term in a vocabulary."
-argument-hint: "[site] <vocabulary> <name> [description] [weight] [parentId]"
+argument-hint: "<vocabulary> <name> [site] [description] [weight] [parentId]"
 allowed-tools: mcp__drupal__drupal_create_taxonomy_term
 ---
 

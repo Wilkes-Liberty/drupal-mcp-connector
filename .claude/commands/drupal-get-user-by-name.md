@@ -1,6 +1,6 @@
 ---
 description: "Look up a Drupal user by their exact username."
-argument-hint: "[site] <name>"
+argument-hint: "<name> [site]"
 allowed-tools: mcp__drupal__drupal_get_user_by_name
 ---
 

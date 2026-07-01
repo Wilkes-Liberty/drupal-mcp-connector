@@ -1,6 +1,6 @@
 ---
 description: "Create a new Drupal user account with optional roles and password."
-argument-hint: "[site] <name> <mail> [password] [status] [roles] [timezone]"
+argument-hint: "<name> <mail> [site] [password] [status] [roles] [timezone]"
 allowed-tools: mcp__drupal__drupal_create_user
 ---
 

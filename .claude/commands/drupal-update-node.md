@@ -1,6 +1,6 @@
 ---
 description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status."
-argument-hint: "[site] <type> <id> [title] [body] [summary] [status] [moderationState] [fields] [dryRun]"
+argument-hint: "<type> <id> [site] [title] [body] [summary] [status] [moderationState] [fields] [dryRun]"
 allowed-tools: mcp__drupal__drupal_update_node
 ---
 

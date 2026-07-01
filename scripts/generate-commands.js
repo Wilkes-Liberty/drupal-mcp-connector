@@ -35,9 +35,10 @@ function yamlString(value) {
   return `"${clean}"`;
 }
 
-/** Build the `argument-hint` string: `<required>` first, then `[optional]`. */
+/** Build the `argument-hint` string: `<required>` first, then `[optional]` (order stable within each group). */
 function argumentHint(params) {
-  return params.map((p) => (p.required ? `<${p.name}>` : `[${p.name}]`)).join(" ");
+  const ordered = [...params].sort((a, b) => Number(b.required) - Number(a.required));
+  return ordered.map((p) => (p.required ? `<${p.name}>` : `[${p.name}]`)).join(" ");
 }
 
 /**

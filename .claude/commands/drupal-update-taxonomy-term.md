@@ -1,6 +1,6 @@
 ---
 description: "Update an existing taxonomy term's name, description, or weight."
-argument-hint: "[site] <vocabulary> <id> [name] [description] [weight]"
+argument-hint: "<vocabulary> <id> [site] [name] [description] [weight]"
 allowed-tools: mcp__drupal__drupal_update_taxonomy_term
 ---
 

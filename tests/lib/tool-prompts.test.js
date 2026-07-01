@@ -72,6 +72,13 @@ describe("tool-prompts", () => {
     expect(text).toContain("Destructive");
   });
 
+  it("warns on the generic drupal_entity_delete tool (name-based, not prefix-based)", () => {
+    // inferOperation() leaves entity tools "read" (they self-gate in-handler), but the
+    // user-facing warning must still fire — see isDestructiveTool in lib/operations.js.
+    const text = getToolPromptMessages("drupal-entity-delete", {}, definitionsByName)[0].content.text;
+    expect(text).toContain("Destructive");
+  });
+
   it("handles a no-argument tool", () => {
     const listSites = allDefinitions.find((d) => d.name === "drupal_list_sites");
     expect(paramList(listSites.inputSchema)).toEqual([]);

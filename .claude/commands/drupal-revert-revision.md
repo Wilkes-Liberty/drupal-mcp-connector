@@ -1,6 +1,6 @@
 ---
 description: "Revert a content node to a prior revision (GOVERNED WRITE). Reads the target revision and replays its editable content as a NEW current revision (history is preserved, nothing is deleted). Internal ids, revision metadata, and computed paths are not written back. Subject to the site's write security policy. Confirm with the user before calling."
-argument-hint: "[site] <type> <id> <version>"
+argument-hint: "<type> <id> <version> [site]"
 allowed-tools: mcp__drupal__drupal_revert_revision
 ---
 

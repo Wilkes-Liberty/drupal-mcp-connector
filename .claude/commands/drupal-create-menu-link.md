@@ -1,6 +1,6 @@
 ---
 description: "Create a custom menu link, enabled by default so it renders immediately. The link target is a Drupal URI such as 'internal:/about', 'entity:node/42', or an absolute 'https://…' URL — prefer 'entity:node/<id>' when linking to a node (avoids the alias-resolution 'path inaccessible' race). Set 'parent' (a parent link plugin id like 'menu_link_content:<uuid>') to nest the link, and 'enabled: false' to create it disabled. Checked against the site security config."
-argument-hint: "[site] <title> <link> <menu> [weight] [parent] [enabled]"
+argument-hint: "<title> <link> <menu> [site] [weight] [parent] [enabled]"
 allowed-tools: mcp__drupal__drupal_create_menu_link
 ---
 

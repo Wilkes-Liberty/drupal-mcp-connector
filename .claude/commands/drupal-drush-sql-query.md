@@ -1,6 +1,6 @@
 ---
 description: "Run a read-only SQL query (SELECT, SHOW, DESCRIBE, EXPLAIN only) via Drush. Write queries are blocked by the security layer."
-argument-hint: "[site] <query>"
+argument-hint: "<query> [site]"
 allowed-tools: mcp__drupal__drupal_drush_sql_query
 ---
 

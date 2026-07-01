@@ -1,6 +1,6 @@
 ---
 description: "Upload a local file to Drupal and create a File entity. Returns the file UUID to use when creating a Media entity. For images, the typical flow is: drupal_upload_file → drupal_create_media."
-argument-hint: "[site] <filePath> [entityType] <bundle> <fieldName>"
+argument-hint: "<filePath> <bundle> <fieldName> [site] [entityType]"
 allowed-tools: mcp__drupal__drupal_upload_file
 ---
 

@@ -1,6 +1,6 @@
 ---
 description: "Delete a taxonomy term. Confirm with the user before calling."
-argument-hint: "[site] <vocabulary> <id>"
+argument-hint: "<vocabulary> <id> [site]"
 allowed-tools: mcp__drupal__drupal_delete_taxonomy_term
 ---
 

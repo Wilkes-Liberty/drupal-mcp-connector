@@ -1,6 +1,6 @@
 ---
 description: "Create an entity of any Drupal entity type and bundle. Use drupal_get_entity_schema first to know what fields are available. All operations checked against security config."
-argument-hint: "[site] <entityType> <bundle> [attributes] [relationships] [dryRun]"
+argument-hint: "<entityType> <bundle> [site] [attributes] [relationships] [dryRun]"
 allowed-tools: mcp__drupal__drupal_entity_create
 ---
 

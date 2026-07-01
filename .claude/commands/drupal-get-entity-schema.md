@@ -1,6 +1,6 @@
 ---
 description: "Inspect the fields and relationships available on any Drupal entity type + bundle. Run this before creating or updating entities to know what fields are available."
-argument-hint: "[site] <entityType> <bundle>"
+argument-hint: "<entityType> <bundle> [site]"
 allowed-tools: mcp__drupal__drupal_get_entity_schema
 ---
 

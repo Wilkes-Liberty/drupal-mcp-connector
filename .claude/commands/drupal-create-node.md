@@ -1,6 +1,6 @@
 ---
 description: "Create a new content node. Returns the new node UUID, integer ID, and URL. For content types under an editorial (content_moderation) workflow, set moderationState (e.g. 'draft'/'published') instead of status."
-argument-hint: "[site] <type> <title> [body] [summary] [status] [moderationState] [fields] [dryRun]"
+argument-hint: "<type> <title> [site] [body] [summary] [status] [moderationState] [fields] [dryRun]"
 allowed-tools: mcp__drupal__drupal_create_node
 ---
 

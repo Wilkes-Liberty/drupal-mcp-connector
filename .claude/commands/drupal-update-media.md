@@ -1,6 +1,6 @@
 ---
 description: "Update a media entity's name, status, or field values."
-argument-hint: "[site] <type> <id> [name] [status] [fields]"
+argument-hint: "<type> <id> [site] [name] [status] [fields]"
 allowed-tools: mcp__drupal__drupal_update_media
 ---
 

@@ -1,6 +1,6 @@
 ---
 description: "Fetch a single Drupal user account by UUID, including their assigned roles."
-argument-hint: "[site] <id>"
+argument-hint: "<id> [site]"
 allowed-tools: mcp__drupal__drupal_get_user
 ---
 

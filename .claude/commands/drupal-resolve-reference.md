@@ -1,6 +1,6 @@
 ---
 description: "Resolve a human name or title to a Drupal entity UUID. Use this before creating or updating an entity reference when you only know the label (e.g. a taxonomy term name, a user name, or a node title) and not its UUID. Read-only: returns the best match { id, title } plus any ambiguous candidates. Filters on 'title' for nodes and 'name' for taxonomy_term / user."
-argument-hint: "[site] <entityType> <bundle> <name> [limit]"
+argument-hint: "<entityType> <bundle> <name> [site] [limit]"
 allowed-tools: mcp__drupal__drupal_resolve_reference
 ---
 

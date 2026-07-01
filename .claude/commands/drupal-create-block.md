@@ -1,6 +1,6 @@
 ---
 description: "Create a custom content block of a given block type (bundle). 'info' is the administrative label; 'body' is optional rendered HTML. Checked against the site security config."
-argument-hint: "[site] <type> <info> [body]"
+argument-hint: "<type> <info> [site] [body]"
 allowed-tools: mcp__drupal__drupal_create_block
 ---
 

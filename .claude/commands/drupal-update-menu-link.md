@@ -1,6 +1,6 @@
 ---
 description: "Update a custom menu link by UUID (rename, re-weight, re-target, re-parent, enable/disable). Only the fields you pass change. The link's enabled state is preserved across edits — an unrelated change will not disable a live link — unless you pass 'enabled' explicitly. Checked against the site security config."
-argument-hint: "[site] <id> [title] [link] [menu] [weight] [parent] [enabled]"
+argument-hint: "<id> [site] [title] [link] [menu] [weight] [parent] [enabled]"
 allowed-tools: mcp__drupal__drupal_update_menu_link
 ---
 

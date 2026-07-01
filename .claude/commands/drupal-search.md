@@ -1,6 +1,6 @@
 ---
 description: "Search content by a query string. Best-effort title match over a content type (mode:'fallback'); relevance-ranked search requires a Search API/Solr endpoint."
-argument-hint: "[site] <query> [type] [limit]"
+argument-hint: "<query> [site] [type] [limit]"
 allowed-tools: mcp__drupal__drupal_search
 ---
 

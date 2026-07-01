@@ -1,6 +1,6 @@
 ---
 description: "Enable a Drupal module. Module name validated as machine name. Requires write access."
-argument-hint: "[site] <moduleName>"
+argument-hint: "<moduleName> [site]"
 allowed-tools: mcp__drupal__drupal_drush_module_enable
 ---
 

@@ -1,6 +1,6 @@
 ---
 description: "Create or replace a translation of a Drupal entity for a target language (governed write). Sets the given langcode plus the supplied translated field values. Requires the content_translation module enabled and the bundle configured as translatable; otherwise Drupal rejects the write. Defaults to node."
-argument-hint: "[site] [entityType] <type> <id> <langcode> [attributes]"
+argument-hint: "<type> <id> <langcode> [site] [entityType] [attributes]"
 allowed-tools: mcp__drupal__drupal_create_translation
 ---
 

@@ -1,6 +1,6 @@
 ---
 description: "Create a Drupal user and optionally assign roles. Requires write access."
-argument-hint: "[site] <name> <mail> <password> [roles]"
+argument-hint: "<name> <mail> <password> [site] [roles]"
 allowed-tools: mcp__drupal__drupal_drush_user_create
 ---
 

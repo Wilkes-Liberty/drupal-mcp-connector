@@ -1,6 +1,6 @@
 ---
 description: "Fetch a single media entity by UUID and media type."
-argument-hint: "[site] <type> <id>"
+argument-hint: "<type> <id> [site]"
 allowed-tools: mcp__drupal__drupal_get_media
 ---
 

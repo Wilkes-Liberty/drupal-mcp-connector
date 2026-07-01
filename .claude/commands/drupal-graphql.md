@@ -1,6 +1,6 @@
 ---
 description: "Execute a GraphQL query against a Drupal site. Requires the GraphQL Compose module (drupal.org/project/graphql_compose), which exposes a read-only schema; mutations are gated by \"allowGraphqlMutations\". Use drupal_graphql_introspect first to discover available types and fields. Example query: query GetArticle($id: String!) { nodeById(id: $id) { title ... on NodeArticle { body { value } } } } Example mutation (only if your GraphQL Compose schema enables mutations): mutation CreateArticle($title: String!, $body: String!) { createNodeArticle(data: { title: $title, body: { value: $body, format: \"full_html\" } }) { entity { title uuid } errors { message } } }"
-argument-hint: "[site] <query> [variables] [operationName]"
+argument-hint: "<query> [site] [variables] [operationName]"
 allowed-tools: mcp__drupal__drupal_graphql
 ---
 
