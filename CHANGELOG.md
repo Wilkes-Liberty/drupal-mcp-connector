@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Docs: stale counts corrected.** The getting-started first-run banner and the
+  architecture/whitepaper figures still read `v1.3.0 / 93 tools / 21 modules / 4 prompts`;
+  updated to the current build — **119 tools across 26 modules, 3 resources, 124 prompts**
+  — so onboarding output matches what a new user actually sees.
+
+### Changed
+- **Docs: per-client cross-link.** `getting-started.md` §6 now points to `mcp-clients.md`
+  for copy-paste config per client (Claude Code/Desktop, Grok Build, OpenAI Codex, Cursor).
+
 ## [1.7.0] - 2026-07-01
 
 ### Added

@@ -143,14 +143,14 @@ node src/index.js
 You should see:
 
 ```
-[drupal-mcp-connector v1.3.0] stdio transport active. 93 tools · 3 resources · 4 prompts
+[drupal-mcp-connector v1.7.0] stdio transport active. 119 tools · 3 resources · 124 prompts
 ```
 
 ---
 
 ## 6. Register with an MCP Client (stdio)
 
-Most desktop and CLI MCP clients launch the connector as a stdio subprocess. Add an entry to your client's MCP server configuration:
+Most desktop and CLI MCP clients launch the connector as a stdio subprocess. For **copy-paste config per client** — Claude Code/Desktop, Grok Build, OpenAI Codex, Cursor — see **[mcp-clients.md](mcp-clients.md)**. The generic shape most stdio clients accept:
 
 ```json
 {
