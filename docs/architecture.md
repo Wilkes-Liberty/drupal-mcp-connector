@@ -17,7 +17,7 @@
 │        ┌────────────────┼─────────────────┐                       │
 │        ▼                ▼                 ▼                        │
 │   src/tools/       src/lib/           MCP primitives               │
-│  (119 tools)       backends/          Tools · Resources · Prompts  │
+│   (119 tools)      backends/          Tools · Resources · Prompts  │
 │                    + canonical/security                            │
 └──────────┬─────────────────────────────────────────────────────────┘
            │           backend abstraction (resolveBackend)
