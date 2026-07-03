@@ -150,7 +150,7 @@ You should see:
 
 ## 6. Register with an MCP Client (stdio)
 
-Most desktop and CLI MCP clients launch the connector as a stdio subprocess. Add an entry to your client's MCP server configuration:
+Most desktop and CLI MCP clients launch the connector as a stdio subprocess. For **copy-paste config per client** — Claude Code/Desktop, Grok Build, OpenAI Codex, Cursor — see **[mcp-clients.md](mcp-clients.md)**. The generic shape most stdio clients accept:
 
 ```json
 {
