@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Launcher: auditor secret sourcing.** `bin/drupal-mcp-launch.sh` now optionally
+  sources the read-only **config-auditor** Keychain secrets (`drupal-mcp-auditor-secret`
+  → `MCP_AGENT_AUDITOR_SECRET`, `drupal-mcp-auditor-secret-stg` →
+  `MCP_AGENT_AUDITOR_SECRET_STG`) for the `prod-audit` and `staging-audit` connector
+  sites. Both exports are guarded — silent no-ops until the auditor consumers are
+  provisioned — matching the existing per-environment secret-sourcing pattern.
+
 ### Fixed
 - **Docs: stale counts corrected.** The getting-started first-run banner and the
   architecture/whitepaper figures still read `v1.3.0 / 93 tools / 21 modules / 4 prompts`;
