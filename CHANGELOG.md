@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MCP_AGENT_AUDITOR_SECRET_STG`) for the `prod-audit` and `staging-audit` connector
   sites. Both exports are guarded — silent no-ops until the auditor consumers are
   provisioned — matching the existing per-environment secret-sourcing pattern.
+- **Launcher: content-auditor and break-glass admin secret sourcing.**
+  `bin/drupal-mcp-launch.sh` now also sources the read-only **content-auditor**
+  secrets (`drupal-mcp-content-auditor-secret` → `MCP_AGENT_CONTENT_AUDITOR_SECRET`,
+  `drupal-mcp-content-auditor-secret-stg` → `MCP_AGENT_CONTENT_AUDITOR_SECRET_STG`) and
+  the on-demand **break-glass admin** secret (`drupal-mcp-admin-secret` →
+  `MCP_AGENT_ADMIN_SECRET`). All are guarded no-ops until the matching Keychain items
+  exist; the admin item is deliberately absent by default so the `prod-admin` site stays
+  inert until you opt in for a session and remove it afterward.
 
 ### Fixed
 - **Docs: stale counts corrected.** The getting-started first-run banner and the
