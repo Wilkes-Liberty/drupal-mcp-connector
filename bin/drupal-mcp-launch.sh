@@ -10,10 +10,12 @@
 #
 #   The governance tiers map to secrets per environment, not per tier — the
 #   dev and dev-admin sites share one DDEV consumer secret:
-#     prod (content)     -> Keychain 'drupal-mcp-agent-secret'     -> MCP_AGENT_CLIENT_SECRET
-#     staging (content)  -> Keychain 'drupal-mcp-agent-secret-stg' -> MCP_AGENT_CLIENT_SECRET_STG
-#     dev (developer)    -> Keychain 'drupal-mcp-agent-secret-dev' -> MCP_AGENT_CLIENT_SECRET_DEV
-#     dev-admin (admin)  -> reuses MCP_AGENT_CLIENT_SECRET_DEV (same DDEV consumer)
+#     prod (content)          -> Keychain 'drupal-mcp-agent-secret'       -> MCP_AGENT_CLIENT_SECRET
+#     staging (content)       -> Keychain 'drupal-mcp-agent-secret-stg'   -> MCP_AGENT_CLIENT_SECRET_STG
+#     dev (developer)         -> Keychain 'drupal-mcp-agent-secret-dev'   -> MCP_AGENT_CLIENT_SECRET_DEV
+#     dev-admin (admin)       -> reuses MCP_AGENT_CLIENT_SECRET_DEV (same DDEV consumer)
+#     prod-audit (auditor)    -> Keychain 'drupal-mcp-auditor-secret'     -> MCP_AGENT_AUDITOR_SECRET
+#     staging-audit (auditor) -> Keychain 'drupal-mcp-auditor-secret-stg' -> MCP_AGENT_AUDITOR_SECRET_STG
 #
 # Also trusts DDEV's locally-generated (mkcert) TLS cert via NODE_EXTRA_CA_CERTS so
 # Node accepts https://*.wilkesliberty.dev. There is no per-site TLS flag in the
@@ -36,6 +38,17 @@ fi
 # site's oauth.clientSecretEnv points at (MCP_AGENT_CLIENT_SECRET_DEV).
 if MCP_AGENT_CLIENT_SECRET_DEV="$(security find-generic-password -s 'drupal-mcp-agent-secret-dev' -w 2>/dev/null)"; then
   export MCP_AGENT_CLIENT_SECRET_DEV
+fi
+
+# Read-only config-auditor secrets (optional) — the 'prod-audit'/'staging-audit'
+# least-privilege identities. Only exported when the Keychain item exists, so the
+# launcher is a silent no-op until the auditor consumers are provisioned
+# (drush mcp-sentinel:agent-provision auditor --env=<env>).
+if MCP_AGENT_AUDITOR_SECRET="$(security find-generic-password -s 'drupal-mcp-auditor-secret' -w 2>/dev/null)"; then
+  export MCP_AGENT_AUDITOR_SECRET
+fi
+if MCP_AGENT_AUDITOR_SECRET_STG="$(security find-generic-password -s 'drupal-mcp-auditor-secret-stg' -w 2>/dev/null)"; then
+  export MCP_AGENT_AUDITOR_SECRET_STG
 fi
 
 # Trust DDEV's locally-generated (mkcert) root CA so Node accepts the dev site's
