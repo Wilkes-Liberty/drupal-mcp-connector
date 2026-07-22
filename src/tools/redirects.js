@@ -19,11 +19,15 @@
  *   - `status_code` defaults to 301 and can be set to 302 (or another redirect
  *     code) explicitly on create, and changed on an existing redirect via update.
  *
- * Redirect entities have no separate enabled/disabled flag — a redirect with a
- * valid source is active. "Enable an existing redirect" therefore means: correct
- * its fields so it matches and fires, which is exactly what drupal_update_redirect
- * does. Both tools are governed: writes assert create/update permission for the
- * `redirect` entity type against the per-site security policy.
+ * Redirect module ≥ dev-1.x makes redirects publishable: an `enabled` base field
+ * (the published key) decides whether the redirect fires. This connector does not
+ * send `enabled` — sites govern that flag server-side (mcp_sentinel's publish
+ * gate exempted it as routing metadata as of its post-1.9 release; on older
+ * sentinel releases a deny-publish profile silently disables agent-created
+ * redirects — verify `enabled` after create on such sites). On pre-publishable
+ * redirect releases the field is absent and every redirect with a valid source
+ * is active. Both tools are governed: writes assert create/update permission for
+ * the `redirect` entity type against the per-site security policy.
  */
 
 import { getSiteConfig } from "../lib/config.js";
