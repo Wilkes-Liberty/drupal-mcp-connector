@@ -38,8 +38,12 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
 
+      # Trusted publishing needs npm >= 11.5.1. Pin to the 11.x line rather than
+      # `@latest`: npm 12+ requires Node >= 22, but this job runs Node 20, so
+      # `npm install -g npm@latest` fails with EBADENGINE. The latest 11.x is
+      # >= 11.5.1 and Node 20-compatible.
       - name: Upgrade npm (trusted publishing needs npm >= 11.5.1)
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       - name: Install dependencies
         run: npm ci
