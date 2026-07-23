@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exist; the admin item is deliberately absent by default so the `prod-admin` site stays
   inert until you opt in for a session and remove it afterward.
 
+### Changed
+- **`drupal-content-audit` prompt is now content-type-agnostic (#122).** The prompt
+  hardcoded `article` for its SEO and accessibility steps, so on a site without that
+  type — or one whose model was consolidated — those steps scanned zero nodes and the
+  audit reported no findings, indistinguishable from a genuinely clean scan. It now
+  derives the types to audit from `drupal_report_content_summary`'s `byContentType`
+  inventory, iterates the per-type checks across every type that has nodes, records
+  zero-node types as empty rather than clean, prefers `drupal_report_seo_meta_coverage`
+  (which reads the site's actual meta field) for the SEO step, and states which types
+  were scanned so an empty or unexpected model can't be mistaken for a passing audit.
+
 ### Fixed
 - **SEO audit: false "0 missing meta descriptions" on Metatag sites (#120).**
   `drupal_report_seo_audit` counted the JSON:API `metatag` field as a present
