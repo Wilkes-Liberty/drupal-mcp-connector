@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { assertGraphqlMutationAllowed, SecurityError } from "../../src/lib/security.js";
 import { redactCanonicalEntity, redactResource, resolveSecurityConfig } from "../../src/lib/security.js";
 import { assertConfigReadAllowed, assertConfigWriteAllowed, getSecuritySummary } from "../../src/lib/security.js";
+import { assertPublishAllowed, isPublishBearing } from "../../src/lib/security.js";
 
 const allowMut = { allowGraphqlMutations: true, readOnly: false };
 const denyMut = { allowGraphqlMutations: false, readOnly: false };
@@ -34,6 +35,38 @@ describe("redactResource (JSON:API shape)", () => {
   it("is null/empty-safe", () => {
     expect(redactResource(null, sec, "user")).toBeNull();
     expect(redactResource({ type: "user--user", id: "u1" }, sec, "user")).toMatchObject({ id: "u1" });
+  });
+});
+
+describe("allowPublish policy (#114) + assertPublishAllowed (#111)", () => {
+  it("defaults allowPublish false on every preset except development", () => {
+    expect(resolveSecurityConfig({ security: { preset: "development" } }).allowPublish).toBe(true);
+    for (const preset of ["content-editor", "config-editor", "auditor", "production-strict", "write-plane"]) {
+      expect(resolveSecurityConfig({ security: { preset } }).allowPublish).toBe(false);
+    }
+  });
+
+  it("lets an operator opt in per site (explicit key wins over preset)", () => {
+    expect(resolveSecurityConfig({ security: { preset: "write-plane", allowPublish: true } }).allowPublish).toBe(true);
+    expect(resolveSecurityConfig({ security: { preset: "development", allowPublish: false } }).allowPublish).toBe(false);
+  });
+
+  it("isPublishBearing is true only for status:true", () => {
+    expect(isPublishBearing({ status: true })).toBe(true);
+    expect(isPublishBearing({ status: false })).toBe(false);
+    expect(isPublishBearing({ name: "x" })).toBe(false);
+    expect(isPublishBearing({})).toBe(false);
+  });
+
+  it("throws on a status:true write when allowPublish is false", () => {
+    expect(() => assertPublishAllowed({ allowPublish: false }, { status: true })).toThrow(SecurityError);
+    expect(() => assertPublishAllowed({ allowPublish: false }, { status: true })).toThrow(/allowPublish/);
+  });
+
+  it("allows a status:true write when allowPublish is true, and never blocks a non-publish write", () => {
+    expect(() => assertPublishAllowed({ allowPublish: true }, { status: true })).not.toThrow();
+    expect(() => assertPublishAllowed({ allowPublish: false }, { status: false })).not.toThrow();
+    expect(() => assertPublishAllowed({ allowPublish: false }, { name: "x" })).not.toThrow();
   });
 });
 

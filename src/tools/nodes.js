@@ -9,7 +9,8 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { resolveSecurityConfig, redactCanonicalEntity, assertWriteAllowed } from "../lib/security.js";
+import { resolveSecurityConfig, redactCanonicalEntity, assertWriteAllowed, assertPublishAllowed } from "../lib/security.js";
+import { shapeWriteResponse, RETURNING_SCHEMA } from "../lib/entity-response.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 
 /** Fallback language for an alias when the node exposes none. */
@@ -215,10 +216,14 @@ async function searchContent({ site: siteName, query, type, status, limit = 10 }
  * If a moderated bundle still receives `status` (the safe default), the JSON:API
  * backend transparently retries without it — see jsonapi.js.
  *
- * @param {object} args - { site?, type, title, body?, summary?, status?, moderationState?, fields? }.
+ * Entity-reference fields (taxonomy, related content, media) must be passed in
+ * `relationships` (JSON:API shape), not `fields`; Drupal rejects reference fields
+ * sent as attributes (#115).
+ *
+ * @param {object} args - { site?, type, title, body?, summary?, status?, moderationState?, fields?, relationships? }.
  * @returns {Promise<object>} The created node descriptor from the backend.
  */
-async function createNode({ site: siteName, type, title, body, summary, status, moderationState, fields = {}, dryRun = false }) {
+async function createNode({ site: siteName, type, title, body, summary, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
   const attributes = { title, ...fields };
   if (moderationState !== undefined) {
@@ -228,18 +233,19 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
   }
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
-  if (dryRun) return { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes };
+  assertPublishAllowed(resolveSecurityConfig(site), attributes);
+  if (dryRun) return { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes, relationships };
   const backend = await resolveBackend(site);
   // Alias handling: an explicit `path.alias` is set as a manual alias; otherwise
   // `path` is omitted so pathauto generates the alias (DEV-116).
   const { pathAttr } = await resolvePathWrite({ backend, type, id: null, providedPath: attributes.path, isCreate: true });
   if (pathAttr === undefined) delete attributes.path;
   else attributes.path = pathAttr;
-  const created = await backend.createEntity({ entityType: "node", bundle: type, attributes });
+  const created = await backend.createEntity({ entityType: "node", bundle: type, attributes, relationships });
   // Honest response: re-read so the persisted alias (explicit or pathauto-generated)
   // is reflected rather than the pre-alias write response.
   const fresh = await backend.getEntity({ entityType: "node", bundle: type, id: created.id }).catch(() => null);
-  return fresh ?? created;
+  return shapeWriteResponse(fresh ?? created, returning);
 }
 
 /**
@@ -256,10 +262,12 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
  * the current alias is read back and re-pinned (`{ alias, pathauto: 0 }`). Pass
  * `fields.path` explicitly to set/replace the alias yourself.
  *
- * @param {object} args - { site?, type, id, title?, body?, summary?, status?, moderationState?, fields? }.
+ * Entity-reference fields go in `relationships` (JSON:API shape), not `fields` (#115).
+ *
+ * @param {object} args - { site?, type, id, title?, body?, summary?, status?, moderationState?, fields?, relationships? }.
  * @returns {Promise<object>} The updated node descriptor.
  */
-async function updateNode({ site: siteName, type, id, title, body, summary, status, moderationState, fields = {}, dryRun = false }) {
+async function updateNode({ site: siteName, type, id, title, body, summary, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
   const attributes = { ...fields };
   if (title !== undefined) attributes.title = title;
@@ -267,7 +275,8 @@ async function updateNode({ site: siteName, type, id, title, body, summary, stat
   else if (status !== undefined) attributes.status = status;
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
-  if (dryRun) return { dryRun: true, operation: "update", entityType: "node", bundle: type, id, attributes };
+  assertPublishAllowed(resolveSecurityConfig(site), attributes);
+  if (dryRun) return { dryRun: true, operation: "update", entityType: "node", bundle: type, id, attributes, relationships };
   const backend = await resolveBackend(site);
   const sec = resolveSecurityConfig(site);
   // Alias handling (DEV-116): an explicit `path.alias` is set in place by
@@ -277,13 +286,13 @@ async function updateNode({ site: siteName, type, id, title, body, summary, stat
   const { pathAttr, redirect } = await resolvePathWrite({ backend, type, id, providedPath: attributes.path, isCreate: false });
   if (pathAttr === undefined) delete attributes.path;
   else attributes.path = pathAttr;
-  await backend.updateEntity({ entityType: "node", bundle: type, id, attributes });
+  await backend.updateEntity({ entityType: "node", bundle: type, id, attributes, relationships });
   const redirectResult = redirect ? await createRenameRedirect(backend, sec, redirect) : null;
   // Honest response: re-read persisted state so the returned `url` is the alias
   // that actually resolves, never the just-sent value.
   const fresh = await backend.getEntity({ entityType: "node", bundle: type, id }).catch(() => null);
-  if (fresh && redirectResult) return { ...fresh, _redirect: redirectResult };
-  return fresh ?? { id };
+  if (fresh && redirectResult) return shapeWriteResponse({ ...fresh, _redirect: redirectResult }, returning);
+  return shapeWriteResponse(fresh ?? { id }, returning);
 }
 
 /**
@@ -350,7 +359,7 @@ export const definitions = [
   },
   {
     name: "drupal_create_node",
-    description: "Create a new content node. Returns the new node UUID, integer ID, and URL. For content types under an editorial (content_moderation) workflow, set moderationState (e.g. 'draft'/'published') instead of status.",
+    description: "Create a new content node. Returns the new node UUID, integer ID, and URL. For content types under an editorial (content_moderation) workflow, set moderationState (e.g. 'draft'/'published') instead of status. Entity-reference fields (taxonomy terms, related content, media) go in `relationships`, not `fields`.",
     inputSchema: {
       type: "object", required: ["type", "title"],
       properties: {
@@ -361,14 +370,16 @@ export const definitions = [
         summary: { type: "string", description: "Body summary / teaser" },
         status:  { type: "boolean", default: false, description: "Published flag for NON-moderated types. true to publish immediately. Ignored if moderationState is set; on a moderated type it is dropped automatically." },
         moderationState: { type: "string", description: "Moderation state for content_moderation types, e.g. 'draft' or 'published'. Takes precedence over status." },
-        fields:  { type: "object", description: "Additional field values keyed by Drupal machine name" },
+        fields:  { type: "object", description: "Scalar/attribute field values keyed by Drupal machine name. Do NOT put entity-reference fields here — Drupal rejects them as attributes; use `relationships`." },
+        relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value: { field_resource_type: { data: { type: 'taxonomy_term--resource_type', id: '<uuid>' } } }. Multi-value: { field_tags: { data: [{ type: 'taxonomy_term--tags', id: '<uuid>' }] } }." },
         dryRun:  { type: "boolean", default: false, description: "Validate and return a preview of the write without committing." },
+        returning: RETURNING_SCHEMA,
       },
     },
   },
   {
     name: "drupal_update_node",
-    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status.",
+    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. Entity-reference fields go in `relationships`, not `fields`.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
@@ -380,8 +391,10 @@ export const definitions = [
         summary: { type: "string" },
         status:  { type: "boolean", description: "Published flag for NON-moderated types: true = publish, false = unpublish. Ignored if moderationState is set." },
         moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status." },
-        fields:  { type: "object" },
+        fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Entity-reference fields go in `relationships`, not here." },
+        relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }." },
         dryRun:  { type: "boolean", default: false, description: "Validate and return a preview of the update without committing." },
+        returning: RETURNING_SCHEMA,
       },
     },
   },

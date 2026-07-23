@@ -48,6 +48,21 @@ describe("bulk tools", () => {
     });
   });
 
+  it("gates a publish-bearing item per-item without aborting the batch (#111/#114)", async () => {
+    backend.updateEntity.mockResolvedValue({ id: "n2" });
+    const out = await handlers.drupal_bulk_update({
+      entityType: "node", bundle: "article",
+      items: [
+        { id: "11111111-1111-4111-8111-111111111111", attributes: { status: true } },
+        { id: "22222222-2222-4222-8222-222222222222", attributes: { title: "ok" } },
+      ],
+    });
+    expect(out.summary).toMatchObject({ updated: 1, failed: 1 });
+    expect(out.results.find((r) => !r.success).error).toMatch(/allowPublish/);
+    // The publish-bearing item never reached the backend; the other one did.
+    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
+  });
+
   it("bulk_create continues past a per-item failure (partial success)", async () => {
     backend.createEntity
       .mockResolvedValueOnce({ id: "a1" })

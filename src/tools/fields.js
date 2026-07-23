@@ -67,16 +67,28 @@ function relationshipField(name) {
  * Read-only. Builds on the always-available sampling schema and normalizes it
  * into a flat, per-field list with inferred hints. Always `approximate: true`.
  *
- * @param {object} args - { site?, type, bundle? }. `bundle` defaults to `type`
- *   (matching Drupal's single-bundle entity types, e.g. `user`).
+ * The entity type is accepted as either `type` or `entityType` (#116): the
+ * sibling tools (get_entity_schema, entity_create/update, resolve_reference) use
+ * `entityType`, and passing that name here previously slipped through as
+ * `undefined` and surfaced a misleading access-denied error.
+ *
+ * @param {object} args - { site?, type|entityType, bundle? }. `bundle` defaults
+ *   to the entity type (matching Drupal's single-bundle types, e.g. `user`).
  * @returns {Promise<{entityType: string, bundle: string, resourceType?: string,
  *   approximate: true, fieldCount: number, fields: object[], note: string,
  *   authoritativeSource: string}>}
  * @throws {SecurityError} If reading the type/bundle is not permitted.
+ * @throws {Error} If no entity type is given under either name.
  */
-async function describeFields({ site: siteName, type, bundle }) {
-  const entityType = type;
-  const resolvedBundle = bundle || type;
+async function describeFields({ site: siteName, type, entityType: entityTypeArg, bundle }) {
+  const entityType = type ?? entityTypeArg;
+  if (!entityType) {
+    throw new Error(
+      "drupal_describe_fields requires an entity type. Pass `type` (or its alias `entityType`), " +
+      "e.g. { type: \"node\", bundle: \"article\" }."
+    );
+  }
+  const resolvedBundle = bundle || entityType;
 
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -120,10 +132,11 @@ export const definitions = [
       "bridge (Field API). Use this before creating/updating entities to learn field names.",
     inputSchema: {
       type: "object",
-      required: ["site", "type"],
+      required: ["site"],
       properties: {
         site:   { type: "string", description: "Configured site name." },
-        type:   { type: "string", description: "Entity type machine name, e.g. 'node', 'taxonomy_term', 'user', 'media'." },
+        type:   { type: "string", description: "Entity type machine name, e.g. 'node', 'taxonomy_term', 'user', 'media'. Alias: `entityType` (as used by the sibling tools)." },
+        entityType: { type: "string", description: "Alias for `type` — accepted for parity with get_entity_schema / entity_create / entity_update / resolve_reference." },
         bundle: { type: "string", description: "Bundle machine name, e.g. 'article'. Defaults to the entity type for single-bundle types (e.g. 'user')." },
       },
     },

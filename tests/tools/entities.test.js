@@ -10,6 +10,10 @@ vi.mock("../../src/lib/config.js", () => ({
 }));
 
 import { handlers } from "../../src/tools/entities.js";
+import { getSiteConfig } from "../../src/lib/config.js";
+
+// A site whose tier cannot publish (allowPublish false), for the publish-gate tests.
+const noPublishSite = { _name: "prod", baseUrl: "https://x", security: { preset: "write-plane" } };
 
 const ent = { id: "p1", entityType: "paragraph", bundle: "text", title: null, status: null,
   langcode: "en", created: null, changed: null, url: null, fields: { field_body: "x" }, relationships: {}, _backend: "jsonapi" };
@@ -32,6 +36,51 @@ describe("entities tools (migrated)", () => {
     expect(out).toMatchObject({ dryRun: true, operation: "create", entityType: "paragraph", bundle: "text" });
     expect(out.attributes).toEqual({ field_body: "x" });
     expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("entity_create rejects a status:true write when the tier cannot publish (#111)", async () => {
+    getSiteConfig.mockReturnValueOnce(noPublishSite);
+    await expect(
+      handlers.drupal_entity_create({ entityType: "taxonomy_term", bundle: "tags", attributes: { name: "T", status: true } })
+    ).rejects.toThrow(/allowPublish/);
+    expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("entity_update dryRun rejects a status:true write the real call would refuse (#112)", async () => {
+    getSiteConfig.mockReturnValueOnce(noPublishSite);
+    await expect(
+      handlers.drupal_entity_update({ entityType: "taxonomy_term", bundle: "tags", id: "11111111-1111-4111-8111-111111111111", attributes: { status: true }, dryRun: true })
+    ).rejects.toThrow(/allowPublish/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("entity_create allows a non-publishing (status:false) write on a no-publish tier", async () => {
+    getSiteConfig.mockReturnValueOnce(noPublishSite);
+    backend.createEntity.mockResolvedValue(ent);
+    await handlers.drupal_entity_create({ entityType: "taxonomy_term", bundle: "tags", attributes: { name: "T", status: false } });
+    expect(backend.createEntity).toHaveBeenCalled();
+  });
+
+  it("entity_update returning:minimal omits body/attributes, keeps identity + state (#113)", async () => {
+    backend.updateEntity.mockResolvedValue({
+      id: "p1", entityType: "node", bundle: "article", title: "T", status: true,
+      langcode: "en", changed: "2026-01-01T00:00:00+00:00", url: "/t",
+      fields: { body: { value: "x", processed: "x" } }, relationships: {},
+    });
+    const out = await handlers.drupal_entity_update({
+      entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111",
+      attributes: { status: true }, returning: "minimal",
+    });
+    expect(out).not.toHaveProperty("fields");
+    expect(out).not.toHaveProperty("relationships");
+    expect(out).toMatchObject({ id: "p1", entityType: "node", bundle: "article", title: "T", status: true, url: "/t", changed: "2026-01-01T00:00:00+00:00" });
+  });
+
+  it("entity_update returning:full (default) returns the whole entity", async () => {
+    const full = { id: "p1", entityType: "node", bundle: "article", fields: { body: { value: "x" } }, relationships: {} };
+    backend.updateEntity.mockResolvedValue(full);
+    const out = await handlers.drupal_entity_update({ entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "T" } });
+    expect(out).toHaveProperty("fields");
   });
 
   it("entity_delete dryRun returns a preview and does not delete", async () => {

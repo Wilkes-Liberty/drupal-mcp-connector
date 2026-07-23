@@ -32,15 +32,20 @@ const COUNT_MAX_RECORDS = 1000;
  * Detect the JSON:API error Drupal returns when a write attempts to set the
  * `status` (published) field on a content_moderation-governed entity. Such
  * entities own their published state via `moderation_state`, so a direct
- * `status` write is refused with a 403 ("Cannot edit the published field of
- * moderated entities" / "not allowed to … field (status)"). Used to decide
- * whether to retry the write without `status`.
+ * `status` write is refused with "Cannot edit the published field of moderated
+ * entities." Used to decide whether to retry the write without `status`.
+ *
+ * Matched narrowly, on that moderation-specific phrase only. A generic
+ * field-access denial ("The current user is not allowed to … the field
+ * (status)") is a *permission* refusal, not a moderation quirk — matching it
+ * here would silently drop a caller's status change and return success (#111).
+ * That case must surface, so it is deliberately excluded.
  * @param {unknown} err
  * @returns {boolean}
  */
 export function isModeratedStatusError(err) {
   const msg = String(err?.message || "");
-  return /published field of moderated/i.test(msg) || /field \(status\)/i.test(msg);
+  return /published field of moderated/i.test(msg);
 }
 
 // Canonical filter op -> JSON:API condition operator.

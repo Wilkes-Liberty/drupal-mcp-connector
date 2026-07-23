@@ -31,6 +31,7 @@ import { parse } from "graphql";
  *
  *  readOnly            true  → reject all create/update/delete/graphql-mutation calls
  *  allowDestructive    false → reject all delete operations
+ *  allowPublish        false → reject a write carrying status:true (publishing)
  *  allowGraphqlMutations false → reject drupal_graphql when mutation is detected
  *  allowConfigRead     false → reject drupal_config_get / drupal_config_list
  *  allowConfigWrite    false → reject drupal_config_set
@@ -116,6 +117,7 @@ const PRESETS = {
   development: {
     readOnly: false,
     allowDestructive: true,
+    allowPublish: true,               // mirrors allowDestructive: everything allowed
     allowGraphqlMutations: true,
     allowConfigRead: true,
     allowConfigWrite: true,
@@ -230,6 +232,7 @@ export function resolveSecurityConfig(site) {
   return {
     readOnly:              raw.readOnly              ?? preset.readOnly,
     allowDestructive:      raw.allowDestructive      ?? preset.allowDestructive,
+    allowPublish:          raw.allowPublish          ?? preset.allowPublish          ?? false,
     allowGraphqlMutations: raw.allowGraphqlMutations ?? preset.allowGraphqlMutations,
     allowConfigRead:       raw.allowConfigRead       ?? preset.allowConfigRead       ?? false,
     allowConfigWrite:      raw.allowConfigWrite      ?? preset.allowConfigWrite      ?? false,
@@ -371,6 +374,42 @@ export function assertDestructiveAllowed(secConfig, entityType, id) {
       "Destructive operations (delete) are disabled for this site. " +
       `Blocked: delete ${entityType} ${id}. ` +
       "To enable, set security.allowDestructive = true in your config."
+    );
+  }
+}
+
+/**
+ * Whether a set of write attributes carries a publish action. Deliberately
+ * limited to the unambiguous, entity-agnostic signal `status === true`; a site's
+ * moderation-workflow state names are not knowable from a site-agnostic
+ * connector, so publishing via `moderation_state` stays gated server-side.
+ * @param {object} [attributes] Attribute map for the write.
+ * @returns {boolean}
+ */
+export function isPublishBearing(attributes = {}) {
+  return attributes?.status === true;
+}
+
+/**
+ * Local, fail-fast publish gate, symmetric with assertDestructiveAllowed. When
+ * the connector is not permitted to publish (allowPublish false — the default in
+ * every preset except `development`), a write carrying `status: true` is refused
+ * before the round-trip, rather than being silently dropped by a moderated-bundle
+ * retry or a server-side gate (see #111/#114). Client-side convenience only — the
+ * remote Drupal's own permissions remain the real authority.
+ * @param {object} secConfig Resolved security config.
+ * @param {object} [attributes] Attribute map for the write.
+ * @returns {void}
+ * @throws {SecurityError} if a publish-bearing write is attempted while allowPublish is false.
+ */
+export function assertPublishAllowed(secConfig, attributes = {}) {
+  if (secConfig.allowPublish) return;
+  if (isPublishBearing(attributes)) {
+    throw new SecurityError(
+      "Publishing is disabled for this connector (allowPublish: false). " +
+      "Blocked: a write carrying status:true. " +
+      "To enable, set security.allowPublish = true in your config; otherwise publish " +
+      "via an operator/server-gated path (e.g. a moderation transition)."
     );
   }
 }
