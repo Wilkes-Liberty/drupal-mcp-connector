@@ -335,6 +335,7 @@ Before going live with any non-development site:
 - [ ] `config/config.json` is not committed (`git status` verified)
 - [ ] `security.preset` is `auditor` or `production-strict` on live sites
 - [ ] `security.allowDestructive` is `false`
+- [ ] `security.allowPublish` is `false` (a write carrying `status: true` is refused locally)
 - [ ] `security.readOnly` is `true` for analysis-only workloads
 - [ ] Dedicated Drupal API user created with `mcp_api` role only
 - [ ] TLS certificates configured for HTTP transport mode

@@ -134,7 +134,7 @@ Defense-in-depth with four one-line presets, enforced connector-side and complem
 | Preset | What it does |
 |--------|-------------|
 | `development` | Everything allowed — local development only |
-| `content-editor` | Create/edit nodes, media, terms; no deletes; no user access |
+| `content-editor` | Create/edit nodes, media, terms; no deletes; no publishing (`allowPublish` off); no user access |
 | `auditor` | Read-only, all entity types, PII fields redacted |
 | `production-strict` | Read-only, no user entities, broad PII redaction |
 
