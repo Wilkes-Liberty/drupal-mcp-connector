@@ -76,6 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`whoami` hardcoded `capabilities.publish: false` (#114).** A site-specific claim in
   a site-agnostic tool, neither derived nor enforced. Now derived from `allowPublish`
   (see Added).
+- **Bulk writes bypassed the publish gate.** `drupal_bulk_create`/`drupal_bulk_update` now
+  apply `assertPublishAllowed` per item (a publish-bearing item fails on its own, without
+  aborting the batch), so the new `allowPublish` policy can't be sidestepped in bulk.
 - **SEO audit: false "0 missing meta descriptions" on Metatag sites (#120).**
   `drupal_report_seo_audit` counted the JSON:API `metatag` field as a present
   description, but that field is an unresolved placeholder over JSON:API, so every

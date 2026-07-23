@@ -13,7 +13,7 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { resolveSecurityConfig, assertWriteAllowed } from "../lib/security.js";
+import { resolveSecurityConfig, assertWriteAllowed, assertPublishAllowed } from "../lib/security.js";
 
 /**
  * Normalize an unknown thrown value into a human-readable message.
@@ -46,6 +46,7 @@ async function bulkCreate({ site: siteName, entityType, bundle, items = [] }) {
   for (const [index, rawItem] of items.entries()) {
     const item = rawItem || {};
     try {
+      assertPublishAllowed(sec, item.attributes ?? {});
       const entity = await backend.createEntity({
         entityType, bundle,
         attributes: item.attributes ?? {},
@@ -84,6 +85,7 @@ async function bulkUpdate({ site: siteName, entityType, bundle, items = [] }) {
     const item = rawItem || {};
     try {
       if (!item.id) throw new Error("Missing 'id' for update item");
+      assertPublishAllowed(sec, item.attributes ?? {});
       const entity = await backend.updateEntity({
         entityType, bundle, id: item.id,
         attributes: item.attributes ?? {},
