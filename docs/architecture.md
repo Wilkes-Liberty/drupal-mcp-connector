@@ -273,6 +273,7 @@ interface SiteConfig {
     preset?: "development" | "content-editor" | "auditor" | "production-strict" | "write-plane";
     readOnly?: boolean;
     allowDestructive?: boolean;
+    allowPublish?: boolean;          // default false (true only in the development preset)
     allowGraphqlMutations?: boolean;
     allowedEntityTypes?: string[] | null;
     deniedEntityTypes?: string[];
