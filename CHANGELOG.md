@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inert until you opt in for a session and remove it afterward.
 
 ### Fixed
+- **`drupal_create_node` / `drupal_update_node` couldn't set entity-reference fields (#115).**
+  Everything in `fields` was sent as JSON:API attributes, so any create/update that set a
+  reference field (taxonomy, related content, media) failed with a 422 — the node tools
+  could only produce untagged, unclassified content. Both tools now take a `relationships`
+  parameter (JSON:API shape, same as `drupal_entity_create`) that is passed through to the
+  backend, and `fields`/`relationships` are documented so reference fields land in the right
+  place.
 - **Publish state silently dropped on writes (#111).** A write carrying `status: true`
   at a tier that cannot publish was silently discarded (200, entity unchanged, no
   diagnostic). Two causes, both fixed: the new `assertPublishAllowed` gate now rejects

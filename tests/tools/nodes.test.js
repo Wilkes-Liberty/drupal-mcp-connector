@@ -122,6 +122,25 @@ describe("nodes tools (migrated)", () => {
     expect(arg.attributes).not.toHaveProperty("moderation_state");
   });
 
+  it("create_node passes entity-reference fields through as relationships (#115)", async () => {
+    backend.createEntity.mockResolvedValue(canonicalNode());
+    const relationships = { field_tags: { data: [{ type: "taxonomy_term--tags", id: "t1" }] } };
+    await handlers.drupal_create_node({ type: "resource", title: "R", relationships });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.relationships).toEqual(relationships);
+    // Reference field is NOT smuggled into attributes.
+    expect(arg.attributes).not.toHaveProperty("field_tags");
+  });
+
+  it("update_node passes relationships through to the backend (#115)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: null }));
+    backend.updateEntity.mockResolvedValue(canonicalNode());
+    const relationships = { field_resource_type: { data: { type: "taxonomy_term--resource_type", id: "rt1" } } };
+    await handlers.drupal_update_node({ type: "resource", id: "n1", relationships });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.relationships).toEqual(relationships);
+  });
+
   it("update_node with moderationState sends moderation_state and omits status", async () => {
     backend.getEntity.mockResolvedValue(canonicalNode({ url: null }));
     backend.updateEntity.mockResolvedValue(canonicalNode());
