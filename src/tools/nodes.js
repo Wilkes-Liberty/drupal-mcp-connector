@@ -9,7 +9,7 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { resolveSecurityConfig, redactCanonicalEntity, assertWriteAllowed } from "../lib/security.js";
+import { resolveSecurityConfig, redactCanonicalEntity, assertWriteAllowed, assertPublishAllowed } from "../lib/security.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 
 /** Fallback language for an alias when the node exposes none. */
@@ -228,6 +228,7 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
   }
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
+  assertPublishAllowed(resolveSecurityConfig(site), attributes);
   if (dryRun) return { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes };
   const backend = await resolveBackend(site);
   // Alias handling: an explicit `path.alias` is set as a manual alias; otherwise
@@ -267,6 +268,7 @@ async function updateNode({ site: siteName, type, id, title, body, summary, stat
   else if (status !== undefined) attributes.status = status;
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
+  assertPublishAllowed(resolveSecurityConfig(site), attributes);
   if (dryRun) return { dryRun: true, operation: "update", entityType: "node", bundle: type, id, attributes };
   const backend = await resolveBackend(site);
   const sec = resolveSecurityConfig(site);

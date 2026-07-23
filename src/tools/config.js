@@ -130,9 +130,10 @@ async function whoami({ site: siteName }) {
       delete:      sec.allowDestructive && canWrite,
       configRead:  sec.allowConfigRead  && canConfig,
       configWrite: sec.allowConfigWrite && !sec.readOnly && canConfig,
-      // Publishing is always gated server-side (editorial workflow); the agent
-      // never holds the publish transition. Surfaced here so it is explicit.
-      publish:     false,
+      // Local publish policy (allowPublish), symmetric with delete/config caps.
+      // Defaults false in every preset except `development`; the remote Drupal's
+      // own permissions (and any server-side governance) remain authoritative.
+      publish:     sec.allowPublish && canWrite,
     },
   };
 }

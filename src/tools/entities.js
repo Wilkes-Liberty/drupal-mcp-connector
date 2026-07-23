@@ -11,7 +11,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import {
-  resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertDeleteAllowed,
+  resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
   redactCanonicalEntity, getSecuritySummary,
 } from "../lib/security.js";
 
@@ -60,6 +60,7 @@ async function createEntity({ site: siteName, entityType, bundle, attributes = {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", entityType, bundle);
+  assertPublishAllowed(sec, attributes);
   if (dryRun) return { dryRun: true, operation: "create", entityType, bundle, attributes, relationships };
   const backend = await resolveBackend(site);
   return backend.createEntity({ entityType, bundle, attributes, relationships });
@@ -76,6 +77,7 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", entityType, bundle);
+  assertPublishAllowed(sec, attributes);
   if (dryRun) return { dryRun: true, operation: "update", entityType, bundle, id, attributes, relationships };
   const backend = await resolveBackend(site);
   return backend.updateEntity({ entityType, bundle, id, attributes, relationships });

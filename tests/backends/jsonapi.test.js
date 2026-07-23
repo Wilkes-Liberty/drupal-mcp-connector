@@ -270,8 +270,8 @@ describe("isModeratedStatusError (retry guard)", () => {
   it("matches the moderated published-field 403", () => {
     expect(isModeratedStatusError(new Error("Drupal 403 on POST /jsonapi/node/article: Cannot edit the published field of moderated entities."))).toBe(true);
   });
-  it("matches the 'field (status)' permission phrasing", () => {
-    expect(isModeratedStatusError(new Error("The current user is not allowed to POST the selected field (status)."))).toBe(true);
+  it("does NOT match a generic 'field (status)' permission denial (#111 — must surface, not retry-drop)", () => {
+    expect(isModeratedStatusError(new Error("The current user is not allowed to POST the selected field (status)."))).toBe(false);
   });
   it("does not match unrelated errors", () => {
     expect(isModeratedStatusError(new Error("Drupal 422 on POST /jsonapi/node/article: title is required"))).toBe(false);

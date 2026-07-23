@@ -15,7 +15,7 @@ vi.mock("../../src/lib/config.js", () => ({
 vi.mock("../../src/lib/security.js", async (orig) => {
   const actual = await orig();
   return { ...actual, resolveSecurityConfig: vi.fn(() => ({
-    readOnly: false, allowedEntityTypes: null, deniedEntityTypes: [],
+    readOnly: false, allowPublish: true, allowedEntityTypes: null, deniedEntityTypes: [],
     globalRedactedFields: [], entityRules: {},
   })) };
 });

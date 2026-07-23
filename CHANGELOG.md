@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`security.allowPublish` policy knob (#114).** A local, fail-fast publish gate,
+  symmetric with `allowDestructive`: defaults `false` in every preset except
+  `development`, and an operator opts in per site. `assertPublishAllowed` rejects a
+  write carrying `status: true` before the round-trip when publishing is not permitted.
+  `drupal_mcp_whoami` now **derives** `capabilities.publish` from it (`allowPublish &&
+  write`) instead of returning a hardcoded `false`. The remote Drupal's permissions
+  (and any server-side governance) remain the real authority — this is defence in depth.
 - **Launcher: auditor secret sourcing.** `bin/drupal-mcp-launch.sh` now optionally
   sources the read-only **config-auditor** Keychain secrets (`drupal-mcp-auditor-secret`
   → `MCP_AGENT_AUDITOR_SECRET`, `drupal-mcp-auditor-secret-stg` →
@@ -24,6 +31,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inert until you opt in for a session and remove it afterward.
 
 ### Fixed
+- **Publish state silently dropped on writes (#111).** A write carrying `status: true`
+  at a tier that cannot publish was silently discarded (200, entity unchanged, no
+  diagnostic). Two causes, both fixed: the new `assertPublishAllowed` gate now rejects
+  such a write up front with a clear error, and the JSON:API moderated-status retry no
+  longer matches a generic `field (status)` **permission** denial — that is a real
+  refusal and now surfaces, instead of being retried away as a moderation quirk. Only
+  the unambiguous "published field of moderated entities" error still triggers the
+  status-drop retry.
+- **`dryRun` echoed input instead of validating (#112).** `dryRun` returned the request
+  parameters without applying tier policy, so it previewed writes that could not happen.
+  It now runs the same write **and publish** checks as the real call, so a dry run fails
+  exactly where the write would.
+- **`whoami` hardcoded `capabilities.publish: false` (#114).** A site-specific claim in
+  a site-agnostic tool, neither derived nor enforced. Now derived from `allowPublish`
+  (see Added).
 - **SEO audit: false "0 missing meta descriptions" on Metatag sites (#120).**
   `drupal_report_seo_audit` counted the JSON:API `metatag` field as a present
   description, but that field is an unresolved placeholder over JSON:API, so every
