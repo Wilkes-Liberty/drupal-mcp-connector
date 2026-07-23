@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inert until you opt in for a session and remove it afterward.
 
 ### Fixed
+- **Backend resolution misdiagnosed auth failures as unreachable (#119).** The probe
+  swallowed every error and reported "none of the configured api backends are usable —
+  check the api setting and that the endpoint is reachable," sending operators to chase
+  network/DNS when the real problem was an expired/invalid OAuth token. Resolution now
+  captures each protocol's underlying error, classifies auth failures (401,
+  invalid_client/grant, unauthorized) distinctly, includes the underlying detail in
+  every message, and on an auth failure clears the cached token so the next call
+  re-attempts the client-credentials grant instead of latching "unusable."
 - **`drupal_create_node` / `drupal_update_node` couldn't set entity-reference fields (#115).**
   Everything in `fields` was sent as JSON:API attributes, so any create/update that set a
   reference field (taxonomy, related content, media) failed with a 422 — the node tools
