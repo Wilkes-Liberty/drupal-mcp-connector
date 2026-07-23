@@ -327,7 +327,7 @@ Read-only audit and analysis tools. All respect the security config.
 | `drupal_report_taxonomy_usage` | `vocabulary` | How many nodes reference each term. Finds orphaned terms. |
 | `drupal_report_revision_hotspots` | `type` | Nodes with most revisions — spots churn. Requires D9.3+. |
 | `drupal_report_user_activity` | `inactiveDays` | Active/blocked/inactive user summary. |
-| `drupal_report_seo_audit` | `type`, `sampleSize` | Missing meta descriptions, title length, thin content. |
+| `drupal_report_seo_audit` | `type`, `sampleSize` | Missing meta descriptions, title length, thin content. Meta descriptions use the rendered Metatag output via GraphQL when available (`metaSource`: `graphql`/`jsonapi`/`unavailable`); reports the meta check as unavailable rather than a false zero when no source is readable. |
 | `drupal_report_accessibility_audit` | `type`, `sampleSize` | Missing alt text, H1s in body, bad link text, tables without captions. |
 
 ---

@@ -11,6 +11,9 @@ const backend = {
   rawQuery: vi.fn(),
 };
 
+const graphqlFetch = vi.fn();
+vi.mock("../../src/lib/drupal-fetch.js", () => ({ drupalGraphqlFetch: (...a) => graphqlFetch(...a) }));
+
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 vi.mock("../../src/lib/config.js", () => ({
   getSiteConfig: vi.fn((n) => ({ _name: n || "d", baseUrl: "https://x", security: {} })),
@@ -27,6 +30,7 @@ vi.mock("../../src/lib/security.js", async (orig) => {
 import { handlers } from "../../src/tools/reports.js";
 
 beforeEach(() => {
+  graphqlFetch.mockReset();
   Object.values(backend).forEach((f) => typeof f.mockReset === "function" && f.mockReset());
   // Re-apply default capabilities after reset
   backend.capabilities.mockReturnValue({
@@ -182,9 +186,43 @@ describe("drupal_report_seo_audit", () => {
     });
     const out = await handlers.drupal_report_seo_audit({ type: "article", sampleSize: 10 });
     expect(out.issues.missingMetaDescription.count).toBe(1);
+    expect(out.metaSource).toBe("jsonapi");
     expect(out.issues.thinContent.count).toBe(1);
     expect(out.scanned).toBe(2);
     expect(out.approximate).toBe(false);
+  });
+
+  it("prefers the rendered Metatag description via GraphQL when nodes have aliases", async () => {
+    backend.listEntities.mockResolvedValue({
+      entities: [
+        { id: "n1", title: "A Long Enough Title For The SEO Check", url: "/a", fields: { body: { value: "word ".repeat(400) } } },
+        { id: "n2", title: "Another Sufficiently Long Node Title", url: "/b", fields: { body: { value: "word ".repeat(400) } } },
+      ],
+      page: { hasNext: false },
+    });
+    graphqlFetch.mockResolvedValue({
+      data: {
+        n0: { entity: { metatag: [{ __typename: "MetaTagValue", attributes: { name: "description", content: "present" } }] } },
+        n1: { entity: { metatag: [] } },
+      },
+    });
+    const out = await handlers.drupal_report_seo_audit({ type: "resource", sampleSize: 10 });
+    expect(out.metaSource).toBe("graphql");
+    expect(out.issues.missingMetaDescription.count).toBe(1);
+    expect(out.issues.missingMetaDescription.nodes[0].id).toBe("n2");
+  });
+
+  it("reports the meta check unavailable instead of a false zero when no source is readable", async () => {
+    backend.listEntities.mockResolvedValue({
+      entities: [
+        { id: "n1", title: "Node With No Description Field At All Here", url: "/a", fields: { body: { value: "x" } } },
+      ],
+      page: { hasNext: false },
+    });
+    graphqlFetch.mockResolvedValue({ errors: [{ message: "Cannot query field metatag" }] });
+    const out = await handlers.drupal_report_seo_audit({ type: "resource", sampleSize: 10 });
+    expect(out.metaSource).toBe("unavailable");
+    expect(out.issues.missingMetaDescription).toMatchObject({ unavailable: true, count: null });
   });
 });
 

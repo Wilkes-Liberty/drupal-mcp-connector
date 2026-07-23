@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inert until you opt in for a session and remove it afterward.
 
 ### Fixed
+- **SEO audit: false "0 missing meta descriptions" on Metatag sites (#120).**
+  `drupal_report_seo_audit` counted the JSON:API `metatag` field as a present
+  description, but that field is an unresolved placeholder over JSON:API, so every
+  node looked covered and the audit reported zero gaps while pages shipped without a
+  description. The meta check now resolves the **rendered** description from GraphQL
+  Compose's normalized `metatag` field (`route(path:)`, no introspection required —
+  reflecting defaults *and* per-node overrides), falls back to a plain
+  `field_meta_description`/`metaDescription` field on non-Metatag sites, and when
+  neither is readable reports the check as `unavailable` rather than a false zero. The
+  result now carries a `metaSource` of `graphql` | `jsonapi` | `unavailable`.
 - **Docs: stale counts corrected.** The getting-started first-run banner and the
   architecture/whitepaper figures still read `v1.3.0 / 93 tools / 21 modules / 4 prompts`;
   updated to the current build — **119 tools across 26 modules, 3 resources, 124 prompts**

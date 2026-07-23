@@ -1,12 +1,12 @@
 ---
-description: "SEO audit for a content type: missing meta descriptions, title length issues, and thin content (under 300 words). Returns node lists for each issue category."
+description: "SEO audit for a content type: missing meta descriptions, title length issues, and thin content (under 300 words). Returns node lists for each issue category. Meta descriptions use the rendered Metatag output via GraphQL when available (reported as `metaSource`); when no description source is readable it reports the meta check as unavailable rather than a false zero."
 argument-hint: "[site] [type] [sampleSize]"
 allowed-tools: mcp__drupal__drupal_report_seo_audit
 ---
 
 Call the `mcp__drupal__drupal_report_seo_audit` MCP tool.
 
-SEO audit for a content type: missing meta descriptions, title length issues, and thin content (under 300 words). Returns node lists for each issue category.
+SEO audit for a content type: missing meta descriptions, title length issues, and thin content (under 300 words). Returns node lists for each issue category. Meta descriptions use the rendered Metatag output via GraphQL when available (reported as `metaSource`); when no description source is readable it reports the meta check as unavailable rather than a false zero.
 
 Parse the request in `$ARGUMENTS` into this tool's parameters:
 
