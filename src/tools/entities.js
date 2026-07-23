@@ -10,6 +10,7 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
+import { shapeWriteResponse, RETURNING_SCHEMA } from "../lib/entity-response.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
   redactCanonicalEntity, getSecuritySummary,
@@ -56,14 +57,14 @@ async function getEntity({ site: siteName, entityType, bundle, id, include = [] 
  * @returns {Promise<object>} The created entity descriptor.
  * @throws {SecurityError} If creating the type/bundle is not permitted.
  */
-async function createEntity({ site: siteName, entityType, bundle, attributes = {}, relationships = {}, dryRun = false }) {
+async function createEntity({ site: siteName, entityType, bundle, attributes = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", entityType, bundle);
   assertPublishAllowed(sec, attributes);
   if (dryRun) return { dryRun: true, operation: "create", entityType, bundle, attributes, relationships };
   const backend = await resolveBackend(site);
-  return backend.createEntity({ entityType, bundle, attributes, relationships });
+  return shapeWriteResponse(await backend.createEntity({ entityType, bundle, attributes, relationships }), returning);
 }
 
 /**
@@ -73,14 +74,14 @@ async function createEntity({ site: siteName, entityType, bundle, attributes = {
  * @returns {Promise<object>} The updated entity descriptor.
  * @throws {SecurityError} If updating the type/bundle is not permitted.
  */
-async function updateEntity({ site: siteName, entityType, bundle, id, attributes = {}, relationships = {}, dryRun = false }) {
+async function updateEntity({ site: siteName, entityType, bundle, id, attributes = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", entityType, bundle);
   assertPublishAllowed(sec, attributes);
   if (dryRun) return { dryRun: true, operation: "update", entityType, bundle, id, attributes, relationships };
   const backend = await resolveBackend(site);
-  return backend.updateEntity({ entityType, bundle, id, attributes, relationships });
+  return shapeWriteResponse(await backend.updateEntity({ entityType, bundle, id, attributes, relationships }), returning);
 }
 
 /**
@@ -215,6 +216,7 @@ export const definitions = [
         attributes:    { type: "object", description: "Field values keyed by Drupal machine name" },
         relationships: { type: "object", description: "Relationship data keyed by field name" },
         dryRun:        { type: "boolean", default: false, description: "Validate and return a preview of the create without committing." },
+        returning:     RETURNING_SCHEMA,
       },
     },
   },
@@ -231,6 +233,7 @@ export const definitions = [
         attributes:    { type: "object" },
         relationships: { type: "object" },
         dryRun:        { type: "boolean", default: false, description: "Validate and return a preview of the update without committing." },
+        returning:     RETURNING_SCHEMA,
       },
     },
   },

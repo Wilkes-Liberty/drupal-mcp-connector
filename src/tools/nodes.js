@@ -10,6 +10,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, redactCanonicalEntity, assertWriteAllowed, assertPublishAllowed } from "../lib/security.js";
+import { shapeWriteResponse, RETURNING_SCHEMA } from "../lib/entity-response.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 
 /** Fallback language for an alias when the node exposes none. */
@@ -222,7 +223,7 @@ async function searchContent({ site: siteName, query, type, status, limit = 10 }
  * @param {object} args - { site?, type, title, body?, summary?, status?, moderationState?, fields?, relationships? }.
  * @returns {Promise<object>} The created node descriptor from the backend.
  */
-async function createNode({ site: siteName, type, title, body, summary, status, moderationState, fields = {}, relationships = {}, dryRun = false }) {
+async function createNode({ site: siteName, type, title, body, summary, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
   const attributes = { title, ...fields };
   if (moderationState !== undefined) {
@@ -244,7 +245,7 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
   // Honest response: re-read so the persisted alias (explicit or pathauto-generated)
   // is reflected rather than the pre-alias write response.
   const fresh = await backend.getEntity({ entityType: "node", bundle: type, id: created.id }).catch(() => null);
-  return fresh ?? created;
+  return shapeWriteResponse(fresh ?? created, returning);
 }
 
 /**
@@ -266,7 +267,7 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
  * @param {object} args - { site?, type, id, title?, body?, summary?, status?, moderationState?, fields?, relationships? }.
  * @returns {Promise<object>} The updated node descriptor.
  */
-async function updateNode({ site: siteName, type, id, title, body, summary, status, moderationState, fields = {}, relationships = {}, dryRun = false }) {
+async function updateNode({ site: siteName, type, id, title, body, summary, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
   const attributes = { ...fields };
   if (title !== undefined) attributes.title = title;
@@ -290,8 +291,8 @@ async function updateNode({ site: siteName, type, id, title, body, summary, stat
   // Honest response: re-read persisted state so the returned `url` is the alias
   // that actually resolves, never the just-sent value.
   const fresh = await backend.getEntity({ entityType: "node", bundle: type, id }).catch(() => null);
-  if (fresh && redirectResult) return { ...fresh, _redirect: redirectResult };
-  return fresh ?? { id };
+  if (fresh && redirectResult) return shapeWriteResponse({ ...fresh, _redirect: redirectResult }, returning);
+  return shapeWriteResponse(fresh ?? { id }, returning);
 }
 
 /**
@@ -372,6 +373,7 @@ export const definitions = [
         fields:  { type: "object", description: "Scalar/attribute field values keyed by Drupal machine name. Do NOT put entity-reference fields here — Drupal rejects them as attributes; use `relationships`." },
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value: { field_resource_type: { data: { type: 'taxonomy_term--resource_type', id: '<uuid>' } } }. Multi-value: { field_tags: { data: [{ type: 'taxonomy_term--tags', id: '<uuid>' }] } }." },
         dryRun:  { type: "boolean", default: false, description: "Validate and return a preview of the write without committing." },
+        returning: RETURNING_SCHEMA,
       },
     },
   },
@@ -392,6 +394,7 @@ export const definitions = [
         fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Entity-reference fields go in `relationships`, not here." },
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }." },
         dryRun:  { type: "boolean", default: false, description: "Validate and return a preview of the update without committing." },
+        returning: RETURNING_SCHEMA,
       },
     },
   },

@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`returning: "minimal"` on write tools (#113).** `drupal_entity_create/update` and
+  `drupal_create_node/update_node` returned the complete re-read entity on every write —
+  several thousand tokens for a node with a body (included twice, `value` + `processed`),
+  most of it unrelated to the change, which made bulk content work exhaust an agent's
+  context window. A new `returning` parameter (`"full"` default, preserving today's
+  contract; `"minimal"` opt-in) returns just identity + state (id, type, bundle, title,
+  status, changed, url), recommended for bulk writes. (`drupal_bulk_create/update` already
+  return only per-item id + status.)
 - **`security.allowPublish` policy knob (#114).** A local, fail-fast publish gate,
   symmetric with `allowDestructive`: defaults `false` in every preset except
   `development`, and an operator opts in per site. `assertPublishAllowed` rejects a

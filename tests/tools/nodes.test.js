@@ -141,6 +141,15 @@ describe("nodes tools (migrated)", () => {
     expect(arg.relationships).toEqual(relationships);
   });
 
+  it("create_node returning:minimal strips the body from the response (#113)", async () => {
+    backend.createEntity.mockResolvedValue(canonicalNode());
+    backend.getEntity.mockResolvedValue(canonicalNode());
+    const out = await handlers.drupal_create_node({ type: "article", title: "T", returning: "minimal" });
+    expect(out).not.toHaveProperty("fields");
+    expect(out.id).toBe("n1");
+    expect(out.url).toBe("/t");
+  });
+
   it("update_node with moderationState sends moderation_state and omits status", async () => {
     backend.getEntity.mockResolvedValue(canonicalNode({ url: null }));
     backend.updateEntity.mockResolvedValue(canonicalNode());

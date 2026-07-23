@@ -61,6 +61,28 @@ describe("entities tools (migrated)", () => {
     expect(backend.createEntity).toHaveBeenCalled();
   });
 
+  it("entity_update returning:minimal omits body/attributes, keeps identity + state (#113)", async () => {
+    backend.updateEntity.mockResolvedValue({
+      id: "p1", entityType: "node", bundle: "article", title: "T", status: true,
+      langcode: "en", changed: "2026-01-01T00:00:00+00:00", url: "/t",
+      fields: { body: { value: "x", processed: "x" } }, relationships: {},
+    });
+    const out = await handlers.drupal_entity_update({
+      entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111",
+      attributes: { status: true }, returning: "minimal",
+    });
+    expect(out).not.toHaveProperty("fields");
+    expect(out).not.toHaveProperty("relationships");
+    expect(out).toMatchObject({ id: "p1", entityType: "node", bundle: "article", title: "T", status: true, url: "/t", changed: "2026-01-01T00:00:00+00:00" });
+  });
+
+  it("entity_update returning:full (default) returns the whole entity", async () => {
+    const full = { id: "p1", entityType: "node", bundle: "article", fields: { body: { value: "x" } }, relationships: {} };
+    backend.updateEntity.mockResolvedValue(full);
+    const out = await handlers.drupal_entity_update({ entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "T" } });
+    expect(out).toHaveProperty("fields");
+  });
+
   it("entity_delete dryRun returns a preview and does not delete", async () => {
     const out = await handlers.drupal_entity_delete({ entityType: "paragraph", bundle: "text", id: "p1", dryRun: true });
     expect(out).toMatchObject({ dryRun: true, operation: "delete", entityType: "paragraph", bundle: "text", id: "p1" });
