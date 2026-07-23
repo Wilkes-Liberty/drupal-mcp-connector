@@ -45,12 +45,26 @@ function sampledSchema(over = {}) {
 beforeEach(() => Object.values(backend).forEach((f) => f.mockReset()));
 
 describe("fields tools", () => {
-  it("exposes drupal_describe_fields with required site+type, optional bundle", () => {
+  it("exposes drupal_describe_fields requiring site, accepting type or entityType, optional bundle", () => {
     const def = definitions.find((d) => d.name === "drupal_describe_fields");
     expect(def).toBeTruthy();
-    expect(def.inputSchema.required).toEqual(expect.arrayContaining(["site", "type"]));
-    expect(def.inputSchema.required).not.toContain("bundle");
+    expect(def.inputSchema.required).toEqual(["site"]);
+    expect(def.inputSchema.properties).toHaveProperty("type");
+    expect(def.inputSchema.properties).toHaveProperty("entityType");
     expect(def.inputSchema.properties).toHaveProperty("bundle");
+  });
+
+  it("accepts entityType as an alias for type (#116)", async () => {
+    backend.getEntitySchema.mockResolvedValue(sampledSchema());
+    const out = await handlers.drupal_describe_fields({ site: "d", entityType: "node", bundle: "article" });
+    expect(backend.getEntitySchema).toHaveBeenCalledWith("node", "article");
+    expect(out.entityType).toBe("node");
+  });
+
+  it("errors clearly when no entity type is given under either name (#116)", async () => {
+    await expect(handlers.drupal_describe_fields({ site: "d", bundle: "article" }))
+      .rejects.toThrow(/requires an entity type.*type.*entityType/is);
+    expect(backend.getEntitySchema).not.toHaveBeenCalled();
   });
 
   it("describe_fields calls getEntitySchema with type+bundle and returns per-field descriptors", async () => {

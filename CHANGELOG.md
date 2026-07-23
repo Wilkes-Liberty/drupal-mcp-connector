@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inert until you opt in for a session and remove it afterward.
 
 ### Fixed
+- **`drupal_describe_fields` entity-type parameter name mismatch (#116).** The tool took
+  the entity type as `type` while its siblings (`get_entity_schema`, `entity_create`,
+  `entity_update`, `resolve_reference`) take `entityType`; passing the sibling name
+  slipped through as `undefined` and surfaced a misleading "Entity type 'undefined' is
+  not in the allowedEntityTypes list" access error. It now accepts `entityType` as an
+  alias for `type`, and errors clearly (naming both accepted parameters) when neither is
+  given instead of reporting a phantom access-control failure.
 - **Backend resolution misdiagnosed auth failures as unreachable (#119).** The probe
   swallowed every error and reported "none of the configured api backends are usable —
   check the api setting and that the endpoint is reachable," sending operators to chase
