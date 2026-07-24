@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Resolved npm audit high/low advisories via a compatible lockfile bump:
+  `brace-expansion` DoS (GHSA-3jxr-9vmj-r5cp), `fast-uri` host confusion
+  (GHSA-v2hh-gcrm-f6hx, GHSA-4c8g-83qw-93j6), and `body-parser` DoS
+  (GHSA-v422-hmwv-36x6). Two residual moderate `@hono/node-server` advisories
+  (Windows-only path traversal, GHSA-frvp-7c67-39w9) are tracked in #128, blocked
+  on an `@modelcontextprotocol/sdk` release accepting hono 2.x.
+
 ## [1.8.0] - 2026-07-23
 
 ### Added
