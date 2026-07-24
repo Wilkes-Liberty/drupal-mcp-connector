@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-07-23
+
 ### Security
 - Resolved npm audit high/low advisories via a compatible lockfile bump:
   `brace-expansion` DoS (GHSA-3jxr-9vmj-r5cp), `fast-uri` host confusion
