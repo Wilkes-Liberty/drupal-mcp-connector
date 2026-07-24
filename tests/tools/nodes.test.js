@@ -15,7 +15,7 @@ vi.mock("../../src/lib/config.js", () => ({
 vi.mock("../../src/lib/security.js", async (orig) => {
   const actual = await orig();
   return { ...actual, resolveSecurityConfig: vi.fn(() => ({
-    readOnly: false, allowedEntityTypes: null, deniedEntityTypes: [],
+    readOnly: false, allowPublish: true, allowedEntityTypes: null, deniedEntityTypes: [],
     globalRedactedFields: [], entityRules: {},
   })) };
 });
@@ -120,6 +120,34 @@ describe("nodes tools (migrated)", () => {
     const arg = backend.createEntity.mock.calls[0][0];
     expect(arg.attributes.status).toBe(true);
     expect(arg.attributes).not.toHaveProperty("moderation_state");
+  });
+
+  it("create_node passes entity-reference fields through as relationships (#115)", async () => {
+    backend.createEntity.mockResolvedValue(canonicalNode());
+    const relationships = { field_tags: { data: [{ type: "taxonomy_term--tags", id: "t1" }] } };
+    await handlers.drupal_create_node({ type: "resource", title: "R", relationships });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.relationships).toEqual(relationships);
+    // Reference field is NOT smuggled into attributes.
+    expect(arg.attributes).not.toHaveProperty("field_tags");
+  });
+
+  it("update_node passes relationships through to the backend (#115)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: null }));
+    backend.updateEntity.mockResolvedValue(canonicalNode());
+    const relationships = { field_resource_type: { data: { type: "taxonomy_term--resource_type", id: "rt1" } } };
+    await handlers.drupal_update_node({ type: "resource", id: "n1", relationships });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.relationships).toEqual(relationships);
+  });
+
+  it("create_node returning:minimal strips the body from the response (#113)", async () => {
+    backend.createEntity.mockResolvedValue(canonicalNode());
+    backend.getEntity.mockResolvedValue(canonicalNode());
+    const out = await handlers.drupal_create_node({ type: "article", title: "T", returning: "minimal" });
+    expect(out).not.toHaveProperty("fields");
+    expect(out.id).toBe("n1");
+    expect(out.url).toBe("/t");
   });
 
   it("update_node with moderationState sends moderation_state and omits status", async () => {

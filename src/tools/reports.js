@@ -12,6 +12,7 @@ import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
 import { collectEntities, gatedReport, fieldValue, daysSince } from "../lib/reports-support.js";
+import { fetchRenderedMetaDescriptions } from "../lib/metatag-audit.js";
 
 // ---------------------------------------------------------------------------
 // Report implementations
@@ -395,8 +396,13 @@ async function userActivity({ site: siteName, inactiveDays = 90, limit = 50 }) {
  * (>60 too long, <20 too short) and the 300-word thin-content floor are SEO
  * heuristics, not hard Drupal limits.
  *
+ * The meta-description check reports its `metaSource`: "graphql" (rendered
+ * Metatag output — the accurate default), "jsonapi" (a plain description field
+ * on non-Metatag sites), or "unavailable" (neither could be read, in which case
+ * `missingMetaDescription` is `{ unavailable: true, reason }` — never a false 0).
+ *
  * @param {object} args - { site?, type?, sampleSize? }.
- * @returns {Promise<object>} Issue lists keyed by category, with counts.
+ * @returns {Promise<object>} Issue lists keyed by category, plus `metaSource`.
  * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function seoAudit({ site: siteName, type, sampleSize = 100 }) {
@@ -412,26 +418,74 @@ async function seoAudit({ site: siteName, type, sampleSize = 100 }) {
     { entityType: "node", bundle: contentType, filters: [{ field: "status", op: "eq", value: true }] },
     sampleSize
   );
+
+  // Meta descriptions: prefer the *rendered* value from GraphQL Compose's
+  // normalized `metatag` field (defaults + overrides, resolved), which is the
+  // only source that reflects what the frontend emits. Fall back to a plain
+  // JSON:API description field for non-Metatag sites. The computed `metatag`
+  // field is deliberately NOT read over JSON:API — it is an unresolved
+  // placeholder there and counting it as "present" hides every gap (issue #120).
+  const rendered = await fetchRenderedMetaDescriptions(site, entities);
+  const metaSource = rendered.source === "graphql" ? "graphql" : resolveJsonapiMetaSource(entities);
+
   for (const n of entities) {
     const title = n.title ?? "";
     const bodyField = fieldValue(n, ["body"]);
     const body = (bodyField && typeof bodyField === "object" ? bodyField.value : bodyField) ?? "";
-    const meta = fieldValue(n, ["metaDescription", "field_meta_description", "metatag"]) ?? null;
     const wordCount = String(body).replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
-    if (!meta) issues.get("missingMetaDescription").push({ id: n.id, title });
+    if (metaSource === "graphql") {
+      // Only nodes whose route resolved are knowable; skip the rest.
+      const hit = rendered.byId.get(n.id);
+      if (hit && !hit.description) issues.get("missingMetaDescription").push({ id: n.id, title });
+    } else if (metaSource === "jsonapi") {
+      if (!jsonapiMetaDescription(n)) issues.get("missingMetaDescription").push({ id: n.id, title });
+    }
     if (title.length > 60) issues.get("titleTooLong").push({ id: n.id, title, length: title.length });
     if (title.length < 20) issues.get("titleTooShort").push({ id: n.id, title, length: title.length });
     if (wordCount < 300 && wordCount > 0) issues.get("thinContent").push({ id: n.id, title, wordCount });
   }
-  return {
-    contentType,
-    scanned: entities.length,
-    approximate: false,
-    issues: Object.fromEntries(issueKeys.map((k) => {
-      const list = issues.get(k);
-      return [k, { count: list.length, nodes: list }];
-    })),
-  };
+
+  const issuesOut = Object.fromEntries(issueKeys.map((k) => {
+    const list = issues.get(k);
+    return [k, { count: list.length, nodes: list }];
+  }));
+  if (metaSource === "unavailable") {
+    // Do NOT emit a false "0 missing": we could not read a meta description at all.
+    issuesOut.missingMetaDescription = {
+      unavailable: true,
+      reason: rendered.reason ?? "no rendered metatag or JSON:API description field available",
+      count: null,
+      nodes: [],
+    };
+  }
+  return { contentType, scanned: entities.length, approximate: false, metaSource, issues: issuesOut };
+}
+
+/**
+ * Read a plain JSON:API description field (the non-Metatag path). The computed
+ * `metatag` field is excluded on purpose — it does not resolve over JSON:API.
+ *
+ * @param {object} n Canonical entity.
+ * @returns {string|undefined} Trimmed description, "" when the field is present
+ *   but empty, or undefined when no such field exists on the entity.
+ */
+function jsonapiMetaDescription(n) {
+  const v = fieldValue(n, ["metaDescription", "field_meta_description"]);
+  if (v === undefined) return undefined;
+  if (v && typeof v === "object") return String(v.value ?? "").trim();
+  return String(v ?? "").trim();
+}
+
+/**
+ * Decide whether a JSON:API description field is usable across the sample. If no
+ * node exposes the field at all, the field does not exist and we must report the
+ * meta check as unavailable rather than flagging every node as missing.
+ *
+ * @param {object[]} entities Canonical entities.
+ * @returns {"jsonapi"|"unavailable"}
+ */
+function resolveJsonapiMetaSource(entities) {
+  return entities.some((n) => jsonapiMetaDescription(n) !== undefined) ? "jsonapi" : "unavailable";
 }
 
 /**
@@ -580,7 +634,7 @@ export const definitions = [
   },
   {
     name: "drupal_report_seo_audit",
-    description: "SEO audit for a content type: missing meta descriptions, title length issues, and thin content (under 300 words). Returns node lists for each issue category.",
+    description: "SEO audit for a content type: missing meta descriptions, title length issues, and thin content (under 300 words). Returns node lists for each issue category. Meta descriptions use the rendered Metatag output via GraphQL when available (reported as `metaSource`); when no description source is readable it reports the meta check as unavailable rather than a false zero.",
     inputSchema: {
       type: "object",
       properties: {

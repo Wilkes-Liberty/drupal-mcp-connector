@@ -50,8 +50,8 @@ Tools for creating, reading, updating, and deleting Drupal content nodes. Reads 
 | `drupal_get_node` | `type`, `id` | Fetch a single node by UUID. Returns all attributes. |
 | `drupal_list_nodes` | `type` | List nodes with filter, sort, pagination support. |
 | `drupal_search_content` | `query` | Search nodes by title substring. |
-| `drupal_create_node` | `type`, `title` | Create a node. Pass arbitrary fields via `fields` object. |
-| `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. |
+| `drupal_create_node` | `type`, `title` | Create a node. Scalar fields via `fields`; **entity-reference fields (taxonomy, related content, media) via `relationships`** (JSON:API shape). `returning: "minimal"` for a compact identity+state response. |
+| `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. Reference fields go in `relationships`, not `fields`; `returning: "minimal"` bounds the response size. |
 | `drupal_delete_node` | `type`, `id` | Permanently delete a node. Requires `allowDestructive: true`. |
 
 ### drupal_get_node
@@ -252,8 +252,8 @@ Works with **any** Drupal entity type — paragraphs, commerce products, webform
 | `drupal_get_entity_schema` | `entityType`, `bundle` | Inspect available fields before creating/updating. |
 | `drupal_entity_list` | `entityType`, `bundle` | List entities with filter, sort, pagination. |
 | `drupal_entity_get` | `entityType`, `bundle`, `id` | Fetch any entity by UUID. |
-| `drupal_entity_create` | `entityType`, `bundle` | Create any entity with arbitrary attributes and relationships. |
-| `drupal_entity_update` | `entityType`, `bundle`, `id` | Update any entity. |
+| `drupal_entity_create` | `entityType`, `bundle` | Create any entity with arbitrary attributes and relationships. `returning: "minimal"` for a compact response. |
+| `drupal_entity_update` | `entityType`, `bundle`, `id` | Update any entity. `returning: "minimal"` for a compact response. |
 | `drupal_entity_delete` | `entityType`, `bundle`, `id` | Delete any entity. Requires `allowDestructive: true`. |
 | `drupal_security_info` | — | Show active security configuration for a site. |
 
@@ -327,7 +327,7 @@ Read-only audit and analysis tools. All respect the security config.
 | `drupal_report_taxonomy_usage` | `vocabulary` | How many nodes reference each term. Finds orphaned terms. |
 | `drupal_report_revision_hotspots` | `type` | Nodes with most revisions — spots churn. Requires D9.3+. |
 | `drupal_report_user_activity` | `inactiveDays` | Active/blocked/inactive user summary. |
-| `drupal_report_seo_audit` | `type`, `sampleSize` | Missing meta descriptions, title length, thin content. |
+| `drupal_report_seo_audit` | `type`, `sampleSize` | Missing meta descriptions, title length, thin content. Meta descriptions use the rendered Metatag output via GraphQL when available (`metaSource`: `graphql`/`jsonapi`/`unavailable`); reports the meta check as unavailable rather than a false zero when no source is readable. |
 | `drupal_report_accessibility_audit` | `type`, `sampleSize` | Missing alt text, H1s in body, bad link text, tables without captions. |
 
 ---
@@ -358,8 +358,8 @@ These tools are functional only once the Drupal-side governed config tools are
 deployed; until then the server returns a tool-not-found error.
 
 > **Tip:** Call `drupal_mcp_whoami` to see what the current tier permits before
-> attempting a write — it reports `configWrite`, `delete`, and the server-gated
-> `publish: false` up front.
+> attempting a write — it reports `configWrite`, `delete`, and `publish` (derived
+> from the local `allowPublish` policy) up front.
 
 ---
 
@@ -488,7 +488,7 @@ Introspect the fields of an entity type + bundle before writing. Built on schema
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_describe_fields` | `site`, `type` | Return a per-field list of `{ name, type, kind, cardinality?, approximate }`. Pass `bundle` for multi-bundle types (defaults to the entity type for single-bundle types). |
+| `drupal_describe_fields` | `site`, `type` | Return a per-field list of `{ name, type, kind, cardinality?, approximate }`. The entity type may be passed as `type` **or** `entityType` (alias, for parity with the sibling tools). Pass `bundle` for multi-bundle types (defaults to the entity type for single-bundle types). |
 
 ### drupal_describe_fields
 

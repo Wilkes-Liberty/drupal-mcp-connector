@@ -226,14 +226,15 @@ function getPromptMessages(name, args) {
   const prompts = {
     "drupal-content-audit": [
       { role: "user", content: { type: "text", text:
-        `Please run a comprehensive content audit ${site}. Follow these steps:\n` +
-        "1. Call drupal_report_content_summary to get the full inventory.\n" +
-        "2. Call drupal_report_stale_content (days: 180) to find stale content.\n" +
-        "3. Call drupal_report_field_completeness for each major content type.\n" +
-        "4. Call drupal_report_seo_audit for the article content type.\n" +
-        "5. Call drupal_report_accessibility_audit for the article content type.\n" +
-        "6. Synthesize findings into: (a) immediate actions, (b) medium-term improvements, (c) process recommendations.\n" +
-        "Present results as a structured report with counts, severity, and specific node links where possible."
+        `Please run a comprehensive content audit ${site}. Do not assume any particular content type exists — every site has a different model, so discover it first and audit the types this site actually has.\n` +
+        "1. Call drupal_report_content_summary for the full inventory. Its byContentType list is the set of content types to audit — derive the types from it; never assume a fixed type such as \"article\".\n" +
+        "2. For each content type that has nodes, call drupal_report_stale_content (days: 180).\n" +
+        "3. For each content type that has nodes, call drupal_report_field_completeness.\n" +
+        "4. For each content type with published nodes, check SEO: prefer drupal_report_seo_meta_coverage (it reads the site's actual meta field rather than assuming one) and use drupal_report_seo_audit for title-length and thin-content checks.\n" +
+        "5. For each content type with published nodes, call drupal_report_accessibility_audit.\n" +
+        "6. For any content type reporting zero nodes, skip its per-type scans and record it as empty — an empty type is not a clean one.\n" +
+        "7. Synthesize findings into: (a) immediate actions, (b) medium-term improvements, (c) process recommendations.\n" +
+        "Present results as a structured report with counts, severity, and specific node links where possible. State which content types were scanned so an empty or unexpected model cannot be mistaken for a clean audit."
       }},
     ],
     "drupal-create-article": [

@@ -7,7 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Docs: redirect entities are publishable.** The `redirects.js` header claimed
+  redirect entities have no enabled/disabled flag. That has been stale since the
+  redirect module's dev-1.x made the entity publishable (`enabled` is the published
+  key). Corrected the doc and added a verify-after-create caveat for sites on older
+  `mcp_sentinel` releases (≤ 1.9), where agent-created redirects can arrive silently
+  disabled until the publish gate exempts redirects.
+
+## [1.8.1] - 2026-07-23
+
+### Security
+- Resolved npm audit high/low advisories via a compatible lockfile bump:
+  `brace-expansion` DoS (GHSA-3jxr-9vmj-r5cp), `fast-uri` host confusion
+  (GHSA-v2hh-gcrm-f6hx, GHSA-4c8g-83qw-93j6), and `body-parser` DoS
+  (GHSA-v422-hmwv-36x6). Two residual moderate `@hono/node-server` advisories
+  (Windows-only path traversal, GHSA-frvp-7c67-39w9) are tracked in #128, blocked
+  on an `@modelcontextprotocol/sdk` release accepting hono 2.x.
+
+## [1.8.0] - 2026-07-23
+
 ### Added
+- **`returning: "minimal"` on write tools (#113).** `drupal_entity_create/update` and
+  `drupal_create_node/update_node` returned the complete re-read entity on every write —
+  several thousand tokens for a node with a body (included twice, `value` + `processed`),
+  most of it unrelated to the change, which made bulk content work exhaust an agent's
+  context window. A new `returning` parameter (`"full"` default, preserving today's
+  contract; `"minimal"` opt-in) returns just identity + state (id, type, bundle, title,
+  status, changed, url), recommended for bulk writes. (`drupal_bulk_create/update` already
+  return only per-item id + status.)
+- **`security.allowPublish` policy knob (#114).** A local, fail-fast publish gate,
+  symmetric with `allowDestructive`: defaults `false` in every preset except
+  `development`, and an operator opts in per site. `assertPublishAllowed` rejects a
+  write carrying `status: true` before the round-trip when publishing is not permitted.
+  `drupal_mcp_whoami` now **derives** `capabilities.publish` from it (`allowPublish &&
+  write`) instead of returning a hardcoded `false`. The remote Drupal's permissions
+  (and any server-side governance) remain the real authority — this is defence in depth.
 - **Launcher: auditor secret sourcing.** `bin/drupal-mcp-launch.sh` now optionally
   sources the read-only **config-auditor** Keychain secrets (`drupal-mcp-auditor-secret`
   → `MCP_AGENT_AUDITOR_SECRET`, `drupal-mcp-auditor-secret-stg` →
@@ -23,13 +58,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exist; the admin item is deliberately absent by default so the `prod-admin` site stays
   inert until you opt in for a session and remove it afterward.
 
+### Changed
+- **`drupal-content-audit` prompt is now content-type-agnostic (#122).** The prompt
+  hardcoded `article` for its SEO and accessibility steps, so on a site without that
+  type — or one whose model was consolidated — those steps scanned zero nodes and the
+  audit reported no findings, indistinguishable from a genuinely clean scan. It now
+  derives the types to audit from `drupal_report_content_summary`'s `byContentType`
+  inventory, iterates the per-type checks across every type that has nodes, records
+  zero-node types as empty rather than clean, prefers `drupal_report_seo_meta_coverage`
+  (which reads the site's actual meta field) for the SEO step, and states which types
+  were scanned so an empty or unexpected model can't be mistaken for a passing audit.
+
 ### Fixed
-- **Docs: redirect entities are publishable.** The `redirects.js` header claimed
-  redirect entities have no enabled/disabled flag. That has been stale since the
-  redirect module's dev-1.x made the entity publishable (`enabled` is the published
-  key). Corrected the doc and added a verify-after-create caveat for sites on older
-  `mcp_sentinel` releases (≤ 1.9), where agent-created redirects can arrive silently
-  disabled until the publish gate exempts redirects.
+- **`drupal_describe_fields` entity-type parameter name mismatch (#116).** The tool took
+  the entity type as `type` while its siblings (`get_entity_schema`, `entity_create`,
+  `entity_update`, `resolve_reference`) take `entityType`; passing the sibling name
+  slipped through as `undefined` and surfaced a misleading "Entity type 'undefined' is
+  not in the allowedEntityTypes list" access error. It now accepts `entityType` as an
+  alias for `type`, and errors clearly (naming both accepted parameters) when neither is
+  given instead of reporting a phantom access-control failure.
+- **Backend resolution misdiagnosed auth failures as unreachable (#119).** The probe
+  swallowed every error and reported "none of the configured api backends are usable —
+  check the api setting and that the endpoint is reachable," sending operators to chase
+  network/DNS when the real problem was an expired/invalid OAuth token. Resolution now
+  captures each protocol's underlying error, classifies auth failures (401,
+  invalid_client/grant, unauthorized) distinctly, includes the underlying detail in
+  every message, and on an auth failure clears the cached token so the next call
+  re-attempts the client-credentials grant instead of latching "unusable."
+- **`drupal_create_node` / `drupal_update_node` couldn't set entity-reference fields (#115).**
+  Everything in `fields` was sent as JSON:API attributes, so any create/update that set a
+  reference field (taxonomy, related content, media) failed with a 422 — the node tools
+  could only produce untagged, unclassified content. Both tools now take a `relationships`
+  parameter (JSON:API shape, same as `drupal_entity_create`) that is passed through to the
+  backend, and `fields`/`relationships` are documented so reference fields land in the right
+  place.
+- **Publish state silently dropped on writes (#111).** A write carrying `status: true`
+  at a tier that cannot publish was silently discarded (200, entity unchanged, no
+  diagnostic). Two causes, both fixed: the new `assertPublishAllowed` gate now rejects
+  such a write up front with a clear error, and the JSON:API moderated-status retry no
+  longer matches a generic `field (status)` **permission** denial — that is a real
+  refusal and now surfaces, instead of being retried away as a moderation quirk. Only
+  the unambiguous "published field of moderated entities" error still triggers the
+  status-drop retry.
+- **`dryRun` echoed input instead of validating (#112).** `dryRun` returned the request
+  parameters without applying tier policy, so it previewed writes that could not happen.
+  It now runs the same write **and publish** checks as the real call, so a dry run fails
+  exactly where the write would.
+- **`whoami` hardcoded `capabilities.publish: false` (#114).** A site-specific claim in
+  a site-agnostic tool, neither derived nor enforced. Now derived from `allowPublish`
+  (see Added).
+- **Bulk writes bypassed the publish gate.** `drupal_bulk_create`/`drupal_bulk_update` now
+  apply `assertPublishAllowed` per item (a publish-bearing item fails on its own, without
+  aborting the batch), so the new `allowPublish` policy can't be sidestepped in bulk.
+- **SEO audit: false "0 missing meta descriptions" on Metatag sites (#120).**
+  `drupal_report_seo_audit` counted the JSON:API `metatag` field as a present
+  description, but that field is an unresolved placeholder over JSON:API, so every
+  node looked covered and the audit reported zero gaps while pages shipped without a
+  description. The meta check now resolves the **rendered** description from GraphQL
+  Compose's normalized `metatag` field (`route(path:)`, no introspection required —
+  reflecting defaults *and* per-node overrides), falls back to a plain
+  `field_meta_description`/`metaDescription` field on non-Metatag sites, and when
+  neither is readable reports the check as `unavailable` rather than a false zero. The
+  result now carries a `metaSource` of `graphql` | `jsonapi` | `unavailable`.
 - **Docs: stale counts corrected.** The getting-started first-run banner and the
   architecture/whitepaper figures still read `v1.3.0 / 93 tools / 21 modules / 4 prompts`;
   updated to the current build — **119 tools across 26 modules, 3 resources, 124 prompts**
