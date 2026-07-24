@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Docs: redirect entities are publishable.** The `redirects.js` header claimed
+  redirect entities have no enabled/disabled flag. That has been stale since the
+  redirect module's dev-1.x made the entity publishable (`enabled` is the published
+  key). Corrected the doc and added a verify-after-create caveat for sites on older
+  `mcp_sentinel` releases (≤ 1.9), where agent-created redirects can arrive silently
+  disabled until the publish gate exempts redirects.
+
 ## [1.8.1] - 2026-07-23
 
 ### Security
