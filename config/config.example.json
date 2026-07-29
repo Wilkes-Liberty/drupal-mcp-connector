@@ -70,7 +70,7 @@
       },
       "serverTools": { "url": "/mcp" },
       "drushSsh": {
-        "_comment": "Dev only. DDEV web-container SSH target. Whitelisted to config export/status — every other drupal_drush_* tool is blocked here.",
+        "_comment": "Dev only. DDEV web-container SSH target. Whitelisted to config export/status — every other drupal_drush_* tool is blocked here. rawSql is omitted, so drupal_drush_sql_query is refused: raw SQL reads underneath Drupal's entity API and is only available via mcp_sentinel's governed command. To enable it, set rawSql:\"governed\", add \"mcp-sentinel:sql-query\" to allowedCommands, and set allow_raw_sql on the site's policy profile.",
         "host":            "<ddev-web-container-ssh-host>",
         "user":            "<ddev-ssh-user>",
         "keyPath":         "~/.ssh/id_ed25519",

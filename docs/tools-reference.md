@@ -377,7 +377,7 @@ Requires `drushSsh` config block. SSH key auth only — no passwords. An optiona
 | `drupal_drush_security_updates` | — | Modules with known security advisories. |
 | `drupal_drush_module_list` | — | List modules. Filter by enabled/disabled. |
 | `drupal_drush_watchdog` | — | Recent dblog entries. Filter by type/severity. |
-| `drupal_drush_sql_query` | — | Read-only SQL (SELECT/SHOW/DESCRIBE/EXPLAIN only). |
+| `drupal_drush_sql_query` | — | Single read-only `SELECT` via mcp_sentinel's governed command. Off unless the site sets `drushSsh.rawSql: "governed"` **and** the policy profile sets `allow_raw_sql`. Entity tables only; denied types and redacted fields refused; every attempt audited. |
 | `drupal_drush_user_list` | — | List users via Drush. |
 | `drupal_drush_cache_rebuild` | ✅ | `drush cache:rebuild`. |
 | `drupal_drush_cron` | ✅ | `drush cron`. |

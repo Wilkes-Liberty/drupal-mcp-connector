@@ -51,10 +51,22 @@ validator — it would break legitimate relationship filters.
 
 ## Residual risks & operator recommendations
 
-- **Drush SQL bridge (T9):** the read-only allowlist is a denylist-assisted
-  best-effort, not a guarantee. If you enable the drush bridge and expose
-  `drupal_drush_sql_query`, **use a dedicated read-only database credential** for
-  that connection. Better still, leave the drush bridge disabled unless needed.
+- **Drush SQL bridge (T9):** `drupal_drush_sql_query` is now off unless a site
+  sets `drushSsh.rawSql: "governed"`, and it runs through mcp_sentinel's
+  `mcp-sentinel:sql-query`, where Drupal's policy profile decides and every
+  attempt is audited. The residual risk is no longer "the allowlist here is
+  best-effort" — that check is only a fast local reject — but that **raw SQL is
+  a weaker boundary than an entity read even when governed**: the server's
+  guard constrains which tables and columns a statement may touch, not what an
+  expression over an allowed column can reconstruct. Leave `allow_raw_sql` off
+  on the policy profile unless a reviewed workflow needs it, and **use a
+  dedicated read-only database credential** for the bridge connection.
+- **The rest of the SSH bridge is outside Drupal governance entirely.**
+  `sql:cli`, `sql:dump` and `php:eval` do not load Drupal's module system —
+  Drush caps their bootstrap below the level at which module command files are
+  discovered — so no Drupal-side policy can apply to them, whatever the site
+  configures. Pin `allowedCommands` per site and treat SSH as an operator
+  channel rather than an agent one.
 - **The connector is not the access-control authority.** Keep a Drupal-side
   governance module active (MCP Sentinel) and a least-privilege OAuth
   consumer/role — the connector's presets are a second layer, not the first.

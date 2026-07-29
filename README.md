@@ -209,6 +209,37 @@ drush mcp-sentinel:setup
 
 Governance keys off the authenticated account's role and OAuth scopes — not request headers. The connector sends an `X-MCP-Client` identity header purely as a log label. See the [MCP Sentinel project page](https://www.drupal.org/project/mcp_sentinel) for the full contract.
 
+### Raw SQL is governed, or it is off
+
+The Drush bridge runs over SSH, which is *below* everything above: a `drush`
+subprocess does not make a request Drupal can govern, and most Drush commands
+never load Drupal's module system at all. `drupal_drush_sql_query` used to
+exploit that without meaning to — it called `drush sql:query`, so no policy
+profile, no denied entity type, no field redaction and no audit entry applied
+to anything it read.
+
+It now calls `drush mcp-sentinel:sql-query` (mcp_sentinel ≥ 1.14), which runs
+with Drupal fully bootstrapped and enforces the same profile that governs
+JSON:API. **Two opt-ins, both off by default**, are required:
+
+```jsonc
+// this connector, per site
+"drushSsh": {
+  "rawSql": "governed",                          // no other value enables it
+  "allowedCommands": ["mcp-sentinel:sql-query"]  // only if you pin this list
+}
+```
+
+…plus `allow_raw_sql` on the policy profile in Drupal. Expect a much narrower
+tool than before: one `SELECT`, entity tables only, no expressions, and no
+`SELECT *` on a table carrying a redacted column. Every attempt — permitted or
+refused — lands in the audit chain with its statement text.
+
+The rest of the bridge (`sql:cli`, `sql:dump`, `php:eval` and anything else you
+reach over SSH) is **outside Drupal governance by construction**. Treat SSH as
+an operator channel: keep the agent's credentials off it, and pin
+`allowedCommands` per site.
+
 ---
 
 ## Documentation

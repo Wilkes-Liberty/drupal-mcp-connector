@@ -7,7 +7,11 @@
  *   1. SSH key auth only — password-based SSH is deliberately unsupported.
  *   2. All command arguments are validated before being passed to SSH.
  *   3. Module names are validated as machine names (a-z, 0-9, _) only.
- *   4. SQL tool enforces SELECT-only allowlist — no DDL/DML permitted.
+ *   4. Raw SQL runs ONLY through mcp_sentinel's governed command, and only for
+ *      a site that opts in with drushSsh.rawSql="governed". The SELECT-only
+ *      check here is a fast local reject; the site's policy profile is the
+ *      authority, because this process holds the SSH key and cannot police
+ *      itself.
  *   5. Key path is validated against path traversal.
  *   6. All operations are logged to stderr with site name and command.
  *   7. Write operations assert non-readOnly via the security layer.
@@ -54,6 +58,32 @@ function assertCommandAllowed(sshCfg, subcommand) {
     throw new SecurityError(
       `Drush command "${subcommand}" is not permitted on this site. ` +
       `Allowed: ${allow.join(", ")}.`
+    );
+  }
+}
+
+/**
+ * Enforce the per-site opt-in for raw SQL.
+ *
+ * Raw SQL is off unless a site sets `drushSsh.rawSql: "governed"`. There is no
+ * ungoverned mode: the previous behaviour — running the statement through
+ * `drush sql:query` — bypassed the site's entire policy and left no audit
+ * record, so it was removed rather than kept behind a flag. A flag would have
+ * meant the bypass was one config key away and still invisible when used.
+ *
+ * @param {object} sshCfg Resolved drushSsh config block.
+ * @param {string} siteName Site name, for the error message.
+ * @returns {void}
+ * @throws {SecurityError} if the site has not opted in.
+ */
+function assertGovernedRawSql(sshCfg, siteName) {
+  if (sshCfg.rawSql !== "governed") {
+    throw new SecurityError(
+      `Raw SQL is disabled for site "${siteName}". Raw SQL reads underneath Drupal's ` +
+      "entity API, so it is only available through mcp_sentinel's governed command. " +
+      "To enable it: install mcp_sentinel on the site, set `allow_raw_sql` on the policy " +
+      "profile that governs the agent, and set `rawSql: \"governed\"` in this site's " +
+      "drushSsh config (plus `mcp-sentinel:sql-query` in allowedCommands if that list is set)."
     );
   }
 }
@@ -400,18 +430,45 @@ async function drushCreateUser({ site: siteName, name, mail, password, roles = [
 }
 
 /**
- * Run a read-only SQL query (`drush sql:query`). The query is validated against
- * a SELECT-only allowlist before execution.
+ * Run a read-only SQL query through mcp_sentinel's governed command.
+ *
+ * This used to call `drush sql:query`, which was a hole straight through the
+ * site's policy: `sql:query` runs below Drupal's entity API, so no policy
+ * profile, no denied_entity_types, no redacted_fields and no audit entry ever
+ * applied to it. That is not a fixable property of the command — Drush caps
+ * its bootstrap below the level at which Drupal discovers module command
+ * files, so no module code can run on its path at all.
+ *
+ * `mcp-sentinel:sql-query` is a module-provided command, so Drupal is fully
+ * bootstrapped: the policy profile applies, the statement is checked against
+ * the same deny and redaction lists that govern JSON:API, and every attempt —
+ * permitted or refused — is written to the tamper-evident audit chain with its
+ * statement text. Enforcement is therefore server-side, which matters because
+ * this process holds the SSH key and cannot be trusted to police itself.
+ *
  * @param {object} args - { site?, query }.
- * @returns {Promise<{rows: *}>}
- * @throws {SecurityError} If the query is not read-only.
+ * @returns {Promise<object>} The server's payload: { rows, row_count, truncated, profile }.
+ * @throws {SecurityError} If the site has not opted in, or the query is not read-only.
  */
 async function sqlQuery({ site: siteName, query }) {
-  const site = getSiteConfig(siteName);
-  // Throws SecurityError if query is not read-only
+  const site   = getSiteConfig(siteName);
+  const sshCfg = getDrushConfig(site);
+  assertGovernedRawSql(sshCfg, site._name);
+  // Fast local reject only; mcp_sentinel's guard is the authority.
   validateSqlQuery(query);
-  const out = await sshDrush(site, ["sql:query", query]);
-  return { rows: parseDrush(out) };
+  const out = await sshDrush(site, ["mcp-sentinel:sql-query", query]);
+  // The command emits a JSON object; a non-JSON reply means the command was
+  // not found (mcp_sentinel absent or too old), which must not be reported as
+  // an empty result set.
+  const payload = parseDrush(out);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || !Array.isArray(payload.rows)) {
+    throw new Error(
+      `Raw SQL on site "${site._name}" did not return a governed result. ` +
+      "Confirm mcp_sentinel >= 1.14 is installed and enabled on the target site — " +
+      "`drush mcp-sentinel:sql-query` must exist there."
+    );
+  }
+  return payload;
 }
 
 /**
@@ -477,7 +534,7 @@ export const definitions = [
   },
   {
     name: "drupal_drush_sql_query",
-    description: "Run a read-only SQL query (SELECT, SHOW, DESCRIBE, EXPLAIN only) via Drush. Write queries are blocked by the security layer.",
+    description: "Run a single read-only SELECT through mcp_sentinel's governed command (`drush mcp-sentinel:sql-query`). Requires the site to set drushSsh.rawSql=\"governed\" AND the site's policy profile to set allow_raw_sql; both are off by default. The server refuses statements touching a denied entity type, a non-entity table, or a redacted field, and records every attempt in the tamper-evident audit log. Use the site-context or entity-schema tools for schema introspection.",
     inputSchema: { type: "object", required: ["query"], properties: { site: { type: "string" }, query: { type: "string" } } },
   },
   {

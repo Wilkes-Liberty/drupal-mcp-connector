@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING: `drupal_drush_sql_query` no longer runs ungoverned SQL, and is off
+  by default.** It called `drush sql:query`, which executes below Drupal's
+  entity API — so a site's `mcp_sentinel` policy profile, its denied entity
+  types, its redacted fields and its audit log had no effect on anything this
+  tool read. A statement could return exactly the data the same site refused
+  over JSON:API, and nothing recorded that it had. That is not fixable on the
+  Drupal side: Drush caps `sql:query`'s bootstrap below the level at which
+  module command files are discovered, so no module hook can run on its path.
+  Nor is it fixable here — this process holds the SSH key, so a client-side
+  check is a promise made by the thing being constrained.
+
+  The tool now calls `drush mcp-sentinel:sql-query` (mcp_sentinel ≥ 1.14),
+  where Drupal is fully bootstrapped and the policy profile decides. Two
+  independent opt-ins are required, both off by default: `drushSsh.rawSql:
+  "governed"` on the site here, and `allow_raw_sql` on the policy profile
+  there. There is no ungoverned mode — keeping one behind a flag would have
+  left the bypass a config key away and still invisible when used.
+
+  **To migrate:** set both flags, add `mcp-sentinel:sql-query` to
+  `allowedCommands` if the site pins that list, and expect a narrower tool —
+  the server accepts a single `SELECT` over entity tables only (no `SHOW` /
+  `DESCRIBE` / `EXPLAIN`, no expressions, no `SELECT *` on a table carrying a
+  redacted column). Schema introspection moves to the site-context and
+  entity-schema tools. Sites that do not run mcp_sentinel lose this tool; raw
+  database access belongs to the operator's own shell, not to an agent.
+
 ### Fixed
 - **Docs: redirect entities are publishable.** The `redirects.js` header claimed
   redirect entities have no enabled/disabled flag. That has been stale since the
