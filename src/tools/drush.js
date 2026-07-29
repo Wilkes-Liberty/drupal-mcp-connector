@@ -461,7 +461,7 @@ async function sqlQuery({ site: siteName, query }) {
   // not found (mcp_sentinel absent or too old), which must not be reported as
   // an empty result set.
   const payload = parseDrush(out);
-  if (payload === null || typeof payload !== "object") {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || !Array.isArray(payload.rows)) {
     throw new Error(
       `Raw SQL on site "${site._name}" did not return a governed result. ` +
       "Confirm mcp_sentinel >= 1.14 is installed and enabled on the target site — " +
