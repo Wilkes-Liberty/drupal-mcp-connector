@@ -66,7 +66,13 @@ export function validateUuid(value, fieldName = "id") {
 // SQL query validation (read-only enforcement for Drush bridge)
 // ---------------------------------------------------------------------------
 
-const SAFE_SQL_PREFIXES = ["select ", "show ", "describe ", "explain ", "desc "];
+// SELECT only. SHOW / DESCRIBE / EXPLAIN used to be accepted here, but raw SQL
+// now runs through mcp_sentinel's governed command, which accepts SELECT alone
+// — schema introspection has a governed home on the /drupal-mcp/context
+// endpoint and the entity-schema tools. Keeping the wider list here would mean
+// this check passed statements the server then refused, i.e. two policies
+// disagreeing, which is the failure mode this whole change exists to remove.
+const SAFE_SQL_PREFIXES = ["select "];
 
 // Patterns that indicate write operations even within SELECT contexts
 const DANGEROUS_SQL_PATTERNS = [
@@ -80,7 +86,14 @@ const DANGEROUS_SQL_PATTERNS = [
 
 /**
  * Validate that a SQL query is read-only.
- * Checks both the query prefix AND secondary injection patterns.
+ *
+ * This is a fast local reject, NOT the authority. The authority is
+ * mcp_sentinel's McpRawSqlGuard, which runs inside Drupal where the policy
+ * profile lives and can resolve denied entity types and redacted fields down
+ * to real tables and columns — something no client-side check can do. This
+ * check exists only to fail obvious cases without an SSH round trip, so it is
+ * deliberately kept coarser than, and never wider than, the server's.
+ *
  * @param {string} query The SQL query to validate.
  * @returns {string} The validated query.
  * @throws {Error} if the query is empty or exceeds the length cap.
@@ -95,8 +108,9 @@ export function validateSqlQuery(query) {
 
   if (!SAFE_SQL_PREFIXES.some((prefix) => normalised.startsWith(prefix))) {
     throw new SecurityError(
-      "drupal_drush_sql_query only permits SELECT, SHOW, DESCRIBE, and EXPLAIN statements. " +
-      "Use the JSON:API tools for write operations."
+      "drupal_drush_sql_query only permits SELECT statements. " +
+      "Use the JSON:API tools for write operations, and the site-context or " +
+      "entity-schema tools for schema introspection."
     );
   }
 
