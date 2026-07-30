@@ -64,5 +64,24 @@ jobs:
       - name: Unit tests
         run: npm test --if-present
 
+      # Re-pushing or moving a release tag is a normal recovery operation — a
+      # tag pushed before its commit reached the default branch, a tag deleted
+      # and recreated. Without this check the rerun dies on npm's E403
+      # "cannot publish over the previously published version", which reads as
+      # a broken release when the registry is in exactly the desired state.
+      - name: Skip if this version is already on the registry
+        id: published
+        run: |
+          set -euo pipefail
+          PKG="$(node -p 'require("./package.json").name')"
+          VER="$(node -p 'require("./package.json").version')"
+          if npm view "${PKG}@${VER}" version >/dev/null 2>&1; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "${PKG}@${VER} is already published; skipping publish."
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish (trusted publishing — no token)
+        if: steps.published.outputs.already == 'false'
         run: npm publish --access public

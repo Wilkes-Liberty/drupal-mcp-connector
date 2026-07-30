@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.0] - 2026-07-29
 
+### Fixed
+- **Re-pushing a release tag no longer fails the publish job.** The workflow
+  now skips publishing a version already on the registry. Moving or recreating
+  a tag is a normal recovery operation, and npm's E403 "cannot publish over the
+  previously published version" reads as a broken release when the registry is
+  in exactly the state you wanted.
+
 ### Changed
 - **BREAKING: `drupal_drush_sql_query` no longer runs ungoverned SQL, and is off
   by default.** It called `drush sql:query`, which executes below Drupal's
