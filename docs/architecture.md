@@ -148,7 +148,7 @@ TLS_KEY_PATH=/etc/ssl/private/mcp.key \
 MCP_PORT=3443 node src/index.js
 ```
 
-Endpoint: `https://host:3443/mcp` (health probe at `/health`). HTTPS is mandatory; plain HTTP is refused on non-localhost unless `MCP_ALLOW_HTTP=1` is set explicitly (development only). Without TLS the server binds loopback only. Optional bearer auth (`MCP_AUTH_TOKEN`) and bind-address restriction (`MCP_BIND_HOST`) are documented in [security-hardening.md](security-hardening.md).
+Endpoint: `https://host:3443/mcp` (health probe at `/health`). HTTPS is mandatory; plain HTTP is refused on non-localhost unless `MCP_ALLOW_HTTP=1` is set explicitly (development only). Without TLS the server binds loopback only. Non-loopback TLS binds **require** `MCP_AUTH_TOKEN` (or `MCP_ALLOW_UNAUTHENTICATED=1` behind a trusted proxy) and default to a 120 req/min rate limit when `MCP_RATE_LIMIT` is unset. Bind-address restriction (`MCP_BIND_HOST`) and related controls are documented in [security-hardening.md](security-hardening.md).
 
 ---
 
@@ -237,7 +237,8 @@ infer operation (read/write/delete/graphql) from tool name
       ├─ resolve site security config
       ├─ assert operation allowed (readOnly, allowDestructive, allowGraphqlMutations)
       ▼
-handler(args)        ← entity-type/bundle checks (assertReadAllowed, …)
+handler(args)        ← entity-type/bundle checks on specialized + generic tools
+                       (assertReadAllowed / assertWriteAllowed / assertDeleteAllowed)
       │              ← backend capability checks (write/delete gated)
       ▼
 toolResult(data)     ← field redaction applied before returning

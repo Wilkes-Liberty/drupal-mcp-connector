@@ -17,8 +17,10 @@ service, port, or token; see [mcp-clients.md](mcp-clients.md).
 |---|---|
 | `MCP_TRANSPORT=https` | Run the HTTP server transport |
 | `TLS_CERT_PATH` / `TLS_KEY_PATH` | TLS cert + key (mandatory off-localhost) |
-| `MCP_AUTH_TOKEN` | Bearer token required on `/mcp` — **always set this** |
-| `MCP_BIND_HOST` | Restrict the listen interface (with TLS) |
+| `MCP_AUTH_TOKEN` | Bearer token required on `/mcp` — **required** for non-loopback binds |
+| `MCP_ALLOW_UNAUTHENTICATED` | Set to `1` only when a trusted proxy already authenticates clients |
+| `MCP_RATE_LIMIT` | Max `/mcp` requests per window per IP (`0` = off; default 120 on non-loopback TLS) |
+| `MCP_UPLOAD_ROOT` | Colon-separated absolute dirs allowed for local file uploads (default: process cwd) || `MCP_BIND_HOST` | Restrict the listen interface (with TLS) |
 | `MCP_RATE_LIMIT` / `MCP_RATE_WINDOW_SEC` | Optional per-IP rate limiting (see [security-hardening.md](security-hardening.md)) |
 | `MCP_PORT` | Listen port (default 3443) |
 

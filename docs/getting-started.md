@@ -197,7 +197,7 @@ MCP_PORT=3443 node src/index.js
 
 The server listens at `https://host:3443/mcp` with a health probe at `/health`. Register that URL with any HTTP-capable MCP client.
 
-> **Security:** HTTPS is mandatory; plain HTTP is refused on non-localhost unless `MCP_ALLOW_HTTP=1` (dev only). Add `MCP_AUTH_TOKEN` to require a bearer token, and `MCP_BIND_HOST` to restrict the listen interface. See [security-hardening.md](security-hardening.md).
+> **Security:** HTTPS is mandatory; plain HTTP is refused on non-localhost unless `MCP_ALLOW_HTTP=1` (dev only). Non-loopback binds require `MCP_AUTH_TOKEN` (fail closed) unless you set `MCP_ALLOW_UNAUTHENTICATED=1` behind a trusted proxy. Use `MCP_BIND_HOST` to restrict the listen interface. See [security-hardening.md](security-hardening.md).
 
 ---
 

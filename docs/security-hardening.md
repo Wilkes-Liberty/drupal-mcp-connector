@@ -18,23 +18,24 @@ export MCP_CLIENT_ID="my-org-bot/1.0"  # custom label
 export MCP_CLIENT_ID=""                 # disable entirely
 ```
 
-## Authenticate the HTTPS transport (opt-in)
+## Authenticate the HTTPS transport
 
-The `https` transport serves `/mcp` to MCP clients. By default it runs without client
-authentication (intended to sit behind a trusted boundary such as a VPN or an auth
-proxy). To require a bearer token on every request:
+The `https` transport serves `/mcp` to MCP clients.
+
+**Fail closed when network-facing:** if the process binds beyond loopback
+(`MCP_BIND_HOST` other than `127.0.0.1` / `::1` / `localhost`, or the TLS default
+`0.0.0.0`), **`MCP_AUTH_TOKEN` is required**. Without it the process exits at
+startup. Opt out only behind a trusted auth boundary:
 
 ```sh
 export MCP_AUTH_TOKEN="<a long random secret>"
+# only when a reverse proxy / VPN already authenticates clients:
+export MCP_ALLOW_UNAUTHENTICATED=1
 ```
 
-Clients must then send `Authorization: Bearer <token>`. The `/health` endpoint stays
-open regardless.
-
-If you front the connector with an auth proxy (e.g. an OAuth2/OIDC reverse proxy) or
-restrict access via a VPN, you may rely on that boundary instead of `MCP_AUTH_TOKEN`.
-The connector logs a startup warning when `/mcp` is unauthenticated so the choice is
-always explicit.
+Clients must send `Authorization: Bearer <token>`. The `/health` endpoint stays
+open regardless. Loopback-only binds may omit the token (a startup warning is
+still logged when auth is off).
 
 ## Bind address (opt-in)
 
@@ -51,11 +52,15 @@ export MCP_BIND_HOST="127.0.0.1"   # loopback only
 `NODE_EXTRA_CA_CERTS` can be set to trust a private or self-signed CA chain for
 outbound HTTPS connections to Drupal.
 
-## Rate limiting (opt-in)
+## Rate limiting
 
-The HTTPS transport can throttle `/mcp` requests per client IP with a built-in
-fixed-window limiter. It's **off by default**; enable it by setting a positive
-`MCP_RATE_LIMIT`:
+The HTTPS transport throttles `/mcp` requests per client IP with a built-in
+fixed-window limiter.
+
+- **Non-loopback TLS bind:** defaults to **120 requests per 60s** per client IP
+  when `MCP_RATE_LIMIT` is unset.
+- **Loopback / plain-HTTP dev:** off unless you set a positive `MCP_RATE_LIMIT`.
+- Set `MCP_RATE_LIMIT=0` to disable even on non-loopback.
 
 ```sh
 export MCP_RATE_LIMIT=120        # max requests per window per client IP
@@ -68,7 +73,21 @@ check runs **before** auth, so repeated bad-token attempts are throttled too. Th
 
 Counts are kept per process, so this protects a single connector instance. For
 multi-replica deployments, prefer rate limiting at the reverse proxy (shared
-state) — or use both. See [issue #4](https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues/4).
+state) — or use both.
+
+## Local file upload roots
+
+`drupal_upload_file` and `drupal_upload_file_and_create_media` may only read files
+that resolve under an allowed root (after `realpath`). Default root is the
+connector process working directory. Expand or replace roots with:
+
+```sh
+export MCP_UPLOAD_ROOT="/var/mcp-uploads:/home/editor/media-drop"
+```
+
+Paths under `.ssh`, `.gnupg`, `.env*`, and connector `config/config.json` are
+always refused, even when under an allowed root. Entity type, bundle, and field
+name path segments are validated as Drupal machine names.
 
 ## Keep tokens out of the config file (opt-in)
 

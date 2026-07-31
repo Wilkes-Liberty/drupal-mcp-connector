@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-07-31
+
 ### Security
 - **Specialized tools honor entity allowlists/denylists (#138).**
   `drupal_*_node`, media, and taxonomy tools now call the same
@@ -28,8 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MCP_RATE_LIMIT` is unset.
 - **Link-checker does not follow redirects (#143).** Live checks use
   `redirect: "manual"` to avoid SSRF via 302 to private/metadata targets.
-- **auditor / production-strict apply SENSITIVE_DENY (#140).** Secrets,
-  governance, and account entity types stay denied on those presets.
+- **auditor / production-strict apply SENSITIVE_DENY** (partial #140). Secrets,
+  governance, and account entity types stay denied on those presets. Default
+  when `security` is omitted remains `development` (tracked in #140).
+
 ### Fixed
 - **Published moderated updates default to a draft forward revision (#131).**
   `drupal_update_node`, `drupal_bulk_update`, and `drupal_entity_update` now
@@ -47,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.grok/` / `CLAUDE.md` / parallel rule trees. Generated slash stubs under
   `.claude/commands/` remain client ergonomics for MCP operators, not project
   development rules.
+
+### Documentation
+- Security, hardening, deployment, tools-reference, threat-model, and
+  architecture docs updated for the 2.1 controls (fail-closed HTTPS, upload
+  roots, publish/draft defaults, GraphQL policy caveat).
 
 ## [2.0.0] - 2026-07-29
 

@@ -51,8 +51,8 @@ Tools for creating, reading, updating, and deleting Drupal content nodes. Reads 
 | `drupal_list_nodes` | `type` | List nodes with filter, sort, pagination support. |
 | `drupal_search_content` | `query` | Search nodes by title substring. |
 | `drupal_create_node` | `type`, `title` | Create a node. Scalar fields via `fields`; **entity-reference fields (taxonomy, related content, media) via `relationships`** (JSON:API shape). `returning: "minimal"` for a compact identity+state response. |
-| `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. Reference fields go in `relationships`, not `fields`; `returning: "minimal"` bounds the response size. |
-| `drupal_delete_node` | `type`, `id` | Permanently delete a node. Requires `allowDestructive: true`. |
+| `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. Reference fields go in `relationships`, not `fields`; `returning: "minimal"` bounds the response size. On a **published moderated** node, omitting `moderationState` defaults the write to `moderation_state: "draft"` (forward revision). |
+| `drupal_delete_node` | `type`, `id` | Permanently delete a node. Requires `allowDestructive: true`. Subject to entity allowlists like all node tools. |
 
 ### drupal_get_node
 
@@ -176,16 +176,20 @@ All user tools respect the security config. Set `"deniedEntityTypes": ["user"]` 
 
 ## Media
 
+All media tools honor the site entity allowlist/denylist (same gates as
+`drupal_entity_*`). Create defaults to **unpublished** (`status: false`); publishing
+requires `allowPublish: true` and an explicit `status: true`.
+
 | Tool | Required params | Description |
 |------|----------------|-------------|
 | `drupal_list_media_types` | — | List all media types (image, document, remote_video, etc.). |
 | `drupal_list_media` | — | List media entities. Filter by type, status, name. |
 | `drupal_get_media` | `type`, `id` | Fetch a single media entity by UUID. |
-| `drupal_create_media` | `type`, `name` | Create a media entity. Pass source field in `fields`. |
-| `drupal_update_media` | `type`, `id` | Update a media entity. |
+| `drupal_create_media` | `type`, `name` | Create a media entity. Pass source field in `fields`. Defaults unpublished. |
+| `drupal_update_media` | `type`, `id` | Update a media entity. Publish gated by `allowPublish`. |
 | `drupal_delete_media` | `type`, `id` | Delete a media entity. Requires `allowDestructive: true`. |
-| `drupal_upload_file` | `filePath`, `bundle`, `fieldName` | Upload a local file. Returns file UUID for use in create_media. |
-| `drupal_upload_file_and_create_media` | `filePath`, `mediaType`, `fieldName` | Upload + create media in one step. |
+| `drupal_upload_file` | `filePath`, `bundle`, `fieldName` | Upload a local file under `MCP_UPLOAD_ROOT` (or cwd). Returns file UUID for use in create_media. |
+| `drupal_upload_file_and_create_media` | `filePath`, `mediaType`, `fieldName` | Upload + create media in one step. Media defaults unpublished. |
 | `drupal_find_orphaned_media` | — | Find media entities not referenced by any content. |
 
 ### Remote Video Example
@@ -206,9 +210,14 @@ All user tools respect the security config. Set `"deniedEntityTypes": ["user"]` 
 
 Requires the [GraphQL Compose](https://www.drupal.org/project/graphql_compose) module. GraphQL Compose exposes a read-only schema (no mutations); when `allowGraphqlMutations` is off (the default), any document containing a mutation is rejected by the connector before it is sent.
 
+**Policy gap:** query results are returned as raw GraphQL `data`. Connector entity
+allowlists and field redaction do **not** apply here — only Drupal's GraphQL
+permissions do. Prefer JSON:API entity tools when connector policy must hold
+(tracked in issue #142).
+
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_graphql` | `query` | Execute a GraphQL query. Mutations are gated by `allowGraphqlMutations`. |
+| `drupal_graphql` | `query` | Execute a GraphQL query. Mutations are gated by `allowGraphqlMutations`. Not entity-allowlist/redaction-gated. |
 | `drupal_graphql_introspect` | — | Inspect schema. Add `typeName` for detailed field info on a specific type. |
 
 ### Example Query
@@ -432,7 +441,7 @@ Drive content under a `content_moderation` editorial workflow. Authoritative sta
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_set_moderation_state` | `type`, `id`, `state` | Transition a node to a moderation state, e.g. `draft`, `needs_review`, `published`, `archived`. Governed write. |
+| `drupal_set_moderation_state` | `type`, `id`, `state` | Transition a node to a moderation state, e.g. `draft`, `needs_review`, `published`, `archived`. Governed write. `state: "published"` requires `allowPublish: true`. |
 | `drupal_content_by_moderation_state` | `type`, `state` | List nodes of a content type currently in a given moderation state. Supports `limit` / `offset`. |
 | `drupal_list_moderation_states` | `type` | List the moderation states observed on a content type's content (best-effort; `sample` controls how many recent items to inspect). |
 
@@ -525,12 +534,12 @@ Resolve a human label to an entity UUID before wiring up an entity-reference fie
 
 ## Bulk
 
-Create or update many entities of a single type + bundle in one call. Permission is checked once; each item runs independently, so the batch continues past individual failures (partial success). Returns per-item `{ index, success, id | error }` and a summary. Writes default to unpublished/draft.
+Create or update many entities of a single type + bundle in one call. Permission is checked once; each item runs independently, so the batch continues past individual failures (partial success). Returns per-item `{ index, success, id | error }` and a summary. Writes default to unpublished/draft. Entity allowlists apply. Bulk **updates** of published moderated targets without an explicit `attributes.moderation_state` default to `draft`.
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
 | `drupal_bulk_create` | `entityType`, `bundle`, `items` | Create many entities. Each item is `{ attributes?, relationships? }`. Summary: `{ created, failed }`. |
-| `drupal_bulk_update` | `entityType`, `bundle`, `items` | Update many entities. Each item requires an `id`; items missing one are reported as failures. Summary: `{ updated, failed }`. |
+| `drupal_bulk_update` | `entityType`, `bundle`, `items` | Update many entities. Each item requires an `id`; items missing one are reported as failures. Summary: `{ updated, failed }`. Published moderated items default to draft when moderation state is omitted. |
 
 ### drupal_bulk_create
 

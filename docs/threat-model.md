@@ -71,13 +71,26 @@ validator — it would break legitimate relationship filters.
   governance module active (MCP Sentinel) and a least-privilege OAuth
   consumer/role — the connector's presets are a second layer, not the first.
 - **Exposing the HTTPS transport** widens the attack surface; follow the
-  pre-exposure checklist in [deployment.md](deployment.md) and keep
-  `MCP_AUTH_TOKEN` + TLS + bind-host (+ rate limiting / IP allow-list) on.
+  pre-exposure checklist in [deployment.md](deployment.md). Non-loopback binds
+  **require** `MCP_AUTH_TOKEN` (fail closed) unless `MCP_ALLOW_UNAUTHENTICATED=1`.
+  Prefer TLS + tight `MCP_BIND_HOST` + rate limiting (default 120/min on
+  non-loopback HTTPS) and/or a reverse-proxy allow-list.
 
-## Assurance performed (1.0 security pass)
+## Residual risks (post 2.1 security suite)
 
-- `npm audit` — **0 vulnerabilities**.
+| Item | Status |
+|------|--------|
+| Specialized tool entity allowlists | Mitigated (#138) |
+| Upload arbitrary local paths | Mitigated (`MCP_UPLOAD_ROOT` / cwd allowlist, #137) |
+| Media auto-publish / moderation publish gate | Mitigated (#139) |
+| Live link-check open redirects to private IPs | Mitigated (`redirect: "manual"`, #143) |
+| GraphQL path skips entity allowlist + redaction | **Open** — issue #142 |
+| Omitted `security` defaults to `development` | **Open** — issue #140 (SENSITIVE_DENY applied to auditor/strict) |
+| Transitive `@hono/node-server` moderate advisory | **Open** — issue #128 (blocked on MCP SDK) |
+
+## Assurance performed
+
 - `eslint-plugin-security` runs in CI lint.
-- Adversarial code review across command/query/path injection, secret handling,
-  auth/transport, and SSRF — one MEDIUM finding (T2) fixed; LOWs (T3, T9)
-  documented above with rationale. No critical/high issues.
+- Unit suite + Drupal integration job in CI.
+- 2026-07 security audit (upload, publish, HTTPS, entity policy, link-checker)
+  drove the 2.1 hardening suite; residual items tracked above.

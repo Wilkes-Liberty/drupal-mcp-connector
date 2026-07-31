@@ -12,10 +12,12 @@ MCP Client
     ▼
 [Layer 1] Connector Security (src/lib/security.js + backend capabilities)
   · Security presets
-  · read-only / allowDestructive gates
-  · Entity type allow/deny lists
-  · Field redaction
+  · read-only / allowDestructive / allowPublish gates
+  · Entity type allow/deny lists (generic *and* specialized tools)
+  · Field redaction on canonical JSON:API-shaped responses
   · GraphQL mutation blocking
+  · Upload path allowlist (MCP_UPLOAD_ROOT / cwd)
+  · Safe draft default for published moderated node updates
   · Backend capability gating (writes refused on a read-only backend)
     │
     ▼
@@ -29,6 +31,28 @@ Drupal Database
 ```
 
 Neither layer trusts the other. A misconfigured Drupal permission cannot bypass connector security, and a misconfigured connector preset cannot bypass Drupal's access system. When MCP Sentinel is installed, it is the **authoritative** server-side gate — it enforces policy on the authenticated account's role and OAuth scopes regardless of how any connector is configured.
+
+### Entity policy on specialized tools
+
+Connector entity allowlists and denylists apply to **specialized tools**
+(`drupal_list_nodes`, `drupal_create_media`, taxonomy tools, etc.) the same way
+they apply to `drupal_entity_*`. Choosing a friendlier tool name cannot bypass
+`deniedEntityTypes` / `allowedEntityTypes`.
+
+### Publish gate
+
+When `allowPublish` is false (every preset except `development`), the connector
+refuses writes that carry `status: true` **or** `moderation_state: "published"`.
+Media create defaults to **unpublished**. Published moderated **updates** that
+omit a moderation state are rewritten to `moderation_state: "draft"` (forward
+revision) so live default revisions are not mutated by accident.
+
+### GraphQL caveat
+
+`drupal_graphql` returns raw GraphQL `data`. Connector entity allowlists and
+field redaction **do not** apply to that path (only mutation documents are
+blocked when `allowGraphqlMutations` is false). Treat GraphQL as a separate,
+Drupal-permission-only surface until that gap is closed (see issue #142).
 
 ### Backend capability gating
 
@@ -76,7 +100,10 @@ Good for: a developer-tier agent that builds the content model on a dev environm
 ```json
 { "preset": "auditor" }
 ```
-Read-only. Accesses all entity types. User `pass` and `mail` fields are redacted in all responses.
+Read-only. Broad entity reads. **Secrets / governance / account entity types**
+(`user`, `oauth2_token`, `key`, `consumer`, `encryption_profile`, `mcp_tool_config`,
+`mcp_policy_profile`) are denied via `SENSITIVE_DENY`. User `pass` and `mail` are
+redacted when a `user` read is otherwise allowed through custom overrides.
 
 Good for: analytics, content audits, SEO analysis, reporting.
 
@@ -84,7 +111,8 @@ Good for: analytics, content audits, SEO analysis, reporting.
 ```json
 { "preset": "production-strict" }
 ```
-Read-only. User entities blocked entirely. Broad PII field redaction (`pass`, `mail`, `field_private`, `field_api_key`, `field_token`).
+Read-only. Same **SENSITIVE_DENY** denylist as above (includes `user`). Broad PII
+field redaction (`pass`, `mail`, `field_private`, `field_api_key`, `field_token`).
 
 Good for: live production sites where any write access is unacceptable.
 
@@ -317,7 +345,7 @@ The Drush SSH bridge has additional requirements:
 - **No agent forwarding** — disabled in the SSH client config
 - **Argument escaping** — all args are single-quote escaped before shell execution
 - **Machine name validation** — module names and role names are validated against `/^[a-z][a-z0-9_]*$/`
-- **SQL allowlist** — only `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN` are permitted; secondary injection patterns are also checked
+- **Raw SQL** — off by default; when enabled (`drushSsh.rawSql: "governed"`) runs only through `mcp-sentinel:sql-query` (SELECT over entity tables, policy-gated server-side). There is no ungoverned `sql:query` path.
 
 For production: restrict the SSH key to specific commands in `~/.ssh/authorized_keys`:
 ```
@@ -335,10 +363,12 @@ Before going live with any non-development site:
 - [ ] `config/config.json` is not committed (`git status` verified)
 - [ ] `security.preset` is `auditor` or `production-strict` on live sites
 - [ ] `security.allowDestructive` is `false`
-- [ ] `security.allowPublish` is `false` (a write carrying `status: true` is refused locally)
+- [ ] `security.allowPublish` is `false` (`status: true` and `moderation_state: "published"` are refused locally)
 - [ ] `security.readOnly` is `true` for analysis-only workloads
+- [ ] Explicit `security.preset` set on every non-dev site (omitted security still defaults to `development` — see open issue #140)
 - [ ] Dedicated Drupal API user created with `mcp_api` role only
-- [ ] TLS certificates configured for HTTP transport mode
+- [ ] TLS certificates configured for HTTPS transport; non-loopback bind has `MCP_AUTH_TOKEN` (or trusted proxy + `MCP_ALLOW_UNAUTHENTICATED=1`)
+- [ ] `MCP_UPLOAD_ROOT` set if uploads must come from a directory other than the process cwd
 - [ ] `drupal_security_info` called to verify the active policy
 - [ ] ESLint passing: `npm run lint`
 - [ ] No known vulnerabilities: `npm audit`
