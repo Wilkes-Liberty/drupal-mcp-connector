@@ -13,6 +13,7 @@ import {
   resolveSecurityConfig, redactCanonicalEntity,
   assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
 } from "../lib/security.js";
+import { applySafeDraftDefault } from "../lib/moderation-default.js";
 import { shapeWriteResponse, RETURNING_SCHEMA } from "../lib/entity-response.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 
@@ -285,15 +286,20 @@ async function updateNode({ site: siteName, type, id, title, body, summary, stat
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", "node", type);
-  const attributes = { ...fields };
+  const backend = await resolveBackend(site);
+  let attributes = { ...fields };
   if (title !== undefined) attributes.title = title;
   if (moderationState !== undefined) attributes.moderation_state = moderationState;
   else if (status !== undefined) attributes.status = status;
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
+  // #131: published moderated nodes without an explicit state → draft forward revision.
+  // Runs before the publish gate and on dryRun so previews match the real write.
+  attributes = await applySafeDraftDefault({
+    backend, entityType: "node", bundle: type, id, attributes,
+  });
   assertPublishAllowed(sec, attributes);
   if (dryRun) return { dryRun: true, operation: "update", entityType: "node", bundle: type, id, attributes, relationships };
-  const backend = await resolveBackend(site);
   // Alias handling (DEV-116): an explicit `path.alias` is set in place by
   // round-tripping the existing alias's pid (no duplicate); a path-less update
   // re-pins the current alias *with its pid* so the save can't revert/duplicate
