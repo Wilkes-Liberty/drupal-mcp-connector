@@ -235,14 +235,18 @@ CallTool request
       ▼
 infer operation (read/write/delete/graphql) from tool name
       ├─ resolve site security config
-      ├─ assert operation allowed (readOnly, allowDestructive, allowGraphqlMutations)
+      ├─ assert operation allowed (readOnly, allowDestructive, allowGraphql / allowGraphqlMutations)
       ▼
 handler(args)        ← entity-type/bundle checks on specialized + generic tools
                        (assertReadAllowed / assertWriteAllowed / assertDeleteAllowed)
       │              ← backend capability checks (write/delete gated)
       ▼
-toolResult(data)     ← field redaction applied before returning
+toolResult(data)     ← field redaction applied before returning (JSON:API-shaped paths)
 ```
+
+GraphQL tools call `assertGraphqlAllowed` (and mutations
+`assertGraphqlMutationAllowed`) before the handler runs. Default security when
+`security` is omitted is `production-strict`.
 
 `SecurityError` and `BackendCapabilityError` produce clean, explicit messages; all other errors surface as standard MCP error responses.
 
@@ -271,11 +275,13 @@ interface SiteConfig {
     host: string; user: string; keyPath: string; drupalRoot: string; port?: number; // default 22
   };
   security?: {
-    preset?: "development" | "content-editor" | "auditor" | "production-strict" | "write-plane";
+    // Omitted / {} → production-strict (DEFAULT_SECURITY_PRESET)
+    preset?: "development" | "content-editor" | "config-editor" | "auditor" | "production-strict" | "write-plane";
     readOnly?: boolean;
     allowDestructive?: boolean;
     allowPublish?: boolean;          // default false (true only in the development preset)
-    allowGraphqlMutations?: boolean;
+    allowGraphql?: boolean;          // default false (true only in development); raw GraphQL bypasses entity policy
+    allowGraphqlMutations?: boolean; // requires allowGraphql as well
     allowedEntityTypes?: string[] | null;
     deniedEntityTypes?: string[];
     globalRedactedFields?: string[];

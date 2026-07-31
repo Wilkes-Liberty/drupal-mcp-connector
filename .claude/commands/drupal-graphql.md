@@ -1,5 +1,5 @@
 ---
-description: "Execute a GraphQL query against a Drupal site. Requires the GraphQL Compose module (drupal.org/project/graphql_compose), which exposes a read-only schema; mutations are gated by \"allowGraphqlMutations\". Use drupal_graphql_introspect first to discover available types and fields. Example query: query GetArticle($id: String!) { nodeById(id: $id) { title ... on NodeArticle { body { value } } } } Example mutation (only if your GraphQL Compose schema enables mutations): mutation CreateArticle($title: String!, $body: String!) { createNodeArticle(data: { title: $title, body: { value: $body, format: \"full_html\" } }) { entity { title uuid } errors { message } } }"
+description: "Execute a GraphQL query against a Drupal site. Requires the GraphQL Compose module (drupal.org/project/graphql_compose), which exposes a read-only schema. GraphQL is off unless security.allowGraphql is true (development preset only by default) because raw results bypass entity allowlists and field redaction. Mutations also require allowGraphqlMutations. Use drupal_graphql_introspect first to discover available types and fields. Example query: query GetArticle($id: String!) { nodeById(id: $id) { title ... on NodeArticle { body { value } } } } Example mutation (only if your GraphQL Compose schema enables mutations): mutation CreateArticle($title: String!, $body: String!) { createNodeArticle(data: { title: $title, body: { value: $body, format: \"full_html\" } }) { entity { title uuid } errors { message } } }"
 argument-hint: "<query> [site] [variables] [operationName]"
 allowed-tools: mcp__drupal__drupal_graphql
 ---
@@ -8,7 +8,9 @@ Call the `mcp__drupal__drupal_graphql` MCP tool.
 
 Execute a GraphQL query against a Drupal site.
 Requires the GraphQL Compose module (drupal.org/project/graphql_compose), which
-exposes a read-only schema; mutations are gated by "allowGraphqlMutations".
+exposes a read-only schema. GraphQL is off unless security.allowGraphql is true
+(development preset only by default) because raw results bypass entity allowlists
+and field redaction. Mutations also require allowGraphqlMutations.
 Use drupal_graphql_introspect first to discover available types and fields.
 
 Example query:

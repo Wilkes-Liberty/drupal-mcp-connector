@@ -7,7 +7,7 @@ const backend = {
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 vi.mock("../../src/lib/config.js", () => ({
-  getSiteConfig: vi.fn((n) => ({ _name: n || "d", baseUrl: "https://x", security: {} })),
+  getSiteConfig: vi.fn((n) => ({ _name: n || "d", baseUrl: "https://x", security: { preset: "development" } })),
 }));
 // Use the REAL security layer (handlers call assertReadAllowed/assertWriteAllowed);
 // site.security = {} resolves to the permissive "development" preset.

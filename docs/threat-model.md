@@ -76,7 +76,7 @@ validator — it would break legitimate relationship filters.
   Prefer TLS + tight `MCP_BIND_HOST` + rate limiting (default 120/min on
   non-loopback HTTPS) and/or a reverse-proxy allow-list.
 
-## Residual risks (post 2.1 security suite)
+## Residual risks (post 2.2 security suite)
 
 | Item | Status |
 |------|--------|
@@ -84,13 +84,18 @@ validator — it would break legitimate relationship filters.
 | Upload arbitrary local paths | Mitigated (`MCP_UPLOAD_ROOT` / cwd allowlist, #137) |
 | Media auto-publish / moderation publish gate | Mitigated (#139) |
 | Live link-check open redirects to private IPs | Mitigated (`redirect: "manual"`, #143) |
-| GraphQL path skips entity allowlist + redaction | **Open** — issue #142 |
-| Omitted `security` defaults to `development` | **Open** — issue #140 (SENSITIVE_DENY applied to auditor/strict) |
-| Transitive `@hono/node-server` moderate advisory | **Open** — issue #128 (blocked on MCP SDK) |
+| Omitted `security` defaults to open mode | Mitigated — default is `production-strict` (#140) |
+| GraphQL path skips entity allowlist + redaction | Mitigated by fail-closed gate — tools off unless `allowGraphql` (#142); raw results still bypass policy when opted in |
+| Transitive `@hono/node-server` / `postcss` advisories | Mitigated — MCP SDK `^1.30.0` + npm overrides (#128) |
+
+**When GraphQL is explicitly enabled**, treat results as Drupal-permission-only
+(no connector allowlist/redaction on that path). Prefer JSON:API entity tools
+for policy-bound reads.
 
 ## Assurance performed
 
 - `eslint-plugin-security` runs in CI lint.
 - Unit suite + Drupal integration job in CI.
 - 2026-07 security audit (upload, publish, HTTPS, entity policy, link-checker)
-  drove the 2.1 hardening suite; residual items tracked above.
+  drove the 2.1 hardening suite; 2.2 closed remaining default-preset, GraphQL
+  gate, and dependency residual items.

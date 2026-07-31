@@ -58,16 +58,20 @@
     "syntax-check": "for f in src/lib/*.js src/tools/*.js src/index.js; do node --input-type=module --check < $f && echo \"$f ✓\"; done"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "graphql": "^17.0.0",
     "node-fetch": "^3.3.2",
     "ssh2": "^1.16.0"
   },
   "devDependencies": {
     "eslint": "^10.4.1",
-    "eslint-plugin-security": "^4.0.0",
     "eslint-plugin-n": "^18.1.0",
+    "eslint-plugin-security": "^4.0.0",
     "globals": "^17.6.0",
     "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "@hono/node-server": "^2.0.5",
+    "postcss": "^8.5.18"
   }
 }

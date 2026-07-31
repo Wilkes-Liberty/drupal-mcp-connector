@@ -65,7 +65,10 @@ targeted tests while iterating (`npx vitest run tests/tools/nodes.test.js`).
   moderated node defaults the write to `moderation_state: "draft"`.
 - Uploads: only under `MCP_UPLOAD_ROOT` (or cwd). Non-loopback HTTPS requires
   `MCP_AUTH_TOKEN` (or trusted proxy + `MCP_ALLOW_UNAUTHENTICATED=1`).
-- GraphQL results are not entity-allowlist/redaction-gated (tracked #142).
+- Default security preset is `production-strict` when `security` is omitted.
+- GraphQL tools require `allowGraphql` (development preset only by default).
+  When enabled, results still skip entity allowlist/redaction — prefer JSON:API
+  for policy-bound reads.
 - Report vulnerabilities privately per `SECURITY.md` — not as public issues.
 
 ## Provider-agnostic policy

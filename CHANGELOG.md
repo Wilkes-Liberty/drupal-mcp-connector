@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Default security preset is `production-strict` (#140).** Omitting `security`
+  or passing `{}` no longer opens the site under the `development` preset.
+  Local and integration work must set `"preset": "development"` (or another
+  explicit preset) deliberately. Migration: add
+  `"security": { "preset": "development" }` to any site config that relied on
+  the old open default.
+- **GraphQL tools fail closed (#142).** `drupal_graphql` and
+  `drupal_graphql_introspect` require `security.allowGraphql` (true only on the
+  `development` preset). Mutations still need `allowGraphqlMutations` as well.
+  When GraphQL is opted in, results remain raw (no entity allowlist/redaction
+  on that path); prefer JSON:API entity tools for policy-bound reads.
+- **Dependency advisories cleared (#128).** Bump
+  `@modelcontextprotocol/sdk` to `^1.30.0` and pin overrides for
+  `@hono/node-server` `^2.0.5` and `postcss` `^8.5.18` so `npm audit` reports
+  zero vulnerabilities.
+
+### Documentation
+- README, security guide, threat model, architecture, tools reference, and
+  SECURITY.md updated for the secure default, GraphQL gate, and residual-risk
+  table.
+
 ## [2.1.1] - 2026-07-31
 
 ### Documentation

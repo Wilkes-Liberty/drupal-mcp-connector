@@ -15,7 +15,7 @@ MCP Client
   · read-only / allowDestructive / allowPublish gates
   · Entity type allow/deny lists (generic *and* specialized tools)
   · Field redaction on canonical JSON:API-shaped responses
-  · GraphQL mutation blocking
+  · GraphQL tools gated (`allowGraphql`; mutations also need `allowGraphqlMutations`)
   · Upload path allowlist (MCP_UPLOAD_ROOT / cwd)
   · Safe draft default for published moderated node updates
   · Backend capability gating (writes refused on a read-only backend)
@@ -47,12 +47,15 @@ Media create defaults to **unpublished**. Published moderated **updates** that
 omit a moderation state are rewritten to `moderation_state: "draft"` (forward
 revision) so live default revisions are not mutated by accident.
 
-### GraphQL caveat
+### GraphQL gate
 
-`drupal_graphql` returns raw GraphQL `data`. Connector entity allowlists and
-field redaction **do not** apply to that path (only mutation documents are
-blocked when `allowGraphqlMutations` is false). Treat GraphQL as a separate,
-Drupal-permission-only surface until that gap is closed (see issue #142).
+`drupal_graphql` and `drupal_graphql_introspect` require
+`security.allowGraphql: true`. That flag is **false** on every preset except
+`development`. When enabled, query results are still returned as raw GraphQL
+`data` — connector entity allowlists and field redaction do **not** apply to
+that path. Prefer JSON:API entity tools when connector policy must hold.
+Mutation documents additionally require `allowGraphqlMutations` (also off
+outside `development`).
 
 ### Backend capability gating
 
@@ -62,13 +65,13 @@ Because the connector speaks both JSON:API and GraphQL, write protection is also
 
 ## Security Presets
 
-Choose the preset that matches your use case. Every site in `config.json` gets its own independent preset.
+Choose the preset that matches your use case. Every site in `config.json` gets its own independent preset. When `security` is omitted or is an empty object, the connector uses **`production-strict`**.
 
 ### `development`
 ```json
 { "preset": "development" }
 ```
-Everything allowed. **Local development only.** Never use on a site accessible to the internet.
+Everything allowed, including freeform GraphQL. **Local development only.** Never use on a site accessible to the internet.
 
 ### `content-editor`
 ```json
@@ -365,7 +368,8 @@ Before going live with any non-development site:
 - [ ] `security.allowDestructive` is `false`
 - [ ] `security.allowPublish` is `false` (`status: true` and `moderation_state: "published"` are refused locally)
 - [ ] `security.readOnly` is `true` for analysis-only workloads
-- [ ] Explicit `security.preset` set on every non-dev site (omitted security still defaults to `development` — see open issue #140)
+- [ ] Explicit `security.preset` set on every site (omitted / empty security defaults to `production-strict`)
+- [ ] GraphQL only where intended (`allowGraphql` / development preset); prefer JSON:API for policy-bound reads
 - [ ] Dedicated Drupal API user created with `mcp_api` role only
 - [ ] TLS certificates configured for HTTPS transport; non-loopback bind has `MCP_AUTH_TOKEN` (or trusted proxy + `MCP_ALLOW_UNAUTHENTICATED=1`)
 - [ ] `MCP_UPLOAD_ROOT` set if uploads must come from a directory other than the process cwd
