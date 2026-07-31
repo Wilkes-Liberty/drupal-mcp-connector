@@ -159,6 +159,46 @@ describe("nodes tools (migrated)", () => {
     expect(arg.attributes).not.toHaveProperty("status");
   });
 
+  it("update_node on a published moderated node defaults moderation_state to draft (#131)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({
+      status: true,
+      fields: { moderation_state: "published", body: { value: "B" } },
+    }));
+    await handlers.drupal_update_node({ type: "article", id: "n1", title: "Wire tags" });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes.moderation_state).toBe("draft");
+    expect(arg.attributes.title).toBe("Wire tags");
+  });
+
+  it("update_node does not default draft when caller passes moderationState (#131)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({
+      status: true,
+      fields: { moderation_state: "published" },
+    }));
+    await handlers.drupal_update_node({ type: "article", id: "n1", title: "Keep live", moderationState: "published" });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes.moderation_state).toBe("published");
+  });
+
+  it("update_node does not inject draft on non-moderated published nodes (#131)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({ status: true, fields: { body: { value: "B" } } }));
+    await handlers.drupal_update_node({ type: "page", id: "n1", title: "Page edit" });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes).not.toHaveProperty("moderation_state");
+    expect(arg.attributes.title).toBe("Page edit");
+  });
+
+  it("update_node dryRun preview includes the draft default for published moderated targets (#131)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({
+      status: true,
+      fields: { moderation_state: "published" },
+    }));
+    const out = await handlers.drupal_update_node({ type: "article", id: "n1", title: "Preview", dryRun: true });
+    expect(out.dryRun).toBe(true);
+    expect(out.attributes.moderation_state).toBe("draft");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
   it("update_node without a path preserves the existing alias and round-trips its pid (DEV-116)", async () => {
     backend.getPathInfo.mockResolvedValue(pathInfo({ alias: "/keep-me", pid: "204", langcode: "en" }));
     await handlers.drupal_update_node({ type: "article", id: "n1", title: "New" });
