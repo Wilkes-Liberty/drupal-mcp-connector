@@ -12,8 +12,11 @@ vi.mock("../../src/lib/security.js", async (orig) => {
   const actual = await orig();
   return {
     ...actual,
+    // Open write/publish so entity-policy and #139 tests control deny cases explicitly.
     resolveSecurityConfig: vi.fn(() => ({
-      globalRedactedFields: [], entityRules: {}, allowPublish: true,
+      readOnly: false, allowDestructive: true, allowPublish: true,
+      allowedEntityTypes: null, deniedEntityTypes: [],
+      globalRedactedFields: [], entityRules: {},
     })),
   };
 });
@@ -63,7 +66,9 @@ describe("media tools (migrated)", () => {
   it("create_media rejects status:true when allowPublish is false (#139)", async () => {
     const { resolveSecurityConfig } = await import("../../src/lib/security.js");
     resolveSecurityConfig.mockReturnValueOnce({
-      globalRedactedFields: [], entityRules: {}, allowPublish: false,
+      readOnly: false, allowDestructive: true, allowPublish: false,
+      allowedEntityTypes: null, deniedEntityTypes: [],
+      globalRedactedFields: [], entityRules: {},
     });
     await expect(
       handlers.drupal_create_media({ type: "image", name: "Pic", status: true })

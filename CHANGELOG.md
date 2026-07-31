@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **Specialized tools honor entity allowlists/denylists (#138).**
+  `drupal_*_node`, media, and taxonomy tools now call the same
+  `assertReadAllowed` / `assertWriteAllowed` / `assertDeleteAllowed` gates as
+  `drupal_entity_*`, so a denied type (e.g. `media`) cannot be reached by
+  switching tool names.
 - **Upload path allowlist and path segment hardening (#137).** File uploads
   must resolve under `MCP_UPLOAD_ROOT` (or the connector cwd by default);
   entity/bundle/field path segments are machine-name validated and encoded;

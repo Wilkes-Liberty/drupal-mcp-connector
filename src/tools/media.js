@@ -9,7 +9,8 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import {
-  resolveSecurityConfig, redactCanonicalEntity, assertPublishAllowed,
+  resolveSecurityConfig, redactCanonicalEntity,
+  assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
 } from "../lib/security.js";
 
 /**
@@ -19,6 +20,7 @@ import {
  */
 async function listMediaTypes({ site: siteName }) {
   const site = getSiteConfig(siteName);
+  assertReadAllowed(resolveSecurityConfig(site), "media");
   const backend = await resolveBackend(site);
   return backend.listBundles("media");
 }
@@ -34,11 +36,13 @@ async function listMediaTypes({ site: siteName }) {
 async function listMedia({ site: siteName, type, status, name, limit = 20, offset = 0 }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
+  const bundle = type || "image";
+  assertReadAllowed(sec, "media", bundle);
   const backend = await resolveBackend(site);
   const filters = [];
   if (status !== undefined) filters.push({ field: "status", op: "eq", value: status });
   if (name) filters.push({ field: "name", op: "contains", value: name });
-  const res = await backend.listEntities({ entityType: "media", bundle: type || "image", filters, sort: [{ field: "changed", dir: "desc" }], page: { limit, offset } });
+  const res = await backend.listEntities({ entityType: "media", bundle, filters, sort: [{ field: "changed", dir: "desc" }], page: { limit, offset } });
   const items = res.entities.map((e) => redactCanonicalEntity(e, sec, "media"));
   return { total: res.page?.total ?? items.length, approximate: res.approximate ?? false, offset, nextOffset: offset + items.length, media: items };
 }
@@ -51,6 +55,7 @@ async function listMedia({ site: siteName, type, status, name, limit = 20, offse
 async function getMedia({ site: siteName, type, id }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
+  assertReadAllowed(sec, "media", type);
   const backend = await resolveBackend(site);
   const entity = await backend.getEntity({ entityType: "media", bundle: type, id });
   return entity ? redactCanonicalEntity(entity, sec, "media") : null;
@@ -66,11 +71,13 @@ async function getMedia({ site: siteName, type, id }) {
  */
 async function createMedia({ site: siteName, type, name, status = false, fields = {} }) {
   const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  assertWriteAllowed(sec, "create", "media", type);
   const attributes = { name, status, ...fields };
   // Layer name/status after fields so they win, matching prior behaviour.
   attributes.name = name;
   attributes.status = status;
-  assertPublishAllowed(resolveSecurityConfig(site), attributes);
+  assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
   return backend.createEntity({ entityType: "media", bundle: type, attributes });
 }
@@ -82,10 +89,12 @@ async function createMedia({ site: siteName, type, name, status = false, fields 
  */
 async function updateMedia({ site: siteName, type, id, name, status, fields = {} }) {
   const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  assertWriteAllowed(sec, "update", "media", type);
   const attributes = { ...fields };
   if (name !== undefined) attributes.name = name;
   if (status !== undefined) attributes.status = status;
-  assertPublishAllowed(resolveSecurityConfig(site), attributes);
+  assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
   return backend.updateEntity({ entityType: "media", bundle: type, id, attributes });
 }
@@ -99,6 +108,7 @@ async function updateMedia({ site: siteName, type, id, name, status, fields = {}
  */
 async function deleteMedia({ site: siteName, type, id }) {
   const site = getSiteConfig(siteName);
+  assertDeleteAllowed(resolveSecurityConfig(site), "media", type, id);
   const backend = await resolveBackend(site);
   await backend.deleteEntity({ entityType: "media", bundle: type, id });
   return { success: true, deletedId: id };
@@ -113,6 +123,10 @@ async function deleteMedia({ site: siteName, type, id }) {
  */
 async function uploadFile({ site: siteName, filePath, entityType = "media", bundle, fieldName }) {
   const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  // Host entity field write + file create (both required for JSON:API upload).
+  assertWriteAllowed(sec, "create", entityType, bundle);
+  assertWriteAllowed(sec, "create", "file");
   const backend = await resolveBackend(site);
   return backend.uploadFile({ entityType, bundle, fieldName, filePath });
 }
@@ -129,9 +143,12 @@ async function uploadFile({ site: siteName, filePath, entityType = "media", bund
  */
 async function uploadFileAndCreateMedia({ site: siteName, filePath, mediaType, mediaName, fieldName, altText, status = false }) {
   const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  assertWriteAllowed(sec, "create", "media", mediaType);
+  assertWriteAllowed(sec, "create", "file");
   const attributes = { name: mediaName || undefined, status };
   // Gate publish before any upload I/O so a blocked publish does not leave an orphan file.
-  assertPublishAllowed(resolveSecurityConfig(site), attributes);
+  assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
   const file = await backend.uploadFile({ entityType: "media", bundle: mediaType, fieldName, filePath });
   const fileData = altText
@@ -156,8 +173,9 @@ async function uploadFileAndCreateMedia({ site: siteName, filePath, mediaType, m
 async function findOrphanedMedia({ site: siteName, type, limit = 50 }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  const backend = await resolveBackend(site);
   const bundle = type || "image";
+  assertReadAllowed(sec, "media", bundle);
+  const backend = await resolveBackend(site);
   const map = (res, method, note) => ({
     method, ...(note ? { note } : {}), count: res.entities.length,
     media: res.entities.map((e) => redactCanonicalEntity(e, sec, "media")),
