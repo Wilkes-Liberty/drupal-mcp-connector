@@ -127,9 +127,9 @@ prompts above.
 ### Security Model
 
 Defense-in-depth presets, enforced connector-side and complemented by Drupal-side
-governance (MCP Sentinel). **Set an explicit preset on every non-dev site** —
-if `security` is omitted, the connector still defaults to `development` (tracked
-for change in issue #140).
+governance (MCP Sentinel). **Default when `security` is omitted:**
+`production-strict` (read-only, sensitive types denied). Local development must
+set `"preset": "development"` explicitly.
 
 ```json
 "security": { "preset": "auditor" }
@@ -137,20 +137,20 @@ for change in issue #140).
 
 | Preset | What it does |
 |--------|-------------|
-| `development` | Everything allowed — local development only |
+| `development` | Everything allowed, including GraphQL — local development only |
 | `content-editor` | Create/edit content + structural entities; no deletes; no publishing; secrets/governance/account types denied |
 | `config-editor` | content-editor + site-building config read + governed config write (developer tier) |
 | `auditor` | Read-only; secrets/governance/account types denied; user PII redacted when user is allowed |
-| `production-strict` | Read-only; same sensitive denylist as auditor; broad PII field redaction |
-| `write-plane` | Create/update content set for agents; no deletes; no GraphQL mutations; publish off by default |
+| `production-strict` | Read-only; same sensitive denylist as auditor; broad PII field redaction (**default**) |
+| `write-plane` | Create/update content set for agents; no deletes; no GraphQL; publish off by default |
 
-Additional connector-side gates (2.1+):
+Additional connector-side gates (2.1+ / 2.2+):
 
 - **Entity allowlists** apply to specialized tools (`drupal_*_node`, media, taxonomy), not only `drupal_entity_*`.
 - **Publish gate:** `status: true` and `moderation_state: "published"` require `allowPublish`. Media create defaults **unpublished**. Published moderated node updates without a moderation state default to **draft** (forward revision).
 - **Uploads** only from `MCP_UPLOAD_ROOT` (or the process cwd); sensitive paths (`.env*`, `.ssh`, connector `config.json`) are refused.
 - **HTTPS:** non-loopback binds require `MCP_AUTH_TOKEN` (or `MCP_ALLOW_UNAUTHENTICATED=1` behind a trusted proxy); non-loopback TLS defaults to 120 req/min rate limiting.
-- **GraphQL caveat:** `drupal_graphql` returns raw query data — connector allowlists/redaction do not apply to that path (issue #142).
+- **GraphQL is off by default.** `drupal_graphql` / introspect require `security.allowGraphql` (true only on the `development` preset). Raw GraphQL results still bypass entity allowlists and field redaction — prefer JSON:API entity tools when connector policy must hold. Mutations also need `allowGraphqlMutations`.
 
 Full detail: **[docs/security.md](docs/security.md)** and **[docs/security-hardening.md](docs/security-hardening.md)**.
 

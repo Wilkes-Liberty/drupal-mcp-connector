@@ -41,7 +41,7 @@ This connector implements defense-in-depth:
 ## Known Limitations
 
 - The Drush SSH bridge requires SSH key access to the server. Never use password-based SSH auth.
-- GraphQL mutations should be disabled (`allowGraphqlMutations: false`) unless explicitly needed.
+- GraphQL tools are off unless `allowGraphql: true` (development preset only by default). Mutations additionally need `allowGraphqlMutations`.
 - The HTTPS transport has optional built-in rate limiting (`MCP_RATE_LIMIT`, off by default); for multi-replica deployments also rate-limit at the reverse proxy.
 - The Drush `sql:query` bridge enforces a best-effort read-only allowlist; use a dedicated read-only DB credential if you enable it.
 

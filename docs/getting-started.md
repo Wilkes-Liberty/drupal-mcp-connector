@@ -39,11 +39,16 @@ Edit `config/config.json`. At minimum you need `baseUrl`, a backend (`api`), and
     "mysite": {
       "baseUrl": "https://mysite.com",
       "api": "jsonapi",
-      "apiToken": "your-bearer-token-here"
+      "apiToken": "your-bearer-token-here",
+      "security": { "preset": "content-editor" }
     }
   }
 }
 ```
+
+When `security` is omitted the connector uses **`production-strict`** (read-only).
+Local open mode needs `"preset": "development"`. GraphQL tools need that preset
+or an explicit `allowGraphql: true`.
 
 **Never commit `config/config.json`** — it is gitignored.
 

@@ -12,13 +12,14 @@ import { parse } from "graphql";
  *
  * ─── Quick presets ────────────────────────────────────────────────────────
  *
- *   "preset": "development"        Everything allowed. Default if no security key.
+ *   "preset": "development"        Everything allowed. Opt-in only — set explicitly.
  *   "preset": "content-editor"     Create/edit content (nodes, media, terms, paragraphs, blocks,
  *                                  menu links, redirects, aliases, files). No deletes. Config read-only.
  *   "preset": "config-editor"      content-editor + site-building config READ + governed config
  *                                  read/write (Developer tier). Model changes go via the config bridge.
- *   "preset": "auditor"            Read-only. All entity types. User fields redacted.
- *   "preset": "production-strict"  Read-only. Explicit allowlist required. Redacts PII.
+ *   "preset": "auditor"            Read-only. Sensitive entity types denied. User fields redacted.
+ *   "preset": "production-strict"  Read-only. Sensitive types denied. Redacts PII. **Default** when
+ *                                  security is omitted or has no preset (#140).
  *   "preset": "write-plane"        Governed writes (no delete/mutations) on the content set
  *                                  (node, term, media + structural content entities).
  *
@@ -31,7 +32,8 @@ import { parse } from "graphql";
  *
  *  readOnly            true  → reject all create/update/delete/graphql-mutation calls
  *  allowDestructive    false → reject all delete operations
- *  allowPublish        false → reject a write carrying status:true (publishing)
+ *  allowPublish        false → reject a write carrying status:true / moderation_state:published
+ *  allowGraphql        false → reject drupal_graphql + introspect (raw GraphQL is policy-free, #142)
  *  allowGraphqlMutations false → reject drupal_graphql when mutation is detected
  *  allowConfigRead     false → reject drupal_config_get / drupal_config_list
  *  allowConfigWrite    false → reject drupal_config_set
@@ -118,6 +120,7 @@ const PRESETS = {
     readOnly: false,
     allowDestructive: true,
     allowPublish: true,               // mirrors allowDestructive: everything allowed
+    allowGraphql: true,               // raw GraphQL allowed only in open mode (#142)
     allowGraphqlMutations: true,
     allowConfigRead: true,
     allowConfigWrite: true,
@@ -130,6 +133,7 @@ const PRESETS = {
   "content-editor": {
     readOnly: false,
     allowDestructive: false,          // no deletes
+    allowGraphql: false,              // freeform GraphQL bypasses entity denylists (#142)
     allowGraphqlMutations: false,
     allowConfigRead: true,            // config read-only
     allowConfigWrite: false,
@@ -151,6 +155,7 @@ const PRESETS = {
     // The Drupal-side governance layer remains authoritative; this is defence in depth.
     readOnly: false,
     allowDestructive: false,          // no deletes
+    allowGraphql: false,
     allowGraphqlMutations: false,
     allowConfigRead: true,
     allowConfigWrite: true,           // governed config writes via drupal_config_set
@@ -171,6 +176,7 @@ const PRESETS = {
   auditor: {
     readOnly: true,
     allowDestructive: false,
+    allowGraphql: false,
     allowGraphqlMutations: false,
     allowConfigRead: true,            // read-only inspection of config
     allowConfigWrite: false,
@@ -189,6 +195,7 @@ const PRESETS = {
   "production-strict": {
     readOnly: true,
     allowDestructive: false,
+    allowGraphql: false,
     allowGraphqlMutations: false,
     allowConfigRead: false,           // nothing implicit; opt in per site
     allowConfigWrite: false,
@@ -203,6 +210,7 @@ const PRESETS = {
     // Drupal-side governance layer remains authoritative; this is defence in depth.
     readOnly: false,
     allowDestructive: false,          // no deletes
+    allowGraphql: false,              // JSON:API write plane; GraphQL is policy-free (#142)
     allowGraphqlMutations: false,     // writes go through the JSON:API plane
     allowConfigRead: true,            // config read-only
     allowConfigWrite: false,
@@ -225,15 +233,22 @@ const PRESETS = {
  * @param {object} site Site config (reads site.security).
  * @returns {object} Effective security config used by the assert/redact helpers.
  */
+/** Default when `security.preset` is omitted — least privilege, not open mode (#140). */
+export const DEFAULT_SECURITY_PRESET = "production-strict";
+
 export function resolveSecurityConfig(site) {
   const raw = site.security ?? {};
-  const preset = PRESETS[raw.preset ?? "development"] ?? PRESETS.development;
+  // Explicit preset wins; bare {} / missing security → production-strict (#140).
+  // Open mode requires `preset: "development"` (or another named preset).
+  const presetName = raw.preset ?? DEFAULT_SECURITY_PRESET;
+  const preset = PRESETS[presetName] ?? PRESETS[DEFAULT_SECURITY_PRESET];
 
   // Merge: explicit keys in site.security override the preset
   return {
     readOnly:              raw.readOnly              ?? preset.readOnly,
     allowDestructive:      raw.allowDestructive      ?? preset.allowDestructive,
     allowPublish:          raw.allowPublish          ?? preset.allowPublish          ?? false,
+    allowGraphql:          raw.allowGraphql          ?? preset.allowGraphql          ?? false,
     allowGraphqlMutations: raw.allowGraphqlMutations ?? preset.allowGraphqlMutations,
     allowConfigRead:       raw.allowConfigRead       ?? preset.allowConfigRead       ?? false,
     allowConfigWrite:      raw.allowConfigWrite      ?? preset.allowConfigWrite      ?? false,
@@ -450,7 +465,30 @@ function graphqlHasMutation(query) {
  * @returns {void} No-op for read-only (query) documents.
  * @throws {SecurityError} if the document is a mutation and writes/mutations are disabled.
  */
+/**
+ * Gate GraphQL queries and schema introspection. Freeform GraphQL returns raw
+ * data that does not pass through entity allowlists or field redaction (#142),
+ * so it is off by default outside the development preset. Opt in with
+ * `security.allowGraphql: true`.
+ *
+ * @param {object} secConfig Resolved security config.
+ * @param {string} [operationLabel] Label for the error message.
+ * @returns {void}
+ * @throws {SecurityError} if GraphQL is disabled for this site.
+ */
+export function assertGraphqlAllowed(secConfig, operationLabel = "graphql") {
+  if (secConfig.allowGraphql) return;
+  throw new SecurityError(
+    "GraphQL tools are disabled for this site (allowGraphql: false). " +
+    "Raw GraphQL responses bypass connector entity allowlists and field redaction. " +
+    `Blocked: ${operationLabel}. ` +
+    "Set security.allowGraphql = true to enable (prefer development preset or an explicit opt-in)."
+  );
+}
+
 export function assertGraphqlMutationAllowed(secConfig, query) {
+  // Queries still require allowGraphql (#142); mutations require both flags.
+  assertGraphqlAllowed(secConfig, "graphql mutation");
   const isMutation = graphqlHasMutation(query);
   if (!isMutation) return;
 
@@ -681,9 +719,11 @@ export function getSecuritySummary(site) {
   const cfg = resolveSecurityConfig(site);
   return {
     site:                  site._name,
-    preset:                site.security?.preset ?? "development (default)",
+    preset:                site.security?.preset ?? `${DEFAULT_SECURITY_PRESET} (default)`,
     readOnly:              cfg.readOnly,
     allowDestructive:      cfg.allowDestructive,
+    allowPublish:          cfg.allowPublish,
+    allowGraphql:          cfg.allowGraphql,
     allowGraphqlMutations: cfg.allowGraphqlMutations,
     allowConfigRead:       cfg.allowConfigRead,
     allowConfigWrite:      cfg.allowConfigWrite,

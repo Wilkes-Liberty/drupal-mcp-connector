@@ -208,17 +208,19 @@ requires `allowPublish: true` and an explicit `status: true`.
 
 ## GraphQL
 
-Requires the [GraphQL Compose](https://www.drupal.org/project/graphql_compose) module. GraphQL Compose exposes a read-only schema (no mutations); when `allowGraphqlMutations` is off (the default), any document containing a mutation is rejected by the connector before it is sent.
+Requires the [GraphQL Compose](https://www.drupal.org/project/graphql_compose) module. GraphQL Compose exposes a read-only schema (no mutations).
 
-**Policy gap:** query results are returned as raw GraphQL `data`. Connector entity
-allowlists and field redaction do **not** apply here — only Drupal's GraphQL
-permissions do. Prefer JSON:API entity tools when connector policy must hold
-(tracked in issue #142).
+**Both tools require `security.allowGraphql: true`** (true only on the
+`development` preset by default). When GraphQL is enabled, query results are
+returned as raw GraphQL `data` — connector entity allowlists and field redaction
+do **not** apply. Prefer JSON:API entity tools when connector policy must hold.
+Mutation documents also require `allowGraphqlMutations` (off outside
+`development`).
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_graphql` | `query` | Execute a GraphQL query. Mutations are gated by `allowGraphqlMutations`. Not entity-allowlist/redaction-gated. |
-| `drupal_graphql_introspect` | — | Inspect schema. Add `typeName` for detailed field info on a specific type. |
+| `drupal_graphql` | `query` | Execute a GraphQL query. Requires `allowGraphql`; mutations also need `allowGraphqlMutations`. Not entity-allowlist/redaction-gated. |
+| `drupal_graphql_introspect` | — | Inspect schema. Requires `allowGraphql`. Add `typeName` for detailed field info on a specific type. |
 
 ### Example Query
 

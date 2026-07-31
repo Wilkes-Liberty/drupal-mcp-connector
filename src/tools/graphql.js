@@ -3,9 +3,12 @@
  *
  * Raw GraphQL execution and schema introspection against a Drupal site. Require
  * the GraphQL Compose module (drupal.org/project/graphql_compose), which
- * exposes a read-only schema (no mutations); any mutation in a query is
- * additionally gated by the per-site "allowGraphqlMutations" security flag,
- * enforced by the middleware in index.js before the handler runs.
+ * exposes a read-only schema (no mutations).
+ *
+ * Policy: responses are raw GraphQL data — they do **not** pass connector entity
+ * allowlists or field redaction (#142). Tools are gated by `allowGraphql`
+ * (false outside the development preset unless opted in). Mutations also require
+ * `allowGraphqlMutations` (enforced in the handler and by index.js middleware).
  *
  * Per-site config: set "graphqlEndpoint" to override "/graphql".
  * Auth reuses the same credentials as the JSON:API tools.
@@ -13,6 +16,9 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { drupalGraphqlFetch } from "../lib/drupal-fetch.js";
+import {
+  resolveSecurityConfig, assertGraphqlAllowed, assertGraphqlMutationAllowed,
+} from "../lib/security.js";
 
 // ---------------------------------------------------------------------------
 // Implementations
@@ -29,6 +35,9 @@ import { drupalGraphqlFetch } from "../lib/drupal-fetch.js";
  */
 async function runGraphql({ site: siteName, query, variables = {}, operationName }) {
   const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  assertGraphqlAllowed(sec, "drupal_graphql");
+  assertGraphqlMutationAllowed(sec, query);
   const json = await drupalGraphqlFetch(site, { query, variables, operationName });
 
   if (json.errors?.length) {
@@ -54,6 +63,7 @@ async function runGraphql({ site: siteName, query, variables = {}, operationName
  */
 async function introspectGraphql({ site: siteName, typeName }) {
   const site = getSiteConfig(siteName);
+  assertGraphqlAllowed(resolveSecurityConfig(site), "drupal_graphql_introspect");
 
   // If a specific type is requested, get detailed field info for it.
   if (typeName) {
@@ -128,7 +138,9 @@ export const definitions = [
     name: "drupal_graphql",
     description: `Execute a GraphQL query against a Drupal site.
 Requires the GraphQL Compose module (drupal.org/project/graphql_compose), which
-exposes a read-only schema; mutations are gated by "allowGraphqlMutations".
+exposes a read-only schema. GraphQL is off unless security.allowGraphql is true
+(development preset only by default) because raw results bypass entity allowlists
+and field redaction. Mutations also require allowGraphqlMutations.
 Use drupal_graphql_introspect first to discover available types and fields.
 
 Example query:
@@ -158,7 +170,7 @@ Example mutation (only if your GraphQL Compose schema enables mutations):
   },
   {
     name: "drupal_graphql_introspect",
-    description: "Introspect the Drupal GraphQL schema. Omit typeName for a full schema overview; provide typeName to get detailed fields and args for a specific type.",
+    description: "Introspect the Drupal GraphQL schema. Omit typeName for a full schema overview; provide typeName to get detailed fields and args for a specific type. Requires security.allowGraphql (off outside the development preset by default).",
     inputSchema: {
       type: "object",
       properties: {

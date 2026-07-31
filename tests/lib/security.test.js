@@ -4,9 +4,11 @@ import { redactCanonicalEntity, redactResource, resolveSecurityConfig } from "..
 import { assertConfigReadAllowed, assertConfigWriteAllowed, getSecuritySummary } from "../../src/lib/security.js";
 import { assertPublishAllowed, isPublishBearing } from "../../src/lib/security.js";
 
-const allowMut = { allowGraphqlMutations: true, readOnly: false };
-const denyMut = { allowGraphqlMutations: false, readOnly: false };
-const readOnly = { allowGraphqlMutations: true, readOnly: true };
+// allowGraphql required for any GraphQL path (#142); mutations need both flags.
+const allowMut = { allowGraphql: true, allowGraphqlMutations: true, readOnly: false };
+const denyMut = { allowGraphql: true, allowGraphqlMutations: false, readOnly: false };
+const readOnly = { allowGraphql: true, allowGraphqlMutations: true, readOnly: true };
+const noGraphql = { allowGraphql: false, allowGraphqlMutations: false, readOnly: false };
 
 describe("redactResource (JSON:API shape)", () => {
   const sec = { globalRedactedFields: ["field_api_key"], entityRules: { user: { redactedFields: ["mail", "pass"] } } };
@@ -163,11 +165,29 @@ describe("config capability presets", () => {
     expect(cfg.allowConfigWrite).toBe(true);
   });
 
-  it("defaults to no config access when no preset/keys are given", () => {
+  it("defaults to production-strict when no preset/keys are given (#140)", () => {
     const cfg = resolveSecurityConfig({});
-    // development is the implicit default preset → both true
-    expect(cfg.allowConfigRead).toBe(true);
-    expect(cfg.allowConfigWrite).toBe(true);
+    // Least privilege: production-strict, not development
+    expect(cfg.readOnly).toBe(true);
+    expect(cfg.allowConfigRead).toBe(false);
+    expect(cfg.allowConfigWrite).toBe(false);
+    expect(cfg.allowPublish).toBe(false);
+    expect(cfg.allowGraphql).toBe(false);
+    expect(cfg.deniedEntityTypes).toContain("user");
+  });
+
+  it("requires explicit development preset for open mode (#140)", () => {
+    const open = resolveSecurityConfig({ security: { preset: "development" } });
+    expect(open.readOnly).toBe(false);
+    expect(open.allowPublish).toBe(true);
+    expect(open.allowGraphql).toBe(true);
+  });
+
+  it("disables GraphQL outside development unless allowGraphql is set (#142)", () => {
+    for (const preset of ["content-editor", "auditor", "production-strict", "write-plane"]) {
+      expect(resolveSecurityConfig({ security: { preset } }).allowGraphql).toBe(false);
+    }
+    expect(resolveSecurityConfig({ security: { preset: "content-editor", allowGraphql: true } }).allowGraphql).toBe(true);
   });
 
   it("getSecuritySummary surfaces the config caps", () => {
@@ -190,7 +210,11 @@ describe("assertConfigReadAllowed / assertConfigWriteAllowed", () => {
 });
 
 describe("assertGraphqlMutationAllowed", () => {
-  it("allows a plain query when mutations are disabled", () => {
+  it("blocks all GraphQL when allowGraphql is false (#142)", () => {
+    expect(() => assertGraphqlMutationAllowed(noGraphql, "{ nodeArticles { nodes { id } } }")).toThrow(/allowGraphql/);
+  });
+
+  it("allows a plain query when mutations are disabled but GraphQL is on", () => {
     expect(() => assertGraphqlMutationAllowed(denyMut, "{ nodeArticles { nodes { id } } }")).not.toThrow();
     expect(() => assertGraphqlMutationAllowed(denyMut, "query Q { nodeArticle(id: \"x\") { id } }")).not.toThrow();
   });

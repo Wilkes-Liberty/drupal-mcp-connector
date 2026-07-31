@@ -6,7 +6,7 @@ const backend = {
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 vi.mock("../../src/lib/config.js", () => ({
-  getSiteConfig: vi.fn((n) => ({ _name: n || "d", baseUrl: "https://x", security: {} })),
+  getSiteConfig: vi.fn((n) => ({ _name: n || "d", baseUrl: "https://x", security: { preset: "development" } })),
 }));
 
 import { handlers } from "../../src/tools/entities.js";

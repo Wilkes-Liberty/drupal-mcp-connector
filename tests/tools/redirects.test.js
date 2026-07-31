@@ -8,8 +8,8 @@ const backend = {
   deleteEntity: vi.fn(),
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
-// Per-test site security can be overridden via setSecurity(); default is permissive ({}).
-let siteSecurity = {};
+// Per-test site security can be overridden via setSecurity(); default is open mode.
+let siteSecurity = { preset: "development" };
 vi.mock("../../src/lib/config.js", () => ({
   getSiteConfig: vi.fn((n) => ({ _name: n || "d", baseUrl: "https://x", security: siteSecurity })),
 }));
@@ -34,7 +34,7 @@ function canonicalRedirect(over = {}) {
 }
 
 beforeEach(() => {
-  setSecurity({});
+  setSecurity({ preset: "development" });
   Object.values(backend).forEach((f) => f.mockReset());
 });
 
