@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Upload path allowlist and path segment hardening (#137).** File uploads
+  must resolve under `MCP_UPLOAD_ROOT` (or the connector cwd by default);
+  entity/bundle/field path segments are machine-name validated and encoded;
+  Content-Disposition filenames are sanitized. Sensitive paths (`.env*`,
+  `.ssh`, connector `config.json`) are refused even under an allowed root.
+- **Media no longer publishes by default (#139).** `drupal_create_media` and
+  upload-and-create default to `status: false` and honor `assertPublishAllowed`.
+  `moderation_state: published` and `drupal_set_moderation_state` to published
+  are treated as publish-bearing.
+- **HTTPS fails closed without auth when non-loopback (#141).** Binding beyond
+  loopback requires `MCP_AUTH_TOKEN` unless `MCP_ALLOW_UNAUTHENTICATED=1`.
+  Non-loopback HTTPS defaults to 120 req/min rate limiting when
+  `MCP_RATE_LIMIT` is unset.
+- **Link-checker does not follow redirects (#143).** Live checks use
+  `redirect: "manual"` to avoid SSRF via 302 to private/metadata targets.
+- **auditor / production-strict apply SENSITIVE_DENY (#140).** Secrets,
+  governance, and account entity types stay denied on those presets.
 ### Fixed
 - **Published moderated updates default to a draft forward revision (#131).**
   `drupal_update_node`, `drupal_bulk_update`, and `drupal_entity_update` now

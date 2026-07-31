@@ -7,6 +7,11 @@ import { createReadStream, statSync } from "fs";
 import { basename } from "path";
 import { authHeadersAsync, clientHeaders } from "./config.js";
 import { clearToken } from "./oauth.js";
+import {
+  assertUploadPathAllowed,
+  sanitizeUploadFilename,
+  validateMachineName,
+} from "./validate.js";
 
 const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
 
@@ -115,10 +120,15 @@ export async function drupalGraphqlFetch(site, body) {
  * @throws {Error} on any non-2xx response.
  */
 export async function drupalUploadFile(site, entityType, bundle, fieldName, filePath) {
-  const filename = basename(filePath);
-  // eslint-disable-next-line security/detect-non-literal-fs-filename -- filePath is a caller-supplied local upload path (validated upstream); fs access is the intended behavior
-  const stat = statSync(filePath);
-  const url = `${site.baseUrl}/jsonapi/${entityType}/${bundle}/${fieldName}`;
+  // #137: machine-name segments + path allowlist before any FS or network I/O.
+  validateMachineName(entityType, "entityType");
+  validateMachineName(bundle, "bundle");
+  validateMachineName(fieldName, "fieldName");
+  const safePath = assertUploadPathAllowed(filePath);
+  const filename = sanitizeUploadFilename(basename(safePath));
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- path allowlisted via assertUploadPathAllowed
+  const stat = statSync(safePath);
+  const url = `${site.baseUrl}/jsonapi/${encodeURIComponent(entityType)}/${encodeURIComponent(bundle)}/${encodeURIComponent(fieldName)}`;
 
   const res = await fetch(url, {
     method: "POST",
@@ -129,8 +139,8 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
       ...clientHeaders(),
       ...(await authHeadersAsync(site)),
     },
-    // eslint-disable-next-line security/detect-non-literal-fs-filename -- filePath is a caller-supplied local upload path (validated upstream); fs access is the intended behavior
-    body: createReadStream(filePath),
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- path allowlisted via assertUploadPathAllowed
+    body: createReadStream(safePath),
     // node-fetch requires explicit size for streams to set Content-Length
     size: stat.size,
   });

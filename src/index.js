@@ -384,6 +384,7 @@ if (transport === "stdio") {
 
   const authToken   = process.env.MCP_AUTH_TOKEN || "";
   const checkAuth   = makeBearerCheck(authToken);
+  const allowUnauth = process.env.MCP_ALLOW_UNAUTHENTICATED === "1";
   if (!authToken) {
     console.error(
       "[drupal-mcp-connector] WARNING: the /mcp endpoint is UNAUTHENTICATED. " +
@@ -450,11 +451,33 @@ if (transport === "stdio") {
     return mcpTransport;
   }
 
-  // Optional fixed-window rate limiting on /mcp, keyed by client IP. Off unless
-  // MCP_RATE_LIMIT > 0. Counts are per-process; for multi-replica deployments
-  // prefer rate limiting at the reverse proxy.
-  const rateLimit     = Number(process.env.MCP_RATE_LIMIT || 0);
+  const hasTls   = Boolean(tlsCfg.certPath && tlsCfg.keyPath);
+  // Unauthenticated plain HTTP must never bind beyond loopback. A non-loopback
+  // bind is allowed only alongside TLS, via an explicit MCP_BIND_HOST opt-in.
+  const bindHost = hasTls ? (process.env.MCP_BIND_HOST || "0.0.0.0") : "127.0.0.1";
+  const isLoopbackBind = bindHost === "127.0.0.1" || bindHost === "::1" || bindHost === "localhost";
+
+  // #141: fail closed when HTTPS is network-facing without a bearer token.
+  // Loopback binds and explicit MCP_ALLOW_UNAUTHENTICATED=1 remain for local/proxy setups.
+  if (!authToken && !isLoopbackBind && !allowUnauth) {
+    console.error(
+      "[drupal-mcp-connector] FATAL: MCP_AUTH_TOKEN is required when binding beyond loopback.\n" +
+      "  Set MCP_AUTH_TOKEN, bind to 127.0.0.1 (default without MCP_BIND_HOST), or set\n" +
+      "  MCP_ALLOW_UNAUTHENTICATED=1 only behind a trusted auth boundary."
+    );
+    process.exit(1);
+  }
+
+  // Optional fixed-window rate limiting on /mcp, keyed by client IP.
+  // HTTPS non-loopback defaults to 120 req/min when MCP_RATE_LIMIT is unset (#141).
+  // Set MCP_RATE_LIMIT=0 to disable. Counts are per-process; multi-replica should
+  // also rate-limit at the reverse proxy.
   const rateWindowSec = Number(process.env.MCP_RATE_WINDOW_SEC || 60);
+  const rateLimitEnv  = process.env.MCP_RATE_LIMIT;
+  const rateLimitDefault = (hasTls && !isLoopbackBind) ? 120 : 0;
+  const rateLimit = rateLimitEnv === undefined || rateLimitEnv === ""
+    ? rateLimitDefault
+    : Number(rateLimitEnv);
   const rateLimiter   = rateLimit > 0
     ? createRateLimiter({ limit: rateLimit, windowMs: rateWindowSec * 1000 })
     : null;
@@ -473,11 +496,6 @@ if (transport === "stdio") {
   });
 
   const nodeServer = createNodeServer(requestHandler);
-
-  const hasTls   = Boolean(tlsCfg.certPath && tlsCfg.keyPath);
-  // Unauthenticated plain HTTP must never bind beyond loopback. A non-loopback
-  // bind is allowed only alongside TLS, via an explicit MCP_BIND_HOST opt-in.
-  const bindHost = hasTls ? (process.env.MCP_BIND_HOST || "0.0.0.0") : "127.0.0.1";
 
   nodeServer.listen(port, bindHost, () => {
     const proto = hasTls ? "https" : "http";

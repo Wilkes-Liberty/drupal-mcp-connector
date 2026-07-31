@@ -15,17 +15,31 @@ vi.mock("../../src/lib/security.js", async (orig) => {
   const actual = await orig();
   return {
     ...actual,
-    resolveSecurityConfig: vi.fn(() => ({ globalRedactedFields: [], entityRules: {} })),
+    // Development-like defaults: writes allowed; publish allowed so tests can
+    // pass explicit moderation_state:published (#139 gate) without per-test sites.
+    resolveSecurityConfig: vi.fn(() => ({
+      readOnly: false, allowPublish: true, allowDestructive: true,
+      allowedEntityTypes: null, deniedEntityTypes: [],
+      globalRedactedFields: [], entityRules: {},
+    })),
     assertWriteAllowed: vi.fn(),
   };
 });
 
 import { handlers } from "../../src/tools/bulk.js";
-import { assertWriteAllowed } from "../../src/lib/security.js";
+import { assertWriteAllowed, resolveSecurityConfig } from "../../src/lib/security.js";
+
+const openSec = () => ({
+  readOnly: false, allowPublish: true, allowDestructive: true,
+  allowedEntityTypes: null, deniedEntityTypes: [],
+  globalRedactedFields: [], entityRules: {},
+});
 
 beforeEach(() => {
   Object.values(backend).forEach((f) => f.mockReset());
   assertWriteAllowed.mockReset();
+  resolveSecurityConfig.mockReset();
+  resolveSecurityConfig.mockImplementation(() => openSec());
 });
 
 describe("bulk tools", () => {
@@ -49,6 +63,8 @@ describe("bulk tools", () => {
   });
 
   it("gates a publish-bearing item per-item without aborting the batch (#111/#114)", async () => {
+    // Explicit no-publish policy for this case (#139: status:true is publish-bearing).
+    resolveSecurityConfig.mockImplementation(() => ({ ...openSec(), allowPublish: false }));
     backend.updateEntity.mockResolvedValue({ id: "n2" });
     const out = await handlers.drupal_bulk_update({
       entityType: "node", bundle: "article",

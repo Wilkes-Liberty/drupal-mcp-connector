@@ -11,7 +11,7 @@ Upload a local file to Drupal and create a File entity. Returns the file UUID to
 Parse the request in `$ARGUMENTS` into this tool's parameters:
 
 **Required:**
-- `filePath` (string): Absolute local path to the file to upload
+- `filePath` (string): Local path to the file (must resolve under MCP_UPLOAD_ROOT or the connector working directory)
 - `bundle` (string): Bundle machine name, e.g. 'image', 'article'
 - `fieldName` (string): Field machine name, e.g. 'field_media_image', 'field_image'
 

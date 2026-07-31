@@ -175,7 +175,8 @@ const PRESETS = {
     allowConfigRead: true,            // read-only inspection of config
     allowConfigWrite: false,
     allowedEntityTypes: null,         // read any entity type
-    deniedEntityTypes: [],
+    // Secrets / governance / account entities stay denied even on broad read (#140).
+    deniedEntityTypes: [...SENSITIVE_DENY],
     entityRules: {
       user: {
         allowedOperations: ["read"],
@@ -192,7 +193,7 @@ const PRESETS = {
     allowConfigRead: false,           // nothing implicit; opt in per site
     allowConfigWrite: false,
     allowedEntityTypes: null,         // set an explicit allowlist in your config
-    deniedEntityTypes: ["user"],      // no user data at all
+    deniedEntityTypes: [...SENSITIVE_DENY], // includes user + secrets/governance
     entityRules: {},
     globalRedactedFields: ["pass", "mail", "field_private", "field_api_key", "field_token"],
   },
@@ -387,7 +388,12 @@ export function assertDestructiveAllowed(secConfig, entityType, id) {
  * @returns {boolean}
  */
 export function isPublishBearing(attributes = {}) {
-  return attributes?.status === true;
+  if (attributes?.status === true) return true;
+  // Common core content_moderation publish state. Site-specific publish state
+  // names remain server-gated; this closes the obvious connector-layer hole (#139).
+  const mod = attributes?.moderation_state;
+  if (typeof mod === "string" && mod.toLowerCase() === "published") return true;
+  return false;
 }
 
 /**
@@ -407,9 +413,8 @@ export function assertPublishAllowed(secConfig, attributes = {}) {
   if (isPublishBearing(attributes)) {
     throw new SecurityError(
       "Publishing is disabled for this connector (allowPublish: false). " +
-      "Blocked: a write carrying status:true. " +
-      "To enable, set security.allowPublish = true in your config; otherwise publish " +
-      "via an operator/server-gated path (e.g. a moderation transition)."
+      "Blocked: a write carrying status:true or moderation_state:published. " +
+      "To enable, set security.allowPublish = true in your config."
     );
   }
 }

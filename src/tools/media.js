@@ -8,7 +8,9 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { resolveSecurityConfig, redactCanonicalEntity } from "../lib/security.js";
+import {
+  resolveSecurityConfig, redactCanonicalEntity, assertPublishAllowed,
+} from "../lib/security.js";
 
 /**
  * List all media types (bundles of the media entity type).
@@ -56,15 +58,21 @@ async function getMedia({ site: siteName, type, id }) {
 
 /**
  * Create a media entity. Caller `fields` are spread into attributes; name and
- * status are layered on top.
+ * status are layered on top. Defaults to unpublished (`status: false`) so
+ * media is never auto-published under non-publishing presets (#139).
  *
  * @param {object} args - { site?, type, name, status?, fields? }.
  * @returns {Promise<object>} The created media descriptor.
  */
-async function createMedia({ site: siteName, type, name, status = true, fields = {} }) {
+async function createMedia({ site: siteName, type, name, status = false, fields = {} }) {
   const site = getSiteConfig(siteName);
+  const attributes = { name, status, ...fields };
+  // Layer name/status after fields so they win, matching prior behaviour.
+  attributes.name = name;
+  attributes.status = status;
+  assertPublishAllowed(resolveSecurityConfig(site), attributes);
   const backend = await resolveBackend(site);
-  return backend.createEntity({ entityType: "media", bundle: type, attributes: { name, status, ...fields } });
+  return backend.createEntity({ entityType: "media", bundle: type, attributes });
 }
 
 /**
@@ -74,10 +82,11 @@ async function createMedia({ site: siteName, type, name, status = true, fields =
  */
 async function updateMedia({ site: siteName, type, id, name, status, fields = {} }) {
   const site = getSiteConfig(siteName);
-  const backend = await resolveBackend(site);
   const attributes = { ...fields };
   if (name !== undefined) attributes.name = name;
   if (status !== undefined) attributes.status = status;
+  assertPublishAllowed(resolveSecurityConfig(site), attributes);
+  const backend = await resolveBackend(site);
   return backend.updateEntity({ entityType: "media", bundle: type, id, attributes });
 }
 
@@ -118,8 +127,11 @@ async function uploadFile({ site: siteName, filePath, entityType = "media", bund
  * @returns {Promise<{file: {id: string, filename: string}, media: object}>}
  * @throws {BackendCapabilityError} If the backend cannot upload files.
  */
-async function uploadFileAndCreateMedia({ site: siteName, filePath, mediaType, mediaName, fieldName, altText, status = true }) {
+async function uploadFileAndCreateMedia({ site: siteName, filePath, mediaType, mediaName, fieldName, altText, status = false }) {
   const site = getSiteConfig(siteName);
+  const attributes = { name: mediaName || undefined, status };
+  // Gate publish before any upload I/O so a blocked publish does not leave an orphan file.
+  assertPublishAllowed(resolveSecurityConfig(site), attributes);
   const backend = await resolveBackend(site);
   const file = await backend.uploadFile({ entityType: "media", bundle: mediaType, fieldName, filePath });
   const fileData = altText
@@ -208,7 +220,7 @@ export const definitions = [
         site:   { type: "string" },
         type:   { type: "string", description: "Media type machine name" },
         name:   { type: "string", description: "Media entity name / label" },
-        status: { type: "boolean", default: true },
+        status: { type: "boolean", default: false, description: "Published flag. Defaults to false (unpublished). Requires allowPublish when true." },
         fields: { type: "object", description: "Additional field values — include the source field (e.g. field_media_oembed_video: 'https://youtu.be/...')" },
       },
     },
@@ -247,7 +259,7 @@ export const definitions = [
       type: "object", required: ["filePath", "bundle", "fieldName"],
       properties: {
         site:       { type: "string" },
-        filePath:   { type: "string", description: "Absolute local path to the file to upload" },
+        filePath:   { type: "string", description: "Local path to the file (must resolve under MCP_UPLOAD_ROOT or the connector working directory)" },
         entityType: { type: "string", default: "media", description: "Drupal entity type (usually 'media' or 'node')" },
         bundle:     { type: "string", description: "Bundle machine name, e.g. 'image', 'article'" },
         fieldName:  { type: "string", description: "Field machine name, e.g. 'field_media_image', 'field_image'" },
@@ -256,17 +268,17 @@ export const definitions = [
   },
   {
     name: "drupal_upload_file_and_create_media",
-    description: "Convenience tool: upload a local file and immediately create a Media entity in one step. Best for the common 'add an image' workflow.",
+    description: "Convenience tool: upload a local file and immediately create a Media entity in one step. Best for the common 'add an image' workflow. Media defaults to unpublished.",
     inputSchema: {
       type: "object", required: ["filePath", "mediaType", "fieldName"],
       properties: {
         site:      { type: "string" },
-        filePath:  { type: "string", description: "Absolute local path to the file" },
+        filePath:  { type: "string", description: "Local path to the file (must resolve under MCP_UPLOAD_ROOT or the connector working directory)" },
         mediaType: { type: "string", description: "Media type machine name, e.g. 'image'" },
         mediaName: { type: "string", description: "Name for the media entity (defaults to filename)" },
         fieldName: { type: "string", description: "Source field machine name, e.g. 'field_media_image'" },
         altText:   { type: "string", description: "Alt text for image media" },
-        status:    { type: "boolean", default: true },
+        status:    { type: "boolean", default: false, description: "Published flag. Defaults to false. Requires allowPublish when true." },
       },
     },
   },

@@ -16,7 +16,7 @@ vi.mock("../../src/lib/security.js", async (orig) => {
   return {
     ...actual,
     resolveSecurityConfig: vi.fn(() => ({
-      readOnly: false, allowDestructive: true, allowGraphqlMutations: true,
+      readOnly: false, allowDestructive: true, allowGraphqlMutations: true, allowPublish: true,
       allowedEntityTypes: null, deniedEntityTypes: [], entityRules: {}, globalRedactedFields: [],
     })),
   };
