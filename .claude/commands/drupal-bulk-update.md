@@ -1,12 +1,12 @@
 ---
-description: "Update many entities of a single type + bundle in one call. Permission is checked once; each item is updated independently, so the batch continues past individual failures (partial success). Each item requires an 'id' (UUID); items missing an id are reported as per-item failures. Returns per-item { index, success, id | error } and a summary { updated, failed }."
+description: "Update many entities of a single type + bundle in one call. Permission is checked once; each item is updated independently, so the batch continues past individual failures (partial success). Each item requires an 'id' (UUID); items missing an id are reported as per-item failures. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision) so bulk edits do not mutate live default revisions. Returns per-item { index, success, id | error } and a summary { updated, failed }."
 argument-hint: "<entityType> <bundle> <items> [site]"
 allowed-tools: mcp__drupal__drupal_bulk_update
 ---
 
 Call the `mcp__drupal__drupal_bulk_update` MCP tool.
 
-Update many entities of a single type + bundle in one call. Permission is checked once; each item is updated independently, so the batch continues past individual failures (partial success). Each item requires an 'id' (UUID); items missing an id are reported as per-item failures. Returns per-item { index, success, id | error } and a summary { updated, failed }.
+Update many entities of a single type + bundle in one call. Permission is checked once; each item is updated independently, so the batch continues past individual failures (partial success). Each item requires an 'id' (UUID); items missing an id are reported as per-item failures. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision) so bulk edits do not mutate live default revisions. Returns per-item { index, success, id | error } and a summary { updated, failed }.
 
 Parse the request in `$ARGUMENTS` into this tool's parameters:
 
