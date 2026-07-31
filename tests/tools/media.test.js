@@ -10,7 +10,12 @@ vi.mock("../../src/lib/config.js", () => ({
 }));
 vi.mock("../../src/lib/security.js", async (orig) => {
   const actual = await orig();
-  return { ...actual, resolveSecurityConfig: vi.fn(() => ({ globalRedactedFields: [], entityRules: {} })) };
+  return {
+    ...actual,
+    resolveSecurityConfig: vi.fn(() => ({
+      globalRedactedFields: [], entityRules: {}, allowPublish: true,
+    })),
+  };
 });
 
 import { handlers } from "../../src/tools/media.js";
@@ -47,6 +52,23 @@ describe("media tools (migrated)", () => {
     expect(arg).toMatchObject({ entityType: "media", bundle: "image" });
     expect(arg.attributes.name).toBe("Pic");
     expect(arg.attributes.status).toBe(true);
+  });
+
+  it("create_media defaults to unpublished (#139)", async () => {
+    backend.createEntity.mockResolvedValue(media);
+    await handlers.drupal_create_media({ type: "image", name: "Pic" });
+    expect(backend.createEntity.mock.calls[0][0].attributes.status).toBe(false);
+  });
+
+  it("create_media rejects status:true when allowPublish is false (#139)", async () => {
+    const { resolveSecurityConfig } = await import("../../src/lib/security.js");
+    resolveSecurityConfig.mockReturnValueOnce({
+      globalRedactedFields: [], entityRules: {}, allowPublish: false,
+    });
+    await expect(
+      handlers.drupal_create_media({ type: "image", name: "Pic", status: true })
+    ).rejects.toThrow(/allowPublish/);
+    expect(backend.createEntity).not.toHaveBeenCalled();
   });
 
   it("get_media returns the canonical media or null", async () => {

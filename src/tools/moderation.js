@@ -16,7 +16,10 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, redactCanonicalEntity } from "../lib/security.js";
+import {
+  resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertPublishAllowed,
+  redactCanonicalEntity,
+} from "../lib/security.js";
 
 /** Read a node's moderation_state from a canonical entity, tolerating shapes. */
 function moderationStateOf(entity) {
@@ -37,8 +40,10 @@ async function setModerationState({ site: siteName, type, id, state }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", "node", type);
+  const attributes = { moderation_state: state };
+  assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
-  const entity = await backend.updateEntity({ entityType: "node", bundle: type, id, attributes: { moderation_state: state } });
+  const entity = await backend.updateEntity({ entityType: "node", bundle: type, id, attributes });
   return redactCanonicalEntity(entity, sec, "node");
 }
 

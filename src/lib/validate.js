@@ -8,6 +8,8 @@
  * coerce values in ways that could hide injection attempts.
  */
 
+import { existsSync, realpathSync } from "fs";
+import { basename, resolve, sep } from "path";
 import { SecurityError } from "./security.js";
 
 // ---------------------------------------------------------------------------
@@ -212,6 +214,120 @@ export function clampLimit(value, defaultVal = 20) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 1) return defaultVal;
   return Math.min(n, MAX_PAGE_LIMIT);
+}
+
+// ---------------------------------------------------------------------------
+// Local file upload path allowlist (#137 / audit C1)
+// ---------------------------------------------------------------------------
+//
+// Upload tools must not be able to read arbitrary process-readable files
+// (SSH keys, .env, connector config). Paths must resolve under an allowed
+// root. Default root is process.cwd(); operators expand with MCP_UPLOAD_ROOT
+// (colon- or semicolon-separated absolute paths).
+
+/**
+ * Resolve an absolute path, following symlinks when the target exists.
+ * @param {string} p Path to resolve.
+ * @returns {string} Canonical absolute path.
+ */
+function resolveExistingPath(p) {
+  const abs = resolve(p);
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- operator-configured upload root or cwd
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+/**
+ * Allowed upload roots. From MCP_UPLOAD_ROOT when set; otherwise process.cwd().
+ * @returns {string[]} Absolute root paths (realpath when possible).
+ */
+export function getUploadRoots() {
+  const raw = process.env.MCP_UPLOAD_ROOT;
+  if (raw && String(raw).trim()) {
+    return String(raw)
+      .split(/[:;]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map(resolveExistingPath);
+  }
+  return [resolveExistingPath(process.cwd())];
+}
+
+/**
+ * Sanitize a filename for Content-Disposition (no CR/LF/quotes; bounded length).
+ * @param {string} name Raw filename (often basename of a path).
+ * @returns {string} Safe filename for the header.
+ */
+export function sanitizeUploadFilename(name) {
+  const base = basename(String(name || "upload"));
+  const cleaned = base
+    .replace(/[\r\n"\\]/g, "")
+    .replace(/[^\w.\- ()[\]]+/g, "_")
+    .replace(/^\.+/, "")
+    .slice(0, 200);
+  return cleaned || "upload.bin";
+}
+
+/**
+ * Whether a resolved path sits under a sensitive location that must never
+ * be uploaded even when it is inside an allowed root.
+ * @param {string} real Absolute real path.
+ * @returns {boolean}
+ */
+function isSensitiveUploadPath(real) {
+  const n = real.split(sep).join("/");
+  if (n.includes("/.ssh/") || n.endsWith("/.ssh") || n.includes("/.gnupg/")) return true;
+  const base = basename(real);
+  if (base === "id_rsa" || base === "id_ed25519" || base === "id_ecdsa" || base === "id_dsa") return true;
+  if (base.startsWith(".env")) return true;
+  if (n.endsWith("/config/config.json")) return true;
+  return false;
+}
+
+/**
+ * Validate that a local file path may be uploaded: exists, under an allowed
+ * root, and not a known secret path. Returns the resolved real path for use
+ * with fs streams.
+ *
+ * @param {string} filePath Caller-supplied path.
+ * @returns {string} Real absolute path safe to read for upload.
+ * @throws {Error} if the path is missing or not a string.
+ * @throws {SecurityError} if the path is outside roots or sensitive.
+ */
+export function assertUploadPathAllowed(filePath) {
+  if (typeof filePath !== "string" || !filePath.trim()) {
+    throw new Error("filePath must be a non-empty string.");
+  }
+  const abs = resolve(filePath);
+  // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is caller-supplied; allowlist enforced after realpath
+  if (!existsSync(abs)) {
+    throw new Error(`Upload path does not exist: ${filePath}`);
+  }
+  let real;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- path is caller-supplied; allowlist enforced next
+    real = realpathSync(abs);
+  } catch {
+    throw new Error(`Upload path is not readable: ${filePath}`);
+  }
+  const roots = getUploadRoots();
+  const allowed = roots.some((root) => real === root || real.startsWith(root.endsWith(sep) ? root : root + sep));
+  if (!allowed) {
+    throw new SecurityError(
+      "Upload path is outside allowed roots. Set MCP_UPLOAD_ROOT to an absolute " +
+      "directory (or several, colon-separated), or place the file under the " +
+      `connector working directory. Denied: ${filePath}`
+    );
+  }
+  if (isSensitiveUploadPath(real)) {
+    throw new SecurityError(
+      "Upload of sensitive paths (SSH keys, .env*, connector config.json) is not allowed."
+    );
+  }
+  return real;
 }
 
 // ---------------------------------------------------------------------------

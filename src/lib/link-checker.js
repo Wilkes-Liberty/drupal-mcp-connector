@@ -190,7 +190,9 @@ async function timedFetch(url, method, { timeoutMs, fetchImpl }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(url, { method, redirect: "follow", signal: controller.signal });
+    // #143: never auto-follow redirects — a public allowlisted host can 302 to
+    // private/metadata. Report the redirect status; do not chase Location.
+    const res = await fetchImpl(url, { method, redirect: "manual", signal: controller.signal });
     return { status: res.status, error: null };
   } catch (err) {
     const reason = err?.name === "AbortError" ? `timeout after ${timeoutMs}ms` : (err?.message || "request failed");
