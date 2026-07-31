@@ -8,6 +8,10 @@
  * `mcp__drupal__<tool>` and instructs the model to parse `$ARGUMENTS` into the
  * tool's parameters before making a single call.
  *
+ * These files are *client ergonomics* for operators using Claude Code as an MCP
+ * client against this server — not provider-specific project rules. Development
+ * instructions for any agent live only in AGENTS.md.
+ *
  * Driven from the same tool definitions as the server (src/tools/index.js), so the
  * command set never drifts from the tools. Run: `npm run generate:commands`.
  *

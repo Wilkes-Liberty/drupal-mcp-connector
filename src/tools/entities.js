@@ -11,6 +11,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { shapeWriteResponse, RETURNING_SCHEMA } from "../lib/entity-response.js";
+import { applySafeDraftDefault } from "../lib/moderation-default.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
   redactCanonicalEntity, getSecuritySummary,
@@ -70,6 +71,10 @@ async function createEntity({ site: siteName, entityType, bundle, attributes = {
 /**
  * Update an entity of any type/bundle (partial — only supplied fields are sent).
  *
+ * Safe default (#131): published moderated targets without an explicit
+ * `moderation_state` get `moderation_state: draft` so the write is a forward
+ * revision rather than a live default-revision mutation.
+ *
  * @param {object} args - { site?, entityType, bundle, id, attributes?, relationships? }.
  * @returns {Promise<object>} The updated entity descriptor.
  * @throws {SecurityError} If updating the type/bundle is not permitted.
@@ -78,10 +83,13 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", entityType, bundle);
-  assertPublishAllowed(sec, attributes);
-  if (dryRun) return { dryRun: true, operation: "update", entityType, bundle, id, attributes, relationships };
   const backend = await resolveBackend(site);
-  return shapeWriteResponse(await backend.updateEntity({ entityType, bundle, id, attributes, relationships }), returning);
+  const safeAttributes = await applySafeDraftDefault({
+    backend, entityType, bundle, id, attributes,
+  });
+  assertPublishAllowed(sec, safeAttributes);
+  if (dryRun) return { dryRun: true, operation: "update", entityType, bundle, id, attributes: safeAttributes, relationships };
+  return shapeWriteResponse(await backend.updateEntity({ entityType, bundle, id, attributes: safeAttributes, relationships }), returning);
 }
 
 /**
@@ -222,7 +230,7 @@ export const definitions = [
   },
   {
     name: "drupal_entity_update",
-    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change.",
+    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision).",
     inputSchema: {
       type: "object", required: ["entityType", "bundle", "id"],
       properties: {

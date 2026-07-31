@@ -1,12 +1,12 @@
 ---
-description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change."
+description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision)."
 argument-hint: "<entityType> <bundle> <id> [site] [attributes] [relationships] [dryRun] [returning]"
 allowed-tools: mcp__drupal__drupal_entity_update
 ---
 
 Call the `mcp__drupal__drupal_entity_update` MCP tool.
 
-Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change.
+Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision).
 
 Parse the request in `$ARGUMENTS` into this tool's parameters:
 

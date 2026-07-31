@@ -10,6 +10,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, redactCanonicalEntity, assertWriteAllowed, assertPublishAllowed } from "../lib/security.js";
+import { applySafeDraftDefault } from "../lib/moderation-default.js";
 import { shapeWriteResponse, RETURNING_SCHEMA } from "../lib/entity-response.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 
@@ -256,6 +257,11 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
  * bundles (sends `moderation_state`, omits `status`) or `status` for non-moderated
  * types. `moderationState` takes precedence; both are optional on update.
  *
+ * Safe default (#131): when the target is a *published* moderated node and the
+ * caller did not pass `moderationState` / `moderation_state`, the write is
+ * forced to `moderation_state: draft` so it becomes a forward revision rather
+ * than mutating the live default revision. Opt out by passing an explicit state.
+ *
  * Alias hardening: a partial update that doesn't touch `path` can still lose the
  * node's URL alias when a module (e.g. Pathauto, in automatic mode) regenerates
  * it on save. To preserve the existing alias, when the caller supplies no `path`
@@ -269,15 +275,21 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
  */
 async function updateNode({ site: siteName, type, id, title, body, summary, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
-  const attributes = { ...fields };
+  const backend = await resolveBackend(site);
+  let attributes = { ...fields };
   if (title !== undefined) attributes.title = title;
   if (moderationState !== undefined) attributes.moderation_state = moderationState;
   else if (status !== undefined) attributes.status = status;
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
+  // Defense-in-depth for published moderated nodes (even on dryRun so the
+  // preview matches the write). Runs before the publish gate so the injected
+  // draft state is visible in the dry-run payload.
+  attributes = await applySafeDraftDefault({
+    backend, entityType: "node", bundle: type, id, attributes,
+  });
   assertPublishAllowed(resolveSecurityConfig(site), attributes);
   if (dryRun) return { dryRun: true, operation: "update", entityType: "node", bundle: type, id, attributes, relationships };
-  const backend = await resolveBackend(site);
   const sec = resolveSecurityConfig(site);
   // Alias handling (DEV-116): an explicit `path.alias` is set in place by
   // round-tripping the existing alias's pid (no duplicate); a path-less update
@@ -379,7 +391,7 @@ export const definitions = [
   },
   {
     name: "drupal_update_node",
-    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. Entity-reference fields go in `relationships`, not `fields`.",
+    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Entity-reference fields go in `relationships`, not `fields`.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
@@ -390,7 +402,7 @@ export const definitions = [
         body:    { type: "string" },
         summary: { type: "string" },
         status:  { type: "boolean", description: "Published flag for NON-moderated types: true = publish, false = unpublish. Ignored if moderationState is set." },
-        moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status." },
+        moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status. Required to keep or re-publish a live node — omitting it on a published moderated node defaults the write to 'draft'." },
         fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Entity-reference fields go in `relationships`, not here." },
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }." },
         dryRun:  { type: "boolean", default: false, description: "Validate and return a preview of the update without committing." },

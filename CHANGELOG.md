@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Published moderated updates default to a draft forward revision (#131).**
+  `drupal_update_node`, `drupal_bulk_update`, and `drupal_entity_update` now
+  sniff the target entity: when it is published under content_moderation and
+  the caller omitted `moderation_state` / `moderationState`, the write is sent
+  as `moderation_state: draft` instead of omitting the field. That keeps bulk
+  relationship-wiring and field edits as reviewable forward revisions rather
+  than live default-revision mutations if a server-side publish gate
+  mis-classifies the write. Callers that want a same-state save must pass an
+  explicit moderation state.
+
+### Added
+- **Provider-agnostic agent instructions.** Root `AGENTS.md` is the only
+  committed agent rule file (any coding agent). No vendor-specific
+  `.grok/` / `CLAUDE.md` / parallel rule trees. Generated slash stubs under
+  `.claude/commands/` remain client ergonomics for MCP operators, not project
+  development rules.
+
 ## [2.0.0] - 2026-07-29
 
 ### Fixed

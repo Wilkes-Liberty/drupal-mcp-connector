@@ -67,6 +67,23 @@ No changes to `src/index.js` are needed unless you add a new module file.
 - `async`/`await`, not raw Promise chains.
 - JSDoc comments on all exported functions.
 
+## Coding agents (provider-agnostic)
+
+One instruction file for every agent/IDE assistant:
+
+| File | Role |
+|------|------|
+| [`AGENTS.md`](AGENTS.md) | **Only** committed agent instructions (architecture, commands, security) |
+
+Do **not** add vendor-specific rule trees or duplicates
+(`.grok/`, `.cursor/rules/`, `.claude/rules/`, root `CLAUDE.md`, etc.). Personal
+allowlists and machine paths stay in each tool’s home config.
+
+`.claude/commands/` is unrelated to how we *develop* this repo: it is a
+generated set of slash-command stubs so operators using Claude Code as an MCP
+*client* can call this server’s tools. Regenerate with
+`npm run generate:commands` after tool definition changes; do not hand-edit.
+
 ## Commit Messages
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
