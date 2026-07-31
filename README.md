@@ -125,7 +125,11 @@ Other MCP agents don't need this step — they get the same coverage from the pe
 prompts above.
 
 ### Security Model
-Defense-in-depth with four one-line presets, enforced connector-side and complemented by Drupal-side governance:
+
+Defense-in-depth presets, enforced connector-side and complemented by Drupal-side
+governance (MCP Sentinel). **Set an explicit preset on every non-dev site** —
+if `security` is omitted, the connector still defaults to `development` (tracked
+for change in issue #140).
 
 ```json
 "security": { "preset": "auditor" }
@@ -134,11 +138,21 @@ Defense-in-depth with four one-line presets, enforced connector-side and complem
 | Preset | What it does |
 |--------|-------------|
 | `development` | Everything allowed — local development only |
-| `content-editor` | Create/edit nodes, media, terms; no deletes; no publishing (`allowPublish` off); no user access |
-| `auditor` | Read-only, all entity types, PII fields redacted |
-| `production-strict` | Read-only, no user entities, broad PII redaction |
+| `content-editor` | Create/edit content + structural entities; no deletes; no publishing; secrets/governance/account types denied |
+| `config-editor` | content-editor + site-building config read + governed config write (developer tier) |
+| `auditor` | Read-only; secrets/governance/account types denied; user PII redacted when user is allowed |
+| `production-strict` | Read-only; same sensitive denylist as auditor; broad PII field redaction |
+| `write-plane` | Create/update content set for agents; no deletes; no GraphQL mutations; publish off by default |
 
-Presets layer with entity allow/deny lists, per-bundle operation rules, and field-level redaction. Optional transport hardening (bearer-authenticated HTTPS, bind-address restriction, secrets-from-env) is covered in **[docs/security-hardening.md](docs/security-hardening.md)**.
+Additional connector-side gates (2.1+):
+
+- **Entity allowlists** apply to specialized tools (`drupal_*_node`, media, taxonomy), not only `drupal_entity_*`.
+- **Publish gate:** `status: true` and `moderation_state: "published"` require `allowPublish`. Media create defaults **unpublished**. Published moderated node updates without a moderation state default to **draft** (forward revision).
+- **Uploads** only from `MCP_UPLOAD_ROOT` (or the process cwd); sensitive paths (`.env*`, `.ssh`, connector `config.json`) are refused.
+- **HTTPS:** non-loopback binds require `MCP_AUTH_TOKEN` (or `MCP_ALLOW_UNAUTHENTICATED=1` behind a trusted proxy); non-loopback TLS defaults to 120 req/min rate limiting.
+- **GraphQL caveat:** `drupal_graphql` returns raw query data — connector allowlists/redaction do not apply to that path (issue #142).
+
+Full detail: **[docs/security.md](docs/security.md)** and **[docs/security-hardening.md](docs/security-hardening.md)**.
 
 ---
 
@@ -154,30 +168,38 @@ Presets layer with entity allow/deny lists, per-bundle operation rules, and fiel
 
 ## Quick Start
 
+### From npm (recommended for operators)
+
 ```bash
-# 1. Clone and install
+npm install -g drupal-mcp-connector
+# or: npx -y drupal-mcp-connector
+```
+
+Point your MCP client at the installed binary (path from `which drupal-mcp-connector`
+or `node_modules/.bin/drupal-mcp-connector`). For multi-site or non-env config,
+clone the repo (or copy `config/config.example.json` beside a small launcher) and
+pass a config path — see **[docs/getting-started.md](docs/getting-started.md)**.
+
+### From a git clone (development)
+
+```bash
 git clone https://github.com/Wilkes-Liberty/drupal-mcp-connector
 cd drupal-mcp-connector
 npm install
-
-# 2. Configure
 cp config/config.example.json config/config.json
-# Edit config/config.json — add your site's baseUrl, api backend, and auth
-
-# 3. Run (stdio transport)
+# Edit config/config.json — baseUrl, api backend, auth, security preset
 node src/index.js
 ```
 
 ### Register with an MCP client
 
-Most desktop and CLI MCP clients launch the connector over **stdio**. Add an entry to your client's MCP server configuration:
+Most desktop and CLI MCP clients launch the connector over **stdio**:
 
 ```json
 {
   "mcpServers": {
     "drupal": {
-      "command": "node",
-      "args": ["/absolute/path/to/drupal-mcp-connector/src/index.js"],
+      "command": "drupal-mcp-connector",
       "env": {
         "DRUPAL_BASE_URL": "https://mysite.com",
         "DRUPAL_API_TOKEN": "your-token-here"
@@ -187,7 +209,10 @@ Most desktop and CLI MCP clients launch the connector over **stdio**. Add an ent
 }
 ```
 
-For multi-client or remote use, run the HTTPS transport and register the endpoint instead — see **[docs/getting-started.md](docs/getting-started.md)**.
+Or with an absolute path to `src/index.js` / the installed package. For multi-client
+or remote use, run the HTTPS transport and register the endpoint instead — see
+**[docs/getting-started.md](docs/getting-started.md)** and
+**[docs/mcp-clients.md](docs/mcp-clients.md)**.
 
 ---
 
