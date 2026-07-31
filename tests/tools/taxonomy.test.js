@@ -10,7 +10,14 @@ vi.mock("../../src/lib/config.js", () => ({
 }));
 vi.mock("../../src/lib/security.js", async (orig) => {
   const actual = await orig();
-  return { ...actual, resolveSecurityConfig: vi.fn(() => ({ globalRedactedFields: [], entityRules: {} })) };
+  return {
+    ...actual,
+    resolveSecurityConfig: vi.fn(() => ({
+      readOnly: false, allowDestructive: true, allowPublish: true,
+      allowedEntityTypes: null, deniedEntityTypes: [],
+      globalRedactedFields: [], entityRules: {},
+    })),
+  };
 });
 
 import { handlers } from "../../src/tools/taxonomy.js";

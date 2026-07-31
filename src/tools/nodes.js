@@ -9,7 +9,10 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { resolveSecurityConfig, redactCanonicalEntity, assertWriteAllowed, assertPublishAllowed } from "../lib/security.js";
+import {
+  resolveSecurityConfig, redactCanonicalEntity,
+  assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
+} from "../lib/security.js";
 import { shapeWriteResponse, RETURNING_SCHEMA } from "../lib/entity-response.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 
@@ -156,6 +159,7 @@ function pageOf({ limit = 20, offset = 0 }) {
 async function getNode({ site: siteName, type, id }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
+  assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
   const entity = await backend.getEntity({ entityType: "node", bundle: type, id });
   return entity ? redactCanonicalEntity(entity, sec, "node") : null;
@@ -172,6 +176,7 @@ async function getNode({ site: siteName, type, id }) {
 async function listNodes({ site: siteName, type, status, filters = [], limit = 20, offset = 0, sort = [{ field: "changed", dir: "desc" }] }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
+  assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
   const allFilters = [...filters];
   if (status !== undefined) allFilters.push({ field: "status", op: "eq", value: status });
@@ -195,10 +200,12 @@ async function listNodes({ site: siteName, type, status, filters = [], limit = 2
 async function searchContent({ site: siteName, query, type, status, limit = 10 }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
+  const bundle = type || "article";
+  assertReadAllowed(sec, "node", bundle);
   const backend = await resolveBackend(site);
   const filters = [{ field: "title", op: "contains", value: query }];
   if (status !== undefined) filters.push({ field: "status", op: "eq", value: status });
-  const res = await backend.listEntities({ entityType: "node", bundle: type || "article", filters, sort: [{ field: "changed", dir: "desc" }], page: { limit } });
+  const res = await backend.listEntities({ entityType: "node", bundle, filters, sort: [{ field: "changed", dir: "desc" }], page: { limit } });
   return res.entities.map((e) => redactCanonicalEntity(e, sec, "node"));
 }
 
@@ -225,6 +232,8 @@ async function searchContent({ site: siteName, query, type, status, limit = 10 }
  */
 async function createNode({ site: siteName, type, title, body, summary, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  assertWriteAllowed(sec, "create", "node", type);
   const attributes = { title, ...fields };
   if (moderationState !== undefined) {
     attributes.moderation_state = moderationState;
@@ -233,7 +242,7 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
   }
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
-  assertPublishAllowed(resolveSecurityConfig(site), attributes);
+  assertPublishAllowed(sec, attributes);
   if (dryRun) return { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes, relationships };
   const backend = await resolveBackend(site);
   // Alias handling: an explicit `path.alias` is set as a manual alias; otherwise
@@ -269,16 +278,17 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
  */
 async function updateNode({ site: siteName, type, id, title, body, summary, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  assertWriteAllowed(sec, "update", "node", type);
   const attributes = { ...fields };
   if (title !== undefined) attributes.title = title;
   if (moderationState !== undefined) attributes.moderation_state = moderationState;
   else if (status !== undefined) attributes.status = status;
   const bodyAttr = buildBodyAttribute(body, summary);
   if (bodyAttr) attributes.body = bodyAttr;
-  assertPublishAllowed(resolveSecurityConfig(site), attributes);
+  assertPublishAllowed(sec, attributes);
   if (dryRun) return { dryRun: true, operation: "update", entityType: "node", bundle: type, id, attributes, relationships };
   const backend = await resolveBackend(site);
-  const sec = resolveSecurityConfig(site);
   // Alias handling (DEV-116): an explicit `path.alias` is set in place by
   // round-tripping the existing alias's pid (no duplicate); a path-less update
   // re-pins the current alias *with its pid* so the save can't revert/duplicate
@@ -304,6 +314,8 @@ async function updateNode({ site: siteName, type, id, title, body, summary, stat
  */
 async function deleteNode({ site: siteName, type, id, dryRun = false }) {
   const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  assertDeleteAllowed(sec, "node", type, id);
   if (dryRun) return { dryRun: true, operation: "delete", entityType: "node", bundle: type, id };
   const backend = await resolveBackend(site);
   await backend.deleteEntity({ entityType: "node", bundle: type, id });

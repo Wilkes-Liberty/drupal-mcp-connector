@@ -8,7 +8,10 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { resolveSecurityConfig, redactCanonicalEntity } from "../lib/security.js";
+import {
+  resolveSecurityConfig, redactCanonicalEntity,
+  assertReadAllowed, assertWriteAllowed, assertDeleteAllowed,
+} from "../lib/security.js";
 
 // ---------------------------------------------------------------------------
 // Implementations
@@ -22,6 +25,7 @@ import { resolveSecurityConfig, redactCanonicalEntity } from "../lib/security.js
  */
 async function listVocabularies({ site: siteName }) {
   const site = getSiteConfig(siteName);
+  assertReadAllowed(resolveSecurityConfig(site), "taxonomy_term");
   const backend = await resolveBackend(site);
   return backend.listBundles("taxonomy_term");
 }
@@ -35,6 +39,7 @@ async function listVocabularies({ site: siteName }) {
 async function getTaxonomyTerms({ site: siteName, vocabulary, limit = 50, offset = 0 }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
+  assertReadAllowed(sec, "taxonomy_term", vocabulary);
   const backend = await resolveBackend(site);
   const res = await backend.listEntities({
     entityType: "taxonomy_term", bundle: vocabulary,
@@ -56,6 +61,7 @@ async function getTaxonomyTerms({ site: siteName, vocabulary, limit = 50, offset
 async function getTaxonomyTerm({ site: siteName, vocabulary, id }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
+  assertReadAllowed(sec, "taxonomy_term", vocabulary);
   const backend = await resolveBackend(site);
   const entity = await backend.getEntity({ entityType: "taxonomy_term", bundle: vocabulary, id });
   return entity ? redactCanonicalEntity(entity, sec, "taxonomy_term") : null;
@@ -70,6 +76,7 @@ async function getTaxonomyTerm({ site: siteName, vocabulary, id }) {
  */
 async function createTaxonomyTerm({ site: siteName, vocabulary, name, description, weight = 0, parentId }) {
   const site = getSiteConfig(siteName);
+  assertWriteAllowed(resolveSecurityConfig(site), "create", "taxonomy_term", vocabulary);
   const backend = await resolveBackend(site);
   const attributes = { name, weight };
   if (description !== undefined) attributes.description = { value: description, format: "plain_text" };
@@ -88,6 +95,7 @@ async function createTaxonomyTerm({ site: siteName, vocabulary, name, descriptio
  */
 async function updateTaxonomyTerm({ site: siteName, vocabulary, id, name, description, weight }) {
   const site = getSiteConfig(siteName);
+  assertWriteAllowed(resolveSecurityConfig(site), "update", "taxonomy_term", vocabulary);
   const backend = await resolveBackend(site);
   const attributes = {};
   if (name !== undefined) attributes.name = name;
@@ -105,6 +113,7 @@ async function updateTaxonomyTerm({ site: siteName, vocabulary, id, name, descri
  */
 async function deleteTaxonomyTerm({ site: siteName, vocabulary, id }) {
   const site = getSiteConfig(siteName);
+  assertDeleteAllowed(resolveSecurityConfig(site), "taxonomy_term", vocabulary, id);
   const backend = await resolveBackend(site);
   await backend.deleteEntity({ entityType: "taxonomy_term", bundle: vocabulary, id });
   return { success: true, deletedId: id };

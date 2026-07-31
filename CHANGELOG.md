@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **Specialized tools honor entity allowlists/denylists (#138).**
+  `drupal_*_node`, media, and taxonomy tools now call the same
+  `assertReadAllowed` / `assertWriteAllowed` / `assertDeleteAllowed` gates as
+  `drupal_entity_*`, so a denied type (e.g. `media`) cannot be reached by
+  switching tool names.
+
 ## [2.0.0] - 2026-07-29
 
 ### Fixed
