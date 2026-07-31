@@ -16,7 +16,7 @@ Parse the request in `$ARGUMENTS` into this tool's parameters:
 
 **Optional:**
 - `site` (string): omit for the default site
-- `status` (boolean (true/false))
+- `status` (boolean (true/false)): Published flag. Defaults to false (unpublished). Requires allowPublish when true.
 - `fields` (object (pass as JSON)): Additional field values — include the source field (e.g. field_media_oembed_video: 'https://youtu.be/...')
 
 If a required parameter is missing from `$ARGUMENTS`, ask before calling — do not invent values. Coerce each value to its JSON type (booleans → true/false, numbers → numeric, object/array → parse JSON), then make the single tool call and summarize the result.

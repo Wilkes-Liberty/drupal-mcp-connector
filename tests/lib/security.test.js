@@ -63,6 +63,12 @@ describe("allowPublish policy (#114) + assertPublishAllowed (#111)", () => {
     expect(() => assertPublishAllowed({ allowPublish: false }, { status: true })).toThrow(/allowPublish/);
   });
 
+  it("throws on moderation_state:published when allowPublish is false (#139)", () => {
+    expect(() => assertPublishAllowed({ allowPublish: false }, { moderation_state: "published" })).toThrow(/allowPublish/);
+    expect(isPublishBearing({ moderation_state: "draft" })).toBe(false);
+    expect(isPublishBearing({ moderation_state: "published" })).toBe(true);
+  });
+
   it("allows a status:true write when allowPublish is true, and never blocks a non-publish write", () => {
     expect(() => assertPublishAllowed({ allowPublish: true }, { status: true })).not.toThrow();
     expect(() => assertPublishAllowed({ allowPublish: false }, { status: false })).not.toThrow();
@@ -140,6 +146,16 @@ describe("config capability presets", () => {
     const strict = resolveSecurityConfig({ security: { preset: "production-strict" } });
     expect(strict.allowConfigRead).toBe(false);
     expect(strict.allowConfigWrite).toBe(false);
+  });
+
+  it("auditor and production-strict apply SENSITIVE_DENY (#140)", () => {
+    for (const preset of ["auditor", "production-strict"]) {
+      const denied = resolveSecurityConfig({ security: { preset } }).deniedEntityTypes;
+      expect(denied).toContain("user");
+      expect(denied).toContain("oauth2_token");
+      expect(denied).toContain("key");
+      expect(denied).toContain("mcp_policy_profile");
+    }
   });
 
   it("explicit keys override the preset config caps", () => {

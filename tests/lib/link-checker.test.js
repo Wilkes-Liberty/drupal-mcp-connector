@@ -45,6 +45,8 @@ describe("link-checker", () => {
       });
       expect(fetchImpl).toHaveBeenCalledOnce();
       expect(results[0]).toMatchObject({ ok: true, status: 200, skipped: false });
+      // #143: never auto-follow redirects (SSRF via 302 → private).
+      expect(fetchImpl.mock.calls[0][1].redirect).toBe("manual");
     });
 
     it("flags 4xx as not ok and retries HEAD->GET on 405", async () => {

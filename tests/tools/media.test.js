@@ -12,6 +12,7 @@ vi.mock("../../src/lib/security.js", async (orig) => {
   const actual = await orig();
   return {
     ...actual,
+    // Open write/publish so entity-policy and #139 tests control deny cases explicitly.
     resolveSecurityConfig: vi.fn(() => ({
       readOnly: false, allowDestructive: true, allowPublish: true,
       allowedEntityTypes: null, deniedEntityTypes: [],
@@ -54,6 +55,25 @@ describe("media tools (migrated)", () => {
     expect(arg).toMatchObject({ entityType: "media", bundle: "image" });
     expect(arg.attributes.name).toBe("Pic");
     expect(arg.attributes.status).toBe(true);
+  });
+
+  it("create_media defaults to unpublished (#139)", async () => {
+    backend.createEntity.mockResolvedValue(media);
+    await handlers.drupal_create_media({ type: "image", name: "Pic" });
+    expect(backend.createEntity.mock.calls[0][0].attributes.status).toBe(false);
+  });
+
+  it("create_media rejects status:true when allowPublish is false (#139)", async () => {
+    const { resolveSecurityConfig } = await import("../../src/lib/security.js");
+    resolveSecurityConfig.mockReturnValueOnce({
+      readOnly: false, allowDestructive: true, allowPublish: false,
+      allowedEntityTypes: null, deniedEntityTypes: [],
+      globalRedactedFields: [], entityRules: {},
+    });
+    await expect(
+      handlers.drupal_create_media({ type: "image", name: "Pic", status: true })
+    ).rejects.toThrow(/allowPublish/);
+    expect(backend.createEntity).not.toHaveBeenCalled();
   });
 
   it("get_media returns the canonical media or null", async () => {
