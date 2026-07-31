@@ -57,11 +57,15 @@ targeted tests while iterating (`npx vitest run tests/tools/nodes.test.js`).
 - Never commit `config/config.json`, `.env*`, tokens, OAuth secrets, or SSH keys.
 - Connector security (`src/lib/security.js`) is defense-in-depth on top of Drupal
   permissions — do not weaken presets or redaction without an explicit decision.
-- Destructive tools and publish (`status: true`) are gated; keep defaults safe.
-- **Published moderated updates** (`#131`): `drupal_update_node`,
-  `drupal_bulk_update`, and `drupal_entity_update` default omitted
-  `moderation_state` to `draft` when the target is published and moderated.
-  Callers that need a same-state live save must pass moderation state explicitly.
+- Destructive tools and publish (`status: true` / `moderation_state: "published"`)
+  are gated; media create defaults unpublished.
+- Specialized node/media/taxonomy tools use the same entity allowlists as
+  `drupal_entity_*` — do not reintroduce bypasses.
+- **Published moderated updates**: omitting moderation state on a published
+  moderated node defaults the write to `moderation_state: "draft"`.
+- Uploads: only under `MCP_UPLOAD_ROOT` (or cwd). Non-loopback HTTPS requires
+  `MCP_AUTH_TOKEN` (or trusted proxy + `MCP_ALLOW_UNAUTHENTICATED=1`).
+- GraphQL results are not entity-allowlist/redaction-gated (tracked #142).
 - Report vulnerabilities privately per `SECURITY.md` — not as public issues.
 
 ## Provider-agnostic policy

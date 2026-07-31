@@ -380,10 +380,14 @@ export function assertDestructiveAllowed(secConfig, entityType, id) {
 }
 
 /**
- * Whether a set of write attributes carries a publish action. Deliberately
- * limited to the unambiguous, entity-agnostic signal `status === true`; a site's
- * moderation-workflow state names are not knowable from a site-agnostic
- * connector, so publishing via `moderation_state` stays gated server-side.
+ * Whether a set of write attributes carries a publish action.
+ *
+ * Recognized signals:
+ *   - `status === true` (non-moderated publish)
+ *   - `moderation_state` equal to `"published"` (case-insensitive) — the common
+ *     core content_moderation publish state (#139)
+ *
+ * Other workflow state names are site-specific and remain server-gated.
  * @param {object} [attributes] Attribute map for the write.
  * @returns {boolean}
  */
@@ -399,9 +403,10 @@ export function isPublishBearing(attributes = {}) {
 /**
  * Local, fail-fast publish gate, symmetric with assertDestructiveAllowed. When
  * the connector is not permitted to publish (allowPublish false — the default in
- * every preset except `development`), a write carrying `status: true` is refused
- * before the round-trip, rather than being silently dropped by a moderated-bundle
- * retry or a server-side gate (see #111/#114). Client-side convenience only — the
+ * every preset except `development`), a write that is publish-bearing
+ * (`status: true` or `moderation_state: "published"`) is refused before the
+ * round-trip, rather than being silently dropped by a moderated-bundle retry or
+ * a server-side gate (see #111/#114/#139). Client-side convenience only — the
  * remote Drupal's own permissions remain the real authority.
  * @param {object} secConfig Resolved security config.
  * @param {object} [attributes] Attribute map for the write.

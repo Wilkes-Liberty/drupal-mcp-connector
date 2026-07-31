@@ -132,7 +132,8 @@ mirrored by the connector preset:
 
 `drupal_mcp_whoami` reports the effective tier, scopes, and capabilities for a site.
 `publish` is derived from the local `allowPublish` policy (default off in every preset
-except `development`); the server-side governance remains the real authority. The drush bridge is wired on
+except `development`); a write is publish-bearing if it carries `status: true` or
+`moderation_state: "published"`. The server-side governance remains the real authority. The drush bridge is wired on
 `dev` only and pinned via `drushSsh.allowedCommands` to `config:export` /
 `config:status` — the export step turns a governed live config change into YAML for a PR.
 
