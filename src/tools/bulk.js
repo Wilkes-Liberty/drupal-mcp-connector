@@ -14,6 +14,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertWriteAllowed, assertPublishAllowed } from "../lib/security.js";
+import { applySafeDraftDefault } from "../lib/moderation-default.js";
 
 /**
  * Normalize an unknown thrown value into a human-readable message.
@@ -67,6 +68,11 @@ async function bulkCreate({ site: siteName, entityType, bundle, items = [] }) {
  * each item is updated independently so the batch continues past failures. An
  * item missing an id is reported as a per-item failure rather than aborting.
  *
+ * Safe default (#131): each published moderated target without an explicit
+ * `moderation_state` is rewritten to `moderation_state: draft` before the
+ * PATCH, so bulk relationship-wiring and field edits become forward revisions
+ * rather than live default-revision mutations.
+ *
  * @param {object} args - { site?, entityType, bundle, items: [{ id, attributes?, relationships? }] }.
  * @returns {Promise<{results: object[], summary: {updated: number, failed: number}}>}
  *   Per-item { index, success, id? | error } plus a roll-up summary.
@@ -85,10 +91,14 @@ async function bulkUpdate({ site: siteName, entityType, bundle, items = [] }) {
     const item = rawItem || {};
     try {
       if (!item.id) throw new Error("Missing 'id' for update item");
-      assertPublishAllowed(sec, item.attributes ?? {});
+      const attributes = await applySafeDraftDefault({
+        backend, entityType, bundle, id: item.id,
+        attributes: item.attributes ?? {},
+      });
+      assertPublishAllowed(sec, attributes);
       const entity = await backend.updateEntity({
         entityType, bundle, id: item.id,
-        attributes: item.attributes ?? {},
+        attributes,
         relationships: item.relationships ?? {},
       });
       updated += 1;
@@ -130,7 +140,7 @@ export const definitions = [
   },
   {
     name: "drupal_bulk_update",
-    description: "Update many entities of a single type + bundle in one call. Permission is checked once; each item is updated independently, so the batch continues past individual failures (partial success). Each item requires an 'id' (UUID); items missing an id are reported as per-item failures. Returns per-item { index, success, id | error } and a summary { updated, failed }.",
+    description: "Update many entities of a single type + bundle in one call. Permission is checked once; each item is updated independently, so the batch continues past individual failures (partial success). Each item requires an 'id' (UUID); items missing an id are reported as per-item failures. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision) so bulk edits do not mutate live default revisions. Returns per-item { index, success, id | error } and a summary { updated, failed }.",
     inputSchema: {
       type: "object", required: ["entityType", "bundle", "items"],
       properties: {

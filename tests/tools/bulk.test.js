@@ -110,6 +110,7 @@ describe("bulk tools", () => {
   });
 
   it("bulk_update updates each item by id and returns per-item results plus summary", async () => {
+    backend.getEntity.mockResolvedValue({ status: false, fields: {} });
     backend.updateEntity
       .mockResolvedValueOnce({ id: "a1" })
       .mockResolvedValueOnce({ id: "a2" });
@@ -125,6 +126,42 @@ describe("bulk tools", () => {
     expect(backend.updateEntity).toHaveBeenNthCalledWith(1, {
       entityType: "node", bundle: "article", id: "a1", attributes: { title: "X" }, relationships: {},
     });
+  });
+
+  it("bulk_update defaults published moderated items to draft (#131)", async () => {
+    backend.getEntity.mockResolvedValue({
+      status: true,
+      fields: { moderation_state: "published" },
+    });
+    backend.updateEntity.mockResolvedValue({ id: "a1" });
+    await handlers.drupal_bulk_update({
+      entityType: "node", bundle: "article",
+      items: [{ id: "a1", attributes: { title: "Wire refs" } }],
+    });
+    expect(backend.updateEntity).toHaveBeenCalledWith({
+      entityType: "node", bundle: "article", id: "a1",
+      attributes: { title: "Wire refs", moderation_state: "draft" },
+      relationships: {},
+    });
+  });
+
+  it("bulk_update respects an explicit moderation_state on items (#131)", async () => {
+    backend.getEntity.mockResolvedValue({
+      status: true,
+      fields: { moderation_state: "published" },
+    });
+    backend.updateEntity.mockResolvedValue({ id: "a1" });
+    await handlers.drupal_bulk_update({
+      entityType: "node", bundle: "article",
+      items: [{ id: "a1", attributes: { title: "Live save", moderation_state: "published" } }],
+    });
+    expect(backend.updateEntity).toHaveBeenCalledWith({
+      entityType: "node", bundle: "article", id: "a1",
+      attributes: { title: "Live save", moderation_state: "published" },
+      relationships: {},
+    });
+    // Explicit state short-circuits the capability sniff.
+    expect(backend.getEntity).not.toHaveBeenCalled();
   });
 
   it("bulk_update continues past a per-item failure (partial success)", async () => {
