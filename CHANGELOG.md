@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-07-31
+
+### Documentation
+- **npm package page / README.** Security model table lists all six presets and
+  the 2.1 connector-side gates (entity policy on specialized tools, publish/draft
+  defaults, upload roots, fail-closed HTTPS). Quick start leads with `npm install`
+  for package consumers; clone path remains for development.
+- Normalize `package.json` `repository.url` to the form npm expects
+  (`git+https://…`).
+
 ## [2.1.0] - 2026-07-31
 
 ### Security

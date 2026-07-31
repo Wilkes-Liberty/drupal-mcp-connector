@@ -1,6 +1,6 @@
 {
   "name": "drupal-mcp-connector",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "A secure, multi-site Model Context Protocol (MCP) connector for Drupal — dual-protocol JSON:API and GraphQL.",
   "type": "module",
   "main": "src/index.js",
@@ -31,7 +31,7 @@
   "homepage": "https://github.com/Wilkes-Liberty/drupal-mcp-connector",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Wilkes-Liberty/drupal-mcp-connector.git"
+    "url": "git+https://github.com/Wilkes-Liberty/drupal-mcp-connector.git"
   },
   "bugs": {
     "url": "https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues"
