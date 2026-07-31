@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-30
+
 ### Security
 - **Default security preset is `production-strict` (#140).** Omitting `security`
   or passing `{}` no longer opens the site under the `development` preset.
