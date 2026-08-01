@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **CI: No AI attribution gate (DEV-227).** Pull requests fail when commits, the
+  PR title, or the PR body credit AI with authorship (shared Wilkes & Liberty
+  drop-in). Covers server-side paths that local hooks cannot see.
+
+
 ## [2.2.0] - 2026-07-30
 
 ### Security
