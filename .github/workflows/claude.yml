@@ -18,7 +18,7 @@ on:
   issue_comment:               { types: [created] }
   pull_request_review_comment: { types: [created] }
   pull_request_review:         { types: [submitted] }
-  issues:                      { types: [opened, assigned] }
+  issues:                      { types: [opened] }
 
 permissions:
   contents: write        # create branches / commits on a PR
@@ -43,7 +43,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
