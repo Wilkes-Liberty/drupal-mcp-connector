@@ -24,6 +24,9 @@ permissions:
   contents: write        # create branches / commits on a PR
   issues: write          # respond on issues
   pull-requests: write   # open PRs, comment on PRs
+  # The action exchanges a GitHub OIDC token for its app credentials in every
+  # auth mode -- the first activation run failed without this.
+  id-token: write
 
 concurrency:
   # One Claude run per issue/PR at a time; a stale run is left to finish.

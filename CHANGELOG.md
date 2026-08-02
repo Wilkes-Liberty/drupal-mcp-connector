@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pull request can no longer supply the code that decides whether it passes.
 
 ### Fixed
+- **CI: the `@claude` workflow can fetch its OIDC token.** The action exchanges
+  a GitHub OIDC token for its app credentials in every auth mode; without
+  `id-token: write` the first activation run failed before reaching Claude.
 - **CI: the attribution gate no longer fails on clean commits.** The stripper
   compared each commit message against a copy that had gained a trailing newline,
   so every commit looked modified and the run ended with `strip count > 0 but tip
