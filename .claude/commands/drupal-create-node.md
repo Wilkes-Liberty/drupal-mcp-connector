@@ -1,6 +1,6 @@
 ---
 description: "Create a new content node. Returns the new node UUID, integer ID, and URL. For content types under an editorial (content_moderation) workflow, set moderationState (e.g. 'draft'/'published') instead of status. Entity-reference fields (taxonomy terms, related content, media) go in `relationships`, not `fields`."
-argument-hint: "<type> <title> [site] [body] [summary] [status] [moderationState] [fields] [relationships] [dryRun] [returning]"
+argument-hint: "<type> <title> [site] [body] [summary] [format] [status] [moderationState] [fields] [relationships] [dryRun] [returning]"
 allowed-tools: mcp__drupal__drupal_create_node
 ---
 
@@ -17,7 +17,8 @@ Parse the request in `$ARGUMENTS` into this tool's parameters:
 **Optional:**
 - `site` (string): omit for the default site
 - `body` (string): Body field HTML
-- `summary` (string): Body summary / teaser
+- `summary` (string): Body summary/teaser — writes the `summary` property of the body field (core `text_with_summary`). Many headless sites instead use a dedicated summary/deck field for teasers and meta descriptions; on those, set that field in `fields` — a value written here will be stored but may never be rendered.
+- `format` (string): Text format machine name for the body, e.g. 'basic_html'. Defaults to the site config's `defaultTextFormat`, then 'full_html'. Set this when the site's formats do not include full_html, or to avoid writing content into a more permissive format than intended.
 - `status` (boolean (true/false)): Published flag for NON-moderated types. true to publish immediately. Ignored if moderationState is set; on a moderated type it is dropped automatically.
 - `moderationState` (string): Moderation state for content_moderation types, e.g. 'draft' or 'published'. Takes precedence over status.
 - `fields` (object (pass as JSON)): Scalar/attribute field values keyed by Drupal machine name. Do NOT put entity-reference fields here — Drupal rejects them as attributes; use `relationships`.

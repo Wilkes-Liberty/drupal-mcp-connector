@@ -44,6 +44,13 @@ Each site declares which backend(s) it exposes via the `api` key:
   `{ id, entityType, bundle, title, status, langcode, created, changed, url, fields, relationships, _backend }`, so tool output is identical regardless of protocol.
 - **Capability-aware.** Each backend advertises what it supports (read, write, delete, server-side filter/sort, revisions). GraphQL via GraphQL Compose is **read-only** (no mutations) and has no server-side field filter, so filters are applied client-side over a bounded fetch and flagged `approximate`/`truncated`. Write tools against a read-only backend return a clear capability error rather than failing silently.
 - **Writes go through JSON:API.** Use a JSON:API-enabled site as the write plane; keep GraphQL as a read plane where that suits your architecture.
+- **`defaultTextFormat` sets the body text format** used by the `body` convenience
+  parameter on node writes, e.g. `{ "baseUrl": "…", "defaultTextFormat": "basic_html" }`.
+  Individual calls can override it with `format`. Without either, the connector falls
+  back to `full_html`, which many governed sites deliberately do not define — and which
+  is the most permissive core format, so setting this per site is the safer posture. A
+  text format is Drupal's HTML-filtering boundary, so it is worth choosing deliberately
+  rather than inheriting.
 
 See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction and **[docs/graphql-local-setup.md](docs/graphql-local-setup.md)** for the GraphQL specifics.
 

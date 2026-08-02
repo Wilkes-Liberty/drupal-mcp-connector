@@ -86,7 +86,9 @@ describe("nodes tools (migrated)", () => {
     expect(arg).toMatchObject({ entityType: "node", bundle: "article", id: "n1" });
     expect(arg.attributes.title).toBe("New");
     expect(arg.attributes.field_x).toBe(1);
-    expect(arg.attributes.body).toEqual({ value: "<p>y</p>", format: "full_html", summary: "" });
+    // No summary supplied → the property is omitted rather than blanked, so an
+    // existing body summary survives a body-only update.
+    expect(arg.attributes.body).toEqual({ value: "<p>y</p>", format: "full_html" });
   });
 
   it("create_node builds the body wrapper and calls createEntity", async () => {
@@ -293,5 +295,43 @@ describe("nodes tools (migrated)", () => {
     const out = await handlers.drupal_delete_node({ type: "article", id: "n1" });
     expect(out).toEqual({ success: true, deletedId: "n1" });
     expect(backend.deleteEntity).toHaveBeenCalledWith({ entityType: "node", bundle: "article", id: "n1" });
+  });
+});
+
+describe("body text format and summary handling", () => {
+  it("uses an explicit format over any default", async () => {
+    await handlers.drupal_create_node({
+      type: "article", title: "T", body: "<p>x</p>", format: "headless_clean",
+    });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes.body.format).toBe("headless_clean");
+  });
+
+  it("falls back to the site config's defaultTextFormat", async () => {
+    const { getSiteConfig } = await import("../../src/lib/config.js");
+    getSiteConfig.mockReturnValueOnce({
+      _name: "d", baseUrl: "https://x", security: {}, defaultTextFormat: "site_default_format",
+    });
+    await handlers.drupal_create_node({ type: "article", title: "T", body: "<p>x</p>" });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes.body.format).toBe("site_default_format");
+  });
+
+  it("keeps full_html only as the last-resort fallback", async () => {
+    await handlers.drupal_create_node({ type: "article", title: "T", body: "<p>x</p>" });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes.body.format).toBe("full_html");
+  });
+
+  it("omits summary when it was not supplied, so a body-only update cannot blank it", async () => {
+    await handlers.drupal_update_node({ type: "article", id: "n1", body: "<p>y</p>" });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes.body).not.toHaveProperty("summary");
+  });
+
+  it("writes an empty summary only when explicitly asked to clear it", async () => {
+    await handlers.drupal_update_node({ type: "article", id: "n1", body: "<p>y</p>", summary: "" });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes.body.summary).toBe("");
   });
 });
