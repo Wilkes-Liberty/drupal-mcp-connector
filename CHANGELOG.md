@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The body text format is no longer hardcoded to `full_html`.** Node writes
+  that used the `body` convenience parameter always sent `format: "full_html"`,
+  so the connector could not write a body at all on a site whose text formats
+  omit it — and on sites that do define it, content was silently written into
+  the most permissive core format. Writes now resolve the format explicitly: a
+  new per-call `format` argument, then the site config's `defaultTextFormat`,
+  then `full_html` as the unchanged last-resort fallback. A text format is
+  Drupal's HTML-filtering boundary, so it should be a decision rather than an
+  assumption.
+- **A body-only update no longer blanks an existing body summary.** The body
+  descriptor set `summary: ""` whenever no summary was supplied, so updating
+  just the body erased the summary as a side effect. The property is now sent
+  only when the caller supplies it; passing `summary: ""` still clears it
+  deliberately.
+
+### Changed
+- **`summary` documents what it actually targets.** The parameter writes the
+  `summary` property of the core `text_with_summary` body field. Headless sites
+  commonly use a dedicated summary/deck field for teasers and meta descriptions
+  instead; on those, the value written here is stored but may never be rendered.
+  Both node tools now say so, and point at `fields` for the dedicated field.
+
 ### Added
 - **CI: No AI attribution gate.** Pull requests fail when commits, the
   PR title, or the PR body credit AI with authorship (shared Wilkes & Liberty

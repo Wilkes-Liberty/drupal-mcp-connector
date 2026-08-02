@@ -1,6 +1,6 @@
 ---
 description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Entity-reference fields go in `relationships`, not `fields`."
-argument-hint: "<type> <id> [site] [title] [body] [summary] [status] [moderationState] [fields] [relationships] [dryRun] [returning]"
+argument-hint: "<type> <id> [site] [title] [body] [summary] [format] [status] [moderationState] [fields] [relationships] [dryRun] [returning]"
 allowed-tools: mcp__drupal__drupal_update_node
 ---
 
@@ -18,7 +18,8 @@ Parse the request in `$ARGUMENTS` into this tool's parameters:
 - `site` (string): omit for the default site
 - `title` (string)
 - `body` (string)
-- `summary` (string)
+- `summary` (string): Body summary/teaser — writes the `summary` property of the body field (core `text_with_summary`). Many headless sites instead use a dedicated summary/deck field for teasers and meta descriptions; on those, set that field in `fields` — a value written here will be stored but may never be rendered.
+- `format` (string): Text format machine name for the body, e.g. 'basic_html'. Defaults to the site config's `defaultTextFormat`, then 'full_html'. Set this when the site's formats do not include full_html, or to avoid writing content into a more permissive format than intended.
 - `status` (boolean (true/false)): Published flag for NON-moderated types: true = publish, false = unpublish. Ignored if moderationState is set.
 - `moderationState` (string): Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status. Required to keep or re-publish a live node — omitting it on a published moderated node defaults the write to 'draft'.
 - `fields` (object (pass as JSON)): Scalar/attribute field values keyed by machine name. Entity-reference fields go in `relationships`, not here.

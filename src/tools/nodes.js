@@ -128,17 +128,42 @@ async function createRenameRedirect(backend, sec, redirect) {
 }
 
 /**
+ * Fallback text format when neither the call nor the site config names one.
+ *
+ * Retained for backward compatibility only. A site whose text formats do not
+ * include `full_html` — or whose agent account may not use it — must set
+ * `defaultTextFormat` in its site config or pass `format` per call.
+ */
+const FALLBACK_TEXT_FORMAT = "full_html";
+
+/**
  * Build a Drupal body field descriptor from plain HTML + optional summary.
  *
+ * The text format is a security boundary in Drupal (it decides which HTML
+ * survives filtering), so it is resolved explicitly rather than assumed:
+ * an explicit `format` argument wins, then the site's `defaultTextFormat`,
+ * then the historical fallback.
+ *
+ * `summary` is only included when the caller supplied it. Sending an empty
+ * string on every write would blank an existing body summary whenever a
+ * caller updated the body alone.
+ *
  * @param {string} [body]    - Body HTML; when undefined the field is omitted.
- * @param {string} [summary] - Teaser/summary text.
- * @returns {{value: string, format: string, summary: string}|undefined}
+ * @param {string} [summary] - Teaser/summary text; omitted when undefined.
+ * @param {string} [format]  - Text format machine name.
+ * @param {object} [site]    - Site config, read for `defaultTextFormat`.
+ * @returns {{value: string, format: string, summary?: string}|undefined}
  *   A body attribute object, or undefined when no body was supplied (so callers
  *   can skip the field on update rather than blanking it).
  */
-function buildBodyAttribute(body, summary) {
+function buildBodyAttribute(body, summary, format, site) {
   if (body === undefined) return undefined;
-  return { value: body, format: "full_html", summary: summary ?? "" };
+  const attr = {
+    value: body,
+    format: format ?? site?.defaultTextFormat ?? FALLBACK_TEXT_FORMAT,
+  };
+  if (summary !== undefined) attr.summary = summary;
+  return attr;
 }
 
 /**
@@ -228,10 +253,10 @@ async function searchContent({ site: siteName, query, type, status, limit = 10 }
  * `relationships` (JSON:API shape), not `fields`; Drupal rejects reference fields
  * sent as attributes (#115).
  *
- * @param {object} args - { site?, type, title, body?, summary?, status?, moderationState?, fields?, relationships? }.
+ * @param {object} args - { site?, type, title, body?, summary?, format?, status?, moderationState?, fields?, relationships? }.
  * @returns {Promise<object>} The created node descriptor from the backend.
  */
-async function createNode({ site: siteName, type, title, body, summary, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
+async function createNode({ site: siteName, type, title, body, summary, format, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", "node", type);
@@ -241,7 +266,7 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
   } else {
     attributes.status = status === undefined ? false : status;
   }
-  const bodyAttr = buildBodyAttribute(body, summary);
+  const bodyAttr = buildBodyAttribute(body, summary, format, site);
   if (bodyAttr) attributes.body = bodyAttr;
   assertPublishAllowed(sec, attributes);
   if (dryRun) return { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes, relationships };
@@ -279,10 +304,10 @@ async function createNode({ site: siteName, type, title, body, summary, status, 
  *
  * Entity-reference fields go in `relationships` (JSON:API shape), not `fields` (#115).
  *
- * @param {object} args - { site?, type, id, title?, body?, summary?, status?, moderationState?, fields?, relationships? }.
+ * @param {object} args - { site?, type, id, title?, body?, summary?, format?, status?, moderationState?, fields?, relationships? }.
  * @returns {Promise<object>} The updated node descriptor.
  */
-async function updateNode({ site: siteName, type, id, title, body, summary, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
+async function updateNode({ site: siteName, type, id, title, body, summary, format, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", "node", type);
@@ -291,7 +316,7 @@ async function updateNode({ site: siteName, type, id, title, body, summary, stat
   if (title !== undefined) attributes.title = title;
   if (moderationState !== undefined) attributes.moderation_state = moderationState;
   else if (status !== undefined) attributes.status = status;
-  const bodyAttr = buildBodyAttribute(body, summary);
+  const bodyAttr = buildBodyAttribute(body, summary, format, site);
   if (bodyAttr) attributes.body = bodyAttr;
   // #131: published moderated nodes without an explicit state → draft forward revision.
   // Runs before the publish gate and on dryRun so previews match the real write.
@@ -390,7 +415,8 @@ export const definitions = [
         type:    { type: "string", description: "Content type machine name" },
         title:   { type: "string" },
         body:    { type: "string", description: "Body field HTML" },
-        summary: { type: "string", description: "Body summary / teaser" },
+        summary: { type: "string", description: "Body summary/teaser — writes the `summary` property of the body field (core `text_with_summary`). Many headless sites instead use a dedicated summary/deck field for teasers and meta descriptions; on those, set that field in `fields` — a value written here will be stored but may never be rendered." },
+        format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. Defaults to the site config's `defaultTextFormat`, then 'full_html'. Set this when the site's formats do not include full_html, or to avoid writing content into a more permissive format than intended." },
         status:  { type: "boolean", default: false, description: "Published flag for NON-moderated types. true to publish immediately. Ignored if moderationState is set; on a moderated type it is dropped automatically." },
         moderationState: { type: "string", description: "Moderation state for content_moderation types, e.g. 'draft' or 'published'. Takes precedence over status." },
         fields:  { type: "object", description: "Scalar/attribute field values keyed by Drupal machine name. Do NOT put entity-reference fields here — Drupal rejects them as attributes; use `relationships`." },
@@ -411,7 +437,8 @@ export const definitions = [
         id:      { type: "string", description: "Node UUID" },
         title:   { type: "string" },
         body:    { type: "string" },
-        summary: { type: "string" },
+        summary: { type: "string", description: "Body summary/teaser — writes the `summary` property of the body field (core `text_with_summary`). Many headless sites instead use a dedicated summary/deck field for teasers and meta descriptions; on those, set that field in `fields` — a value written here will be stored but may never be rendered." },
+        format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. Defaults to the site config's `defaultTextFormat`, then 'full_html'. Set this when the site's formats do not include full_html, or to avoid writing content into a more permissive format than intended." },
         status:  { type: "boolean", description: "Published flag for NON-moderated types: true = publish, false = unpublish. Ignored if moderationState is set." },
         moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status. Required to keep or re-publish a live node — omitting it on a published moderated node defaults the write to 'draft'." },
         fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Entity-reference fields go in `relationships`, not here." },
