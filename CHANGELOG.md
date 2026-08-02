@@ -12,12 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PR title, or the PR body credit AI with authorship (shared Wilkes & Liberty
   drop-in). Covers server-side paths that local hooks cannot see.
 
+### Changed
+- **CI: the attribution gate reads its scripts from the base commit.** A
+  pull request can no longer supply the code that decides whether it passes.
+
 ### Fixed
-- **CI: the attribution gate no longer fails on clean commits.** The checker
+- **CI: the attribution gate no longer fails on clean commits.** The stripper
   compared each commit message against a copy that had gained a trailing newline,
   so every commit looked modified and the run ended with `strip count > 0 but tip
-  unchanged`. Merge commits are now scanned, and the robot-emoji rule matches a
-  marker line rather than the character anywhere in the message.
+  unchanged`.
 
 
 ## [2.2.0] - 2026-07-30
