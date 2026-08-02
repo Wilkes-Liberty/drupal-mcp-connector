@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`@claude` GitHub Action (inline).** Maintainers can tag `@claude` on an
+  issue or PR and Claude acts on the repo and opens a PR. Only
+  owner/member/collaborator authors trigger it; bot actors are excluded; the
+  job runs on `ubuntu-latest`, stops at opening a PR, and adds no AI
+  attribution. Inert until the Claude GitHub App is installed and the
+  `CLAUDE_CODE_OAUTH_TOKEN` org secret is made visible to this repo.
 - **CI: No AI attribution gate.** Pull requests fail when commits, the
   PR title, or the PR body credit AI with authorship (shared Wilkes & Liberty
   drop-in). Covers server-side paths that local hooks cannot see.
