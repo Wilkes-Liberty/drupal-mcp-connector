@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Wilkes-Liberty/shared-ci@v1`, and the vendored `.github/scripts/` copies are
   removed. One implementation for every repository makes copy drift structurally
   impossible instead of merely detectable.
+- **CI: the changelog gate is required-by-default again.** The brief conversion
+  to the org's opt-in model is reverted: this package's CHANGELOG ships as a
+  published artifact, so an entry is the default and trivial PRs opt out with
+  the `no-changelog` label. The conversion's hardening is kept — fixed-string
+  match, checkout skipped on bypassed PRs, Dependabot exempt.
 
 ## [2.2.1] - 2026-08-02
 
