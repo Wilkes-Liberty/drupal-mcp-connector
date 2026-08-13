@@ -20,18 +20,20 @@ function surface(onToolCall = () => {}) {
         name: "drupal_test",
         description: "Test tool",
         inputSchema: { type: "object", properties: {} },
-      }, {
-        name: "drupal_other",
-        description: "Second test tool",
-        inputSchema: { type: "object", properties: {} },
       }],
       call: async (name, args, context) => {
         onToolCall(context);
         return { content: [{ type: "text", text: JSON.stringify({ name, args }) }] };
       },
     },
-    resources: { definitions: [], read: async () => ({}) },
-    prompts: { definitions: [], get: () => [] },
+    resources: {
+      definitions: [{ uri: "drupal://test", name: "Test", mimeType: "application/json" }],
+      read: async (uri) => ({ uri, ok: true }),
+    },
+    prompts: {
+      definitions: [{ name: "drupal-test", description: "Test prompt" }],
+      get: () => [{ role: "user", content: { type: "text", text: "test" } }],
+    },
   };
 }
 
@@ -46,7 +48,7 @@ async function startServer({ onToolCall = () => {}, onBuild = () => {}, legacyMo
     checkAuth: (header) => header === "Bearer transport-secret",
     modernHandler: toNodeHandler(modernMcpHandler),
     legacyHandler: createLegacySessionHandler({ buildServer, mode: legacyMode }),
-    toolCount: 2,
+    toolCount: 1,
   });
   const server = createServer((req, res) => { void handler(req, res); });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -98,10 +100,7 @@ describe("MCP transport integration", () => {
 
     await client.connect(httpTransport(url, captureFetch(traffic)));
     expect(client.getNegotiatedProtocolVersion()).toBe("2026-07-28");
-    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
-      "drupal_test",
-      "drupal_other",
-    ]);
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["drupal_test"]);
     await client.callTool({ name: "drupal_test", arguments: { value: 1 } });
 
     expect(builds.length).toBeGreaterThanOrEqual(3);
@@ -126,10 +125,7 @@ describe("MCP transport integration", () => {
 
     await client.connect(httpTransport(url, captureFetch(traffic)));
     expect(client.getNegotiatedProtocolVersion()).toBe("2025-11-25");
-    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
-      "drupal_test",
-      "drupal_other",
-    ]);
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["drupal_test"]);
     await client.callTool({ name: "drupal_test", arguments: {} });
 
     expect(builds).toHaveLength(1);
@@ -164,6 +160,10 @@ describe("MCP transport integration", () => {
     await client.connect(httpTransport(url, captureFetch(traffic)));
     await client.listTools();
     await client.callTool({ name: "drupal_test", arguments: {} });
+    await client.listResources();
+    await client.readResource({ uri: "drupal://test" });
+    await client.listPrompts();
+    await client.getPrompt({ name: "drupal-test", arguments: {} });
 
     const call = traffic.find((request) => request.body?.method === "tools/call");
     expect(call).toBeDefined();
@@ -175,6 +175,10 @@ describe("MCP transport integration", () => {
       "server/discover",
       "tools/list",
       "tools/call",
+      "resources/list",
+      "resources/read",
+      "prompts/list",
+      "prompts/get",
     ]);
 
     const disagreementCases = captured.flatMap((request, index) => {
@@ -192,12 +196,13 @@ describe("MCP transport integration", () => {
           value: captured[(index + 1) % captured.length].body.method,
         },
       ];
-      if (request.headers["mcp-name"]) {
+      if (["tools/call", "resources/read", "prompts/get"].includes(request.body.method)) {
+        expect(request.headers["mcp-name"], `${request.body.method} captured name`).toBeTruthy();
         cases.push({
           label: `${request.body.method} name`,
           request,
           header: "Mcp-Name",
-          value: "drupal_other",
+          value: "definitely-not-the-body-name",
         });
       }
       return cases;
@@ -211,6 +216,16 @@ describe("MCP transport integration", () => {
       "tools/call protocol",
       "tools/call method",
       "tools/call name",
+      "resources/list protocol",
+      "resources/list method",
+      "resources/read protocol",
+      "resources/read method",
+      "resources/read name",
+      "prompts/list protocol",
+      "prompts/list method",
+      "prompts/get protocol",
+      "prompts/get method",
+      "prompts/get name",
     ]);
 
     const acceptedBuildCount = builds.length;
