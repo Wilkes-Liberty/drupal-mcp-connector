@@ -20,6 +20,10 @@ function surface(onToolCall = () => {}) {
         name: "drupal_test",
         description: "Test tool",
         inputSchema: { type: "object", properties: {} },
+      }, {
+        name: "drupal_other",
+        description: "Second test tool",
+        inputSchema: { type: "object", properties: {} },
       }],
       call: async (name, args, context) => {
         onToolCall(context);
@@ -42,7 +46,7 @@ async function startServer({ onToolCall = () => {}, onBuild = () => {}, legacyMo
     checkAuth: (header) => header === "Bearer transport-secret",
     modernHandler: toNodeHandler(modernMcpHandler),
     legacyHandler: createLegacySessionHandler({ buildServer, mode: legacyMode }),
-    toolCount: 1,
+    toolCount: 2,
   });
   const server = createServer((req, res) => { void handler(req, res); });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -94,7 +98,10 @@ describe("MCP transport integration", () => {
 
     await client.connect(httpTransport(url, captureFetch(traffic)));
     expect(client.getNegotiatedProtocolVersion()).toBe("2026-07-28");
-    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["drupal_test"]);
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+      "drupal_test",
+      "drupal_other",
+    ]);
     await client.callTool({ name: "drupal_test", arguments: { value: 1 } });
 
     expect(builds.length).toBeGreaterThanOrEqual(3);
@@ -119,7 +126,10 @@ describe("MCP transport integration", () => {
 
     await client.connect(httpTransport(url, captureFetch(traffic)));
     expect(client.getNegotiatedProtocolVersion()).toBe("2025-11-25");
-    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["drupal_test"]);
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+      "drupal_test",
+      "drupal_other",
+    ]);
     await client.callTool({ name: "drupal_test", arguments: {} });
 
     expect(builds).toHaveLength(1);
@@ -142,7 +152,7 @@ describe("MCP transport integration", () => {
     expect(builds).toHaveLength(0);
   });
 
-  it("denies every modern protocol, method, and name header/body disagreement", async () => {
+  it("authenticates before denying every captured modern header/body disagreement without fallback", async () => {
     const traffic = [];
     const builds = [];
     const url = await startServer({ onBuild: (context) => builds.push(context) });
@@ -152,6 +162,7 @@ describe("MCP transport integration", () => {
     );
     closers.push(() => client.close());
     await client.connect(httpTransport(url, captureFetch(traffic)));
+    await client.listTools();
     await client.callTool({ name: "drupal_test", arguments: {} });
 
     const call = traffic.find((request) => request.body?.method === "tools/call");
@@ -159,20 +170,73 @@ describe("MCP transport integration", () => {
     expect(call.headers["mcp-session-id"]).toBeUndefined();
     expect(call.responseHeaders["mcp-session-id"]).toBeUndefined();
 
-    for (const [header, value] of [
-      ["MCP-Protocol-Version", "2099-01-01"],
-      ["Mcp-Method", "prompts/list"],
-      ["Mcp-Name", "drupal_other"],
-    ]) {
-      const headers = new Headers(call.headers);
+    const captured = traffic.filter((request) => request.method === "POST");
+    expect(captured.map((request) => request.body.method)).toEqual([
+      "server/discover",
+      "tools/list",
+      "tools/call",
+    ]);
+
+    const disagreementCases = captured.flatMap((request, index) => {
+      const cases = [
+        {
+          label: `${request.body.method} protocol`,
+          request,
+          header: "MCP-Protocol-Version",
+          value: "2025-11-25",
+        },
+        {
+          label: `${request.body.method} method`,
+          request,
+          header: "Mcp-Method",
+          value: captured[(index + 1) % captured.length].body.method,
+        },
+      ];
+      if (request.headers["mcp-name"]) {
+        cases.push({
+          label: `${request.body.method} name`,
+          request,
+          header: "Mcp-Name",
+          value: "drupal_other",
+        });
+      }
+      return cases;
+    });
+
+    expect(disagreementCases.map(({ label }) => label)).toEqual([
+      "server/discover protocol",
+      "server/discover method",
+      "tools/list protocol",
+      "tools/list method",
+      "tools/call protocol",
+      "tools/call method",
+      "tools/call name",
+    ]);
+
+    const acceptedBuildCount = builds.length;
+    for (const { label, request, header, value } of disagreementCases) {
+      const deniedHeaders = new Headers(request.headers);
+      deniedHeaders.delete("Authorization");
+      deniedHeaders.set(header, value);
+      const denied = await fetch(url, {
+        method: "POST",
+        headers: deniedHeaders,
+        body: JSON.stringify(request.body),
+      });
+      expect(denied.status, `${label} before auth`).toBe(401);
+      expect(await denied.text(), `${label} before auth`).toBe("Unauthorized");
+      expect(builds, `${label} before auth`).toHaveLength(acceptedBuildCount);
+
+      const headers = new Headers(request.headers);
       headers.set(header, value);
       const response = await fetch(url, {
         method: "POST",
         headers,
-        body: JSON.stringify(call.body),
+        body: JSON.stringify(request.body),
       });
-      expect(response.status, header).toBe(400);
-      expect(await response.json(), header).toMatchObject({ error: { code: -32020 } });
+      expect(response.status, label).toBe(400);
+      expect(await response.json(), label).toMatchObject({ error: { code: -32020 } });
+      expect(builds, `${label} dispatch`).toHaveLength(acceptedBuildCount);
     }
 
     const unsupportedBody = structuredClone(call.body);
@@ -223,5 +287,43 @@ describe("MCP transport integration", () => {
     expect(await crossEraMismatch.json()).toMatchObject({ error: { code: -32020 } });
 
     expect(builds.every((context) => context.era === "modern")).toBe(true);
+  });
+
+  it("denies a captured legacy initialize carrying modern claims without falling back", async () => {
+    const builds = [];
+    const traffic = [];
+    const url = await startServer({ onBuild: (context) => builds.push(context) });
+    const legacyClient = new Client({ name: "legacy-client", version: "1.0.0" });
+    closers.push(() => legacyClient.close());
+    await legacyClient.connect(httpTransport(url, captureFetch(traffic)));
+
+    const initialize = traffic.find((request) => request.body?.method === "initialize");
+    expect(initialize).toBeDefined();
+    expect(builds).toEqual([{ era: "legacy" }]);
+    const acceptedBuildCount = builds.length;
+
+    const modernClaimHeaders = new Headers(initialize.headers);
+    modernClaimHeaders.set("MCP-Protocol-Version", "2026-07-28");
+    modernClaimHeaders.set("Mcp-Method", "initialize");
+
+    const unauthenticatedHeaders = new Headers(modernClaimHeaders);
+    unauthenticatedHeaders.delete("Authorization");
+    const unauthenticated = await fetch(url, {
+      method: "POST",
+      headers: unauthenticatedHeaders,
+      body: JSON.stringify(initialize.body),
+    });
+    expect(unauthenticated.status).toBe(401);
+    expect(await unauthenticated.text()).toBe("Unauthorized");
+    expect(builds).toHaveLength(acceptedBuildCount);
+
+    const ambiguous = await fetch(url, {
+      method: "POST",
+      headers: modernClaimHeaders,
+      body: JSON.stringify(initialize.body),
+    });
+    expect(ambiguous.status).toBe(400);
+    expect(await ambiguous.json()).toMatchObject({ error: { code: -32020 } });
+    expect(builds).toHaveLength(acceptedBuildCount);
   });
 });
