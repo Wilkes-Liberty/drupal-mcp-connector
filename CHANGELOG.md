@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.2] - 2026-08-12
+
 ### Security
 - Bump `hono` to 4.13.1, `ip-address` to 10.5.0, and `fast-uri` to 3.1.5,
   closing eight npm advisories (GHSA-mwp4-54f8-5fhr, GHSA-4xrf-jv44-h6hh,
