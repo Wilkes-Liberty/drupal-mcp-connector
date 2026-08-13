@@ -24,6 +24,11 @@ pick per client:
 Regardless of client, a Drupal-side governance module (e.g.
 [MCP Sentinel](integration-contract.md)) remains the authoritative policy.
 
+Both transports accept current MCP 2026-07-28 clients and a time-boxed 2025-era
+compatibility path. HTTP clients share one URL but not one state model: current
+requests are stateless; legacy clients keep a session. Operators can set
+`MCP_LEGACY_TRANSPORT=reject` once all registered clients are current.
+
 ---
 
 ## Generic stdio
@@ -221,6 +226,9 @@ Hardening (see [security-hardening.md](security-hardening.md)):
 - **`MCP_BIND_HOST`** — restrict the listen interface.
 - Source the OAuth client secret from env / a secrets manager (not a desktop keychain) on servers.
 - Put it behind your reverse proxy and, where possible, IP-allowlist the client's egress.
+- Test `server/discover`, version/method/name mismatch rejection, and the absence
+  of `Mcp-Session-Id` with the exact client/gateway build before claiming current
+  protocol compatibility.
 
 > **Security tradeoff:** a remote endpoint that bridges a hosted assistant into
 > your Drupal widens the attack surface. Prefer a local stdio client when Drupal

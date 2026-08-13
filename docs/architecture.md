@@ -138,6 +138,10 @@ The server runs as a child process of the MCP client. Zero network exposure.
 node src/index.js
 ```
 
+The stable v2 stdio entry selects the protocol era from the opening exchange and
+pins one server instance for the connection. Both current 2026-07-28 clients and
+2025-era clients use the same transport-neutral server factory.
+
 ### HTTPS (multi-client — remote)
 The server runs as a standalone HTTPS service; multiple clients connect simultaneously.
 
@@ -148,7 +152,20 @@ TLS_KEY_PATH=/etc/ssl/private/mcp.key \
 MCP_PORT=3443 node src/index.js
 ```
 
-Endpoint: `https://host:3443/mcp` (health probe at `/health`). HTTPS is mandatory; plain HTTP is refused on non-localhost unless `MCP_ALLOW_HTTP=1` is set explicitly (development only). Without TLS the server binds loopback only. Non-loopback TLS binds **require** `MCP_AUTH_TOKEN` (or `MCP_ALLOW_UNAUTHENTICATED=1` behind a trusted proxy) and default to a 120 req/min rate limit when `MCP_RATE_LIMIT` is unset. Bind-address restriction (`MCP_BIND_HOST`) and related controls are documented in [security-hardening.md](security-hardening.md).
+Endpoint: `https://host:3443/mcp` (health probe at `/health`). One bounded POST
+body is classified into exactly one transport arm: current 2026-07-28 requests
+use the strict request-scoped handler, while 2025-era clients use the existing
+sessionful handler. `GET`/`DELETE` are legacy session operations. Set
+`MCP_LEGACY_TRANSPORT=reject` to reject the legacy arm. Authentication and rate
+limiting run before body parsing and classification.
+
+HTTPS is mandatory; plain HTTP is refused on non-localhost unless
+`MCP_ALLOW_HTTP=1` is set explicitly (development only). Without TLS the server
+binds loopback only. Non-loopback TLS binds **require** `MCP_AUTH_TOKEN` (or
+`MCP_ALLOW_UNAUTHENTICATED=1` behind a trusted proxy) and default to a 120
+req/min rate limit when `MCP_RATE_LIMIT` is unset. Bind-address restriction
+(`MCP_BIND_HOST`) and related controls are documented in
+[security-hardening.md](security-hardening.md).
 
 ---
 
@@ -162,6 +179,8 @@ src/
 │   ├── canonical.js          # Canonical entity shape + normalization helpers
 │   ├── drupal-fetch.js       # Authenticated HTTP wrappers (JSON:API, GraphQL, file upload)
 │   ├── http-auth.js          # Bearer check for the HTTPS transport (timing-safe)
+│   ├── http-handler.js       # Auth-first, bounded, explicit modern/legacy routing
+│   ├── mcp-server.js         # Shared transport-neutral MCP server factory
 │   ├── security.js           # Presets, assertions, field redaction
 │   ├── reports-support.js    # Shared collectors/helpers for the reports module
 │   ├── errors.js             # toolResult / toolError helpers

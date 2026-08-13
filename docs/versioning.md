@@ -52,13 +52,17 @@ These are implementation details — don't build automation on them:
 
 ## MCP protocol version
 
-The connector does not pin a protocol version: it supports up to the
-`LATEST_PROTOCOL_VERSION` shipped by its pinned `@modelcontextprotocol/sdk`
-(currently **2025-11-25**, per the README badge) and **negotiates the highest
-version each client supports** at connect time. So a client may report an older
-negotiated version (e.g. `2025-06-18`) without anything being wrong. SDK upgrades
-that raise the supported protocol ship in a normal release and are noted in the
-changelog.
+The connector uses the stable modular MCP SDK 2.0.0 packages and supports the
+current **2026-07-28** protocol. Modern HTTP is request-scoped: each request gets
+a fresh server instance and no `Mcp-Session-Id`. The same `/mcp` URL retains a
+time-boxed, sessionful compatibility arm for 2025-era clients. Operators can end
+that window with `MCP_LEGACY_TRANSPORT=reject`; changing the default or removing
+the arm follows the deprecation policy because transport behavior is stable
+surface.
+
+The private outbound connector-to-Drupal server-tool bridge is a separate
+contract and remains pinned to **2025-06-18** until the Drupal endpoint migrates.
+That pin does not limit northbound clients to the same revision.
 
 ## Runtime support
 

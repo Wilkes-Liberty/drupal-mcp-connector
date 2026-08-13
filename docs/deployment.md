@@ -20,9 +20,11 @@ service, port, or token; see [mcp-clients.md](mcp-clients.md).
 | `MCP_AUTH_TOKEN` | Bearer token required on `/mcp` — **required** for non-loopback binds |
 | `MCP_ALLOW_UNAUTHENTICATED` | Set to `1` only when a trusted proxy already authenticates clients |
 | `MCP_RATE_LIMIT` | Max `/mcp` requests per window per IP (`0` = off; default 120 on non-loopback TLS) |
-| `MCP_UPLOAD_ROOT` | Colon-separated absolute dirs allowed for local file uploads (default: process cwd) || `MCP_BIND_HOST` | Restrict the listen interface (with TLS) |
+| `MCP_UPLOAD_ROOT` | Colon-separated absolute dirs allowed for local file uploads (default: process cwd) |
+| `MCP_BIND_HOST` | Restrict the listen interface (with TLS) |
 | `MCP_RATE_LIMIT` / `MCP_RATE_WINDOW_SEC` | Optional per-IP rate limiting (see [security-hardening.md](security-hardening.md)) |
 | `MCP_PORT` | Listen port (default 3443) |
+| `MCP_LEGACY_TRANSPORT` | `serve` (default) or `reject` for 2025-era HTTP clients |
 
 Provide the Drupal connection via a mounted `config/config.json` or the
 single-site `DRUPAL_*` env vars. Keep all secrets out of config files and images
@@ -89,3 +91,18 @@ depth), and restrict to the client vendor's documented egress range where you ca
 - [ ] Secrets sourced from an env file / secret manager — not in config or the image.
 - [ ] Drupal-side governance (e.g. MCP Sentinel) active — the authoritative policy.
 - [ ] `/health` returns 200; tools enumerate over the endpoint.
+- [ ] A pinned MCP v2 client proves 2026-07-28 `server/discover`, stateless tool
+      calls, and malformed/mismatched request rejection in this environment.
+- [ ] If legacy clients are unnecessary, set `MCP_LEGACY_TRANSPORT=reject`; if
+      retained, record their owner and removal date.
+
+## Transport compatibility and exposure claims
+
+The single `/mcp` endpoint serves both eras, but they have different state
+contracts. Current 2026-07-28 POSTs are request-scoped and do not issue
+`Mcp-Session-Id`; 2025-era clients use a session created only by `initialize`.
+Bearer authentication and rate limiting precede body parsing and era
+classification. A successful local or non-production test is not evidence of a
+production public URL: record the client version, gateway configuration,
+protocol mismatch tests, date, and artifact separately before making an
+exposure claim.

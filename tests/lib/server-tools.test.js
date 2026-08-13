@@ -53,7 +53,7 @@ const toolOk = (result) => mcpRes({ json: { jsonrpc: "2.0", id: 2, result } });
 beforeEach(() => { vi.mocked(fetch).mockReset(); });
 
 describe("callServerTool", () => {
-  it("performs the MCP handshake then posts tools/call with the session header", async () => {
+  it("keeps the private Drupal bridge sessionful and pinned to MCP 2025-06-18", async () => {
     const site = oauthSite();
     clearToken(site);
     vi.mocked(fetch)

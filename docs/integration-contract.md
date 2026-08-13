@@ -118,6 +118,12 @@ registered and enabled as `mcp_tool_config` entities on the Drupal site — they
 `allowConfigWrite`, set by preset — e.g. `config-editor`) are a complementary
 client-side gate; **the Drupal-side policy remains authoritative.**
 
+This outbound bridge is intentionally independent of the connector's northbound
+MCP transport. It remains pinned to MCP **2025-06-18** and preserves its
+sessionful initialize/initialized/call/reinitialize flow even when a northbound
+client negotiates 2026-07-28. A northbound transport migration must not silently
+change the private Drupal bridge contract.
+
 ### 5b. Governance tiers (reference configuration)
 
 `config/config.example.json` models four environment-keyed least-privilege tiers.
