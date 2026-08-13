@@ -20,25 +20,21 @@
  *                     (default: "0.0.0.0"; ignored without TLS, which forces loopback)
  *   MCP_RATE_LIMIT    Max /mcp requests per window per client IP (0/unset = off)
  *   MCP_RATE_WINDOW_SEC  Rate-limit window in seconds (default: 60)
+ *   MCP_LEGACY_TRANSPORT "serve" (default) | "reject" for 2025-era clients
  */
 
 import { createServer as createHttpsServer } from "https";
 import { createServer as createHttpServer }  from "http";
 import { readFileSync }                      from "fs";
-import { randomUUID }                        from "node:crypto";
 
-import { Server }                   from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport }     from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema,
-  ListToolsRequestSchema,
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema,
-  ListPromptsRequestSchema,
-  GetPromptRequestSchema }   from "@modelcontextprotocol/sdk/types.js";
+import { createMcpHandler } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { toNodeHandler } from "@modelcontextprotocol/node";
 
 import { getSiteConfig, listSiteNames, getTlsConfig, CLIENT_VERSION } from "./lib/config.js";
 import { makeBearerCheck } from "./lib/http-auth.js";
-import { createMcpRequestHandler } from "./lib/http-handler.js";
+import { createLegacySessionHandler, createMcpRequestHandler } from "./lib/http-handler.js";
+import { createConnectorServerFactory } from "./lib/mcp-server.js";
 import { createRateLimiter } from "./lib/rate-limit.js";
 import { resolveSecurityConfig, assertNotReadOnly,
   assertDestructiveAllowed, assertGraphqlMutationAllowed,
@@ -290,19 +286,10 @@ function getPromptMessages(name, args) {
 }
 
 // ---------------------------------------------------------------------------
-// MCP Server construction
+// MCP Server surface
 // ---------------------------------------------------------------------------
 
-const server = new Server(
-  { name: "drupal-mcp-connector", version: CLIENT_VERSION },
-  { capabilities: { tools: {}, resources: {}, prompts: {} } }
-);
-
-// Tools
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: allDefinitions }));
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+async function callTool(name, args) {
   // eslint-disable-next-line security/detect-object-injection -- name is an MCP tool name from validated schema; allHandlers is a closed dispatch table built at startup
   const handler = allHandlers[name];
 
@@ -329,32 +316,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     return toolError(err);
   }
-});
+}
 
-// Resources
-server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: RESOURCES }));
-
-server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-  const { uri } = request.params;
-  try {
-    const data = await readResource(uri);
-    return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(data, null, 2) }] };
-  } catch (err) {
-    throw new Error(`Resource read failed (${uri}): ${err.message}`);
-  }
-});
-
-// Prompts — hand-authored workflows + one generated prompt per tool
-server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: ALL_PROMPTS }));
-
-server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-  const known = ALL_PROMPTS.find((p) => p.name === name);
-  if (!known) throw new Error(`Unknown prompt: "${name}"`);
-  const messages = WORKFLOW_PROMPT_NAMES.has(name)
-    ? getPromptMessages(name, args)
-    : getToolPromptMessages(name, args, definitionsByName);
-  return { description: known.description, messages };
+const buildConnectorServer = createConnectorServerFactory({
+  serverInfo: { name: "drupal-mcp-connector", version: CLIENT_VERSION },
+  tools: { definitions: allDefinitions, call: callTool },
+  resources: { definitions: RESOURCES, read: readResource },
+  prompts: {
+    definitions: ALL_PROMPTS,
+    get: (name, args) => WORKFLOW_PROMPT_NAMES.has(name)
+      ? getPromptMessages(name, args)
+      : getToolPromptMessages(name, args, definitionsByName),
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -362,22 +335,21 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 // ---------------------------------------------------------------------------
 
 const transport = process.env.MCP_TRANSPORT || "stdio";
+const reportMcpTransportStage = (stage) => {
+  console.error(`[drupal-mcp-connector] MCP ${stage} failed.`);
+};
 
 if (transport === "stdio") {
-  const stdioTransport = new StdioServerTransport();
-  await server.connect(stdioTransport);
+  serveStdio(buildConnectorServer, {
+    legacy: "serve",
+    onerror: () => reportMcpTransportStage("stdio-dispatch"),
+  });
   console.error(
     `[drupal-mcp-connector v${CLIENT_VERSION}] stdio transport active. ` +
     `${allDefinitions.length} tools · ${RESOURCES.length} resources · ${ALL_PROMPTS.length} prompts`
   );
 
 } else if (transport === "https" || transport === "http") {
-
-  // Dynamically import the HTTP transport — only needed in server mode
-  const { StreamableHTTPServerTransport } = await import(
-    "@modelcontextprotocol/sdk/server/streamableHttp.js"
-  );
-
   const tlsCfg     = getTlsConfig();
   const port       = tlsCfg.port;
   const allowHttp  = process.env.MCP_ALLOW_HTTP === "1";
@@ -436,21 +408,6 @@ if (transport === "stdio") {
     });
   }
 
-  // Map of sessionId → transport for multi-client support
-  const sessions = new Map();
-
-  // Create + connect a new Streamable-HTTP transport, registering it in the
-  // session map on initialize and pruning it on close.
-  async function openSession() {
-    const mcpTransport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: (id) => sessions.set(id, mcpTransport),
-    });
-    mcpTransport.onclose = () => sessions.delete(mcpTransport.sessionId);
-    await server.connect(mcpTransport);
-    return mcpTransport;
-  }
-
   const hasTls   = Boolean(tlsCfg.certPath && tlsCfg.keyPath);
   // Unauthenticated plain HTTP must never bind beyond loopback. A non-loopback
   // bind is allowed only alongside TLS, via an explicit MCP_BIND_HOST opt-in.
@@ -487,10 +444,22 @@ if (transport === "stdio") {
     );
   }
 
+  const legacyMode = process.env.MCP_LEGACY_TRANSPORT || "serve";
+  const modernMcpHandler = createMcpHandler(buildConnectorServer, {
+    legacy: "reject",
+    onerror: () => reportMcpTransportStage("modern-protocol"),
+  });
+  const modernHandler = toNodeHandler(modernMcpHandler, {
+    onerror: () => reportMcpTransportStage("modern-adapter"),
+  });
+  const legacyHandler = createLegacySessionHandler({
+    buildServer: buildConnectorServer,
+    mode: legacyMode,
+  });
   const requestHandler = createMcpRequestHandler({
     checkAuth,
-    sessions,
-    openSession,
+    modernHandler,
+    legacyHandler,
     toolCount: allDefinitions.length,
     rateLimiter,
   });

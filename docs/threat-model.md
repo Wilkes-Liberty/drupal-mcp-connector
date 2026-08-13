@@ -33,12 +33,14 @@ see [SECURITY.md](../SECURITY.md).
 | T2 | **Path traversal / cross-resource access** via `id`/`bundle`/`entityType` interpolated into JSON:API paths (e.g. `id="../../user/user/…"` to read PII despite an entity-type denylist) | `validateUuid(id)` + `validateMachineName(entityType, bundle)` at the backend, plus `encodeURIComponent` on every path segment | ✅ fixed (this pass) |
 | T3 | **Query-param injection** via filter `field`/`value` | `URLSearchParams` percent-encodes keys and values, so inputs cannot break out into separate params | ✅ controlled (see note below) |
 | T4 | **Secret leakage** into logs / errors / tool output | Secrets sourced from env; never logged; `OAuthError` carries status only; tool errors return `err.message` without credentials; `Authorization` header never echoed; `getSecuritySummary` omits credentials | ✅ controlled |
-| T5 | **Auth bypass on the HTTPS transport** | `/mcp` bearer-gated (GET+POST) before session handling; constant-time token compare (`timingSafeEqual` + length check); exact-path match (no `/mcp?…` bypass); only `/health` is open and leaks nothing sensitive | ✅ controlled |
+| T5 | **Auth bypass on the HTTPS transport** | `/mcp` bearer-gated (GET/POST/DELETE) before body parsing, protocol classification, or session handling; constant-time token compare (`timingSafeEqual` + length check); exact-path match; only `/health` is open and leaks nothing sensitive | ✅ controlled |
 | T6 | **Plaintext exposure / MITM** on the network | TLS mandatory off-localhost (process exits without certs unless `MCP_ALLOW_HTTP=1`, which force-binds loopback); HSTS + strict CSP headers | ✅ controlled |
 | T7 | **DoS / brute force** against `/mcp` | Optional per-IP rate limiting (`MCP_RATE_LIMIT`), checked before auth; recommend also rate-limiting at the reverse proxy | ✅ opt-in |
 | T8 | **SSRF** via request-time URL control | `baseUrl`/endpoints are operator config, not per-call tool inputs; `validateBaseUrl` enforces HTTPS for non-localhost | ✅ controlled |
 | T9 | **Unintended DB writes** via the drush `sql:query` bridge | Best-effort read-only allowlist (`validateSqlQuery`); single-statement execution. **Best-effort only** — see residual risks | ⚠️ partial |
 | T10 | **Over-privileged writes** (publishing, deleting, editing beyond intent) | Drupal-side governance is authoritative; connector security presets (`auditor`/`write-plane`/…) add a client-side cap; destructive ops gated | ✅ defense-in-depth |
+| T11 | **Protocol confusion / cross-era fallback** | One bounded body is classified once by the stable SDK and sent to exactly one arm; modern header/body version, method, and tool-name disagreements are rejected; a failed arm never falls through to the other | ✅ controlled |
+| T12 | **Internal error or secret disclosure at the HTTP boundary** | Expected malformed/oversized requests get stable 400/413 responses; unexpected conversion/classification/dispatch failures are sanitized, and partial responses are destroyed without echoing the error | ✅ controlled |
 
 ### Note on T3 (filter fields)
 
@@ -86,7 +88,7 @@ validator — it would break legitimate relationship filters.
 | Live link-check open redirects to private IPs | Mitigated (`redirect: "manual"`, #143) |
 | Omitted `security` defaults to open mode | Mitigated — default is `production-strict` (#140) |
 | GraphQL path skips entity allowlist + redaction | Mitigated by fail-closed gate — tools off unless `allowGraphql` (#142); raw results still bypass policy when opted in |
-| Transitive `@hono/node-server` / `postcss` advisories | Mitigated — MCP SDK `^1.30.0` + npm overrides (#128) |
+| Transitive MCP transport advisories | Mitigated — stable modular MCP 2.0.0 packages plus maintained npm overrides (#128, #172) |
 
 **When GraphQL is explicitly enabled**, treat results as Drupal-permission-only
 (no connector allowlist/redaction on that path). Prefer JSON:API entity tools

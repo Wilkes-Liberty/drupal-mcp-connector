@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MCP 2026-07-28 transport support (#172).** HTTP and stdio now serve the
+  current request-scoped protocol through the stable 2.0.0 server, Node, and
+  client packages. Modern HTTP requests use a fresh server instance, expose
+  `server/discover`, carry client metadata/capabilities in the request envelope,
+  and do not create `Mcp-Session-Id` state.
+
+### Changed
+
+- **One `/mcp` URL now has explicit dual-era routing.** Auth and rate limiting
+  run before a POST body is read once and bounded; the SDK classifier then sends
+  that parsed body to exactly one arm. Current requests use the strict modern
+  handler. 2025-era clients keep the existing sessionful handler by default and
+  can be disabled with `MCP_LEGACY_TRANSPORT=reject`. stdio uses the same server
+  factory and preserves both eras.
+- **MCP SDK packages are migrated to stable v2.** Runtime dependencies are now
+  `@modelcontextprotocol/server` and `@modelcontextprotocol/node` 2.0.0; the
+  matching client package supplies integration evidence. Node.js 20+ remains
+  the runtime floor.
+
+### Security
+
+- Unexpected request conversion, era classification, and handler failures no
+  longer expose internal error messages. Before response headers they return a
+  generic 500; after headers they terminate the response without a second write.
+  Protocol/header/body disagreements continue to return the SDK's typed 400
+  errors, and the outbound private-Drupal bridge remains pinned to its
+  sessionful 2025-06-18 contract.
+
 ## [2.2.2] - 2026-08-12
 
 ### Security

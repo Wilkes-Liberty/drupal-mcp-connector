@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-green)](https://nodejs.org)
 [![Drupal](https://img.shields.io/badge/drupal-10%20%7C%2011-blue)](https://drupal.org)
-[![MCP](https://img.shields.io/badge/MCP-2025--11--25-purple)](https://modelcontextprotocol.io)
+[![MCP](https://img.shields.io/badge/MCP-2026--07--28-purple)](https://modelcontextprotocol.io)
 
 Built by **Jeremy Michael Cerda** (opensource@wilkesliberty.com). Maintained by [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty).
 
@@ -220,6 +220,11 @@ Or with an absolute path to `src/index.js` / the installed package. For multi-cl
 or remote use, run the HTTPS transport and register the endpoint instead — see
 **[docs/getting-started.md](docs/getting-started.md)** and
 **[docs/mcp-clients.md](docs/mcp-clients.md)**.
+
+The same entry point serves current MCP 2026-07-28 clients and 2025-era clients.
+Current HTTP requests are stateless and never receive `Mcp-Session-Id`; legacy
+HTTP clients retain their existing session. Set `MCP_LEGACY_TRANSPORT=reject`
+to end the compatibility window deliberately. The `/mcp` URL does not change.
 
 ---
 

@@ -37,6 +37,20 @@ Clients must send `Authorization: Bearer <token>`. The `/health` endpoint stays
 open regardless. Loopback-only binds may omit the token (a startup warning is
 still logged when auth is off).
 
+For `/mcp`, rate limiting and bearer authentication run before any request body
+is parsed, converted, or classified. POST bodies are bounded to 1 MiB, read
+once, and dispatched to exactly one era. Current 2026-07-28 requests are
+stateless; 2025-era sessions are accepted by default or can be disabled with:
+
+```sh
+export MCP_LEGACY_TRANSPORT=reject
+```
+
+Unexpected conversion/classification/dispatch failures return only a generic
+500 before headers. If a handler already began a response, the connection is
+terminated without a second response. Diagnostics receive the failed stage,
+not the raw error or credentials.
+
 ## Bind address (opt-in)
 
 With TLS configured, `MCP_BIND_HOST` restricts which network interface the server
