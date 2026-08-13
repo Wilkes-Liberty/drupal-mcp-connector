@@ -41,8 +41,8 @@ export function createConnectorServerFactory({ serverInfo, tools, resources, pro
         return {
           contents: [{ uri, mimeType: "application/json", text: JSON.stringify(data, null, 2) }],
         };
-      } catch (error) {
-        throw new Error(`Resource read failed (${uri}): ${error.message}`);
+      } catch {
+        throw new Error(`Resource read failed (${uri})`);
       }
     });
 

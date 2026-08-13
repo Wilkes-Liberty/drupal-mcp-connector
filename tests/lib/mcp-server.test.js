@@ -59,4 +59,22 @@ describe("createConnectorServerFactory", () => {
     await client.close();
     await server.close();
   });
+
+  it("returns a stable non-secret error when resource reads throw non-Error values", async () => {
+    const current = surface();
+    current.resources.read.mockRejectedValue("resource-backend-secret");
+    const server = createConnectorServerFactory(current)({ era: "legacy" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const error = await client.readResource({ uri: "drupal://test" }).catch((caught) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe("Resource read failed (drupal://test)");
+
+    await client.close();
+    await server.close();
+  });
 });
