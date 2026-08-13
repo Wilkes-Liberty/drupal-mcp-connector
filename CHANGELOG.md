@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Bump `hono` to 4.13.1, `ip-address` to 10.5.0, and `fast-uri` to 3.1.5,
+  closing eight npm advisories (GHSA-mwp4-54f8-5fhr, GHSA-4xrf-jv44-h6hh,
+  GHSA-22jq-vg5j-6vgg, GHSA-7p8r-x3mc-p8w7, GHSA-8j4g-w8fx-2239,
+  GHSA-f23p-vx2j-j53r, GHSA-79qm-7rj5-m7r9, GHSA-54fx-42gc-7vw4). Lockfile-only
+  bumps within existing ranges; `npm audit` reports 0 vulnerabilities (#173).
+
 ### Changed
 
 - **CI: the attribution check is now the shared workflow.**
