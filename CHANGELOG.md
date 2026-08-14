@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-08-14
+
 ### Fixed
 - **One unresolvable site no longer kills tool discovery (#187).** 2.4.0's
   discovery gate resolved every configured site eagerly, so a deliberately
