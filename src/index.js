@@ -31,12 +31,12 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 
-import { getSiteConfig, listSiteNames, getTlsConfig, CLIENT_VERSION } from "./lib/config.js";
+import { listSiteNames, getTlsConfig, CLIENT_VERSION } from "./lib/config.js";
 import { makeBearerCheck } from "./lib/http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "./lib/http-handler.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
 import { createRateLimiter } from "./lib/rate-limit.js";
-import { callTool } from "./lib/dispatch.js";
+import { callTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
 import { filterDiscoverableTools } from "./lib/governance.js";
 
 // Tools — aggregated (single source of truth, side-effect-free) and per-tool prompts
@@ -236,7 +236,7 @@ const buildConnectorServer = createConnectorServerFactory({
   serverInfo: { name: "drupal-mcp-connector", version: CLIENT_VERSION },
   tools: {
     definitions: allDefinitions,
-    list: () => filterDiscoverableTools(allDefinitions, listSiteNames().map((n) => getSiteConfig(n))),
+    list: () => filterDiscoverableTools(allDefinitions, listResolvableSiteConfigs()),
     call: callTool,
   },
   resources: { definitions: RESOURCES, read: readResource },

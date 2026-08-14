@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **One unresolvable site no longer kills tool discovery (#187).** 2.4.0's
+  discovery gate resolved every configured site eagerly, so a deliberately
+  credential-less site — the inert break-glass tier keeps its Keychain item
+  absent by design — threw `requireSecureAuth` during `tools/list` and took
+  the whole tool surface down. Discovery now skips sites whose resolution
+  throws; execution against such a site still surfaces its own descriptive
+  error at call time, exactly as in 2.3.0.
+
 ## [2.4.0] - 2026-08-14
 
 ### Added
