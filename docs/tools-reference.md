@@ -51,7 +51,7 @@ Tools for creating, reading, updating, and deleting Drupal content nodes. Reads 
 | `drupal_list_nodes` | `type` | List nodes with filter, sort, pagination support. |
 | `drupal_search_content` | `query` | Search nodes by title substring. |
 | `drupal_create_node` | `type`, `title` | Create a node. Scalar fields via `fields`; **entity-reference fields (taxonomy, related content, media) via `relationships`** (JSON:API shape). `returning: "minimal"` for a compact identity+state response. |
-| `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. Reference fields go in `relationships`, not `fields`; `returning: "minimal"` bounds the response size. On a **published moderated** node, omitting `moderationState` defaults the write to `moderation_state: "draft"` (forward revision). |
+| `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. Reference fields go in `relationships`, not `fields`; `returning: "minimal"` bounds the response size. On a **published moderated** node, omitting `moderationState` defaults the write to `moderation_state: "draft"` (forward revision). An unrequested published-state flip in the persisted node is reported via `_statusChanged` (#171). |
 | `drupal_delete_node` | `type`, `id` | Permanently delete a node. Requires `allowDestructive: true`. Subject to entity allowlists like all node tools. |
 
 ### drupal_get_node
@@ -185,8 +185,8 @@ requires `allowPublish: true` and an explicit `status: true`.
 | `drupal_list_media_types` | — | List all media types (image, document, remote_video, etc.). |
 | `drupal_list_media` | — | List media entities. Filter by type, status, name. |
 | `drupal_get_media` | `type`, `id` | Fetch a single media entity by UUID. |
-| `drupal_create_media` | `type`, `name` | Create a media entity. Pass source field in `fields`. Defaults unpublished. |
-| `drupal_update_media` | `type`, `id` | Update a media entity. Publish gated by `allowPublish`. |
+| `drupal_create_media` | `type`, `name` | Create a media entity. Pass source field in `fields`; entity-reference values in JSON:API linkage shape (`{ data: { type, id } }`) are sent as relationships automatically (#171). Defaults unpublished. |
+| `drupal_update_media` | `type`, `id` | Update a media entity. Partial: `status` is only sent when provided (publish gated by `allowPublish`). Reference-shaped `fields` values route to relationships automatically; an unrequested published-state flip is reported via `_statusChanged` (#171). |
 | `drupal_delete_media` | `type`, `id` | Delete a media entity. Requires `allowDestructive: true`. |
 | `drupal_upload_file` | `filePath`, `bundle`, `fieldName` | Upload a local file under `MCP_UPLOAD_ROOT` (or cwd). Returns file UUID for use in create_media. |
 | `drupal_upload_file_and_create_media` | `filePath`, `mediaType`, `fieldName` | Upload + create media in one step. Media defaults unpublished. |
@@ -264,7 +264,7 @@ Works with **any** Drupal entity type — paragraphs, commerce products, webform
 | `drupal_entity_list` | `entityType`, `bundle` | List entities with filter, sort, pagination. |
 | `drupal_entity_get` | `entityType`, `bundle`, `id` | Fetch any entity by UUID. |
 | `drupal_entity_create` | `entityType`, `bundle` | Create any entity with arbitrary attributes and relationships. `returning: "minimal"` for a compact response. |
-| `drupal_entity_update` | `entityType`, `bundle`, `id` | Update any entity. `returning: "minimal"` for a compact response. |
+| `drupal_entity_update` | `entityType`, `bundle`, `id` | Update any entity. `returning: "minimal"` for a compact response. `status` is strictly opt-in; if a server-side gate flips the published state anyway, the response carries a `_statusChanged` marker instead of a silent success (#171). |
 | `drupal_entity_delete` | `entityType`, `bundle`, `id` | Delete any entity. Requires `allowDestructive: true`. |
 | `drupal_security_info` | — | Show active security configuration for a site. |
 

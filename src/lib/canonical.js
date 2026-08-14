@@ -66,3 +66,51 @@ export function normalizeRelationship(ref) {
   const [entityType = null, bundle = null] = (ref.type || "").split("--");
   return { id: ref.id, entityType, bundle };
 }
+
+/**
+ * Whether a field value is a JSON:API relationship linkage (`{ data: ... }`
+ * where data is null, one `{ type, id }` reference, or an array of them —
+ * an empty array clears a multi-value reference).
+ *
+ * Composite attribute values (e.g. `{ value, format }` text fields) have no
+ * `data` key and are never matched, so ordinary attributes pass through.
+ *
+ * @param {*} value A caller-supplied field value.
+ * @returns {boolean} True when the value is relationship-shaped.
+ */
+export function isRelationshipLinkage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (!Object.prototype.hasOwnProperty.call(value, "data")) return false;
+  const isRef = (d) => Boolean(d) && typeof d === "object" && !Array.isArray(d)
+    && typeof d.type === "string" && typeof d.id === "string";
+  const { data } = value;
+  if (data === null) return true;
+  if (Array.isArray(data)) return data.every(isRef);
+  return isRef(data);
+}
+
+/**
+ * Split a caller field map into JSON:API attributes and relationships (#171).
+ *
+ * Entity-reference values passed under a `fields` map used to be forwarded as
+ * attributes, which Drupal rejects with a 422 ("relationship fields were
+ * provided as attributes"). Relationship-shaped values are routed to the
+ * `relationships` document member instead, so field-map tools accept the same
+ * reference shape as `drupal_entity_update`.
+ *
+ * @param {object} fields Caller-supplied field map.
+ * @returns {{attributes: object, relationships: ?object}} Split maps;
+ *   `relationships` is null when no value was relationship-shaped.
+ */
+export function splitReferenceFields(fields) {
+  const attrEntries = [];
+  const relEntries = [];
+  for (const entry of Object.entries(fields)) {
+    const [, value] = entry;
+    (isRelationshipLinkage(value) ? relEntries : attrEntries).push(entry);
+  }
+  return {
+    attributes: Object.fromEntries(attrEntries),
+    relationships: relEntries.length ? Object.fromEntries(relEntries) : null,
+  };
+}

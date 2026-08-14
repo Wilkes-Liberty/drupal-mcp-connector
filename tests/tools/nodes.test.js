@@ -335,3 +335,29 @@ describe("body text format and summary handling", () => {
     expect(arg.attributes.body.summary).toBe("");
   });
 });
+
+describe("#171 status stays opt-in on node updates", () => {
+  it("update_node without status on a published unmoderated node sends neither status nor moderation_state", async () => {
+    await handlers.drupal_update_node({ type: "article", id: "n1", title: "Rename only" });
+    const sent = backend.updateEntity.mock.calls[0][0];
+    expect(sent.attributes).not.toHaveProperty("status");
+    expect(sent.attributes).not.toHaveProperty("moderation_state");
+  });
+});
+
+describe("#171 unrequested published-state flip is flagged on node updates", () => {
+  it("flags a flip observed in the post-write re-read", async () => {
+    // Pre-read published; the persisted node re-reads unpublished.
+    backend.getEntity
+      .mockResolvedValueOnce(canonicalNode({ status: true }))
+      .mockResolvedValue(canonicalNode({ status: false }));
+    const out = await handlers.drupal_update_node({ type: "article", id: "n1", title: "Rename only" });
+    expect(out._statusChanged).toMatchObject({ from: true, to: false });
+  });
+
+  it("does not flag when the caller passed an explicit moderationState", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({ status: false }));
+    const out = await handlers.drupal_update_node({ type: "article", id: "n1", moderationState: "draft" });
+    expect(out).not.toHaveProperty("_statusChanged");
+  });
+});

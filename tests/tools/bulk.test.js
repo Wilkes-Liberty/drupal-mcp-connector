@@ -221,3 +221,18 @@ describe("bulk tools", () => {
     expect(names).toContain("drupal_bulk_update");
   });
 });
+
+describe("#171 bulk updates keep status opt-in", () => {
+  it("a relationships-only bulk item sends neither status nor moderation_state", async () => {
+    backend.getEntity.mockResolvedValue({ id: "u1", entityType: "media", bundle: "video_file", status: true, fields: {} });
+    backend.updateEntity.mockResolvedValue({ id: "u1" });
+    const out = await handlers.drupal_bulk_update({
+      entityType: "media", bundle: "video_file",
+      items: [{ id: "u1", relationships: { field_poster: { data: { type: "media--image", id: "u2" } } } }],
+    });
+    expect(out.summary).toEqual({ updated: 1, failed: 0 });
+    const sent = backend.updateEntity.mock.calls[0][0];
+    expect(sent.attributes).not.toHaveProperty("status");
+    expect(sent.attributes).not.toHaveProperty("moderation_state");
+  });
+});
