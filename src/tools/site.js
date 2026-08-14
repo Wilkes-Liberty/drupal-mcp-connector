@@ -7,6 +7,7 @@
  */
 
 import { getSiteConfig, listSiteNames } from "../lib/config.js";
+import { governanceStatus } from "../lib/governance.js";
 import { resolveBackend } from "../lib/backends/index.js";
 
 // ---------------------------------------------------------------------------
@@ -49,6 +50,19 @@ async function listConfiguredSites() {
   return { sites: listSiteNames() };
 }
 
+/**
+ * Per-site source-governance condition (#176). The one governed-path
+ * diagnostic that stays callable while governance is failing, so an operator
+ * can see WHICH required condition failed. Never includes credentials.
+ *
+ * @param {object} args - { site? } (a named site narrows the report).
+ * @returns {Promise<{sites: object[]}>} required/ok/reason per site.
+ */
+async function getGovernanceStatus({ site: siteName } = {}) {
+  const names = siteName ? [siteName] : listSiteNames();
+  return { sites: await governanceStatus(names.map((n) => getSiteConfig(n))) };
+}
+
 // ---------------------------------------------------------------------------
 // Definitions
 // ---------------------------------------------------------------------------
@@ -71,6 +85,14 @@ export const definitions = [
     },
   },
   {
+    name: "drupal_governance_status",
+    description: "Report each configured site's source-governance condition: whether governance is required, whether the source contract verifies, and the failed condition when it does not. Callable even while governed paths are denied — this is the diagnostic for that denial.",
+    inputSchema: {
+      type: "object",
+      properties: { site: { type: "string" } },
+    },
+  },
+  {
     name: "drupal_list_sites",
     description: "List all named Drupal sites configured in config.json. Useful for multi-site setups.",
     inputSchema: {
@@ -84,4 +106,5 @@ export const handlers = {
   drupal_site_info:          getSiteInfo,
   drupal_list_content_types: listContentTypes,
   drupal_list_sites:         listConfiguredSites,
+  drupal_governance_status:  getGovernanceStatus,
 };

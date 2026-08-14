@@ -7,7 +7,7 @@
   },
 
   "_security_options": {
-    "_comment": "All optional. apiTokenEnv: read the Bearer token from this env var instead of apiToken (keeps secrets out of the config file). requireSecureAuth: reject anon/basic, require HTTPS+Bearer (recommended for production). Env overrides: MCP_CLIENT_ID overrides or disables the outbound identity header; MCP_AUTH_TOKEN requires bearer auth on the HTTPS /mcp endpoint; MCP_BIND_HOST restricts the listen interface (with TLS). See docs/security-hardening.md."
+    "_comment": "All optional. apiTokenEnv: read the Bearer token from this env var instead of apiToken (keeps secrets out of the config file). requireSecureAuth: reject anon/basic, require HTTPS+Bearer (recommended for production). requireGovernance: deny every governed path unless the source governance contract (GET /drupal-mcp/readiness, mcp_sentinel >= 2.4.0) verifies — no ungoverned JSON:API/GraphQL fallback; recommended wherever mcp_sentinel governs the site. Env overrides: MCP_CLIENT_ID overrides or disables the outbound identity header; MCP_AUTH_TOKEN requires bearer auth on the HTTPS /mcp endpoint; MCP_BIND_HOST restricts the listen interface (with TLS). See docs/security-hardening.md."
   },
 
   "_governance_tiers": {
@@ -28,6 +28,7 @@
       "_comment": "Content tier. Content/media/term CRUD; config read-only; cannot publish (server-side editorial gate). No drushSsh.",
       "baseUrl":           "https://api.int.wilkesliberty.com",
       "requireSecureAuth": true,
+      "requireGovernance": true,
       "api":               "jsonapi",
       "oauth": {
         "tokenUrl":        "/oauth/token",

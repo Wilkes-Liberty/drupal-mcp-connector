@@ -36,69 +36,12 @@ import { makeBearerCheck } from "./lib/http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "./lib/http-handler.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
 import { createRateLimiter } from "./lib/rate-limit.js";
-import { resolveSecurityConfig, assertNotReadOnly,
-  assertDestructiveAllowed, assertGraphqlMutationAllowed,
-  SecurityError }            from "./lib/security.js";
-import { toolError, toolResult }    from "./lib/errors.js";
-import { BackendCapabilityError, BackendResolutionError } from "./lib/backends/errors.js";
+import { callTool } from "./lib/dispatch.js";
+import { filterDiscoverableTools } from "./lib/governance.js";
 
 // Tools — aggregated (single source of truth, side-effect-free) and per-tool prompts
 import { allDefinitions, allHandlers, definitionsByName } from "./tools/index.js";
 import { buildToolPrompts, getToolPromptMessages } from "./lib/tool-prompts.js";
-import { inferOperation } from "./lib/operations.js";
-
-// ---------------------------------------------------------------------------
-// Security middleware — runs BEFORE every tool handler
-//
-// Operation intent (read/write/delete/graphql) is inferred from the tool name
-// prefix rather than trusting per-tool metadata, so a new tool that follows the
-// naming convention is gated automatically. The matched operation drives which
-// assertions from lib/security.js run against the resolved per-site policy.
-// ---------------------------------------------------------------------------
-
-/**
- * Derive the entity type a tool acts on, for destructive-allow assertions.
- *
- * @param {string} toolName - The MCP tool name.
- * @param {object} args     - The tool arguments.
- * @returns {string} Explicit args.entityType when present, else the suffix
- *   parsed from the tool name (e.g. "node" from "drupal_delete_node"),
- *   falling back to "entity".
- */
-function extractEntityType(toolName, args) {
-  if (args?.entityType) return args.entityType;
-  const m = toolName.match(/^drupal_(?:delete|create|update|get|list)_(.+)$/);
-  return m ? m[1] : "entity";
-}
-
-/**
- * Apply per-site security assertions before dispatching to a tool handler.
- *
- * @param {string}   toolName - The MCP tool name.
- * @param {object}   args     - Tool arguments (may carry `site`, `id`, etc.).
- * @param {Function} handler  - The resolved tool handler.
- * @returns {Promise<*>} The handler's result.
- * @throws {SecurityError} If the resolved policy forbids the inferred operation.
- */
-async function securityMiddleware(toolName, args, handler) {
-  // Tools with no site context skip per-site checks
-  if (toolName === "drupal_list_sites") return handler(args);
-
-  const site = getSiteConfig(args?.site);
-  const sec  = resolveSecurityConfig(site);
-  const op   = inferOperation(toolName);
-
-  if (op === "delete") {
-    assertDestructiveAllowed(sec, extractEntityType(toolName, args), args?.id ?? "?");
-    assertNotReadOnly(sec, toolName);
-  } else if (op === "write") {
-    assertNotReadOnly(sec, toolName);
-  } else if (op === "graphql" && args?.query) {
-    assertGraphqlMutationAllowed(sec, args.query);
-  }
-
-  return handler(args);
-}
 
 // ---------------------------------------------------------------------------
 // MCP Resources — browsable, always-fresh site context
@@ -286,41 +229,16 @@ function getPromptMessages(name, args) {
 }
 
 // ---------------------------------------------------------------------------
-// MCP Server surface
+// MCP Server surface — dispatch (middleware + callTool) lives in lib/dispatch.js
 // ---------------------------------------------------------------------------
-
-async function callTool(name, args) {
-  // eslint-disable-next-line security/detect-object-injection -- name is an MCP tool name from validated schema; allHandlers is a closed dispatch table built at startup
-  const handler = allHandlers[name];
-
-  if (!handler) {
-    return toolError(new Error(
-      `Unknown tool "${name}". Call drupal_list_entity_types to discover available resources.`
-    ));
-  }
-
-  try {
-    const result = await securityMiddleware(name, args ?? {}, handler);
-    return toolResult(result);
-  } catch (err) {
-    // Translate known error classes into clear, non-leaky isError responses;
-    // anything else falls through to toolError for a generic envelope.
-    if (err instanceof SecurityError) {
-      return { content: [{ type: "text", text: `Access denied: ${err.message}` }], isError: true };
-    }
-    if (err instanceof BackendCapabilityError) {
-      return { content: [{ type: "text", text: `Not supported by this site's backend: ${err.message}` }], isError: true };
-    }
-    if (err instanceof BackendResolutionError) {
-      return { content: [{ type: "text", text: `Backend resolution failed: ${err.message}` }], isError: true };
-    }
-    return toolError(err);
-  }
-}
 
 const buildConnectorServer = createConnectorServerFactory({
   serverInfo: { name: "drupal-mcp-connector", version: CLIENT_VERSION },
-  tools: { definitions: allDefinitions, call: callTool },
+  tools: {
+    definitions: allDefinitions,
+    list: () => filterDiscoverableTools(allDefinitions, listSiteNames().map((n) => getSiteConfig(n))),
+    call: callTool,
+  },
   resources: { definitions: RESOURCES, read: readResource },
   prompts: {
     definitions: ALL_PROMPTS,
