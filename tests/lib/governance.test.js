@@ -87,6 +87,20 @@ describe("verifySourceGovernance", () => {
     expect(result.reason).toBe("sentinel_unreachable");
   });
 
+  it("reports credential acquisition failure distinctly from an unreachable source", async () => {
+    // The OAuth token request is the FIRST fetch an oauth site makes; its
+    // failure must not be blamed on Sentinel.
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("token endpoint down"));
+    const site = governedSite({
+      _name: "gov-oauth-fail",
+      apiToken: undefined,
+      oauth: { tokenUrl: "/oauth/token", clientId: "c", clientSecret: "s", grant: "client_credentials" },
+    });
+    const result = await verifySourceGovernance(site);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("credential_acquisition_failed");
+  });
+
   it("caches a passing verification inside the TTL and re-verifies beyond it", async () => {
     vi.useFakeTimers();
     vi.mocked(fetch).mockResolvedValue(ready());

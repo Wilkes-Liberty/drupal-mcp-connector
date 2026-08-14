@@ -93,16 +93,24 @@ export async function verifySourceGovernance(site, { force = false } = {}) {
  */
 async function probeReadiness(site) {
   const checkedAt = Date.now();
+
+  // Credential construction is its own failure class: an OAuth token the
+  // connector cannot acquire is the connector's principal failing, and must
+  // not be misreported as the source being unreachable.
+  let headers;
+  try {
+    headers = {
+      Accept: "application/json",
+      ...clientHeaders(),
+      ...(await authHeadersAsync(site)),
+    };
+  } catch {
+    return { ok: false, reason: "credential_acquisition_failed", checkedAt };
+  }
+
   let res;
   try {
-    res = await fetch(`${site.baseUrl}/drupal-mcp/readiness`, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...clientHeaders(),
-        ...(await authHeadersAsync(site)),
-      },
-    });
+    res = await fetch(`${site.baseUrl}/drupal-mcp/readiness`, { method: "GET", headers });
   } catch {
     // Network detail (addresses, DNS text) is deliberately not propagated.
     return { ok: false, reason: "sentinel_unreachable", checkedAt };
