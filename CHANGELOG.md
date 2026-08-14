@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Source governance is now enforceable on every governed product path
+  (#176).** A site with `requireGovernance: true` requires the Drupal
+  source's governance contract to verify before any tool call runs against
+  it: the connector probes `GET /drupal-mcp/readiness` as its own principal
+  (mcp_sentinel ≥ 2.4.0), caches a passing verdict for 60 seconds, and
+  re-proves it after that. A failed, stale, or unreachable verification
+  denies tool discovery and execution with the source's own stable reason —
+  it never falls back to a plain JSON:API or GraphQL path, on any backend or
+  bridge. The new `drupal_governance_status` tool stays callable while
+  governance is failing and reports which required condition failed, without
+  credentials. Ungoverned sites are untouched.
+
+### Changed
+
+- The security middleware and tools/call dispatch moved from the entry point
+  into `src/lib/dispatch.js` (side-effect-free, testable per backend); the
+  entry point now only boots transports. Tool discovery accepts a per-request
+  `list` hook so governance can gate what is discoverable.
+
 ## [2.3.0] - 2026-08-13
 
 ### Added

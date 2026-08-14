@@ -98,6 +98,15 @@ Request a token and store it as `apiToken` — or, to keep it out of the config 
 
 `requireSecureAuth: true` rejects anonymous/Basic auth and non-HTTPS `baseUrl` values — recommended for production and any write plane.
 
+`requireGovernance: true` makes source governance a hard requirement: before any
+tool runs against the site, the connector verifies the source's governance
+contract (`GET /drupal-mcp/readiness`, authenticated as the connector's own
+principal — MCP Sentinel present, an applicable active policy profile, the
+enforcement wiring live). A failed, stale, or unreachable verification denies
+tool discovery and execution instead of falling back to a plain JSON:API or
+GraphQL path. `drupal_governance_status` stays callable throughout and names
+the failed condition. Recommended wherever MCP Sentinel governs the site.
+
 ### Option B — Basic Auth (local dev only)
 
 ```json

@@ -280,6 +280,7 @@ interface SiteConfig {
   apiToken?: string;                     // Bearer token (preferred)
   apiTokenEnv?: string;                  // Read the Bearer token from this env var instead
   requireSecureAuth?: boolean;           // Reject anon/Basic/HTTP; require HTTPS + Bearer
+  requireGovernance?: boolean;           // Deny every governed path unless the source's governance contract verifies
   username?: string;                     // Basic auth fallback (local dev)
   password?: string;
   oauth?: {                              // OAuth2 client_credentials write plane

@@ -12,7 +12,9 @@ import { Server } from "@modelcontextprotocol/server";
  *
  * @param {object} surface
  * @param {{name: string, version: string}} surface.serverInfo
- * @param {{definitions: Array<object>, call: (name: string, args: object, context: object) => Promise<object>}} surface.tools
+ * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, call: (name: string, args: object, context: object) => Promise<object>}} surface.tools
+ *   `definitions` is the full static surface (schema projection); the optional
+ *   `list` hook decides what is DISCOVERABLE per request (governance gating).
  * @param {{definitions: Array<object>, read: (uri: string) => Promise<object>}} surface.resources
  * @param {{definitions: Array<object>, get: (name: string, args: object) => Array<object>}} surface.prompts
  * @returns {(context: import("@modelcontextprotocol/server").McpRequestContext) => Server}
@@ -26,7 +28,9 @@ export function createConnectorServerFactory({ serverInfo, tools, resources, pro
       { capabilities: { tools: {}, resources: {}, prompts: {} } }
     );
 
-    server.setRequestHandler("tools/list", async () => ({ tools: tools.definitions }));
+    server.setRequestHandler("tools/list", async () => ({
+      tools: tools.list ? await tools.list() : tools.definitions,
+    }));
     server.setRequestHandler("tools/call", async (request, context) => {
       const { name, arguments: args } = request.params;
       const result = await tools.call(name, args ?? {}, context);
