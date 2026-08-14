@@ -5,7 +5,11 @@ vi.mock("../../src/lib/config.js", async (orig) => {
   const actual = await orig();
   return {
     ...actual,
+    listSiteNames: vi.fn(() => ["gov", "open", "prod-admin"]),
     getSiteConfig: vi.fn((name) => {
+      if (name === "prod-admin") {
+        throw new Error('Site "prod-admin": requireSecureAuth is set but no Bearer apiToken or OAuth2 client credentials are configured');
+      }
       if (name === "gov" || name === "gov-ro") {
         return {
           _name: name,
@@ -27,7 +31,7 @@ vi.mock("../../src/lib/config.js", async (orig) => {
 });
 
 import fetch from "node-fetch";
-import { securityMiddleware, callTool } from "../../src/lib/dispatch.js";
+import { securityMiddleware, callTool, listResolvableSiteConfigs } from "../../src/lib/dispatch.js";
 import { GovernanceError, clearGovernanceCache } from "../../src/lib/governance.js";
 import { SecurityError } from "../../src/lib/security.js";
 
@@ -135,5 +139,15 @@ describe("callTool governance envelope", () => {
     expect(text).toContain("Source governance");
     expect(text).toContain("no_designated_consumer");
     expect(text).not.toContain("tok-secret-value");
+  });
+});
+
+describe("listResolvableSiteConfigs", () => {
+  it("skips sites whose resolution throws, so one inert site cannot kill discovery", () => {
+    // prod-admin is the deliberately credential-less break-glass site: its
+    // Keychain item is kept absent on purpose, so resolution throws. That must
+    // exclude it from the discovery pool, never break tools/list (2.4.0 bug).
+    const sites = listResolvableSiteConfigs();
+    expect(sites.map((s) => s._name)).toEqual(["gov", "open"]);
   });
 });

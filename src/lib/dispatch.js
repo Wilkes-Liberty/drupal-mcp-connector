@@ -8,7 +8,7 @@
  * this module is denial on every path, with no ungoverned fallback below it.
  */
 
-import { getSiteConfig } from "./config.js";
+import { getSiteConfig, listSiteNames } from "./config.js";
 import { resolveSecurityConfig, assertNotReadOnly,
   assertDestructiveAllowed, assertGraphqlMutationAllowed,
   SecurityError } from "./security.js";
@@ -17,6 +17,26 @@ import { BackendCapabilityError, BackendResolutionError } from "./backends/error
 import { inferOperation } from "./operations.js";
 import { assertSourceGovernance, GovernanceError, GOVERNANCE_DIAGNOSTIC_TOOLS } from "./governance.js";
 import { allHandlers } from "../tools/index.js";
+
+/**
+ * Resolve every configured site that CAN resolve, skipping the ones that
+ * throw. A site can legitimately be unresolvable on purpose — the break-glass
+ * tier keeps its credential absent to stay inert — and discovery must treat
+ * such a site as simply unable to serve tools, never let it kill tools/list
+ * for everyone (the 2.4.0 regression). Execution against an unresolvable
+ * site still surfaces its own descriptive error at call time.
+ *
+ * @returns {Array<object>} Resolved site configs.
+ */
+export function listResolvableSiteConfigs() {
+  return listSiteNames().flatMap((name) => {
+    try {
+      return [getSiteConfig(name)];
+    } catch {
+      return [];
+    }
+  });
+}
 
 /**
  * Derive the entity type a tool acts on, for destructive-allow assertions.
