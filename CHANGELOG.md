@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Versioning policy states the post-1.0 guarantees it actually operates under
+  (#195).** `docs/versioning.md` still opened with a pre-1.0 section explaining
+  that minor releases might break the stable surface because the project was on
+  `0.x`, and pointed at a closed tracking issue. The package has been past 1.0
+  for some time, so the document told operators the compatibility guarantees
+  were not yet in force when they were. The stable-surface list, deprecation
+  policy and runtime support were already correct and are unchanged.
+
+### Fixed
+- **Whitepaper no longer calls the companion governance module pre-1.0/alpha
+  (#195).** `docs/whitepaper.md` described `drupal/mcp_sentinel` as alpha and
+  requiring Drupal `^10.3 || ^11`. It is a shipping module at 2.9.0 with a floor
+  of `^10.6 || ^11.3` on PHP 8.3 or newer — the stale constraint would have sent
+  a reader to install it on a combination it does not support.
+
 ## [2.6.0] - 2026-08-15
 
 ### Added
