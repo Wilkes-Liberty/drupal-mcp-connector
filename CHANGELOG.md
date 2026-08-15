@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-08-15
+
 ### Added
 - **Secure-install verifier (`npm run verify`, #180).** Produces evidence that
   an installation carries the secure, tenant-neutral defaults the governed
