@@ -49,6 +49,15 @@ const USAGE = `drupal-mcp-connector verify
   --config <path>   Verify this configuration file instead of the loaded one.
   --live            Also verify a running target (needs credentials in env).
   --site <name>     Which site to verify live. Defaults to the default site.
+  --content-target <uuid>
+                    A node the live run may attempt a publish-bearing edit
+                    against. Without it that probe is skipped: a PATCH at a
+                    non-existent id returns 404 before any access check, so
+                    scoring it would claim the publish gate holds without
+                    reaching it. Use a NON-PRODUCTION target you would not
+                    mind being published if the gate fails.
+  --content-target-type <type>
+                    JSON:API resource type of that target (default node--article).
   --json            Print the evidence document instead of a summary.
   --help            Show this message.
 `;
@@ -108,7 +117,14 @@ async function main() {
     // The real bridge client, so the governed-tool probes exercise the real
     // contract (MCP session, tool_api name, tool-level refusal) rather than a
     // hand-rolled JSON-RPC body the server would reject as malformed.
-    evidence.push(await verifyLive(site, { transport: fetch, callTool: callServerTool }));
+    evidence.push(
+      await verifyLive(site, {
+        transport: fetch,
+        callTool: callServerTool,
+        contentTarget: args["content-target"] ? String(args["content-target"]) : null,
+        contentTargetType: args["content-target-type"] ? String(args["content-target-type"]) : null,
+      }),
+    );
   }
 
   if (args.json) {

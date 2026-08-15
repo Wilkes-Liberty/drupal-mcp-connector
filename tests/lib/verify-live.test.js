@@ -71,10 +71,15 @@ const refusingCallTool = async () => {
   throw new Error("Server-tool tool_api.mcp_sentinel_config_set error (-32000): access denied by MCP Sentinel policy");
 };
 
+/** A real node id: a healthy live run supplies one so the publish gate is
+ * actually reached (see the content-edit probe). */
+const CONTENT_TARGET = "11111111-2222-4333-8444-555555555555";
+
 const run = (over = {}, transportOverrides = {}, callTool = refusingCallTool) =>
   verifyLive(site(over), {
     transport: scriptedTransport(transportOverrides),
     callTool,
+    contentTarget: CONTENT_TARGET,
     now: () => new Date("2026-08-15T12:00:00Z"),
   });
 
@@ -265,6 +270,15 @@ describe("verifyLive — negative probes", () => {
     expect(statusOf(served, "probe_content_edit")).toBe("fail");
   });
 
+  it("skips the content edit when the run supplies no target", async () => {
+    const noTarget = await verifyLive(site(), {
+      transport: scriptedTransport(),
+      callTool: refusingCallTool,
+      now: () => new Date("2026-08-15T12:00:00Z"),
+    });
+    expect(statusOf(noTarget, "probe_content_edit")).toBe("skipped");
+  });
+
   it("records the refusal code the target returned, as evidence", async () => {
     const result = await run();
     expect(findingsOf(result, "probe_mass_read")).toEqual([]);
@@ -353,5 +367,53 @@ describe("verifyLive — a bridge error is not automatically a refusal", () => {
     const skipped = await runWith(throwing("Server-tool session initialize failed 503: unavailable"));
     const skippedProbe = skipped.checks.find((c) => c.id === "probe_config_change");
     expect(skippedProbe.observed).toMatchObject({ outcome: "unexercised" });
+  });
+});
+
+describe("verifyLive — the content-edit probe must reach the publish gate", () => {
+  /**
+   * A PATCH at a UUID that does not exist returns 404 before any access check
+   * runs, so scoring it as "refused" would claim the publish gate holds
+   * without ever reaching it — the same trap as an unexercised bridge call.
+   */
+  const runEdit = (over = {}, contentTarget, editReply) =>
+    verifyLive(site(over), {
+      transport: scriptedTransport(editReply ? { contentEdit: editReply } : {}),
+      callTool: refusingCallTool,
+      contentTarget,
+      now: () => new Date("2026-08-15T12:00:00Z"),
+    });
+
+  it("skips when no target is supplied, naming what it could not prove", async () => {
+    const result = await runEdit();
+    expect(statusOf(result, "probe_content_edit")).toBe("skipped");
+    expect(findingsOf(result, "probe_content_edit").join(" ")).toMatch(/target/i);
+    expect(result.summary.ok).toBe(false);
+  });
+
+  it("passes when a real target is refused by policy (403)", async () => {
+    const result = await runEdit({}, "11111111-2222-4333-8444-555555555555", () => reply(403, { errors: [{ code: "denied_publish" }] }));
+    expect(statusOf(result, "probe_content_edit")).toBe("pass");
+    const probe = result.checks.find((c) => c.id === "probe_content_edit");
+    expect(probe.observed).toMatchObject({ status: 403 });
+  });
+
+  it("fails — loudly — when the publish-bearing edit is accepted", async () => {
+    const result = await runEdit({}, "11111111-2222-4333-8444-555555555555", () => reply(200, { data: { id: "x" } }));
+    expect(statusOf(result, "probe_content_edit")).toBe("fail");
+    expect(findingsOf(result, "probe_content_edit").join(" ")).toMatch(/accepted|published/i);
+  });
+
+  it("skips a 404 rather than counting 'not found' as 'refused'", async () => {
+    const result = await runEdit({}, "11111111-2222-4333-8444-555555555555", () => reply(404, { errors: [{ code: "not_found" }] }));
+    expect(statusOf(result, "probe_content_edit")).toBe("skipped");
+    expect(findingsOf(result, "probe_content_edit").join(" ")).toMatch(/did not reach|not found|proves nothing/i);
+  });
+
+  it("skips a malformed or server-error response too", async () => {
+    for (const status of [400, 422, 500]) {
+      const result = await runEdit({}, "11111111-2222-4333-8444-555555555555", () => reply(status, {}));
+      expect(statusOf(result, "probe_content_edit"), `status ${status}`).toBe("skipped");
+    }
   });
 });

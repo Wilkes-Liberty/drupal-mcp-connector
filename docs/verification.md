@@ -56,7 +56,7 @@ A served probe is the finding.
 |---|---|---|
 | `probe_mass_read` | a 5000-item collection read | the source refuses it (e.g. `read_budget_exceeded`) **or** serves a materially smaller page — a cap is a bound, and reporting one as an unbounded read would train operators to ignore the verifier. A success whose size cannot be measured is `skipped`, never a pass. |
 | `probe_config_change` | a configuration write through the connector's own bridge client — the real MCP session, the governed `tool_api.mcp_sentinel_config_set` name and its argument shape, refusal surfaced as a tool error | the source refuses it. **Skipped** for a principal that holds `mcp_config` (a developer or break-glass role is *supposed* to write config; failing its healthy run would be a false finding). |
-| `probe_content_edit` | an edit that would publish live content | the source refuses it. Skipped for a principal with no write scope, where a refusal would only prove the scope is missing. |
+| `probe_content_edit` | a publish-bearing edit (`status: true`, nothing else) against the node given by `--content-target` | the source refuses it with **403/401** — an authorisation decision. A 404, 422 or 5xx is `skipped`: a PATCH at an id that does not exist returns 404 *before* any access check, so counting it would claim the publish gate holds without ever reaching it. Skipped entirely when no target is supplied, or for a principal with no write scope. |
 
 **A thrown error is not automatically a refusal.** The bridge client throws for
 several unrelated reasons, and only some of them mean the source decided: a
@@ -67,10 +67,17 @@ not found, invalid params) mean the probe never reached policy, and are
 `skipped` with the reason recorded. Scoring those as refusals is exactly how a
 verifier ends up green for an install that proved nothing.
 
-The probes write nothing: the content probe targets a non-existent id, and a
-governed stack refuses on policy before persistence. Run them against a
-non-production environment first, and expect audit rows on the source — a
-refusal is a security event and is recorded as one.
+The config probe writes nothing when the gate holds. The content probe is
+deliberately the one exception, because a publish gate cannot be proven without
+attempting a publish: supply `--content-target <uuid>` pointing at a node on a
+**non-production** target that you would not mind being published if the floor
+fails. The payload sets only `status: true`, so an accepted edit changes nothing
+else — and an accepted edit is the finding, reported loudly. Expect audit rows
+on the source either way: a refusal is a security event and is recorded as one.
+
+```bash
+npm run verify -- --live --site staging --content-target 2f1c…  --json > evidence.json
+```
 
 ## The empty-scope rule
 

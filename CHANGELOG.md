@@ -23,7 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   legitimately holds `mcp_config`. A thrown bridge error is classified before
   it is scored: a tool refusal, a server-defined JSON-RPC error or a 401/403
   is a decision and passes; a missing bridge, a session failure, a network
-  error or a malformed-call error never reached policy and is skipped. `--json` prints an evidence document
+  error or a malformed-call error never reached policy and is skipped. The
+  content probe takes an explicit `--content-target` and counts only a 403/401
+  as a refusal — a 404 means the publish gate was never reached, not that it
+  held. `--json` prints an evidence document
   (connector version, redacted config digest, per-check outcome, the source's
   own refusal codes) for a release record. A check that cannot run reports
   `skipped` and fails the run; nothing secret ever reaches the output. See

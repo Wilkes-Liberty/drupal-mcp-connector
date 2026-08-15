@@ -534,7 +534,7 @@ function liveCheck(id, title, findings, observed = null, { skipped = false, skip
  *   `transport` is fetch-shaped and injectable so this is testable offline.
  * @returns {Promise<object>} Evidence document. Never contains secrets or payloads.
  */
-export async function verifyLive(site, { transport, callTool = null, now = () => new Date() }) {
+export async function verifyLive(site, { transport, callTool = null, contentTarget = null, contentTargetType = null, now = () => new Date() }) {
   const baseUrl = String(site?.baseUrl ?? "");
   const checks = [];
   const httpsOk = baseUrl.startsWith("https://") || isLoopback(baseUrl);
@@ -820,29 +820,57 @@ export async function verifyLive(site, { transport, callTool = null, now = () =>
           skipReason: "this principal holds no write scope, so the probe would prove nothing about the write gate.",
         }),
       );
+    } else if (!contentTarget) {
+      // A PATCH at an id that does not exist returns 404 before any access
+      // check runs, so scoring it as a refusal would claim the publish gate
+      // holds without ever reaching it. The probe needs a real target.
+      checks.push(
+        liveCheck("probe_content_edit", "An edit to live content is refused", [], null, {
+          skipped: true,
+          skipReason:
+            "no content target supplied (--content-target <uuid>), so the publish gate was never reached. " +
+            "Point it at a node on a non-production target that you would not mind being published if the gate fails.",
+        }),
+      );
     } else {
+      const targetType = contentTargetType ?? "node--article";
+      const [entityType, bundle] = targetType.split("--");
       const contentEdit = await attempt(
         transport,
-        joinUrl(baseUrl, "/jsonapi/node/article/00000000-0000-4000-8000-000000000000"),
+        joinUrl(baseUrl, `/jsonapi/${entityType}/${bundle ?? entityType}/${contentTarget}`),
         {
           method: "PATCH",
           headers: { ...authorized, "Content-Type": "application/vnd.api+json" },
           body: JSON.stringify({
-            data: {
-              type: "node--article",
-              id: "00000000-0000-4000-8000-000000000000",
-              attributes: { status: true, title: "verification probe" },
-            },
+            // Publish-bearing and otherwise value-preserving: the flag under
+            // test is `status`, so a refusal proves the gate and an acceptance
+            // changes nothing else about the node.
+            data: { type: targetType, id: contentTarget, attributes: { status: true } },
           }),
         },
       );
+      const observed = { status: contentEdit.status, codes: contentEdit.codes, target: contentTarget };
       checks.push(
-        liveCheck(
-          "probe_content_edit",
-          "An edit to live content is refused",
-          contentEdit.ok ? [`a live-content edit was accepted (status ${contentEdit.status}).`] : [],
-          { status: contentEdit.status, codes: contentEdit.codes },
-        ),
+        (() => {
+          const title = "An edit to live content is refused";
+          if (contentEdit.ok) {
+            return liveCheck(
+              "probe_content_edit",
+              title,
+              [`a publish-bearing edit was ACCEPTED (status ${contentEdit.status}); the no-agent-publish floor did not hold, and the target may now be published.`],
+              observed,
+            );
+          }
+          // Only an authorisation decision proves the gate. "Not found",
+          // "unprocessable" and server errors never reached it.
+          if (contentEdit.status === 403 || contentEdit.status === 401) {
+            return liveCheck("probe_content_edit", title, [], observed);
+          }
+          return liveCheck("probe_content_edit", title, [], observed, {
+            skipped: true,
+            skipReason: `the edit did not reach the publish gate (status ${contentEdit.status ?? "none"}), so its refusal proves nothing; check the target exists and is of the given type.`,
+          });
+        })(),
       );
     }
   }
