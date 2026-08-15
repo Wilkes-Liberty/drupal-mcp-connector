@@ -1,11 +1,12 @@
 {
   "name": "drupal-mcp-connector",
   "version": "2.5.0",
-  "description": "A secure, multi-site Model Context Protocol (MCP) connector for Drupal — dual-protocol JSON:API and GraphQL.",
+  "description": "A secure, multi-site Model Context Protocol (MCP) connector for Drupal \u2014 dual-protocol JSON:API and GraphQL.",
   "type": "module",
   "main": "src/index.js",
   "bin": {
-    "drupal-mcp-connector": "src/index.js"
+    "drupal-mcp-connector": "src/index.js",
+    "drupal-mcp-verify": "bin/drupal-mcp-verify.js"
   },
   "files": [
     "src/",
@@ -55,7 +56,9 @@
     "test:watch": "vitest",
     "audit": "npm audit --audit-level=high",
     "check": "npm run lint && npm run audit",
-    "syntax-check": "for f in src/lib/*.js src/tools/*.js src/index.js; do node --input-type=module --check < $f && echo \"$f ✓\"; done"
+    "syntax-check": "for f in src/lib/*.js src/tools/*.js src/index.js; do node --input-type=module --check < $f && echo \"$f \u2713\"; done",
+    "verify": "node bin/drupal-mcp-verify.js",
+    "verify:example": "node bin/drupal-mcp-verify.js --config config/config.example.json"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",

@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Secure-install verifier (`npm run verify`, #180).** Produces evidence that
+  an installation carries the secure, tenant-neutral defaults the governed
+  product claims, instead of asserting it in a README. The static half needs no
+  network or credentials and runs in CI: transport, principal authentication,
+  scope grant, source governance, role separation, entitlement, target
+  resolution and tenant neutrality. The live half (`--live --site <name>`)
+  proves the same claims against a running target and adds three **negative
+  probes** — a mass read, a configuration change and a live-content edit — that
+  pass only when the target refuses them. `--json` prints an evidence document
+  (connector version, redacted config digest, per-check outcome, the source's
+  own refusal codes) for a release record. A check that cannot run reports
+  `skipped` and fails the run; nothing secret ever reaches the output. See
+  `docs/verification.md`.
+- **Prompt injection and operator trust documented as managed residuals**
+  (`docs/threat-model.md`, `docs/verification.md`) and emitted with every
+  evidence document — the stack bounds the blast radius, it does not solve
+  them (#180).
+
+### Changed
+- **The shipped example configuration is tenant-neutral and secure by default**
+  (#180). Every hostname is documentation-reserved (RFC 2606/6761); the four
+  tiers are named as roles (production, staging, development, break-glass) and
+  each carries **its own OAuth client id and its own secret env var** — the
+  previous example shared one consumer and one development secret across tiers.
+  Staging and development now declare `requireGovernance`, and the permissive
+  `development` preset is confined to a loopback target. `bin/drupal-mcp-launch.sh`
+  reads its env-var → Keychain-item mapping from a table (overridable per
+  machine via `config/secrets.map`) instead of hardcoding one estate's items.
+  CI verifies the shipped example on every run.
+
+### Security
+- **The empty-scope bypass is closed for governed setups (#180).** An OAuth site
+  that named no scopes previously satisfied *every* scope gate, including
+  `mcp_config`: an empty list was read as "unconstrained". It is now read as an
+  unnamed grant and satisfies nothing, so a governed site must name the scopes
+  its token actually carries. A site with no OAuth block (a plain
+  `apiTokenEnv`/anonymous install) is unaffected and stays preset-only.
+
 ## [2.5.0] - 2026-08-14
 
 ### Fixed

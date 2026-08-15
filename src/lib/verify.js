@@ -144,6 +144,23 @@ function strings(value, path = []) {
 }
 
 /**
+ * Whether a bare string looks like a hostname.
+ *
+ * Deliberately label-by-label rather than one nested-quantifier regex: the
+ * pattern form of this test backtracks catastrophically on a long dotless
+ * string, and a verifier is not a place to introduce a denial of service.
+ * @param {string} str Candidate.
+ * @returns {boolean}
+ */
+function looksLikeHostname(str) {
+  if (typeof str !== "string" || str.length < 4 || str.length > 253) return false;
+  const labels = str.split(".");
+  if (labels.length < 2) return false;
+  if (!/^[a-z]{2,}$/i.test(labels[labels.length - 1])) return false;
+  return labels.slice(0, -1).every((label) => /^[a-z0-9-]+$/i.test(label));
+}
+
+/**
  * Hostnames mentioned anywhere in a value: URLs, and bare host-shaped strings.
  * @param {*} value Any JSON-ish value.
  * @returns {Array<{path: string, host: string}>}
@@ -159,7 +176,7 @@ function mentionedHosts(value) {
       found.push({ path, host: urlHost });
       continue;
     }
-    if (/^(?=.{4,253}$)([a-z0-9-]+\.)+[a-z]{2,}$/i.test(str)) {
+    if (looksLikeHostname(str)) {
       found.push({ path, host: str.toLowerCase() });
     }
   }
@@ -305,7 +322,7 @@ export function verifyStatic(config, { source = "config", now = () => new Date()
       const preset = site?.security?.preset;
       if (!preset) return [named(name, "no security preset configured; the connector's entitlement layer is unpinned.")];
       if (preset === "development" && !isLoopback(site?.baseUrl)) {
-        return [named(name, 'the "development" preset allows every operation and is for loopback targets only.')];
+        return [named(name, "the \"development\" preset allows every operation and is for loopback targets only.")];
       }
       return [];
     }),
@@ -373,6 +390,339 @@ export function verifyStatic(config, { source = "config", now = () => new Date()
       skipped: counts[SKIPPED],
       // A skipped check is not a pass: an install is only verified when every
       // check actually ran and none failed.
+      ok: counts[FAIL] === 0 && counts[SKIPPED] === 0,
+    },
+  };
+}
+
+/** Every live check, in report order. */
+export const LIVE_CHECKS = [
+  "transport",
+  "principal_auth",
+  "source_governance",
+  "entitlement_filtering",
+  "target_resolution",
+  "probe_mass_read",
+  "probe_config_change",
+  "probe_content_edit",
+];
+
+/** A page size no governed profile should ever serve in one response. */
+const MASS_READ_LIMIT = 5000;
+
+/** Joins a base URL and a path without doubling or dropping the separator. */
+function joinUrl(baseUrl, path) {
+  return `${String(baseUrl).replace(/\/+$/, "")}/${String(path).replace(/^\/+/, "")}`;
+}
+
+/**
+ * One transport attempt, reduced to what the evidence may carry.
+ *
+ * Never returns a body: a governed read's payload is the very thing that must
+ * not end up in a verification artefact. What is recorded is the status, and
+ * the stable error/reason codes the source uses to explain a refusal.
+ *
+ * @param {Function} transport fetch-shaped transport.
+ * @param {string} url Absolute URL.
+ * @param {object} [init] fetch init.
+ * @returns {Promise<{status: number|null, ok: boolean, codes: string[], reason: string|null, count: number|null, error: string|null}>}
+ */
+async function attempt(transport, url, init = {}) {
+  try {
+    const response = await transport(url, init);
+    let body = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+    const codes = Array.isArray(body?.errors)
+      ? body.errors.map((e) => e?.code).filter(Boolean)
+      : [];
+    return {
+      status: response.status ?? null,
+      ok: Boolean(response.ok),
+      codes,
+      reason: typeof body?.reason === "string" ? body.reason : null,
+      count: Array.isArray(body?.data) ? body.data.length : null,
+      error: typeof body?.error === "string" ? body.error : null,
+    };
+  } catch (err) {
+    return { status: null, ok: false, codes: [], reason: null, count: null, error: String(err?.message ?? err) };
+  }
+}
+
+/** Builds a live check result, carrying what was observed. */
+function liveCheck(id, title, findings, observed = null, { skipped = false, skipReason = "" } = {}) {
+  const status = skipped ? SKIPPED : findings.length === 0 ? PASS : FAIL;
+  return {
+    id,
+    title,
+    status,
+    findings: skipped && skipReason ? [skipReason] : findings,
+    observed,
+  };
+}
+
+/**
+ * Verify a running target against the same claims as the static half.
+ *
+ * The three `probe_*` checks are deliberately inverted: they attempt something
+ * a governed principal must NOT be able to do, and pass only when the target
+ * refuses. A served probe is the finding.
+ *
+ * Nothing here writes content: the write probes target a non-existent id and
+ * a governed stack refuses on policy before persistence. Run against a
+ * non-production environment first.
+ *
+ * @param {object} site Resolved site config (with oauth.clientSecret resolved).
+ * @param {{transport: Function, now?: () => Date}} deps
+ *   `transport` is fetch-shaped and injectable so this is testable offline.
+ * @returns {Promise<object>} Evidence document. Never contains secrets or payloads.
+ */
+export async function verifyLive(site, { transport, now = () => new Date() }) {
+  const baseUrl = String(site?.baseUrl ?? "");
+  const checks = [];
+  const httpsOk = baseUrl.startsWith("https://") || isLoopback(baseUrl);
+
+  // --- transport -----------------------------------------------------------
+  const health = httpsOk ? await attempt(transport, joinUrl(baseUrl, "/drupal-mcp/health")) : null;
+  checks.push(
+    liveCheck(
+      "transport",
+      "The target answers over an encrypted transport",
+      (() => {
+        if (!httpsOk) return [`baseUrl is not HTTPS (${baseUrl || "missing"}).`];
+        if (health.error) return [`the target could not be reached: ${health.error}`];
+        if (health.status === null) return ["the target returned no status."];
+        return [];
+      })(),
+      health && { status: health.status },
+    ),
+  );
+
+  // --- principal authentication -------------------------------------------
+  const oauth = site?.oauth;
+  let token = null;
+  if (!oauth?.clientId || !oauth?.clientSecret) {
+    checks.push(
+      liveCheck("principal_auth", "The principal authenticates, and anonymous access is refused", [], null, {
+        skipped: true,
+        skipReason: "no OAuth principal is configured for this site; nothing to authenticate as.",
+      }),
+    );
+  } else {
+    const tokenResponse = await attempt(transport, joinUrl(baseUrl, oauth.tokenUrl ?? "/oauth/token"), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: oauth.grant ?? "client_credentials",
+        client_id: oauth.clientId,
+        client_secret: oauth.clientSecret,
+        scope: (oauth.scopes ?? []).join(" "),
+      }).toString(),
+    });
+    // The token itself is read from a fresh call so it never enters `attempt`'s
+    // recorded shape; only its presence matters to the evidence.
+    if (tokenResponse.ok) {
+      try {
+        const response = await transport(joinUrl(baseUrl, oauth.tokenUrl ?? "/oauth/token"), {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: oauth.grant ?? "client_credentials",
+            client_id: oauth.clientId,
+            client_secret: oauth.clientSecret,
+            scope: (oauth.scopes ?? []).join(" "),
+          }).toString(),
+        });
+        token = (await response.json())?.access_token ?? null;
+      } catch {
+        token = null;
+      }
+    }
+    const anonymous = await attempt(transport, joinUrl(baseUrl, "/drupal-mcp/readiness"));
+    checks.push(
+      liveCheck(
+        "principal_auth",
+        "The principal authenticates, and anonymous access is refused",
+        (() => {
+          const findings = [];
+          if (!tokenResponse.ok) {
+            findings.push(`the principal could not mint a token (status ${tokenResponse.status ?? "none"}${tokenResponse.error ? `, ${tokenResponse.error}` : ""}).`);
+          }
+          if (anonymous.ok) {
+            findings.push("a governed path answered an anonymous request; authentication is not being enforced.");
+          }
+          return findings;
+        })(),
+        { tokenStatus: tokenResponse.status, anonymousStatus: anonymous.status },
+      ),
+    );
+  }
+
+  const authorized = token ? { Authorization: `Bearer ${token}` } : {};
+
+  // --- source governance ---------------------------------------------------
+  if (site?.requireGovernance !== true) {
+    checks.push(
+      liveCheck("source_governance", "The source governance contract verifies", [], null, {
+        skipped: true,
+        skipReason: "the site does not declare requireGovernance; there is no contract to verify.",
+      }),
+    );
+  } else {
+    const readiness = await attempt(transport, joinUrl(baseUrl, "/drupal-mcp/readiness"), { headers: authorized });
+    checks.push(
+      liveCheck(
+        "source_governance",
+        "The source governance contract verifies",
+        readiness.ok
+          ? []
+          : [
+            `the source reports the contract is not ready (status ${readiness.status ?? "none"}` +
+                `${readiness.reason ? `, reason ${readiness.reason}` : ""}).`,
+          ],
+        { status: readiness.status, reason: readiness.reason },
+      ),
+    );
+  }
+
+  // --- entitlement filtering ----------------------------------------------
+  const scopes = site?.oauth?.scopes ?? [];
+  const holdsConfigScope = scopes.includes("mcp_config");
+  const configProbe = holdsConfigScope
+    ? null
+    : await attempt(transport, joinUrl(baseUrl, "/mcp"), {
+      method: "POST",
+      headers: { ...authorized, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "verify-entitlement",
+        method: "tools/call",
+        params: { name: "drupal_config_set", arguments: { name: "system.site", key: "name", value: "verification probe" } },
+      }),
+    });
+  checks.push(
+    holdsConfigScope
+      ? liveCheck("entitlement_filtering", "Out-of-tier operations are filtered for this principal", [], null, {
+        skipped: true,
+        skipReason: "this principal holds mcp_config, so a config write is in tier; run the probe with a content-tier principal.",
+      })
+      : liveCheck(
+        "entitlement_filtering",
+        "Out-of-tier operations are filtered for this principal",
+        configProbe.ok
+          ? ["a config write was served to a principal that does not hold the mcp_config scope."]
+          : [],
+        { status: configProbe.status, codes: configProbe.codes },
+      ),
+  );
+
+  // --- target resolution ---------------------------------------------------
+  const context = await attempt(transport, joinUrl(baseUrl, "/drupal-mcp/context"), { headers: authorized });
+  checks.push(
+    liveCheck(
+      "target_resolution",
+      "The site resolves to exactly one target that describes itself",
+      context.ok ? [] : [`the target did not return its context document (status ${context.status ?? "none"}).`],
+      { status: context.status },
+    ),
+  );
+
+  // --- negative probes -----------------------------------------------------
+  const massRead = await attempt(
+    transport,
+    `${joinUrl(baseUrl, "/jsonapi/node/article")}?page%5Blimit%5D=${MASS_READ_LIMIT}`,
+    { headers: authorized },
+  );
+  checks.push(
+    liveCheck(
+      "probe_mass_read",
+      `A ${MASS_READ_LIMIT}-item read is refused`,
+      massRead.ok
+        ? [`an unbounded read was served (status ${massRead.status}${massRead.count !== null ? `, ${massRead.count} items` : ""}); the source is not bounding this principal's reads.`]
+        : [],
+      { status: massRead.status, codes: massRead.codes, items: massRead.count },
+    ),
+  );
+
+  const canAttemptWrite = scopes.length === 0 || scopes.includes("mcp_write") || scopes.includes("mcp_config");
+  if (!canAttemptWrite) {
+    for (const [id, title] of [
+      ["probe_config_change", "A configuration change is refused"],
+      ["probe_content_edit", "An edit to live content is refused"],
+    ]) {
+      checks.push(
+        liveCheck(id, title, [], null, {
+          skipped: true,
+          skipReason: "this principal holds no write scope, so the probe would prove nothing about the write gate.",
+        }),
+      );
+    }
+  } else {
+    const configChange = configProbe ??
+      (await attempt(transport, joinUrl(baseUrl, "/mcp"), {
+        method: "POST",
+        headers: { ...authorized, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "verify-config",
+          method: "tools/call",
+          params: { name: "drupal_config_set", arguments: { name: "system.site", key: "name", value: "verification probe" } },
+        }),
+      }));
+    checks.push(
+      liveCheck(
+        "probe_config_change",
+        "A configuration change is refused",
+        configChange.ok ? [`a configuration write was accepted (status ${configChange.status}).`] : [],
+        { status: configChange.status, codes: configChange.codes },
+      ),
+    );
+
+    const contentEdit = await attempt(
+      transport,
+      joinUrl(baseUrl, "/jsonapi/node/article/00000000-0000-4000-8000-000000000000"),
+      {
+        method: "PATCH",
+        headers: { ...authorized, "Content-Type": "application/vnd.api+json" },
+        body: JSON.stringify({
+          data: {
+            type: "node--article",
+            id: "00000000-0000-4000-8000-000000000000",
+            attributes: { status: true, title: "verification probe" },
+          },
+        }),
+      },
+    );
+    checks.push(
+      liveCheck(
+        "probe_content_edit",
+        "An edit to live content is refused",
+        contentEdit.ok ? [`a live-content edit was accepted (status ${contentEdit.status}).`] : [],
+        { status: contentEdit.status, codes: contentEdit.codes },
+      ),
+    );
+  }
+
+  const counts = checks.reduce(
+    (acc, c) => ({ ...acc, [c.status]: acc[c.status] + 1 }),
+    { [PASS]: 0, [FAIL]: 0, [SKIPPED]: 0 },
+  );
+
+  return {
+    tool: "drupal-mcp-connector verify",
+    mode: "live",
+    connectorVersion: CLIENT_VERSION,
+    generatedAt: now().toISOString(),
+    subject: { site: site?._name ?? null, host: hostOf(baseUrl), scopes },
+    checks,
+    residuals: RESIDUALS,
+    summary: {
+      pass: counts[PASS],
+      fail: counts[FAIL],
+      skipped: counts[SKIPPED],
       ok: counts[FAIL] === 0 && counts[SKIPPED] === 0,
     },
   };

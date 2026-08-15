@@ -94,10 +94,38 @@ validator — it would break legitimate relationship filters.
 (no connector allowlist/redaction on that path). Prefer JSON:API entity tools
 for policy-bound reads.
 
+## Managed residuals (not solved by this stack)
+
+Listed here because a threat model that names only mitigated threats reads as a
+claim that nothing else is outstanding. Both are verifiable: `npm run verify`
+emits them with every evidence document (see
+[Verification](verification.md)).
+
+### Prompt injection
+
+**Managed, not solved.** Content read through a governed path can carry
+instruction-shaped text, and a model may act on it. No connector setting makes
+an agent immune. What the stack bounds is the blast radius: least-privilege
+scopes per role, a security preset per site, source-side governance (entity and
+field denies, classification egress ceilings, finite read budgets), no agent
+publication authority — so a redirected agent's worst case is a draft, not a
+live page — and an audit row for every governed action, refusals included.
+Treat model output as untrusted input to whatever consumes it next.
+
+### Operator trust
+
+**Managed, not solved.** An operator holding the client secrets can act with the
+agent's authority. Secret custody, rotation and revocation stay with the
+deploying organisation; the connector reads secrets from the environment and
+never stores them.
+
 ## Assurance performed
 
 - `eslint-plugin-security` runs in CI lint.
 - Unit suite + Drupal integration job in CI.
+- `npm run verify` proves the shipped secure defaults on every CI run: the
+  example configuration is verified tenant-neutral and secure by the same
+  checks an operator runs against their own (#180).
 - 2026-07 security audit (upload, publish, HTTPS, entity policy, link-checker)
   drove the 2.1 hardening suite; 2.2 closed remaining default-preset, GraphQL
   gate, and dependency residual items.
