@@ -20,10 +20,19 @@
 import { createHash } from "node:crypto";
 import { CLIENT_VERSION } from "./config.js";
 
-/** Check outcome vocabulary. */
+/** Check outcome vocabulary.
+ *
+ * `skipped` and `n/a` are deliberately different. A check that SHOULD have run
+ * and could not is `skipped`, and a skipped check fails the run — silence is
+ * not evidence. A check that does not apply to this shape of install (no OAuth
+ * to scope, no second role to separate, no config surface to deny) is `n/a`
+ * and does not fail it: a verifier a secure install can never pass is a
+ * verifier people stop running.
+ */
 export const PASS = "pass";
 export const FAIL = "fail";
 export const SKIPPED = "skipped";
+export const NOT_APPLICABLE = "n/a";
 
 /** Every static check, in report order. */
 export const STATIC_CHECKS = [
@@ -123,9 +132,9 @@ function isLocalDevelopment(site) {
 }
 
 /** Builds one check result. */
-function check(id, title, findings, { skipped = false } = {}) {
-  const status = skipped ? SKIPPED : findings.length === 0 ? PASS : FAIL;
-  return { id, title, status, findings };
+function check(id, title, findings, { skipped = false, notApplicable = false, reason = "" } = {}) {
+  const status = notApplicable ? NOT_APPLICABLE : skipped ? SKIPPED : findings.length === 0 ? PASS : FAIL;
+  return { id, title, status, findings: (skipped || notApplicable) && reason ? [reason] : findings };
 }
 
 /**
@@ -272,7 +281,10 @@ export function verifyStatic(config, { source = "config", now = () => new Date()
         ? []
         : [named(name, "OAuth block names no scopes; an unnamed grant is not a wildcard and every scope gate will now deny.")];
     }),
-    { skipped: oauthSites.length === 0 },
+    {
+      notApplicable: oauthSites.length === 0,
+      reason: "no site authenticates with OAuth, so there are no scopes to name.",
+    },
   );
 
   const sourceGovernance = check(
@@ -312,7 +324,10 @@ export function verifyStatic(config, { source = "config", now = () => new Date()
       }
       return findings;
     })(),
-    { skipped: oauthSites.length === 0 },
+    {
+      notApplicable: oauthSites.length === 0,
+      reason: "no site authenticates with OAuth, so there are no principals to separate.",
+    },
   );
 
   const entitlement = check(
@@ -368,7 +383,7 @@ export function verifyStatic(config, { source = "config", now = () => new Date()
 
   const counts = checks.reduce(
     (acc, c) => ({ ...acc, [c.status]: acc[c.status] + 1 }),
-    { [PASS]: 0, [FAIL]: 0, [SKIPPED]: 0 },
+    { [PASS]: 0, [FAIL]: 0, [SKIPPED]: 0, [NOT_APPLICABLE]: 0 },
   );
 
   return {
@@ -388,8 +403,10 @@ export function verifyStatic(config, { source = "config", now = () => new Date()
       pass: counts[PASS],
       fail: counts[FAIL],
       skipped: counts[SKIPPED],
+      notApplicable: counts[NOT_APPLICABLE],
       // A skipped check is not a pass: an install is only verified when every
-      // check actually ran and none failed.
+      // applicable check actually ran and none failed. A not-applicable check
+      // does not block — it never had anything to prove.
       ok: counts[FAIL] === 0 && counts[SKIPPED] === 0,
     },
   };
@@ -507,13 +524,13 @@ export function classifyBridgeError(error) {
 }
 
 /** Builds a live check result, carrying what was observed. */
-function liveCheck(id, title, findings, observed = null, { skipped = false, skipReason = "" } = {}) {
-  const status = skipped ? SKIPPED : findings.length === 0 ? PASS : FAIL;
+function liveCheck(id, title, findings, observed = null, { skipped = false, notApplicable = false, skipReason = "" } = {}) {
+  const status = notApplicable ? NOT_APPLICABLE : skipped ? SKIPPED : findings.length === 0 ? PASS : FAIL;
   return {
     id,
     title,
     status,
-    findings: skipped && skipReason ? [skipReason] : findings,
+    findings: (skipped || notApplicable) && skipReason ? [skipReason] : findings,
     observed,
   };
 }
@@ -638,7 +655,7 @@ export async function verifyLive(site, { transport, callTool = null, contentTarg
   } else if (site?.requireGovernance !== true) {
     checks.push(
       liveCheck("source_governance", "The source governance contract verifies", [], null, {
-        skipped: true,
+        notApplicable: true,
         skipReason: "the site does not declare requireGovernance; there is no contract to verify.",
       }),
     );
@@ -690,15 +707,15 @@ export async function verifyLive(site, { transport, callTool = null, contentTarg
   } else if (holdsConfigScope) {
     checks.push(
       liveCheck("entitlement_filtering", "Out-of-tier operations are filtered for this principal", [], null, {
-        skipped: true,
+        notApplicable: true,
         skipReason: "this principal holds mcp_config, so a config write is in tier; run the probe with a content-tier principal.",
       }),
     );
   } else if (typeof callTool !== "function" || !site?.serverTools?.url) {
     checks.push(
       liveCheck("entitlement_filtering", "Out-of-tier operations are filtered for this principal", [], null, {
-        skipped: true,
-        skipReason: "no governed tool bridge is configured for this site (serverTools.url), so no governed tool call can be exercised.",
+        notApplicable: true,
+        skipReason: "no governed tool bridge is configured for this site (serverTools.url), so there is no config surface to deny.",
       }),
     );
   } else {
@@ -785,15 +802,15 @@ export async function verifyLive(site, { transport, callTool = null, contentTarg
     if (holdsConfigScope) {
       checks.push(
         liveCheck("probe_config_change", "A configuration change is refused", [], null, {
-          skipped: true,
+          notApplicable: true,
           skipReason: "this principal holds mcp_config: a served config write is in tier here, so the probe proves nothing. Run it with a content-tier principal.",
         }),
       );
     } else if (typeof callTool !== "function" || !site?.serverTools?.url) {
       checks.push(
         liveCheck("probe_config_change", "A configuration change is refused", [], null, {
-          skipped: true,
-          skipReason: "no governed tool bridge is configured for this site (serverTools.url), so no config write can be attempted.",
+          notApplicable: true,
+          skipReason: "no governed tool bridge is configured for this site (serverTools.url), so there is no config surface to deny.",
         }),
       );
     } else {
@@ -816,8 +833,8 @@ export async function verifyLive(site, { transport, callTool = null, contentTarg
     if (!canAttemptWrite) {
       checks.push(
         liveCheck("probe_content_edit", "An edit to live content is refused", [], null, {
-          skipped: true,
-          skipReason: "this principal holds no write scope, so the probe would prove nothing about the write gate.",
+          notApplicable: true,
+          skipReason: "this principal holds no write scope, so there is no write gate for it to cross.",
         }),
       );
     } else if (!contentTarget) {
@@ -877,7 +894,7 @@ export async function verifyLive(site, { transport, callTool = null, contentTarg
 
   const counts = checks.reduce(
     (acc, c) => ({ ...acc, [c.status]: acc[c.status] + 1 }),
-    { [PASS]: 0, [FAIL]: 0, [SKIPPED]: 0 },
+    { [PASS]: 0, [FAIL]: 0, [SKIPPED]: 0, [NOT_APPLICABLE]: 0 },
   );
 
   return {
@@ -892,6 +909,7 @@ export async function verifyLive(site, { transport, callTool = null, contentTarg
       pass: counts[PASS],
       fail: counts[FAIL],
       skipped: counts[SKIPPED],
+      notApplicable: counts[NOT_APPLICABLE],
       ok: counts[FAIL] === 0 && counts[SKIPPED] === 0,
     },
   };

@@ -29,7 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   held. `--json` prints an evidence document
   (connector version, redacted config digest, per-check outcome, the source's
   own refusal codes) for a release record. A check that cannot run reports
-  `skipped` and fails the run; nothing secret ever reaches the output. See
+  `skipped` and fails the run, while a check that does not *apply* to this
+  shape of install (no OAuth, no tool bridge, an in-tier principal) reports
+  `n/a` and does not — a verifier a secure install can never pass is one people
+  stop running. Nothing secret ever reaches the output. See
   `docs/verification.md`.
 - **Prompt injection and operator trust documented as managed residuals**
   (`docs/threat-model.md`, `docs/verification.md`) and emitted with every

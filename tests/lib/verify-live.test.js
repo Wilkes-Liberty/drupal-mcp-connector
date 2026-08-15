@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { verifyLive, LIVE_CHECKS } from "../../src/lib/verify.js";
+import { verifyLive, LIVE_CHECKS, NOT_APPLICABLE } from "../../src/lib/verify.js";
 
 /**
  * The live half of the verifier proves the same claims against a running
@@ -177,9 +177,9 @@ describe("verifyLive — source governance", () => {
     expect(statusOf(result, "source_governance")).toBe("fail");
   });
 
-  it("skips for a site that does not claim governance", async () => {
+  it("is not applicable for a site that does not claim governance", async () => {
     const result = await run({ requireGovernance: false });
-    expect(statusOf(result, "source_governance")).toBe("skipped");
+    expect(statusOf(result, "source_governance")).toBe(NOT_APPLICABLE);
   });
 });
 
@@ -210,12 +210,16 @@ describe("verifyLive — entitlement filtering and target resolution", () => {
     expect(calls[0].args).toHaveProperty("data");
   });
 
-  it("skips entitlement filtering — never passes it — when no bridge is configured", async () => {
+  it("never PASSES entitlement filtering when no bridge is configured — it is not applicable", async () => {
+    // No bridge means no config surface for the connector to write through, so
+    // the property holds by absence rather than by a proven denial. It must
+    // never read as a proven denial, and it must not block an otherwise
+    // complete run either.
     const result = await run({ serverTools: undefined }, {}, refusingCallTool);
-    expect(statusOf(result, "entitlement_filtering")).toBe("skipped");
+    expect(statusOf(result, "entitlement_filtering")).toBe(NOT_APPLICABLE);
     expect(findingsOf(result, "entitlement_filtering").join(" ")).toMatch(/bridge|serverTools/i);
-    expect(statusOf(result, "probe_config_change")).toBe("skipped");
-    expect(result.summary.ok).toBe(false);
+    expect(statusOf(result, "probe_config_change")).toBe(NOT_APPLICABLE);
+    expect(statusOf(result, "entitlement_filtering")).not.toBe("pass");
   });
 
   it("fails when the target does not describe itself", async () => {
@@ -254,13 +258,13 @@ describe("verifyLive — negative probes", () => {
     expect(statusOf(await run({}, {}, served), "probe_config_change")).toBe("fail");
   });
 
-  it("skips the config probe for a principal that legitimately holds mcp_config", async () => {
+  it("marks the config probe not-applicable for a principal that legitimately holds mcp_config", async () => {
     // A developer or break-glass role is SUPPOSED to be able to write config;
     // failing its healthy run would train operators to ignore the verifier.
     const developer = { ...site().oauth, scopes: ["mcp_read", "mcp_write", "mcp_config"] };
     const served = async () => ({ ok: true });
     const result = await run({ oauth: developer }, {}, served);
-    expect(statusOf(result, "probe_config_change")).toBe("skipped");
+    expect(statusOf(result, "probe_config_change")).toBe(NOT_APPLICABLE);
     expect(findingsOf(result, "probe_config_change").join(" ")).toMatch(/mcp_config/);
   });
 
@@ -295,7 +299,7 @@ describe("verifyLive — negative probes", () => {
     // for a principal that can otherwise write — so that one is skipped.
     const result = await run({ oauth: { ...site().oauth, scopes: ["mcp_read"] } });
     expect(statusOf(result, "probe_config_change")).toBe("pass");
-    expect(statusOf(result, "probe_content_edit")).toBe("skipped");
+    expect(statusOf(result, "probe_content_edit")).toBe(NOT_APPLICABLE);
     expect(findingsOf(result, "probe_content_edit").join(" ")).toMatch(/write scope/i);
     // The read probe still runs.
     expect(statusOf(result, "probe_mass_read")).toBe("pass");
@@ -415,5 +419,50 @@ describe("verifyLive — the content-edit probe must reach the publish gate", ()
       const result = await runEdit({}, "11111111-2222-4333-8444-555555555555", () => reply(status, {}));
       expect(statusOf(result, "probe_content_edit"), `status ${status}`).toBe("skipped");
     }
+  });
+});
+
+describe("verifyLive — inapplicable is not unexercised", () => {
+  it("marks an ungoverned site's governance check not-applicable rather than skipped", async () => {
+    const result = await run({ requireGovernance: false });
+    expect(statusOf(result, "source_governance")).toBe(NOT_APPLICABLE);
+  });
+
+  it("marks the config probes not-applicable for a principal that holds mcp_config", async () => {
+    const developer = { ...site().oauth, scopes: ["mcp_read", "mcp_write", "mcp_config"] };
+    const result = await run({ oauth: developer });
+    expect(statusOf(result, "entitlement_filtering")).toBe(NOT_APPLICABLE);
+    expect(statusOf(result, "probe_config_change")).toBe(NOT_APPLICABLE);
+  });
+
+  it("marks the content probe not-applicable for a principal with no write scope", async () => {
+    const result = await run({ oauth: { ...site().oauth, scopes: ["mcp_read"] } });
+    expect(statusOf(result, "probe_content_edit")).toBe(NOT_APPLICABLE);
+    expect(result.summary.notApplicable).toBeGreaterThan(0);
+  });
+
+  it("marks a missing bridge not-applicable — there is no config surface to deny", async () => {
+    const result = await run({ serverTools: undefined });
+    expect(statusOf(result, "entitlement_filtering")).toBe(NOT_APPLICABLE);
+    expect(statusOf(result, "probe_config_change")).toBe(NOT_APPLICABLE);
+  });
+
+  it("keeps a bridge that FAILED to answer skipped, so it still fails the run", async () => {
+    const network = async () => {
+      throw new Error("request to https://drupal.example.com/mcp failed, reason: connect ECONNREFUSED");
+    };
+    const result = await run({}, {}, network);
+    expect(statusOf(result, "probe_config_change")).toBe("skipped");
+    expect(result.summary.ok).toBe(false);
+  });
+
+  it("keeps an unproven publish gate skipped, so it still fails the run", async () => {
+    const noTarget = await verifyLive(site(), {
+      transport: scriptedTransport(),
+      callTool: refusingCallTool,
+      now: () => new Date("2026-08-15T12:00:00Z"),
+    });
+    expect(statusOf(noTarget, "probe_content_edit")).toBe("skipped");
+    expect(noTarget.summary.ok).toBe(false);
   });
 });

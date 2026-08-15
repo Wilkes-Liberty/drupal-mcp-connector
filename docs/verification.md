@@ -10,9 +10,19 @@ npm run verify -- --live --site production        # also exercise a running targ
 npm run verify -- --live --site staging --json > evidence.json
 ```
 
-The exit code is `0` only when every check ran **and** passed. A check that
-could not run reports `SKIP` and fails the run: a verifier that reports success
-for something it never exercised is worse than no verifier at all.
+The exit code is `0` only when every applicable check ran **and** passed.
+
+Two non-passing outcomes are deliberately different:
+
+- **`SKIP`** — the check should have run and could not (no usable token, a
+  bridge that would not answer, a response it could not measure, no content
+  target supplied). A skipped check **fails the run**: a verifier that reports
+  success for something it never exercised is worse than no verifier at all.
+- **`N/A`** — the check does not apply to this shape of install (no OAuth, so
+  no scopes to name and no principals to separate; no tool bridge, so no config
+  surface to deny; a principal that legitimately holds `mcp_config`). It does
+  **not** fail the run. A verifier a secure install can never pass is a
+  verifier people stop running.
 
 Nothing secret reaches the output. The evidence carries hostnames, statuses and
 the source's own stable refusal codes — never a token, a client secret, or the

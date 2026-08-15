@@ -64,7 +64,7 @@ const USAGE = `drupal-mcp-connector verify
 
 /** Human-readable one-line-per-check report. */
 function report(evidence) {
-  const mark = { pass: "PASS", fail: "FAIL", skipped: "SKIP" };
+  const mark = { pass: "PASS", fail: "FAIL", skipped: "SKIP", "n/a": "N/A " };
   const lines = [
     `${evidence.tool} (${evidence.mode}) — connector ${evidence.connectorVersion}`,
     `subject: ${JSON.stringify(evidence.subject)}`,
@@ -75,7 +75,10 @@ function report(evidence) {
     for (const finding of check.findings) lines.push(`         ${finding}`);
   }
   lines.push("");
-  lines.push(`  ${evidence.summary.pass} passed, ${evidence.summary.fail} failed, ${evidence.summary.skipped} skipped`);
+  lines.push(
+    `  ${evidence.summary.pass} passed, ${evidence.summary.fail} failed, ` +
+    `${evidence.summary.skipped} skipped (unproven), ${evidence.summary.notApplicable} not applicable`,
+  );
   lines.push("");
   lines.push("  Managed residuals (not solved by this stack):");
   for (const residual of evidence.residuals) lines.push(`    - ${residual.id}: ${residual.detail}`);

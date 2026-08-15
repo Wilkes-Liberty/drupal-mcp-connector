@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { verifyStatic, STATIC_CHECKS, RESIDUALS } from "../../src/lib/verify.js";
+import { verifyStatic, STATIC_CHECKS, RESIDUALS, NOT_APPLICABLE } from "../../src/lib/verify.js";
 
 /**
  * A config whose every site passes: reserved hostnames, OAuth with named
@@ -306,5 +306,51 @@ describe("verifyStatic — reporting", () => {
     const skipped = result.checks.filter((c) => c.status === "skipped").map((c) => c.id);
     expect(skipped).toContain("principal_auth");
     expect(result.summary.ok).toBe(false);
+  });
+});
+
+describe("verifyStatic — inapplicable is not unexercised", () => {
+  /**
+   * A check that does not apply must not fail the run. A token-only install
+   * has no scope vocabulary and no second role, so scoring those as unproven
+   * would mean a perfectly secure install could never verify — and an
+   * operator who cannot ever pass stops running the tool.
+   */
+  const tokenOnly = {
+    defaultSite: "prod",
+    sites: {
+      prod: {
+        baseUrl: "https://drupal.example.com",
+        requireSecureAuth: true,
+        apiTokenEnv: "MCP_PROD_TOKEN",
+        security: { preset: "production-strict" },
+      },
+    },
+  };
+
+  it("marks the OAuth-only checks not-applicable, and the run still passes", () => {
+    const result = run(tokenOnly);
+    expect(statusOf(result, "scope_grant")).toBe(NOT_APPLICABLE);
+    expect(statusOf(result, "role_separation")).toBe(NOT_APPLICABLE);
+    expect(result.summary.fail).toBe(0);
+    expect(result.summary.skipped).toBe(0);
+    expect(result.summary.notApplicable).toBe(2);
+    expect(result.summary.ok).toBe(true);
+  });
+
+  it("still fails a token-only install that is insecure", () => {
+    const insecure = JSON.parse(JSON.stringify(tokenOnly));
+    insecure.sites.prod.baseUrl = "http://drupal.example.com";
+    delete insecure.sites.prod.security;
+    const result = run(insecure);
+    expect(result.summary.ok).toBe(false);
+    expect(statusOf(result, "transport")).toBe("fail");
+    expect(statusOf(result, "entitlement")).toBe("fail");
+  });
+
+  it("keeps an empty configuration failing — nothing to check is not a pass", () => {
+    const result = run({ sites: {} });
+    expect(result.summary.ok).toBe(false);
+    expect(result.checks.some((c) => c.status === "skipped")).toBe(true);
   });
 });
