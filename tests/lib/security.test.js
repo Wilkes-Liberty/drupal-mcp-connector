@@ -3,6 +3,7 @@ import { assertGraphqlMutationAllowed, SecurityError } from "../../src/lib/secur
 import { redactCanonicalEntity, redactResource, resolveSecurityConfig } from "../../src/lib/security.js";
 import { assertConfigReadAllowed, assertConfigWriteAllowed, getSecuritySummary } from "../../src/lib/security.js";
 import { assertPublishAllowed, isPublishBearing } from "../../src/lib/security.js";
+import { assertConfigScope, hasScope } from "../../src/lib/security.js";
 
 // allowGraphql required for any GraphQL path (#142); mutations need both flags.
 const allowMut = { allowGraphql: true, allowGraphqlMutations: true, readOnly: false };
@@ -282,5 +283,49 @@ describe("redactCanonicalEntity", () => {
 
   it("handles null/undefined entity", () => {
     expect(redactCanonicalEntity(null, sec, "user")).toBeNull();
+  });
+});
+
+describe("hasScope — the empty-scope bypass is closed for governed setups (#180)", () => {
+  const governed = (over = {}) => ({
+    _name: "prod",
+    baseUrl: "https://drupal.example.com",
+    requireGovernance: true,
+    oauth: { clientId: "content-agent", scopes: [], grant: "client_credentials" },
+    ...over,
+  });
+
+  it("denies every scope when a governed site names no scopes", () => {
+    expect(hasScope(governed(), "mcp_config")).toBe(false);
+    expect(hasScope(governed(), "mcp_write")).toBe(false);
+    expect(hasScope(governed(), "mcp_read")).toBe(false);
+  });
+
+  it("denies when the oauth block omits the scopes key entirely", () => {
+    const site = governed({ oauth: { clientId: "content-agent", grant: "client_credentials" } });
+    expect(hasScope(site, "mcp_read")).toBe(false);
+  });
+
+  it("honours a named scope list on a governed site, both ways", () => {
+    const site = governed({ oauth: { clientId: "content-agent", scopes: ["mcp_read", "mcp_write"] } });
+    expect(hasScope(site, "mcp_write")).toBe(true);
+    expect(hasScope(site, "mcp_config")).toBe(false);
+  });
+
+  it("treats an OAuth site as a governed setup even without requireGovernance", () => {
+    const site = { _name: "s", baseUrl: "https://drupal.example.com", oauth: { clientId: "a", scopes: [] } };
+    expect(hasScope(site, "mcp_config")).toBe(false);
+  });
+
+  it("leaves an ungoverned token/anonymous site permissive (no OAuth, no governance claim)", () => {
+    const apiTokenSite = { _name: "legacy", baseUrl: "https://drupal.example.com", apiToken: "t" };
+    expect(hasScope(apiTokenSite, "mcp_config")).toBe(true);
+    expect(hasScope(undefined, "mcp_read")).toBe(true);
+  });
+
+  it("denies a scope-gated config tool on a governed site with empty scopes", () => {
+    expect(() => assertConfigScope(governed(), "config:set system.site")).toThrow(SecurityError);
+    const scoped = governed({ oauth: { clientId: "dev-agent", scopes: ["mcp_read", "mcp_config"] } });
+    expect(() => assertConfigScope(scoped, "config:set system.site")).not.toThrow();
   });
 });

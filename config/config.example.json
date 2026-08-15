@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to config/config.json and fill in your values. This file is safe to commit. config.json is gitignored.",
+  "_comment": "Copy to config/config.json and fill in your values. This file is safe to commit; config.json is gitignored. Every hostname here is a documentation-reserved example (RFC 2606/6761) — replace them with your own. Verify a filled-in config with `npm run verify`.",
 
   "_api_modes": {
     "_comment": "Per-site 'api' selects the backend: 'graphql' | 'jsonapi' | a priority array like ['graphql','jsonapi']. Omit to auto-detect (probes both once). GraphQL is read-only (no mutations); writes require a JSON:API site.",
@@ -7,14 +7,14 @@
   },
 
   "_security_options": {
-    "_comment": "All optional. apiTokenEnv: read the Bearer token from this env var instead of apiToken (keeps secrets out of the config file). requireSecureAuth: reject anon/basic, require HTTPS+Bearer (recommended for production). requireGovernance: deny every governed path unless the source governance contract (GET /drupal-mcp/readiness, mcp_sentinel >= 2.4.0) verifies — no ungoverned JSON:API/GraphQL fallback; recommended wherever mcp_sentinel governs the site. Env overrides: MCP_CLIENT_ID overrides or disables the outbound identity header; MCP_AUTH_TOKEN requires bearer auth on the HTTPS /mcp endpoint; MCP_BIND_HOST restricts the listen interface (with TLS). See docs/security-hardening.md."
+    "_comment": "apiTokenEnv / oauth.clientSecretEnv: read credentials from the environment, never from this file. requireSecureAuth: reject anon/basic, require HTTPS+Bearer — set it on every remote site. requireGovernance: deny every governed path unless the source governance contract (GET /drupal-mcp/readiness, mcp_sentinel) verifies — no ungoverned JSON:API/GraphQL fallback. Env overrides: MCP_CLIENT_ID overrides or disables the outbound identity header; MCP_AUTH_TOKEN requires bearer auth on the HTTPS /mcp endpoint; MCP_BIND_HOST restricts the listen interface (with TLS). See docs/security-hardening.md."
   },
 
   "_governance_tiers": {
-    "_comment": "These four sites model the MCP agent governance tiers: least privilege keyed by environment. The Drupal side (mcp_sentinel) is authoritative; the per-site security preset is a defence-in-depth second layer. Tiers: content (prod/staging), developer (dev), admin/break-glass (dev-admin). serverTools wires the governed config tools (drupal_config_get/list/set); drushSsh is dev-only and whitelisted to config export/status. See docs/integration-contract.md."
+    "_comment": "The sites below model agent governance tiers as ROLES, not as a particular estate: least privilege keyed by environment. The Drupal side (mcp_sentinel) is authoritative; the per-site security preset is a defence-in-depth second layer. Tiers: content (production, staging), developer (development), admin/break-glass (loopback only). Each tier gets its OWN OAuth client and its OWN secret env var — sharing either makes a compromise of one role a compromise of all of them. serverTools wires the governed config tools (drupal_config_get/list/set); drushSsh is development-only and whitelisted to config export/status. See docs/integration-contract.md."
   },
 
-  "defaultSite": "prod",
+  "defaultSite": "production",
 
   "tls": {
     "_comment": "TLS is required for the HTTPS transport (MCP_TRANSPORT=https). Ignored in stdio mode.",
@@ -24,16 +24,16 @@
   },
 
   "sites": {
-    "prod": {
-      "_comment": "Content tier. Content/media/term CRUD; config read-only; cannot publish (server-side editorial gate). No drushSsh.",
-      "baseUrl":           "https://api.int.wilkesliberty.com",
+    "production": {
+      "_comment": "Content tier. Content/media/term CRUD; config read-only; cannot publish (the source-side editorial gate decides publication, not the agent). No drushSsh.",
+      "baseUrl":           "https://drupal.example.com",
       "requireSecureAuth": true,
       "requireGovernance": true,
       "api":               "jsonapi",
       "oauth": {
         "tokenUrl":        "/oauth/token",
-        "clientId":        "mcp-agent",
-        "clientSecretEnv": "MCP_AGENT_CLIENT_SECRET",
+        "clientId":        "content-agent-production",
+        "clientSecretEnv": "MCP_CONTENT_PRODUCTION_SECRET",
         "scopes":          ["mcp_read", "mcp_write"],
         "grant":           "client_credentials"
       },
@@ -42,14 +42,15 @@
     },
 
     "staging": {
-      "_comment": "Content tier. Same capabilities as prod against the staging environment.",
-      "baseUrl":           "https://api-stg.int.wilkesliberty.com",
+      "_comment": "Content tier against the staging environment. Same capabilities as production, its own principal and its own secret.",
+      "baseUrl":           "https://drupal-staging.example.com",
       "requireSecureAuth": true,
+      "requireGovernance": true,
       "api":               "jsonapi",
       "oauth": {
         "tokenUrl":        "/oauth/token",
-        "clientId":        "mcp-agent",
-        "clientSecretEnv": "MCP_AGENT_CLIENT_SECRET_STG",
+        "clientId":        "content-agent-staging",
+        "clientSecretEnv": "MCP_CONTENT_STAGING_SECRET",
         "scopes":          ["mcp_read", "mcp_write"],
         "grant":           "client_credentials"
       },
@@ -57,23 +58,24 @@
       "security":    { "preset": "content-editor" }
     },
 
-    "dev": {
-      "_comment": "Developer tier (DDEV). Content + governed config read/write. Drush bridge is dev-only and whitelisted to config export/status; the agent mutates config via drupal_config_set, then exports to YAML for a PR.",
-      "baseUrl":           "https://api.wilkesliberty.dev",
+    "development": {
+      "_comment": "Developer tier. Content + governed config read/write. The drush bridge is development-only and whitelisted to config export/status; the agent mutates config via drupal_config_set, then exports to YAML for a pull request.",
+      "baseUrl":           "https://drupal.example.test",
       "requireSecureAuth": true,
+      "requireGovernance": true,
       "api":               "jsonapi",
       "oauth": {
         "tokenUrl":        "/oauth/token",
-        "clientId":        "mcp-agent",
-        "clientSecretEnv": "MCP_AGENT_CLIENT_SECRET_DEV",
+        "clientId":        "developer-agent-development",
+        "clientSecretEnv": "MCP_DEVELOPER_DEVELOPMENT_SECRET",
         "scopes":          ["mcp_read", "mcp_write", "mcp_config"],
         "grant":           "client_credentials"
       },
       "serverTools": { "url": "/mcp" },
       "drushSsh": {
-        "_comment": "Dev only. DDEV web-container SSH target. Whitelisted to config export/status — every other drupal_drush_* tool is blocked here. rawSql is omitted, so drupal_drush_sql_query is refused: raw SQL reads underneath Drupal's entity API and is only available via mcp_sentinel's governed command. To enable it, set rawSql:\"governed\", add \"mcp-sentinel:sql-query\" to allowedCommands, and set allow_raw_sql on the site's policy profile.",
-        "host":            "<ddev-web-container-ssh-host>",
-        "user":            "<ddev-ssh-user>",
+        "_comment": "Development only. SSH target of the local web container. Whitelisted to config export/status — every other drupal_drush_* tool is blocked here. rawSql is omitted, so drupal_drush_sql_query is refused: raw SQL reads underneath Drupal's entity API and is only available via mcp_sentinel's governed command. To enable it, set rawSql:\"governed\", add \"mcp-sentinel:sql-query\" to allowedCommands, and set allow_raw_sql on the site's policy profile.",
+        "host":            "<web-container-ssh-host>",
+        "user":            "<web-container-ssh-user>",
         "keyPath":         "~/.ssh/id_ed25519",
         "drupalRoot":      "/var/www/html/web",
         "port":            22,
@@ -81,7 +83,7 @@
       },
       "audit": {
         "_comment": "Optional. Controls drupal_report_broken_links live checking (off unless checkLive:true is passed). linkCheckAllowedHosts gates external hosts; same-origin links are always allowed when checking live.",
-        "linkCheckAllowedHosts": ["www.drupal.org", "wilkesliberty.com"],
+        "linkCheckAllowedHosts": ["www.drupal.org", "example.com"],
         "linkCheckConcurrency":  5,
         "linkCheckTimeoutMs":    5000,
         "linkCheckMaxLinks":     200
@@ -89,15 +91,15 @@
       "security": { "preset": "config-editor" }
     },
 
-    "dev-admin": {
-      "_comment": "Admin / break-glass tier (DDEV). All capabilities incl. destructive + config import — non-standing. Reuses the dev secret. No drushSsh (admin ops go through governed/approval-gated server tools).",
-      "baseUrl":           "https://api.wilkesliberty.dev",
+    "break-glass": {
+      "_comment": "Admin / break-glass tier — non-standing, and deliberately LOOPBACK ONLY: the permissive 'development' preset allows every operation including deletes and config import, so it is never pointed at a remote host in a shipped default. Its own principal and secret. No drushSsh (admin operations go through governed, approval-gated server tools).",
+      "baseUrl":           "https://localhost:8443",
       "requireSecureAuth": true,
       "api":               "jsonapi",
       "oauth": {
         "tokenUrl":        "/oauth/token",
-        "clientId":        "mcp-agent",
-        "clientSecretEnv": "MCP_AGENT_CLIENT_SECRET_DEV",
+        "clientId":        "admin-agent-breakglass",
+        "clientSecretEnv": "MCP_ADMIN_BREAKGLASS_SECRET",
         "scopes":          ["mcp_read", "mcp_write", "mcp_config", "mcp_admin"],
         "grant":           "client_credentials"
       },
@@ -107,7 +109,7 @@
   },
 
   "_security_presets": {
-    "development":       "All operations allowed, incl. config read/write. Local dev / break-glass only.",
+    "development":       "All operations allowed, incl. config read/write. Loopback / break-glass only.",
     "content-editor":    "Create/edit the full content set (node, media, taxonomy_term, paragraph, block_content, menu_link_content, redirect, path_alias, file). No deletes. Config read-only. Denies user + secrets/governance types.",
     "config-editor":     "content-editor + site-building config entities (read/introspection) + governed config read/write (Developer tier). Model changes go via the config bridge, not JSON:API.",
     "auditor":           "Read-only. All entity types. User PII fields redacted. Config read-only.",
@@ -134,7 +136,7 @@
   "_https_transport_registration": {
     "_comment": "For multi-client HTTP mode — register the HTTPS endpoint instead",
     "drupal": {
-      "url": "https://your-server:3443/mcp"
+      "url": "https://mcp.example.com:3443/mcp"
     }
   }
 }
