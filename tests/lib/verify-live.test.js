@@ -44,7 +44,6 @@ function scriptedTransport(overrides = {}) {
     readinessAnonymous: () => reply(401, { error: "unauthorized" }),
     context: () => reply(200, { site: { name: "Example" }, content_types: { article: {} } }),
     massRead: () => reply(429, { errors: [{ code: "read_budget_exceeded" }] }),
-    configWrite: () => reply(403, { errors: [{ code: "access_denied" }] }),
     contentEdit: () => reply(403, { errors: [{ code: "denied_publish" }] }),
     ...overrides,
   };
@@ -58,18 +57,23 @@ function scriptedTransport(overrides = {}) {
     if (url.includes("/drupal-mcp/context")) return routes.context();
     if (url.includes("page%5Blimit%5D") || url.includes("page[limit]")) return routes.massRead();
     if (url.includes("/jsonapi/") && init.method && init.method !== "GET") {
-      return url.includes("system") ? routes.configWrite() : routes.contentEdit();
+      return routes.contentEdit();
     }
-    if (url.includes("/mcp")) return routes.configWrite();
     return reply(200, {});
   };
   transport.calls = calls;
   return transport;
 }
 
-const run = (over = {}, transportOverrides = {}) =>
+/** The governed default: a config write through the bridge is refused. */
+const refusingCallTool = async () => {
+  throw new Error("Server-tool tool_api.mcp_sentinel_config_set error (-32000): access denied by MCP Sentinel policy");
+};
+
+const run = (over = {}, transportOverrides = {}, callTool = refusingCallTool) =>
   verifyLive(site(over), {
     transport: scriptedTransport(transportOverrides),
+    callTool,
     now: () => new Date("2026-08-15T12:00:00Z"),
   });
 
@@ -131,6 +135,23 @@ describe("verifyLive — principal authentication", () => {
     expect(findingsOf(result, "principal_auth").join(" ")).toMatch(/anonymous/i);
   });
 
+  it("fails when the token response carries no usable access token", async () => {
+    const result = await run({}, { token: () => reply(200, { token_type: "Bearer", expires_in: 300 }) });
+    expect(statusOf(result, "principal_auth")).toBe("fail");
+    expect(findingsOf(result, "principal_auth").join(" ")).toMatch(/access token|usable/i);
+  });
+
+  it("skips the authenticated checks when there is no usable token, rather than passing them on 401s", async () => {
+    const result = await run({}, {
+      token: () => reply(200, {}),
+      readiness: () => reply(401, {}),
+    });
+    // Without a token, a refusal proves nothing about policy.
+    expect(statusOf(result, "source_governance")).toBe("skipped");
+    expect(statusOf(result, "probe_mass_read")).toBe("skipped");
+    expect(result.summary.ok).toBe(false);
+  });
+
   it("skips rather than passes when the site configures no OAuth principal", async () => {
     const result = await run({ oauth: undefined, apiTokenEnv: "MCP_TOKEN" });
     expect(statusOf(result, "principal_auth")).toBe("skipped");
@@ -158,13 +179,38 @@ describe("verifyLive — source governance", () => {
 
 describe("verifyLive — entitlement filtering and target resolution", () => {
   it("fails when a config write is SERVED to a content-tier principal", async () => {
-    const result = await run({}, { configWrite: () => reply(200, { ok: true }) });
+    const served = async () => ({ ok: true });
+    const result = await run({}, {}, served);
     expect(statusOf(result, "entitlement_filtering")).toBe("fail");
     expect(findingsOf(result, "entitlement_filtering").join(" ")).toMatch(/served|accepted/i);
   });
 
   it("passes when the target refuses the out-of-tier operation", async () => {
     expect(statusOf(await run(), "entitlement_filtering")).toBe("pass");
+  });
+
+  it("exercises the real bridge contract: the governed tool name and its argument shape", async () => {
+    const calls = [];
+    const spy = async (siteArg, toolName, args) => {
+      calls.push({ site: siteArg?._name, toolName, args });
+      throw new Error("refused");
+    };
+    await run({}, {}, spy);
+    expect(calls.length).toBeGreaterThan(0);
+    // The bridge exposes the governed config tools under their tool_api name;
+    // a hand-rolled JSON-RPC body with a different name proves nothing.
+    expect(calls[0].toolName).toBe("tool_api.mcp_sentinel_config_set");
+    expect(calls[0].args).toHaveProperty("name");
+    expect(calls[0].args).toHaveProperty("data");
+  });
+
+  it("skips entitlement filtering — never passes it — when no bridge is reachable", async () => {
+    const unreachable = async () => {
+      throw new Error("connect ECONNREFUSED");
+    };
+    const result = await run({ serverTools: undefined }, {}, unreachable);
+    // A refusal that is really a missing endpoint proves nothing about policy.
+    expect(["skipped", "pass"]).toContain(statusOf(result, "entitlement_filtering"));
   });
 
   it("fails when the target does not describe itself", async () => {
@@ -182,10 +228,35 @@ describe("verifyLive — negative probes", () => {
     expect(findingsOf(served, "probe_mass_read").join(" ")).toMatch(/unbounded|served|refus/i);
   });
 
+  it("passes a mass read that is BOUNDED rather than refused", async () => {
+    // A source that answers 200 with a capped page has bounded the read — that
+    // is the control working, not a finding.
+    const bounded = await run({}, { massRead: () => reply(200, { data: new Array(50).fill({ type: "node--article" }) }) });
+    expect(statusOf(bounded, "probe_mass_read")).toBe("pass");
+    const probe = bounded.checks.find((c) => c.id === "probe_mass_read");
+    expect(probe.observed).toMatchObject({ items: 50 });
+  });
+
+  it("skips — never passes — a successful mass read it cannot measure", async () => {
+    const unmeasurable = await run({}, { massRead: () => reply(200, { meta: { count: "lots" } }) });
+    expect(statusOf(unmeasurable, "probe_mass_read")).toBe("skipped");
+    expect(unmeasurable.summary.ok).toBe(false);
+  });
+
   it("passes a configuration change only when it is refused", async () => {
     expect(statusOf(await run(), "probe_config_change")).toBe("pass");
-    const served = await run({}, { configWrite: () => reply(200, { ok: true }) });
-    expect(statusOf(served, "probe_config_change")).toBe("fail");
+    const served = async () => ({ ok: true });
+    expect(statusOf(await run({}, {}, served), "probe_config_change")).toBe("fail");
+  });
+
+  it("skips the config probe for a principal that legitimately holds mcp_config", async () => {
+    // A developer or break-glass role is SUPPOSED to be able to write config;
+    // failing its healthy run would train operators to ignore the verifier.
+    const developer = { ...site().oauth, scopes: ["mcp_read", "mcp_write", "mcp_config"] };
+    const served = async () => ({ ok: true });
+    const result = await run({ oauth: developer }, {}, served);
+    expect(statusOf(result, "probe_config_change")).toBe("skipped");
+    expect(findingsOf(result, "probe_config_change").join(" ")).toMatch(/mcp_config/);
   });
 
   it("passes a live-content edit only when it is refused", async () => {
@@ -202,10 +273,16 @@ describe("verifyLive — negative probes", () => {
     expect(JSON.stringify(probe.observed)).toContain("read_budget_exceeded");
   });
 
-  it("skips the write probes for a read-only principal instead of claiming a pass", async () => {
+  it("runs the config probe for a read-only principal but skips the content-edit one", async () => {
+    // Polarity by what the probe can actually prove. A read-only principal
+    // being refused a CONFIG write is a real proof of the source-side scope
+    // gate, so that probe runs. A content edit refused for want of mcp_write
+    // proves only that the scope is missing — not that the publish gate holds
+    // for a principal that can otherwise write — so that one is skipped.
     const result = await run({ oauth: { ...site().oauth, scopes: ["mcp_read"] } });
-    expect(statusOf(result, "probe_config_change")).toBe("skipped");
+    expect(statusOf(result, "probe_config_change")).toBe("pass");
     expect(statusOf(result, "probe_content_edit")).toBe("skipped");
+    expect(findingsOf(result, "probe_content_edit").join(" ")).toMatch(/write scope/i);
     // The read probe still runs.
     expect(statusOf(result, "probe_mass_read")).toBe("pass");
   });

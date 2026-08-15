@@ -16,7 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolution and tenant neutrality. The live half (`--live --site <name>`)
   proves the same claims against a running target and adds three **negative
   probes** — a mass read, a configuration change and a live-content edit — that
-  pass only when the target refuses them. `--json` prints an evidence document
+  pass only when the target refuses them (a mass read that is *bounded* rather
+  than refused also passes; a cap is the control working). The config probe
+  goes through the connector's own bridge client, so it exercises the real MCP
+  session and governed tool contract, and is skipped for a principal that
+  legitimately holds `mcp_config`. `--json` prints an evidence document
   (connector version, redacted config digest, per-check outcome, the source's
   own refusal codes) for a release record. A check that cannot run reports
   `skipped` and fails the run; nothing secret ever reaches the output. See

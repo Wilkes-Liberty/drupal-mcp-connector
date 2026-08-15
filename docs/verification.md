@@ -41,7 +41,7 @@ credentials from the environment.
 | Check | What it proves |
 |---|---|
 | `transport` | The target answers over an encrypted transport. |
-| `principal_auth` | The principal can mint a token **and** an anonymous request to a governed path is refused. |
+| `principal_auth` | The principal mints a **usable** access token **and** an anonymous request to a governed path is refused. Without a usable token every authenticated check below is `skipped`, not passed: a 401 is not a policy decision, and a probe that "passes" because it was unauthenticated proves nothing. |
 | `source_governance` | The source's governance contract verifies (`GET /drupal-mcp/readiness`); a failure reports the source's own stable reason. |
 | `entitlement_filtering` | An out-of-tier operation is filtered for this principal. |
 | `target_resolution` | The site resolves to one target that describes itself. |
@@ -54,9 +54,9 @@ A served probe is the finding.
 
 | Probe | Attempts | Passes when |
 |---|---|---|
-| `probe_mass_read` | a 5000-item collection read | the source refuses or bounds it (e.g. `read_budget_exceeded`) |
-| `probe_config_change` | a configuration write via the governed tool bridge | the source refuses it |
-| `probe_content_edit` | an edit that would publish live content | the source refuses it |
+| `probe_mass_read` | a 5000-item collection read | the source refuses it (e.g. `read_budget_exceeded`) **or** serves a materially smaller page — a cap is a bound, and reporting one as an unbounded read would train operators to ignore the verifier. A success whose size cannot be measured is `skipped`, never a pass. |
+| `probe_config_change` | a configuration write through the connector's own bridge client — the real MCP session, the governed `tool_api.mcp_sentinel_config_set` name and its argument shape, refusal surfaced as a tool error | the source refuses it. **Skipped** for a principal that holds `mcp_config` (a developer or break-glass role is *supposed* to write config; failing its healthy run would be a false finding). |
+| `probe_content_edit` | an edit that would publish live content | the source refuses it. Skipped for a principal with no write scope, where a refusal would only prove the scope is missing. |
 
 The probes write nothing: the content probe targets a non-existent id, and a
 governed stack refuses on policy before persistence. Run them against a

@@ -21,6 +21,7 @@ import process from "node:process";
 import fetch from "node-fetch";
 import { verifyStatic, verifyLive } from "../src/lib/verify.js";
 import { loadConfig, getSiteConfig, resolveOauth } from "../src/lib/config.js";
+import { callServerTool } from "../src/lib/server-tools.js";
 
 /** Parses `--flag`, `--key value` and `--key=value`. */
 function parseArgs(argv) {
@@ -104,7 +105,10 @@ async function main() {
     const site = args.config
       ? resolveOauth({ ...(config.sites?.[siteName ?? config.defaultSite] ?? {}), _name: siteName ?? config.defaultSite })
       : getSiteConfig(siteName);
-    evidence.push(await verifyLive(site, { transport: fetch }));
+    // The real bridge client, so the governed-tool probes exercise the real
+    // contract (MCP session, tool_api name, tool-level refusal) rather than a
+    // hand-rolled JSON-RPC body the server would reject as malformed.
+    evidence.push(await verifyLive(site, { transport: fetch, callTool: callServerTool }));
   }
 
   if (args.json) {
