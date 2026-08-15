@@ -343,16 +343,39 @@ export function assertConfigWriteAllowed(secConfig) {
 }
 
 /**
- * Whether the site's OAuth token carries a given scope. When the site declares
- * no OAuth scopes (no agent channel configured), scope gating is a no-op and
- * this returns true so preset-only (non-OAuth) setups are unaffected.
+ * Whether the site's OAuth token carries a given scope. A governed setup that
+ * names no scopes carries none of them (#180) — an unnamed grant is not a
+ * wildcard. A preset-only, non-OAuth site keeps the permissive behaviour.
  * @param {object} site Resolved site config.
  * @param {string} scope OAuth scope machine id (e.g. "mcp_config").
  * @returns {boolean} True if the scope is present, or no scopes are configured.
  */
 export function hasScope(site, scope) {
   const scopes = site?.oauth?.scopes ?? [];
-  return scopes.length === 0 || scopes.includes(scope);
+  if (scopes.length > 0) return scopes.includes(scope);
+  // Empty or absent scopes. For a GOVERNED product setup — a site that claims
+  // source governance, or configures OAuth at all — that is not "every scope";
+  // it is an unnamed grant, and treating it as a wildcard was a bypass of the
+  // very gate the scopes exist to be (#180). Deny, so the operator has to name
+  // the scopes the token actually carries.
+  //
+  // An ungoverned install (a plain apiToken or anonymous site, no OAuth block)
+  // has no scope vocabulary to name and keeps the historical permissive
+  // behaviour: preset semantics alone decide there.
+  return !isGovernedSetup(site);
+}
+
+/**
+ * Whether a site is part of the governed product path.
+ *
+ * Either it declares the source-governance requirement, or it authenticates
+ * with OAuth — both mean the server is deciding on scopes, so the connector
+ * must not invent one.
+ * @param {object} site Resolved site config.
+ * @returns {boolean}
+ */
+export function isGovernedSetup(site) {
+  return site?.requireGovernance === true || Boolean(site?.oauth);
 }
 
 /**
