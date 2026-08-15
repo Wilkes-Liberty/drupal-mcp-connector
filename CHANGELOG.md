@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-08-14
+
 ### Fixed
 - **An unrequested published-state change is no longer silent (#171).**
   `status` stays strictly opt-in on updates — the connector never adds it to a
