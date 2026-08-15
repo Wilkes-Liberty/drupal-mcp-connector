@@ -22,6 +22,7 @@ const site = (over = {}) => ({
     grant: "client_credentials",
   },
   security: { preset: "content-editor" },
+  serverTools: { url: "/mcp" },
   ...over,
 });
 
@@ -204,13 +205,12 @@ describe("verifyLive — entitlement filtering and target resolution", () => {
     expect(calls[0].args).toHaveProperty("data");
   });
 
-  it("skips entitlement filtering — never passes it — when no bridge is reachable", async () => {
-    const unreachable = async () => {
-      throw new Error("connect ECONNREFUSED");
-    };
-    const result = await run({ serverTools: undefined }, {}, unreachable);
-    // A refusal that is really a missing endpoint proves nothing about policy.
-    expect(["skipped", "pass"]).toContain(statusOf(result, "entitlement_filtering"));
+  it("skips entitlement filtering — never passes it — when no bridge is configured", async () => {
+    const result = await run({ serverTools: undefined }, {}, refusingCallTool);
+    expect(statusOf(result, "entitlement_filtering")).toBe("skipped");
+    expect(findingsOf(result, "entitlement_filtering").join(" ")).toMatch(/bridge|serverTools/i);
+    expect(statusOf(result, "probe_config_change")).toBe("skipped");
+    expect(result.summary.ok).toBe(false);
   });
 
   it("fails when the target does not describe itself", async () => {
@@ -285,5 +285,73 @@ describe("verifyLive — negative probes", () => {
     expect(findingsOf(result, "probe_content_edit").join(" ")).toMatch(/write scope/i);
     // The read probe still runs.
     expect(statusOf(result, "probe_mass_read")).toBe("pass");
+  });
+});
+
+describe("verifyLive — a bridge error is not automatically a refusal", () => {
+  /**
+   * The probe passes when the SOURCE decided to refuse. A thrown error can
+   * equally mean the probe never ran — no bridge configured, a session that
+   * would not initialise, a network failure, a malformed call. Those are
+   * `skipped`, because scoring them as refusals produces a green evidence
+   * document for an install that never proved a config deny.
+   */
+  const throwing = (message) => async () => {
+    throw new Error(message);
+  };
+  const withSite = (over = {}) => site(over);
+  const runWith = (callTool, over = {}) =>
+    verifyLive(withSite(over), {
+      transport: scriptedTransport(),
+      callTool,
+      now: () => new Date("2026-08-15T12:00:00Z"),
+    });
+
+  it("counts a tool-level refusal as a pass", async () => {
+    const result = await runWith(throwing("Server-tool tool_api.mcp_sentinel_config_set reported an error: denied by MCP Sentinel policy"));
+    expect(statusOf(result, "probe_config_change")).toBe("pass");
+    expect(statusOf(result, "entitlement_filtering")).toBe("pass");
+  });
+
+  it("counts a server-defined JSON-RPC error as a pass, but a malformed-call error as a skip", async () => {
+    const denied = await runWith(throwing("Server-tool tool_api.mcp_sentinel_config_set error (-32000): access denied"));
+    expect(statusOf(denied, "probe_config_change")).toBe("pass");
+
+    const malformed = await runWith(throwing("Server-tool tool_api.mcp_sentinel_config_set error (-32601): Method not found"));
+    expect(statusOf(malformed, "probe_config_change")).toBe("skipped");
+    expect(findingsOf(malformed, "probe_config_change").join(" ")).toMatch(/never reached a policy decision|proves nothing/i);
+
+    const badParams = await runWith(throwing("Server-tool tool_api.mcp_sentinel_config_set error (-32602): Invalid params"));
+    expect(statusOf(badParams, "probe_config_change")).toBe("skipped");
+  });
+
+  it("counts an authorisation status as a pass, and a server failure as a skip", async () => {
+    const forbidden = await runWith(throwing("Server-tool call tool_api.mcp_sentinel_config_set failed 403: forbidden"));
+    expect(statusOf(forbidden, "probe_config_change")).toBe("pass");
+
+    const serverError = await runWith(throwing("Server-tool call tool_api.mcp_sentinel_config_set failed 500: Internal Server Error"));
+    expect(statusOf(serverError, "probe_config_change")).toBe("skipped");
+
+    const notFound = await runWith(throwing("Server-tool call tool_api.mcp_sentinel_config_set failed 404: Not Found"));
+    expect(statusOf(notFound, "probe_config_change")).toBe("skipped");
+  });
+
+  it("skips a session that would not initialise, and a network failure", async () => {
+    const session = await runWith(throwing("Server-tool session initialize failed 500: boom"));
+    expect(statusOf(session, "probe_config_change")).toBe("skipped");
+
+    const network = await runWith(throwing("request to https://drupal.example.com/mcp failed, reason: connect ECONNREFUSED"));
+    expect(statusOf(network, "probe_config_change")).toBe("skipped");
+    expect(network.summary.ok).toBe(false);
+  });
+
+  it("records what was observed either way, so the evidence shows which it was", async () => {
+    const refused = await runWith(throwing("Server-tool tool_api.mcp_sentinel_config_set reported an error: denied"));
+    const probe = refused.checks.find((c) => c.id === "probe_config_change");
+    expect(probe.observed).toMatchObject({ served: false, outcome: "refused" });
+
+    const skipped = await runWith(throwing("Server-tool session initialize failed 503: unavailable"));
+    const skippedProbe = skipped.checks.find((c) => c.id === "probe_config_change");
+    expect(skippedProbe.observed).toMatchObject({ outcome: "unexercised" });
   });
 });

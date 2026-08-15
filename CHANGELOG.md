@@ -20,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than refused also passes; a cap is the control working). The config probe
   goes through the connector's own bridge client, so it exercises the real MCP
   session and governed tool contract, and is skipped for a principal that
-  legitimately holds `mcp_config`. `--json` prints an evidence document
+  legitimately holds `mcp_config`. A thrown bridge error is classified before
+  it is scored: a tool refusal, a server-defined JSON-RPC error or a 401/403
+  is a decision and passes; a missing bridge, a session failure, a network
+  error or a malformed-call error never reached policy and is skipped. `--json` prints an evidence document
   (connector version, redacted config digest, per-check outcome, the source's
   own refusal codes) for a release record. A check that cannot run reports
   `skipped` and fails the run; nothing secret ever reaches the output. See

@@ -58,6 +58,15 @@ A served probe is the finding.
 | `probe_config_change` | a configuration write through the connector's own bridge client — the real MCP session, the governed `tool_api.mcp_sentinel_config_set` name and its argument shape, refusal surfaced as a tool error | the source refuses it. **Skipped** for a principal that holds `mcp_config` (a developer or break-glass role is *supposed* to write config; failing its healthy run would be a false finding). |
 | `probe_content_edit` | an edit that would publish live content | the source refuses it. Skipped for a principal with no write scope, where a refusal would only prove the scope is missing. |
 
+**A thrown error is not automatically a refusal.** The bridge client throws for
+several unrelated reasons, and only some of them mean the source decided: a
+tool-level refusal, a server-defined JSON-RPC error, or a 401/403 on the call
+are decisions and pass the probe; a missing `serverTools.url`, a session that
+would not initialise, a network failure, or a standard JSON-RPC error (method
+not found, invalid params) mean the probe never reached policy, and are
+`skipped` with the reason recorded. Scoring those as refusals is exactly how a
+verifier ends up green for an install that proved nothing.
+
 The probes write nothing: the content probe targets a non-existent id, and a
 governed stack refuses on policy before persistence. Run them against a
 non-production environment first, and expect audit rows on the source — a

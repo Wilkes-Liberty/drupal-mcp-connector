@@ -455,6 +455,57 @@ async function attempt(transport, url, init = {}) {
   }
 }
 
+/**
+ * Whether a thrown bridge error is a POLICY refusal or an unexercised probe.
+ *
+ * A probe that passes "because the target refused" must prove which refusal it
+ * read. `callServerTool` throws for several unrelated reasons, and only some of
+ * them mean the source decided:
+ *
+ *  - a tool-level error (the tool ran and refused)            → refused
+ *  - a server-defined JSON-RPC error (-32000..-32099)         → refused
+ *  - an HTTP 401/403 on the tools/call                        → refused
+ *  - a standard JSON-RPC error (method not found, bad params) → unexercised
+ *  - any other HTTP status (400, 404, 5xx)                    → unexercised
+ *  - no bridge configured, session init, network failure      → unexercised
+ *
+ * Scoring an unexercised probe as a refusal is how a verifier produces a green
+ * document for an install that never proved anything.
+ *
+ * @param {Error} error Thrown by the bridge client.
+ * @returns {{outcome: "refused"|"unexercised", detail: string}}
+ */
+export function classifyBridgeError(error) {
+  const message = String(error?.message ?? error);
+  const detail = message.slice(0, 200);
+
+  // The tool ran and reported an error: the canonical governed refusal.
+  if (/ reported an error:/.test(message)) return { outcome: "refused", detail };
+
+  // JSON-RPC error at the tools/call. Server-defined codes are decisions;
+  // the standard codes mean the call itself was wrong.
+  const rpc = message.match(/ error \((-?\d+)\):/);
+  if (rpc) {
+    const code = Number(rpc[1]);
+    const isStandard = [-32700, -32600, -32601, -32602, -32603].includes(code);
+    // A session-initialize error never reached the tool, whatever its code.
+    if (/session initialize/.test(message)) return { outcome: "unexercised", detail };
+    return isStandard ? { outcome: "unexercised", detail } : { outcome: "refused", detail };
+  }
+
+  // HTTP status on the tools/call: an authorisation status is a decision.
+  const http = message.match(/^Server-tool call .* failed (\d{3}):/);
+  if (http) {
+    const status = Number(http[1]);
+    return status === 401 || status === 403
+      ? { outcome: "refused", detail }
+      : { outcome: "unexercised", detail };
+  }
+
+  // Bridge not configured, session initialise failure, transport error.
+  return { outcome: "unexercised", detail };
+}
+
 /** Builds a live check result, carrying what was observed. */
 function liveCheck(id, title, findings, observed = null, { skipped = false, skipReason = "" } = {}) {
   const status = skipped ? SKIPPED : findings.length === 0 ? PASS : FAIL;
@@ -625,9 +676,11 @@ export async function verifyLive(site, { transport, callTool = null, now = () =>
   const attemptConfigWrite = async () => {
     try {
       await callTool(site, CONFIG_SET_TOOL, { name: "system.site", data: { name: "verification probe" } });
-      return { served: true, detail: "accepted" };
+      return { served: true, outcome: "served", detail: "accepted" };
     } catch (err) {
-      return { served: false, detail: String(err?.message ?? err).slice(0, 200) };
+      // Not every throw is a refusal — see classifyBridgeError.
+      const { outcome, detail } = classifyBridgeError(err);
+      return { served: false, outcome, detail };
     }
   };
 
@@ -641,24 +694,29 @@ export async function verifyLive(site, { transport, callTool = null, now = () =>
         skipReason: "this principal holds mcp_config, so a config write is in tier; run the probe with a content-tier principal.",
       }),
     );
-  } else if (typeof callTool !== "function") {
+  } else if (typeof callTool !== "function" || !site?.serverTools?.url) {
     checks.push(
       liveCheck("entitlement_filtering", "Out-of-tier operations are filtered for this principal", [], null, {
         skipped: true,
-        skipReason: "no bridge client is available to exercise a governed tool call.",
+        skipReason: "no governed tool bridge is configured for this site (serverTools.url), so no governed tool call can be exercised.",
       }),
     );
   } else {
     configWrite = await attemptConfigWrite();
     checks.push(
-      liveCheck(
-        "entitlement_filtering",
-        "Out-of-tier operations are filtered for this principal",
-        configWrite.served
-          ? ["a config write was served to a principal that does not hold the mcp_config scope."]
-          : [],
-        { served: configWrite.served, detail: configWrite.detail },
-      ),
+      configWrite.outcome === "unexercised"
+        ? liveCheck("entitlement_filtering", "Out-of-tier operations are filtered for this principal", [], configWrite, {
+          skipped: true,
+          skipReason: `the governed tool call never ran, so no policy decision was observed: ${configWrite.detail}`,
+        })
+        : liveCheck(
+          "entitlement_filtering",
+          "Out-of-tier operations are filtered for this principal",
+          configWrite.served
+            ? ["a config write was served to a principal that does not hold the mcp_config scope."]
+            : [],
+          configWrite,
+        ),
     );
   }
 
@@ -731,22 +789,27 @@ export async function verifyLive(site, { transport, callTool = null, now = () =>
           skipReason: "this principal holds mcp_config: a served config write is in tier here, so the probe proves nothing. Run it with a content-tier principal.",
         }),
       );
-    } else if (typeof callTool !== "function") {
+    } else if (typeof callTool !== "function" || !site?.serverTools?.url) {
       checks.push(
         liveCheck("probe_config_change", "A configuration change is refused", [], null, {
           skipped: true,
-          skipReason: "no bridge client is available to attempt a governed config write.",
+          skipReason: "no governed tool bridge is configured for this site (serverTools.url), so no config write can be attempted.",
         }),
       );
     } else {
       const attemptResult = configWrite ?? (await attemptConfigWrite());
       checks.push(
-        liveCheck(
-          "probe_config_change",
-          "A configuration change is refused",
-          attemptResult.served ? ["a configuration write was accepted."] : [],
-          { served: attemptResult.served, detail: attemptResult.detail },
-        ),
+        attemptResult.outcome === "unexercised"
+          ? liveCheck("probe_config_change", "A configuration change is refused", [], attemptResult, {
+            skipped: true,
+            skipReason: `the config write never reached a policy decision, so its refusal proves nothing: ${attemptResult.detail}`,
+          })
+          : liveCheck(
+            "probe_config_change",
+            "A configuration change is refused",
+            attemptResult.served ? ["a configuration write was accepted."] : [],
+            attemptResult,
+          ),
       );
     }
 
