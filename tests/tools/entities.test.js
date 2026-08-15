@@ -124,3 +124,78 @@ describe("entities tools (migrated)", () => {
     expect(out.attributes.field_body).toBe("string");
   });
 });
+
+// A published, unmoderated entity — the #171 reproduction shape.
+const publishedUnmoderated = {
+  id: "m1", entityType: "media", bundle: "video_file", title: "V", status: true,
+  langcode: "en", created: null, changed: null, url: null,
+  fields: { name: "V" }, relationships: {}, _backend: "jsonapi",
+};
+const posterRel = { field_poster: { data: { type: "media--image", id: "22222222-2222-4222-8222-222222222222" } } };
+
+describe("#171 live-state mediation on updates", () => {
+  it("relationships-only update sends no status or moderation_state", async () => {
+    backend.getEntity.mockResolvedValue(publishedUnmoderated);
+    backend.updateEntity.mockResolvedValue({ ...publishedUnmoderated });
+    await handlers.drupal_entity_update({
+      entityType: "media", bundle: "video_file", id: "11111111-1111-4111-8111-111111111111",
+      relationships: posterRel,
+    });
+    const sent = backend.updateEntity.mock.calls[0][0];
+    expect(sent.attributes).not.toHaveProperty("status");
+    expect(sent.attributes).not.toHaveProperty("moderation_state");
+    expect(sent.relationships.field_poster.data.id).toBe("22222222-2222-4222-8222-222222222222");
+  });
+
+  it("flags an unrequested published-state change on the response", async () => {
+    backend.getEntity.mockResolvedValue(publishedUnmoderated);
+    backend.updateEntity.mockResolvedValue({ ...publishedUnmoderated, status: false });
+    const out = await handlers.drupal_entity_update({
+      entityType: "media", bundle: "video_file", id: "11111111-1111-4111-8111-111111111111",
+      relationships: posterRel,
+    });
+    expect(out._statusChanged).toMatchObject({ from: true, to: false });
+    expect(out._statusChanged.note).toMatch(/status/);
+  });
+
+  it("keeps the unrequested-change flag through returning:minimal", async () => {
+    backend.getEntity.mockResolvedValue(publishedUnmoderated);
+    backend.updateEntity.mockResolvedValue({ ...publishedUnmoderated, status: false });
+    const out = await handlers.drupal_entity_update({
+      entityType: "media", bundle: "video_file", id: "11111111-1111-4111-8111-111111111111",
+      relationships: posterRel, returning: "minimal",
+    });
+    expect(out._statusChanged).toMatchObject({ from: true, to: false });
+    expect(out).not.toHaveProperty("fields");
+  });
+
+  it("does not flag when the caller set status explicitly", async () => {
+    backend.getEntity.mockResolvedValue(publishedUnmoderated);
+    backend.updateEntity.mockResolvedValue({ ...publishedUnmoderated, status: false });
+    const out = await handlers.drupal_entity_update({
+      entityType: "media", bundle: "video_file", id: "11111111-1111-4111-8111-111111111111",
+      attributes: { status: false },
+    });
+    expect(out).not.toHaveProperty("_statusChanged");
+  });
+
+  it("does not flag (and does not crash) when the pre-read fails", async () => {
+    backend.getEntity.mockRejectedValue(new Error("boom"));
+    backend.updateEntity.mockResolvedValue({ ...publishedUnmoderated, status: false });
+    const out = await handlers.drupal_entity_update({
+      entityType: "media", bundle: "video_file", id: "11111111-1111-4111-8111-111111111111",
+      relationships: posterRel,
+    });
+    expect(out).not.toHaveProperty("_statusChanged");
+  });
+
+  it("does not flag when the published state is unchanged", async () => {
+    backend.getEntity.mockResolvedValue(publishedUnmoderated);
+    backend.updateEntity.mockResolvedValue({ ...publishedUnmoderated });
+    const out = await handlers.drupal_entity_update({
+      entityType: "media", bundle: "video_file", id: "11111111-1111-4111-8111-111111111111",
+      relationships: posterRel,
+    });
+    expect(out).not.toHaveProperty("_statusChanged");
+  });
+});

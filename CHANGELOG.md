@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **An unrequested published-state change is no longer silent (#171).**
+  `status` stays strictly opt-in on updates — the connector never adds it to a
+  PATCH — but a server-side gate can still flip it (an unmoderated-entity
+  publish backstop, or a write landing as an unpublished forward revision).
+  `drupal_entity_update`, `drupal_update_node`, and `drupal_update_media` now
+  compare the written state against a pre-write read and, when the caller sent
+  neither `status` nor an explicit moderation state, report a flip via a
+  `_statusChanged` marker (`from`/`to` plus a verification note) instead of
+  returning a clean success. The marker survives `returning: "minimal"`.
+  Regression tests pin that relationships-only and field-only updates send
+  neither `status` nor `moderation_state` across the entity, media, node, and
+  bulk update tools.
+- **Media tools route reference-shaped `fields` to relationships (#171).**
+  `drupal_update_media` and `drupal_create_media` forwarded entity-reference
+  values under `fields` as JSON:API attributes, which Drupal rejects with a 422
+  ("relationship fields were provided as attributes"). Values in linkage shape
+  (`{ data: { type, id } }`, an array of those, or `{ data: null }` to clear)
+  are now sent as relationships, matching what `drupal_entity_update` accepts;
+  composite attribute values (`{ value, format }` and friends) are untouched.
+  The linkage-shape helpers live in `src/lib/canonical.js` for reuse.
+
 ## [2.4.1] - 2026-08-14
 
 ### Fixed

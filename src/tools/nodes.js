@@ -13,8 +13,8 @@ import {
   resolveSecurityConfig, redactCanonicalEntity,
   assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
 } from "../lib/security.js";
-import { applySafeDraftDefault } from "../lib/moderation-default.js";
-import { shapeWriteResponse, RETURNING_SCHEMA } from "../lib/entity-response.js";
+import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
+import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA } from "../lib/entity-response.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 
 /** Fallback language for an alias when the node exposes none. */
@@ -318,10 +318,20 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   else if (status !== undefined) attributes.status = status;
   const bodyAttr = buildBodyAttribute(body, summary, format, site);
   if (bodyAttr) attributes.body = bodyAttr;
+  // One pre-read serves the #131 draft default and the #171 unrequested-
+  // status-change flag. Skipped when the caller pinned the moderation state.
+  let existing = null;
+  if (!hasExplicitModerationState(attributes)) {
+    try {
+      existing = (await backend.getEntity({ entityType: "node", bundle: type, id })) ?? null;
+    } catch {
+      existing = null; // Unreadable target: server-side gates stay authoritative.
+    }
+  }
   // #131: published moderated nodes without an explicit state → draft forward revision.
   // Runs before the publish gate and on dryRun so previews match the real write.
   attributes = await applySafeDraftDefault({
-    backend, entityType: "node", bundle: type, id, attributes,
+    backend, entityType: "node", bundle: type, id, attributes, existingEntity: existing,
   });
   assertPublishAllowed(sec, attributes);
   if (dryRun) return { dryRun: true, operation: "update", entityType: "node", bundle: type, id, attributes, relationships };
@@ -337,8 +347,11 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   // Honest response: re-read persisted state so the returned `url` is the alias
   // that actually resolves, never the just-sent value.
   const fresh = await backend.getEntity({ entityType: "node", bundle: type, id }).catch(() => null);
-  if (fresh && redirectResult) return shapeWriteResponse({ ...fresh, _redirect: redirectResult }, returning);
-  return shapeWriteResponse(fresh ?? { id }, returning);
+  // #171: an unrequested published-state flip in the persisted node is
+  // reported via _statusChanged rather than returned as a clean success.
+  const flagged = flagUnrequestedStatusChange(fresh, existing, attributes);
+  if (flagged && redirectResult) return shapeWriteResponse({ ...flagged, _redirect: redirectResult }, returning);
+  return shapeWriteResponse(flagged ?? { id }, returning);
 }
 
 /**

@@ -8,6 +8,8 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
+import { splitReferenceFields } from "../lib/canonical.js";
+import { flagUnrequestedStatusChange } from "../lib/entity-response.js";
 import {
   resolveSecurityConfig, redactCanonicalEntity,
   assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
@@ -62,9 +64,10 @@ async function getMedia({ site: siteName, type, id }) {
 }
 
 /**
- * Create a media entity. Caller `fields` are spread into attributes; name and
- * status are layered on top. Defaults to unpublished (`status: false`) so
- * media is never auto-published under non-publishing presets (#139).
+ * Create a media entity. Caller `fields` are split into attributes and
+ * relationship-shaped references (#171); name and status are layered on top of
+ * the attributes. Defaults to unpublished (`status: false`) so media is never
+ * auto-published under non-publishing presets (#139).
  *
  * @param {object} args - { site?, type, name, status?, fields? }.
  * @returns {Promise<object>} The created media descriptor.
@@ -73,17 +76,23 @@ async function createMedia({ site: siteName, type, name, status = false, fields 
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", "media", type);
-  const attributes = { name, status, ...fields };
+  const { attributes, relationships } = splitReferenceFields(fields);
   // Layer name/status after fields so they win, matching prior behaviour.
   attributes.name = name;
   attributes.status = status;
   assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
-  return backend.createEntity({ entityType: "media", bundle: type, attributes });
+  return backend.createEntity({
+    entityType: "media", bundle: type, attributes,
+    ...(relationships ? { relationships } : {}),
+  });
 }
 
 /**
- * Update a media entity (partial — omitted fields are left untouched).
+ * Update a media entity (partial — omitted fields are left untouched; `status`
+ * is strictly opt-in, #171). Reference-shaped `fields` values are routed to
+ * relationships — see splitReferenceFields.
+ *
  * @param {object} args - { site?, type, id, name?, status?, fields? }.
  * @returns {Promise<object>} The updated media descriptor.
  */
@@ -91,12 +100,25 @@ async function updateMedia({ site: siteName, type, id, name, status, fields = {}
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", "media", type);
-  const attributes = { ...fields };
+  const { attributes, relationships } = splitReferenceFields(fields);
   if (name !== undefined) attributes.name = name;
   if (status !== undefined) attributes.status = status;
   assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
-  return backend.updateEntity({ entityType: "media", bundle: type, id, attributes });
+  // #171: pre-read so an unrequested published-state flip is reported, not silent.
+  let existing = null;
+  if (status === undefined) {
+    try {
+      existing = (await backend.getEntity({ entityType: "media", bundle: type, id })) ?? null;
+    } catch {
+      existing = null; // Unreadable target: server-side gates stay authoritative.
+    }
+  }
+  const result = await backend.updateEntity({
+    entityType: "media", bundle: type, id, attributes,
+    ...(relationships ? { relationships } : {}),
+  });
+  return flagUnrequestedStatusChange(result, existing, attributes);
 }
 
 /**
@@ -239,13 +261,13 @@ export const definitions = [
         type:   { type: "string", description: "Media type machine name" },
         name:   { type: "string", description: "Media entity name / label" },
         status: { type: "boolean", default: false, description: "Published flag. Defaults to false (unpublished). Requires allowPublish when true." },
-        fields: { type: "object", description: "Additional field values — include the source field (e.g. field_media_oembed_video: 'https://youtu.be/...')" },
+        fields: { type: "object", description: "Additional field values — include the source field (e.g. field_media_oembed_video: 'https://youtu.be/...'). Entity-reference values in JSON:API linkage shape ({ data: { type, id } }) are sent as relationships automatically." },
       },
     },
   },
   {
     name: "drupal_update_media",
-    description: "Update a media entity's name, status, or field values.",
+    description: "Update a media entity's name, status, or field values. Partial: omitted fields (status included) are left untouched.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
@@ -253,8 +275,8 @@ export const definitions = [
         type:   { type: "string" },
         id:     { type: "string" },
         name:   { type: "string" },
-        status: { type: "boolean" },
-        fields: { type: "object" },
+        status: { type: "boolean", description: "Published flag. Only sent when provided; requires allowPublish when true." },
+        fields: { type: "object", description: "Field values. Entity-reference values in JSON:API linkage shape ({ data: { type, id } }) are sent as relationships automatically." },
       },
     },
   },

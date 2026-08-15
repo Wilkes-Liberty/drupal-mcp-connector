@@ -10,8 +10,8 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { shapeWriteResponse, RETURNING_SCHEMA } from "../lib/entity-response.js";
-import { applySafeDraftDefault } from "../lib/moderation-default.js";
+import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA } from "../lib/entity-response.js";
+import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
   redactCanonicalEntity, getSecuritySummary,
@@ -75,6 +75,10 @@ async function createEntity({ site: siteName, entityType, bundle, attributes = {
  * `moderation_state` get `moderation_state: draft` so the write is a forward
  * revision rather than a live default-revision mutation.
  *
+ * Live-state mediation (#171): `status` is never added to the PATCH unless the
+ * caller passed it, and an unrequested published-state flip in the write result
+ * is reported via `_statusChanged` rather than returned silently.
+ *
  * @param {object} args - { site?, entityType, bundle, id, attributes?, relationships? }.
  * @returns {Promise<object>} The updated entity descriptor.
  * @throws {SecurityError} If updating the type/bundle is not permitted.
@@ -84,12 +88,24 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", entityType, bundle);
   const backend = await resolveBackend(site);
+  // One pre-write read serves both the #131 draft default and the #171
+  // unrequested-status-change flag. Skipped when the caller pinned the
+  // moderation state explicitly (same condition the draft default uses).
+  let existing = null;
+  if (!hasExplicitModerationState(attributes)) {
+    try {
+      existing = (await backend.getEntity({ entityType, bundle, id })) ?? null;
+    } catch {
+      existing = null; // Unreadable target: server-side gates stay authoritative.
+    }
+  }
   const safeAttributes = await applySafeDraftDefault({
-    backend, entityType, bundle, id, attributes,
+    backend, entityType, bundle, id, attributes, existingEntity: existing,
   });
   assertPublishAllowed(sec, safeAttributes);
   if (dryRun) return { dryRun: true, operation: "update", entityType, bundle, id, attributes: safeAttributes, relationships };
-  return shapeWriteResponse(await backend.updateEntity({ entityType, bundle, id, attributes: safeAttributes, relationships }), returning);
+  const result = await backend.updateEntity({ entityType, bundle, id, attributes: safeAttributes, relationships });
+  return shapeWriteResponse(flagUnrequestedStatusChange(result, existing, safeAttributes), returning);
 }
 
 /**

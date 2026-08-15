@@ -127,3 +127,70 @@ describe("media tools (migrated)", () => {
     expect(out.count).toBe(1);
   });
 });
+
+describe("#171 reference fields under `fields` route to relationships", () => {
+  const posterRef = { data: { type: "media--image", id: "22222222-2222-4222-8222-222222222222" } };
+
+  it("update_media routes a reference-shaped field to relationships", async () => {
+    backend.updateEntity.mockResolvedValue(media);
+    await handlers.drupal_update_media({
+      type: "video_file", id: "m1",
+      fields: { field_poster: posterRef, field_caption: "Cap" },
+    });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes).toEqual({ field_caption: "Cap" });
+    expect(arg.relationships.field_poster.data.type).toBe("media--image");
+  });
+
+  it("update_media without status sends no status attribute", async () => {
+    backend.updateEntity.mockResolvedValue(media);
+    await handlers.drupal_update_media({ type: "image", id: "m1", name: "Renamed" });
+    expect(backend.updateEntity.mock.calls[0][0].attributes).not.toHaveProperty("status");
+  });
+
+  it("update_media keeps composite value objects (no data key) in attributes", async () => {
+    backend.updateEntity.mockResolvedValue(media);
+    await handlers.drupal_update_media({
+      type: "image", id: "m1",
+      fields: { field_body: { value: "x", format: "basic_html" } },
+    });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes.field_body).toEqual({ value: "x", format: "basic_html" });
+    expect(arg.relationships).toBeUndefined();
+  });
+
+  it("update_media clears a reference via data:null through relationships", async () => {
+    backend.updateEntity.mockResolvedValue(media);
+    await handlers.drupal_update_media({ type: "video_file", id: "m1", fields: { field_poster: { data: null } } });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes).toEqual({});
+    expect(arg.relationships.field_poster).toEqual({ data: null });
+  });
+
+  it("create_media routes reference-shaped fields to relationships too", async () => {
+    backend.createEntity.mockResolvedValue(media);
+    await handlers.drupal_create_media({
+      type: "video_file", name: "V",
+      fields: { field_media_video_file: { data: { type: "file--file", id: "33333333-3333-4333-8333-333333333333" } } },
+    });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes).toEqual({ name: "V", status: false });
+    expect(arg.relationships.field_media_video_file.data.id).toBe("33333333-3333-4333-8333-333333333333");
+  });
+});
+
+describe("#171 unrequested published-state flip is flagged on media updates", () => {
+  it("flags a status flip the caller never requested", async () => {
+    backend.getEntity.mockResolvedValue({ ...media, status: true });
+    backend.updateEntity.mockResolvedValue({ ...media, status: false });
+    const out = await handlers.drupal_update_media({ type: "image", id: "m1", name: "Renamed" });
+    expect(out._statusChanged).toMatchObject({ from: true, to: false });
+  });
+
+  it("does not flag when the caller set status explicitly", async () => {
+    backend.updateEntity.mockResolvedValue({ ...media, status: false });
+    const out = await handlers.drupal_update_media({ type: "image", id: "m1", status: false });
+    expect(out).not.toHaveProperty("_statusChanged");
+    expect(backend.getEntity).not.toHaveBeenCalled();
+  });
+});

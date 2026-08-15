@@ -34,6 +34,47 @@ export function shapeWriteResponse(entity, returning = "full") {
   return out;
 }
 
+/**
+ * Flag a published-state change the caller never requested (#171).
+ *
+ * `status` is strictly opt-in on updates: the connector never adds it to a
+ * PATCH. A server-side gate can still flip it (e.g. a governance backstop
+ * unpublishing an unmoderated entity, or a write landing as an unpublished
+ * forward revision), and a silent success that also changed live state is the
+ * failure class that surfaces only when content goes missing. When a
+ * pre-write read is available and the sent attributes carry neither `status`
+ * nor `moderation_state` (an explicit moderation transition legitimately
+ * changes the published state, as does the #131 injected draft default), a
+ * different `status` in the write result is surfaced as `_statusChanged` — an
+ * `_`-prefixed key, so it survives `returning: "minimal"`.
+ *
+ * Best-effort by design: it requires a readable pre-write entity, and the
+ * server-side gate stays authoritative either way.
+ *
+ * @param {?object} result The entity returned by (or re-read after) the write.
+ * @param {?object} existing The pre-write entity, when it could be read.
+ * @param {object} sentAttributes The attribute map that was sent.
+ * @returns {?object} The result, with `_statusChanged` attached when it applies.
+ */
+export function flagUnrequestedStatusChange(result, existing, sentAttributes) {
+  if (!result || !existing) return result;
+  const sent = (key) => Object.prototype.hasOwnProperty.call(sentAttributes, key);
+  if (sent("status") || sent("moderation_state")) return result;
+  if (typeof existing.status !== "boolean" || typeof result.status !== "boolean") return result;
+  if (existing.status === result.status) return result;
+  return {
+    ...result,
+    _statusChanged: {
+      from: existing.status,
+      to: result.status,
+      note: "The returned published status differs from the pre-write state although the request did not " +
+        "include `status`. A server-side gate intervened — the write may have landed as an unpublished " +
+        "forward revision (live revision unchanged) or the entity may have been unpublished. Verify which " +
+        "revision is live before relying on this content's visibility.",
+    },
+  };
+}
+
 /** JSON Schema fragment for the shared `returning` parameter. */
 export const RETURNING_SCHEMA = {
   type: "string",
