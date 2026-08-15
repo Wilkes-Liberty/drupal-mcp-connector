@@ -2,23 +2,17 @@
 
 This project follows [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
 This document defines **what counts as the public, stable surface** — i.e. what a
-breaking change is — so you can upgrade with confidence and know what 1.0 will
-guarantee.
+breaking change is — so you can upgrade with confidence.
 
-## Pre-1.0 (current: `0.x`)
+## Post-1.0 guarantees
 
-While on `0.x` the project is maturing toward a stable 1.0. We already practice
-the policy below and avoid gratuitous breakage, but per semver, **`0.x` minor
-releases may include a breaking change to the surfaces listed under "Stable
-surface"** when necessary. Such changes are always called out in
-[CHANGELOG.md](../CHANGELOG.md). At **1.0** the guarantees below become firm:
-breaking changes to the stable surface require a major bump.
-
-Tracking issue for 1.0: [#29](https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues/29).
+The guarantees below are in force. A change that breaks the stable surface
+requires a **MAJOR** bump; additive changes are **MINOR**. Every breaking change
+is called out in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Stable surface (the contract)
 
-A change that breaks any of these is a **MAJOR** change (post-1.0):
+A change that breaks any of these is a **MAJOR** change:
 
 - **Tool names and input schemas** — the `drupal_*` tool names and the shape of
   their accepted arguments (removing a tool, renaming it, removing/retyping a

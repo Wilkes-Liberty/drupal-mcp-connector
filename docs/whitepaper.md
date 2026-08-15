@@ -263,7 +263,7 @@ The following represent intended directions, not committed release dates.
 
 ### Companion Governance Module: `drupal/mcp_sentinel`
 
-`drupal/mcp_sentinel` is an independent Drupal module (available on drupal.org, pre-1.0/alpha, requires Drupal `^10.3 || ^11`) that provides the authoritative server-side governance layer for connector-initiated operations.
+`drupal/mcp_sentinel` is an independent Drupal module (available on drupal.org, requires Drupal `^10.6 || ^11.3` on PHP 8.3 or newer) that provides the authoritative server-side governance layer for connector-initiated operations.
 
 When installed, MCP Sentinel enforces:
 
