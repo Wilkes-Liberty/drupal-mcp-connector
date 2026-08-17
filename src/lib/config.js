@@ -85,8 +85,21 @@ export function assertSecureAuth(site) {
     throw new SecurityError(`Site "${site._name}": requireSecureAuth is set but baseUrl is not HTTPS.`);
   }
   if (!site.apiToken && !hasValidOauth(site)) {
+    const siteName = site._name ?? "";
+    if (site.oauth?.clientSecretEnv) {
+      throw new SecurityError(
+        `Site "${siteName}": requireSecureAuth is set but oauth.clientSecretEnv ` +
+        `"${site.oauth.clientSecretEnv}" is not set in the environment.`
+      );
+    }
+    if (site.apiTokenEnv) {
+      throw new SecurityError(
+        `Site "${siteName}": requireSecureAuth is set but apiTokenEnv ` +
+        `"${site.apiTokenEnv}" is not set in the environment.`
+      );
+    }
     throw new SecurityError(
-      `Site "${site._name}": requireSecureAuth is set but no Bearer apiToken or OAuth2 client ` +
+      `Site "${siteName}": requireSecureAuth is set but no Bearer apiToken or OAuth2 client ` +
       "credentials are configured (anonymous and basic auth are not permitted). " +
       "Provide apiToken/apiTokenEnv or an oauth block."
     );

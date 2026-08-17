@@ -41,6 +41,8 @@ fi
 # export into a child that exits immediately, leaving every secret unset while
 # the script still reported success.
 _old_ifs="$IFS"
+_tried=0
+_resolved=0
 IFS='
 '
 for _pair in $SECRET_MAP; do
@@ -50,14 +52,23 @@ for _pair in $SECRET_MAP; do
   _var="$(printf '%s' "${_pair%%=*}" | tr -d '[:space:]')"
   _item="$(printf '%s' "${_pair#*=}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
   if [ -n "$_var" ] && [ -n "$_item" ]; then
+    _tried=$((_tried + 1))
     if _value="$(security find-generic-password -s "$_item" -w 2>/dev/null)"; then
       export "$_var=$_value"
+      _resolved=$((_resolved + 1))
     fi
   fi
   IFS='
 '
 done
 IFS="$_old_ifs"
+
+# Per-item misses stay silent (unprovisioned / inert break-glass). A table
+# that resolves nothing at all is a different failure: launcher and config
+# have likely drifted, and every requireSecureAuth site will fail closed.
+if [ "$_tried" -gt 0 ] && [ "$_resolved" -eq 0 ]; then
+  echo "drupal-mcp-launch: no Keychain items resolved from the secret table ($_tried pairs tried); every site requiring a client secret will fail closed." >&2
+fi
 
 # Trust a locally-generated development root CA (e.g. mkcert) so Node accepts a
 # local site's HTTPS certificate. Only set when mkcert and its root exist;

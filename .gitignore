@@ -5,6 +5,7 @@ node_modules/
 
 # Config with credentials — NEVER commit
 config/config.json
+config/secrets.map
 .env
 .env.local
 .env.*.local
