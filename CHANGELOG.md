@@ -7,26 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-08-17
+
 ### Fixed
 - **A process no longer starts when every secret named by the active config
-  is unset (#199).** 2.6.0 moved the launcher's Keychain table to the
-  tenant-neutral example names and documented `config/secrets.map` as the
-  per-machine override. A checkout whose `config.json` still used the old
-  env-var names, and that never grew a `secrets.map`, started cleanly,
-  resolved zero sites, and advertised only `drupal_list_sites` and
-  `drupal_governance_status`. Worse, the diagnostic itself threw
-  `requireSecureAuth` with advice to "provide an oauth block" that was
-  already there. Now: `node src/index.js` (not only the shell launcher)
-  applies `config/secrets.map` or the shipped example table; the process
-  **refuses to start** when every `clientSecretEnv`/`apiTokenEnv` named in
-  `config.json` is still unset, listing those names; `requireSecureAuth`
-  names the unset variable (and does not claim the env is unset when the
-  secret resolved but `clientId` is missing); `drupal_governance_status`
-  reports a classified reason (`credential_unresolved`, `unknown_site`,
-  `insecure_base_url`, or `site_unresolved`) instead of throwing;
-  `config/secrets.map` is actually gitignored. Per-item Keychain misses
-  stay silent so an inert break-glass tier remains a missing item, not an
-  error.
+  is unset (#199).** After 2.6.0, a client that spawned `node src/index.js`
+  (skipping the launcher) or whose `config.json` still used older
+  `clientSecretEnv` names could start with zero resolved sites and advertise
+  only `drupal_list_sites` and `drupal_governance_status`. The diagnostic
+  then told the operator to provide an oauth block that was already there.
+  2.6.1 loads `config/secrets.map` (or the shipped example table) inside
+  `node`; names the unset variable; classifies
+  `drupal_governance_status` failures; and **refuses to start** when every
+  named secret is missing. On 2.6.0 the same recovery is: launch via
+  `bin/drupal-mcp-launch.sh` with a `config/secrets.map`
+  (`ENV_VAR=keychain-item`), then restart the MCP client.
 
 ## [2.6.0] - 2026-08-15
 
