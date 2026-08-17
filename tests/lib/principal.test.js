@@ -12,6 +12,7 @@ import {
   resolveGrantedSiteNames,
   runWithIdentity,
   getRequestIdentity,
+  visibleSiteTargets,
 } from "../../src/lib/principal.js";
 import { SecurityError } from "../../src/lib/security.js";
 
@@ -289,6 +290,32 @@ describe("resources and prompts", () => {
       tools,
     ).map((p) => p.name);
     expect(visible).toEqual(["drupal-content-audit", "drupal-get-node"]);
+  });
+});
+
+describe("visibleSiteTargets", () => {
+  it("never includes credentials in the public target list", () => {
+    const secretSite = {
+      ...prod,
+      apiToken: "tok-secret-value",
+      oauth: { clientSecret: "oauth-secret-value", scopes: ["mcp_read"] },
+      password: "pw-secret-value",
+    };
+    const payload = visibleSiteTargets(
+      identity({ scopes: ["mcp_read"] }),
+      [secretSite],
+      ["production", "staging"],
+      { "content-agent": ["production"] },
+    );
+    expect(payload).toEqual({
+      sites: ["production"],
+      targets: [{
+        name: "production",
+        baseUrl: "https://drupal.example.com",
+        source: "grant",
+      }],
+    });
+    expect(JSON.stringify(payload)).not.toContain("secret");
   });
 });
 

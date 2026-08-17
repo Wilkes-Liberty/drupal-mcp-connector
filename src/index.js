@@ -48,12 +48,11 @@ import { callTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
 import { filterDiscoverableTools } from "./lib/governance.js";
 import {
   assertPrincipalEntitlement,
-  describeTarget,
   filterPromptsByPrincipal,
   filterResourcesByPrincipal,
   filterToolsByPrincipal,
   getRequestIdentity,
-  resolveGrantedSites,
+  visibleSiteTargets,
 } from "./lib/principal.js";
 
 // Tools — aggregated (single source of truth, side-effect-free) and per-tool prompts
@@ -124,17 +123,7 @@ async function readResource(uri) {
 
   // drupal://sites
   if (uri === "drupal://sites") {
-    const granted = identity ? resolveGrantedSites(identity, sites) : sites;
-    const names = identity ? granted.map((site) => site._name) : listSiteNames();
-    return {
-      sites: names,
-      targets: (identity ? granted : names.map((name) => {
-        const resolved = sites.find((site) => site._name === name);
-        return resolved
-          ? describeTarget(resolved, "config")
-          : { name, source: "config" };
-      })),
-    };
+    return visibleSiteTargets(identity, sites, listSiteNames());
   }
 
   // drupal://{site}/content-types

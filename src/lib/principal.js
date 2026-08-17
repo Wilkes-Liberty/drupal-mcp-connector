@@ -234,6 +234,31 @@ export function describeTarget(site, source) {
 }
 
 /**
+ * Public site list for tools/resources. Never includes credentials.
+ *
+ * @param {object|null} identity
+ * @param {Array<object>} resolvable
+ * @param {string[]} configuredNames
+ * @param {object|null} [grants]
+ * @returns {{sites: string[], targets: Array<{name: string, baseUrl?: string, source: string}>}}
+ */
+export function visibleSiteTargets(identity, resolvable, configuredNames, grants) {
+  const granted = identity ? resolveGrantedSites(identity, resolvable, grants) : resolvable;
+  const names = identity
+    ? granted.map((site) => site._name)
+    : [...configuredNames];
+  const byName = new Map(granted.map((site) => [site._name, site]));
+  const source = identity ? "grant" : "config";
+  return {
+    sites: names,
+    targets: names.map((name) => {
+      const site = byName.get(name);
+      return site ? describeTarget(site, source) : { name, source };
+    }),
+  };
+}
+
+/**
  * Resolve the site this principal may use for a call.
  *
  * @param {object} args

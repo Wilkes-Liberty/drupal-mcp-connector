@@ -31,6 +31,7 @@ vi.mock("../../src/lib/config.js", async (orig) => {
 });
 
 import fetch from "node-fetch";
+import { getSiteConfig } from "../../src/lib/config.js";
 import { securityMiddleware, callTool, listResolvableSiteConfigs } from "../../src/lib/dispatch.js";
 import { GovernanceError, clearGovernanceCache } from "../../src/lib/governance.js";
 import { SecurityError } from "../../src/lib/security.js";
@@ -175,6 +176,24 @@ describe("securityMiddleware inbound entitlement (#178)", () => {
     );
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/Access denied: Not entitled to invoke/);
+  });
+
+  it("does not resolve the default site for an unscoped governance_status", async () => {
+    vi.mocked(getSiteConfig).mockClear();
+    const handler = vi.fn(async () => ({ sites: [] }));
+    await expect(securityMiddleware(
+      "drupal_governance_status",
+      {},
+      handler,
+      {
+        identity: reader,
+        sites: granted,
+        grants: { "content-agent": ["gov"] },
+        defaultSite: "prod-admin",
+      },
+    )).resolves.toEqual({ sites: [] });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(getSiteConfig).not.toHaveBeenCalled();
   });
 
   it("rewrites a granted call onto the authoritative site name", async () => {

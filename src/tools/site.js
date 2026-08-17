@@ -9,7 +9,7 @@
 import { getSiteConfig, listSiteNames } from "../lib/config.js";
 import { governanceStatus } from "../lib/governance.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { getRequestIdentity, resolveGrantedSiteNames } from "../lib/principal.js";
+import { getRequestIdentity, resolveGrantedSiteNames, visibleSiteTargets } from "../lib/principal.js";
 
 // ---------------------------------------------------------------------------
 // Implementations
@@ -50,19 +50,15 @@ async function listContentTypes({ site: siteName }) {
  * @returns {Promise<{sites: string[], targets: Array<object>}>}
  */
 async function listConfiguredSites() {
-  const identity = getRequestIdentity();
-  const names = identity
-    ? resolveGrantedSiteNames(identity, listSiteNames())
-    : listSiteNames();
-  const targets = names.map((name) => {
+  const names = listSiteNames();
+  const resolvable = names.flatMap((name) => {
     try {
-      const site = getSiteConfig(name);
-      return { name: site._name, baseUrl: site.baseUrl, source: identity ? "grant" : "config" };
+      return [getSiteConfig(name)];
     } catch {
-      return { name, source: identity ? "grant" : "config" };
+      return [];
     }
   });
-  return { sites: names, targets };
+  return visibleSiteTargets(getRequestIdentity(), resolvable, names);
 }
 
 /**

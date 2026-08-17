@@ -86,8 +86,13 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
     }
   }
 
-  // Tools with no site context skip per-site checks
+  // Tools with no site context skip per-site checks. governance_status
+  // without a hint reports every granted/configured site and must not
+  // resolve (or fail on) the configured default first.
   if (toolName === "drupal_list_sites") return handler(nextArgs);
+  if (toolName === "drupal_governance_status" && !nextArgs.site) {
+    return handler(nextArgs);
+  }
 
   const site = getSiteConfig(nextArgs.site);
 
