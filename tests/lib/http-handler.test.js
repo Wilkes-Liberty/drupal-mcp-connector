@@ -143,6 +143,69 @@ describe("createMcpRequestHandler", () => {
     expect(res.statusCode).toBe(404);
   });
 
+  it("serves protected-resource metadata without authentication", async () => {
+    const document = { resource: "https://mcp.example.com/mcp", authorization_servers: ["https://idp.example.com"] };
+    const h = createMcpRequestHandler({
+      checkAuth: () => false,
+      protectedResource: document,
+      modernHandler: vi.fn(),
+      legacyHandler,
+      toolCount: 66,
+    });
+    const res = mockRes();
+    await h(req("GET", "/.well-known/oauth-protected-resource/mcp"), res);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual(document);
+  });
+
+  it("returns 404 for the well-known path when no resource server is configured", async () => {
+    const res = mockRes();
+    await handler(req("GET", "/.well-known/oauth-protected-resource"), res);
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("uses the resource-server authenticator and attaches identity", async () => {
+    const incoming = req("GET", "/mcp", { authorization: "Bearer good" });
+    const authenticate = vi.fn(async () => ({
+      ok: true,
+      identity: Object.freeze({ sub: "agent-1", scopes: ["mcp_read"] }),
+    }));
+    const h = createMcpRequestHandler({
+      authenticate,
+      modernHandler: vi.fn(),
+      legacyHandler,
+      toolCount: 66,
+    });
+    const res = mockRes();
+    await h(incoming, res);
+    expect(authenticate).toHaveBeenCalled();
+    expect(incoming.mcpIdentity.sub).toBe("agent-1");
+    expect(legacyHandler).toHaveBeenCalled();
+  });
+
+  it("returns the authenticator challenge without reading the body", async () => {
+    const modernHandler = vi.fn();
+    const toWebRequestFn = vi.fn();
+    const h = createMcpRequestHandler({
+      authenticate: async () => ({
+        ok: false,
+        status: 401,
+        headers: { "WWW-Authenticate": "Bearer realm=\"mcp\", error=\"invalid_token\"" },
+        body: "Unauthorized",
+      }),
+      modernHandler,
+      legacyHandler,
+      toolCount: 66,
+      toWebRequestFn,
+    });
+    const res = mockRes();
+    await h(rawBodyReq(["{not-json"], { authorization: "Bearer nope" }), res);
+    expect(res.statusCode).toBe(401);
+    expect(res.headers["WWW-Authenticate"]).toContain("invalid_token");
+    expect(modernHandler).not.toHaveBeenCalled();
+    expect(toWebRequestFn).not.toHaveBeenCalled();
+  });
+
   it("returns 429 with Retry-After when the rate limiter denies", async () => {
     const rateLimiter = { check: vi.fn(() => ({ allowed: false, retryAfterSec: 7, remaining: 0 })) };
     const h = createMcpRequestHandler({

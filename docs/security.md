@@ -371,7 +371,7 @@ Before going live with any non-development site:
 - [ ] Explicit `security.preset` set on every site (omitted / empty security defaults to `production-strict`)
 - [ ] GraphQL only where intended (`allowGraphql` / development preset); prefer JSON:API for policy-bound reads
 - [ ] Dedicated Drupal API user created with `mcp_api` role only
-- [ ] TLS certificates configured for HTTPS transport; non-loopback bind has `MCP_AUTH_TOKEN` (or trusted proxy + `MCP_ALLOW_UNAUTHENTICATED=1`)
+- [ ] TLS certificates configured for HTTPS transport; non-loopback bind has `auth.issuer` + `auth.audience` (or trusted proxy + `MCP_ALLOW_UNAUTHENTICATED=1`)
 - [ ] `MCP_UPLOAD_ROOT` set if uploads must come from a directory other than the process cwd
 - [ ] `drupal_security_info` called to verify the active policy
 - [ ] ESLint passing: `npm run lint`

@@ -33,7 +33,14 @@ User-Agent:   drupal-mcp-connector/<version>
 
 ## 2. Authentication
 
-The connector authenticates to Drupal with **OAuth2** (via Drupal `simple_oauth`):
+**Inbound (MCP clients → connector HTTPS).** A network-facing `/mcp` is an
+OAuth protected resource. The connector validates the caller's access token
+against a configured issuer (RFC 8414 / OIDC + JWKS). That inbound token is
+never forwarded to Drupal. `MCP_AUTH_TOKEN` remains a loopback-only shared
+secret and is not a governed product path.
+
+**Outbound (connector → Drupal).** The connector authenticates to Drupal with
+**OAuth2** (via Drupal `simple_oauth`):
 
 - **`client_credentials`** grant for unattended/service operation (a dedicated
   Consumer bound to a machine user), or

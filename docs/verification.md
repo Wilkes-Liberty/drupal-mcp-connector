@@ -42,6 +42,7 @@ These read the configuration a clean install ships with, so they run in CI.
 | `entitlement` | Every site pins a security preset, and the permissive `development` preset stays on loopback. |
 | `target_resolution` | Every site resolves to exactly one target and the default site exists. |
 | `tenant_neutrality` | The configuration names no real deployment: hostnames are documentation-reserved (RFC 2606/6761). |
+| `inbound_auth` | Network-facing HTTPS authenticates as an OAuth protected resource (`auth.issuer` + `auth.audience`). `MCP_AUTH_TOKEN` is not accepted on that path. |
 
 ## Live checks (opt-in, `--live`)
 

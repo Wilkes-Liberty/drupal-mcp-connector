@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Network-facing HTTPS is an OAuth protected resource (#177).** `/mcp`
+  validates inbound JWTs against a configured issuer (RFC 8414 / OIDC
+  discovery + JWKS): issuer, audience/resource, expiry and required scopes.
+  RFC 9728 metadata is served at `/.well-known/oauth-protected-resource`.
+  A revocation file (`jti` / `sub`) is re-read when it changes, so a revoke
+  does not require a restart. Optional RFC 7662 introspection is fail-closed
+  when configured. Caller-supplied identity headers never become the
+  principal. The inbound access token is never forwarded to Drupal.
+  `MCP_AUTH_TOKEN` remains valid only on loopback; a network-facing bind
+  that still relies on the shared secret refuses to start.
+
 ### Changed
 - **Versioning policy states the post-1.0 guarantees it actually operates under
   (#195).** `docs/versioning.md` still opened with a pre-1.0 section explaining

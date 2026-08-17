@@ -7,7 +7,7 @@
   },
 
   "_security_options": {
-    "_comment": "apiTokenEnv / oauth.clientSecretEnv: read credentials from the environment, never from this file. requireSecureAuth: reject anon/basic, require HTTPS+Bearer — set it on every remote site. requireGovernance: deny every governed path unless the source governance contract (GET /drupal-mcp/readiness, mcp_sentinel) verifies — no ungoverned JSON:API/GraphQL fallback. Env overrides: MCP_CLIENT_ID overrides or disables the outbound identity header; MCP_AUTH_TOKEN requires bearer auth on the HTTPS /mcp endpoint; MCP_BIND_HOST restricts the listen interface (with TLS). See docs/security-hardening.md."
+    "_comment": "apiTokenEnv / oauth.clientSecretEnv: read credentials from the environment, never from this file. requireSecureAuth: reject anon/basic, require HTTPS+Bearer — set it on every remote site. requireGovernance: deny every governed path unless the source governance contract (GET /drupal-mcp/readiness, mcp_sentinel) verifies — no ungoverned JSON:API/GraphQL fallback. Env overrides: MCP_CLIENT_ID overrides or disables the outbound identity header; MCP_BIND_HOST restricts the listen interface (with TLS). Network-facing HTTPS /mcp requires the top-level auth block (issuer + audience), not MCP_AUTH_TOKEN. MCP_AUTH_TOKEN remains valid only on loopback. See docs/security-hardening.md."
   },
 
   "_governance_tiers": {
@@ -21,6 +21,18 @@
     "certPath": "/etc/ssl/certs/drupal-mcp.crt",
     "keyPath":  "/etc/ssl/private/drupal-mcp.key",
     "port":     3443
+  },
+
+  "auth": {
+    "_comment": "Inbound OAuth resource-server for MCP_TRANSPORT=https when the process binds beyond loopback. The issuer is any standards-based authorization server (RFC 8414 / OIDC) — not a vendor-specific product. Tokens are JWTs validated against the issuer's JWKS. Optional: revocationFile (JSON {jti,sub}, re-read without restart) and introspectionUrl (RFC 7662). Env overrides: MCP_RESOURCE_ISSUER, MCP_RESOURCE_AUDIENCE, MCP_RESOURCE, MCP_REVOCATION_FILE, MCP_INTROSPECTION_URL.",
+    "issuer":   "https://idp.example.com",
+    "audience": "https://mcp.example.com/mcp",
+    "resource": "https://mcp.example.com/mcp",
+    "requiredScopes": ["mcp_read"],
+    "revocationFile": "",
+    "introspectionUrl": "",
+    "introspectionClientIdEnv": "",
+    "introspectionClientSecretEnv": ""
   },
 
   "sites": {

@@ -17,7 +17,7 @@ see [SECURITY.md](../SECURITY.md).
 | **Operator config** (`config/config.json`, env, TLS certs, SSH key, `baseUrl`, `drupalRoot`) | **Trusted.** Set by the operator, not the AI. Not attacker-controlled. |
 | **MCP tool inputs** (ids, bundles, titles, field values, filters, drush args, SQL) | **Untrusted.** An AI client (or a compromised/confused one) can send arbitrary values. Validate at this boundary. |
 | **Drupal** | **Authoritative.** Drupal core permissions + the governance module (e.g. MCP Sentinel) are the real access-control gate. The connector is defense-in-depth, not the primary control. |
-| **HTTPS transport network** | Untrusted when exposed; protected by TLS + bearer auth + bind-host + rate limiting. |
+| **HTTPS transport network** | Untrusted when exposed; protected by TLS + OAuth resource-server (JWT/JWKS) + bind-host + rate limiting. Shared `MCP_AUTH_TOKEN` is loopback-only. |
 
 ## Assets
 
@@ -33,7 +33,7 @@ see [SECURITY.md](../SECURITY.md).
 | T2 | **Path traversal / cross-resource access** via `id`/`bundle`/`entityType` interpolated into JSON:API paths (e.g. `id="../../user/user/…"` to read PII despite an entity-type denylist) | `validateUuid(id)` + `validateMachineName(entityType, bundle)` at the backend, plus `encodeURIComponent` on every path segment | ✅ fixed (this pass) |
 | T3 | **Query-param injection** via filter `field`/`value` | `URLSearchParams` percent-encodes keys and values, so inputs cannot break out into separate params | ✅ controlled (see note below) |
 | T4 | **Secret leakage** into logs / errors / tool output | Secrets sourced from env; never logged; `OAuthError` carries status only; tool errors return `err.message` without credentials; `Authorization` header never echoed; `getSecuritySummary` omits credentials | ✅ controlled |
-| T5 | **Auth bypass on the HTTPS transport** | `/mcp` bearer-gated (GET/POST/DELETE) before body parsing, protocol classification, or session handling; constant-time token compare (`timingSafeEqual` + length check); exact-path match; only `/health` is open and leaks nothing sensitive | ✅ controlled |
+| T5 | **Auth bypass on the HTTPS transport** | Network-facing `/mcp` is an OAuth protected resource (issuer, audience, exp, scopes, JWKS); caller identity headers cannot become the principal; revocation file is hot-reloaded; `/health` and RFC 9728 metadata stay open and leak nothing sensitive. Loopback may still use a shared bearer | ✅ controlled |
 | T6 | **Plaintext exposure / MITM** on the network | TLS mandatory off-localhost (process exits without certs unless `MCP_ALLOW_HTTP=1`, which force-binds loopback); HSTS + strict CSP headers | ✅ controlled |
 | T7 | **DoS / brute force** against `/mcp` | Optional per-IP rate limiting (`MCP_RATE_LIMIT`), checked before auth; recommend also rate-limiting at the reverse proxy | ✅ opt-in |
 | T8 | **SSRF** via request-time URL control | `baseUrl`/endpoints are operator config, not per-call tool inputs; `validateBaseUrl` enforces HTTPS for non-localhost | ✅ controlled |
@@ -74,7 +74,8 @@ validator — it would break legitimate relationship filters.
   consumer/role — the connector's presets are a second layer, not the first.
 - **Exposing the HTTPS transport** widens the attack surface; follow the
   pre-exposure checklist in [deployment.md](deployment.md). Non-loopback binds
-  **require** `MCP_AUTH_TOKEN` (fail closed) unless `MCP_ALLOW_UNAUTHENTICATED=1`.
+  **require** an inbound OAuth resource server (`auth.issuer` + `auth.audience`)
+  unless `MCP_ALLOW_UNAUTHENTICATED=1`. `MCP_AUTH_TOKEN` is loopback-only.
   Prefer TLS + tight `MCP_BIND_HOST` + rate limiting (default 120/min on
   non-loopback HTTPS) and/or a reverse-proxy allow-list.
 
