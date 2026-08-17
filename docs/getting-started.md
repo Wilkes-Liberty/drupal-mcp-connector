@@ -22,6 +22,8 @@ cd drupal-mcp-connector
 npm install
 ```
 
+Prefer **2.6.1 or newer**. If a 2.6.0 client only lists `drupal_list_sites` and `drupal_governance_status`, the named secret env vars are unset — launch via `bin/drupal-mcp-launch.sh` with `config/secrets.map`, or upgrade. Restart the MCP client after either change. See [#199](https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues/199).
+
 ---
 
 ## 3. Configure Your Site
