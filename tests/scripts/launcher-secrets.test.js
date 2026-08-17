@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,7 +26,7 @@ let dir;
  * @param {string} [options.secretsMap] Contents of config/secrets.map.
  * @returns {Record<string,string>} The environment the launcher exec'd with.
  */
-function runLauncher({ keychain, secretsMap }) {
+function runLauncher({ keychain, secretsMap, captureStderr = false }) {
   const bin = join(dir, "bin");
   mkdirSync(bin, { recursive: true });
 
@@ -56,16 +56,22 @@ function runLauncher({ keychain, secretsMap }) {
     writeFileSync(join(connectorRoot, "config", "secrets.map"), secretsMap);
   }
 
-  execFileSync("/bin/sh", [join(connectorRoot, "bin", "launch.sh")], {
+  const launched = spawnSync("/bin/sh", [join(connectorRoot, "bin", "launch.sh")], {
     env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir },
+    encoding: "utf8",
   });
+  if (launched.status !== 0) {
+    throw new Error(launched.stderr || `launcher exited ${launched.status}`);
+  }
+  const stderr = launched.stderr || "";
 
-  return Object.fromEntries(
+  const env = Object.fromEntries(
     readFileSync(envFile, "utf8")
       .split("\n")
       .filter(Boolean)
       .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
   );
+  return captureStderr ? { env, stderr } : env;
 }
 
 beforeEach(() => {
@@ -124,5 +130,22 @@ describe("bin/drupal-mcp-launch.sh", () => {
       secretsMap: "not-a-pair\nGOOD_VAR=item-a\n   \n=missing-var\nMISSING_ITEM=\n",
     });
     expect(env.GOOD_VAR).toBe("value-a");
+  });
+
+  it("warns when the secret table resolves zero Keychain items", () => {
+    const { env, stderr } = runLauncher({
+      keychain: {},
+      captureStderr: true,
+    });
+    expect(env.MCP_CONTENT_PRODUCTION_SECRET).toBeUndefined();
+    expect(stderr).toMatch(/no Keychain items resolved from the secret table \(4 pairs tried\)/);
+  });
+
+  it("does not warn when at least one item resolves", () => {
+    const { stderr } = runLauncher({
+      keychain: { "drupal-mcp-content-production": "prod-secret-value" },
+      captureStderr: true,
+    });
+    expect(stderr).not.toMatch(/no Keychain items resolved/);
   });
 });

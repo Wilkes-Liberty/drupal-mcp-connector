@@ -110,4 +110,20 @@ describe("assertSecureAuth", () => {
       oauth: { clientId: "c" },
     })).toThrow(SecurityError);
   });
+  it("names the unset clientSecretEnv instead of asking for an oauth block that exists", () => {
+    expect(() => assertSecureAuth({
+      _name: "prod",
+      requireSecureAuth: true,
+      baseUrl: "https://x",
+      oauth: { clientId: "c", clientSecretEnv: "MCP_AGENT_CLIENT_SECRET" },
+    })).toThrow(/oauth\.clientSecretEnv "MCP_AGENT_CLIENT_SECRET" is not set in the environment/);
+  });
+  it("names the unset apiTokenEnv when that is the configured credential", () => {
+    expect(() => assertSecureAuth({
+      _name: "prod",
+      requireSecureAuth: true,
+      baseUrl: "https://x",
+      apiTokenEnv: "DRUPAL_TOKEN_PRODUCTION",
+    })).toThrow(/apiTokenEnv "DRUPAL_TOKEN_PRODUCTION" is not set in the environment/);
+  });
 });

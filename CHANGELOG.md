@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A missing client secret now names the unset env var (#199).**
+  `requireSecureAuth` used to say "provide an oauth block" when the block was
+  already there and `oauth.clientSecretEnv` (or `apiTokenEnv`) was simply
+  unset. The error now names the variable. The launcher still skips missing
+  Keychain items per tier, but warns on stderr when the whole table resolves
+  nothing — the case where the shipped example names and the active
+  `config.json` have drifted apart.
+
 ### Changed
 - **Versioning policy states the post-1.0 guarantees it actually operates under
   (#195).** `docs/versioning.md` still opened with a pre-1.0 section explaining
