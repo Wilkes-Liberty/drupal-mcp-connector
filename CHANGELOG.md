@@ -20,10 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   applies `config/secrets.map` or the shipped example table; the process
   **refuses to start** when every `clientSecretEnv`/`apiTokenEnv` named in
   `config.json` is still unset, listing those names; `requireSecureAuth`
-  names the unset variable; `drupal_governance_status` reports
-  `credential_unresolved` instead of throwing; `config/secrets.map` is
-  actually gitignored. Per-item Keychain misses stay silent so an inert
-  break-glass tier remains a missing item, not an error.
+  names the unset variable (and does not claim the env is unset when the
+  secret resolved but `clientId` is missing); `drupal_governance_status`
+  reports a classified reason (`credential_unresolved`, `unknown_site`,
+  `insecure_base_url`, or `site_unresolved`) instead of throwing;
+  `config/secrets.map` is actually gitignored. Per-item Keychain misses
+  stay silent so an inert break-glass tier remains a missing item, not an
+  error.
 
 ### Changed
 - **Versioning policy states the post-1.0 guarantees it actually operates under

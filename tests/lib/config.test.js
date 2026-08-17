@@ -126,4 +126,12 @@ describe("assertSecureAuth", () => {
       apiTokenEnv: "DRUPAL_TOKEN_PRODUCTION",
     })).toThrow(/apiTokenEnv "DRUPAL_TOKEN_PRODUCTION" is not set in the environment/);
   });
+  it("does not claim the env var is unset when the secret resolved but clientId is missing", () => {
+    expect(() => assertSecureAuth({
+      _name: "prod",
+      requireSecureAuth: true,
+      baseUrl: "https://x",
+      oauth: { clientSecretEnv: "MCP_AGENT_CLIENT_SECRET", clientSecret: "resolved" },
+    })).toThrow(/oauth block has no clientId/);
+  });
 });
