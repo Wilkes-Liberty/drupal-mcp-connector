@@ -515,6 +515,7 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
   }
   const issuer = normalizeIssuer(inboundCfg.issuer);
   const asMeta = await discoverAuthorizationServer(issuer, fetchFn);
+  const advertisedIssuer = asMeta.issuer || issuer;
   const jwks = createRemoteJWKSet(new URL(asMeta.jwks_uri));
   const resourceMetadataUrl = resourceMetadataUrlFor(resource);
   const revocationStore = inboundCfg.revocationFile
@@ -548,7 +549,7 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
     authenticate: (req) => check(req.headers.authorization, req.headers),
     protectedResource: protectedResourceMetadata({
       resource,
-      authorizationServers: [issuer],
+      authorizationServers: [advertisedIssuer],
       scopesSupported: inboundCfg.requiredScopes,
     }),
     resourceMetadataUrl,

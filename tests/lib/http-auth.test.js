@@ -416,6 +416,30 @@ describe("discoverAuthorizationServer / introspectToken", () => {
     })).rejects.toThrow(/issuer must be an https URL/);
   });
 
+  it("advertises the discovered issuer string in RFC 9728 authorization_servers", async () => {
+    const fetchFn = async (url) => {
+      if (String(url).includes("oauth-authorization-server")) {
+        return {
+          ok: true,
+          json: async () => ({
+            issuer: "https://idp.example.com/",
+            jwks_uri: "https://idp.example.com/jwks",
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    };
+    const inbound = await createInboundHttpsAuth({
+      inboundCfg: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com",
+        resource: "https://mcp.example.com",
+      },
+      fetchFn,
+    });
+    expect(inbound.protectedResource.authorization_servers).toEqual(["https://idp.example.com/"]);
+  });
+
   it("refuses to start a resource server against an HTTP introspection URL", async () => {
     await expect(createInboundHttpsAuth({
       inboundCfg: {
