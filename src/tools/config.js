@@ -12,6 +12,7 @@
  */
 
 import { getSiteConfig } from "../lib/config.js";
+import { describeTarget, getRequestIdentity } from "../lib/principal.js";
 import {
   resolveSecurityConfig,
   getSecuritySummary,
@@ -117,8 +118,13 @@ async function whoami({ site: siteName }) {
   // When no OAuth scopes are configured, hasScope() is a no-op (preset-only).
   const canWrite  = !sec.readOnly && hasScope(site, "mcp_write");
   const canConfig = hasScope(site, "mcp_config");
+  const identity = getRequestIdentity();
   return {
     site: site._name,
+    target: describeTarget(site, siteName ? "hint" : "default"),
+    principal: identity
+      ? { sub: identity.sub, clientId: identity.clientId, scopes: [...(identity.scopes ?? [])] }
+      : null,
     tier: inferTier(site, sec),
     preset: summary.preset,
     scopes: site.oauth?.scopes ?? [],

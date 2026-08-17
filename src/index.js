@@ -46,6 +46,14 @@ import { createConnectorServerFactory } from "./lib/mcp-server.js";
 import { createRateLimiter } from "./lib/rate-limit.js";
 import { callTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
 import { filterDiscoverableTools } from "./lib/governance.js";
+import {
+  assertPrincipalEntitlement,
+  filterPromptsByPrincipal,
+  filterResourcesByPrincipal,
+  filterToolsByPrincipal,
+  getRequestIdentity,
+  visibleSiteTargets,
+} from "./lib/principal.js";
 
 // Tools — aggregated (single source of truth, side-effect-free) and per-tool prompts
 import { allDefinitions, allHandlers, definitionsByName } from "./tools/index.js";
@@ -102,21 +110,43 @@ const RESOURCES = [
  * @returns {Promise<object>} The resource data (later JSON-serialized).
  * @throws {Error} If the URI matches no known resource.
  */
+async function discoverableTools() {
+  const sites = listResolvableSiteConfigs();
+  const identity = getRequestIdentity();
+  const governed = await filterDiscoverableTools(allDefinitions, sites);
+  return filterToolsByPrincipal(governed, sites, identity);
+}
+
 async function readResource(uri) {
+  const identity = getRequestIdentity();
+  const sites = listResolvableSiteConfigs();
+
   // drupal://sites
   if (uri === "drupal://sites") {
-    return { sites: listSiteNames() };
+    return visibleSiteTargets(identity, sites, listSiteNames());
   }
 
   // drupal://{site}/content-types
   const ctMatch = uri.match(/^drupal:\/\/([^/]+)\/content-types$/);
   if (ctMatch) {
+    assertPrincipalEntitlement({
+      toolName: "drupal_list_content_types",
+      args: { site: ctMatch[1] },
+      identity,
+      sites,
+    });
     return allHandlers.drupal_list_content_types({ site: ctMatch[1] });
   }
 
   // drupal://{site}/security-policy
   const spMatch = uri.match(/^drupal:\/\/([^/]+)\/security-policy$/);
   if (spMatch) {
+    assertPrincipalEntitlement({
+      toolName: "drupal_security_info",
+      args: { site: spMatch[1] },
+      identity,
+      sites,
+    });
     return allHandlers.drupal_security_info({ site: spMatch[1] });
   }
 
@@ -260,12 +290,24 @@ const buildConnectorServer = createConnectorServerFactory({
   serverInfo: { name: "drupal-mcp-connector", version: CLIENT_VERSION },
   tools: {
     definitions: allDefinitions,
-    list: () => filterDiscoverableTools(allDefinitions, listResolvableSiteConfigs()),
+    list: discoverableTools,
     call: callTool,
   },
-  resources: { definitions: RESOURCES, read: readResource },
+  resources: {
+    definitions: RESOURCES,
+    list: async () => {
+      const sites = listResolvableSiteConfigs();
+      return filterResourcesByPrincipal(RESOURCES, getRequestIdentity(), sites);
+    },
+    read: readResource,
+  },
   prompts: {
     definitions: ALL_PROMPTS,
+    list: async () => {
+      const identity = getRequestIdentity();
+      const tools = await discoverableTools();
+      return filterPromptsByPrincipal(ALL_PROMPTS, identity, tools);
+    },
     get: (name, args) => WORKFLOW_PROMPT_NAMES.has(name)
       ? getPromptMessages(name, args)
       : getToolPromptMessages(name, args, definitionsByName),

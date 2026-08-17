@@ -9,6 +9,7 @@
 import { getSiteConfig, listSiteNames } from "../lib/config.js";
 import { governanceStatus } from "../lib/governance.js";
 import { resolveBackend } from "../lib/backends/index.js";
+import { getRequestIdentity, resolveGrantedSiteNames, visibleSiteTargets } from "../lib/principal.js";
 
 // ---------------------------------------------------------------------------
 // Implementations
@@ -43,11 +44,21 @@ async function listContentTypes({ site: siteName }) {
 }
 
 /**
- * List all named sites from config.json. No backend call and no credentials.
- * @returns {Promise<{sites: string[]}>}
+ * List named sites this principal may address. No backend call and no credentials.
+ * `sites` stays a name list for compatibility; `targets` is the authoritative
+ * resolved-target record.
+ * @returns {Promise<{sites: string[], targets: Array<object>}>}
  */
 async function listConfiguredSites() {
-  return { sites: listSiteNames() };
+  const names = listSiteNames();
+  const resolvable = names.flatMap((name) => {
+    try {
+      return [getSiteConfig(name)];
+    } catch {
+      return [];
+    }
+  });
+  return visibleSiteTargets(getRequestIdentity(), resolvable, names);
 }
 
 /**
@@ -71,7 +82,10 @@ export function classifySiteResolutionFailure(message) {
 }
 
 async function getGovernanceStatus({ site: siteName } = {}) {
-  const names = siteName ? [siteName] : listSiteNames();
+  const identity = getRequestIdentity();
+  const configured = listSiteNames();
+  const allowed = identity ? resolveGrantedSiteNames(identity, configured) : configured;
+  const names = siteName ? [siteName] : allowed;
   const resolved = [];
   const unresolved = [];
   for (const name of names) {
@@ -123,7 +137,7 @@ export const definitions = [
   },
   {
     name: "drupal_list_sites",
-    description: "List all named Drupal sites configured in config.json. Useful for multi-site setups.",
+    description: "List the Drupal sites this principal may address. Each target includes the authoritative site name and base URL.",
     inputSchema: {
       type: "object",
       properties: {},

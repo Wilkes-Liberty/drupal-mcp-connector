@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { isInitializeRequest, isJsonContentType, isLegacyRequest } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport, toWebRequest } from "@modelcontextprotocol/node";
 import { formatWwwAuthenticate } from "./http-auth.js";
+import { runWithIdentity } from "./principal.js";
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
@@ -243,7 +244,7 @@ export function createMcpRequestHandler({
 
     if (req.url === "/mcp" && (req.method === "GET" || req.method === "DELETE")) {
       try {
-        await legacyHandler(req, res);
+        await runWithIdentity(req.mcpIdentity ?? null, () => legacyHandler(req, res));
       } catch (error) {
         respondAfterFailure(res, error, onError, "legacy-dispatch");
       }
@@ -264,7 +265,7 @@ export function createMcpRequestHandler({
         const legacy = await isLegacyRequestFn(request, body);
         const selectedHandler = legacy ? legacyHandler : modernHandler;
         stage = legacy ? "legacy-dispatch" : "modern-dispatch";
-        await selectedHandler(req, res, body);
+        await runWithIdentity(req.mcpIdentity ?? null, () => selectedHandler(req, res, body));
       } catch (error) {
         respondAfterFailure(res, error, onError, stage);
       }

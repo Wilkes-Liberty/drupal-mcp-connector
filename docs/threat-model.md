@@ -41,6 +41,7 @@ see [SECURITY.md](../SECURITY.md).
 | T10 | **Over-privileged writes** (publishing, deleting, editing beyond intent) | Drupal-side governance is authoritative; connector security presets (`auditor`/`write-plane`/…) add a client-side cap; destructive ops gated | ✅ defense-in-depth |
 | T11 | **Protocol confusion / cross-era fallback** | One bounded body is classified once by the stable SDK and sent to exactly one arm; modern header/body version, method, and tool-name disagreements are rejected; a failed arm never falls through to the other | ✅ controlled |
 | T12 | **Internal error or secret disclosure at the HTTP boundary** | Expected malformed/oversized requests get stable 400/413 responses; unexpected conversion/classification/dispatch failures are sanitized, and partial responses are destroyed without echoing the error | ✅ controlled |
+| T13 | **Cross-target discovery / invocation by an inbound principal** | Resource-server identity (not caller `site` / `tenant` / `scope` args) filters tools, resources, prompts, and sites; empty scopes are no grants; `auth.grants` is fail-closed for unknown clients; ungranted names are not listed in denials | ✅ controlled |
 
 ### Note on T3 (filter fields)
 

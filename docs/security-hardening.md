@@ -54,6 +54,13 @@ points at RFC 9728 metadata:
 
 `GET /.well-known/oauth-protected-resource` (and `/mcp` on that path).
 
+After the token is accepted, tool / resource / prompt / site discovery is
+filtered by that principal (#178). `auth.grants` (optional) maps inbound
+`client_id` / `azp` to configured site names; when the map is present,
+unknown clients see no targets. Caller-supplied `site` / `environment` /
+`tenant` / `target` arguments cannot widen the grant. Stdio and loopback
+without a resource-server identity are unchanged (local operator).
+
 `/health` stays open. Missing a required scope is `403` with
 `error="insufficient_scope"`.
 

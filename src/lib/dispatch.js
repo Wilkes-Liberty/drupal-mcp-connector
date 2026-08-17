@@ -16,6 +16,7 @@ import { toolError, toolResult } from "./errors.js";
 import { BackendCapabilityError, BackendResolutionError } from "./backends/errors.js";
 import { inferOperation } from "./operations.js";
 import { assertSourceGovernance, GovernanceError, GOVERNANCE_DIAGNOSTIC_TOOLS } from "./governance.js";
+import { assertPrincipalEntitlement, getRequestIdentity } from "./principal.js";
 import { allHandlers } from "../tools/index.js";
 
 /**
@@ -59,17 +60,41 @@ function extractEntityType(toolName, args) {
  * @param {string}   toolName - The MCP tool name.
  * @param {object}   args     - Tool arguments (may carry `site`, `id`, etc.).
  * @param {Function} handler  - The resolved tool handler.
+ * @param {object}   [context] Optional inbound identity / grant overrides (tests).
  * @returns {Promise<*>} The handler's result.
  * @throws {GovernanceError} If the site requires source governance and the
  *   contract is not verified — checked FIRST, so no assertion below can be
  *   read as an ungoverned fallback verdict.
  * @throws {SecurityError} If the resolved policy forbids the inferred operation.
  */
-export async function securityMiddleware(toolName, args, handler) {
-  // Tools with no site context skip per-site checks
-  if (toolName === "drupal_list_sites") return handler(args);
+export async function securityMiddleware(toolName, args, handler, context = {}) {
+  const rawArgs = args ?? {};
+  const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
+  let nextArgs = rawArgs;
 
-  const site = getSiteConfig(args?.site);
+  if (identity) {
+    const resolved = assertPrincipalEntitlement({
+      toolName,
+      args: rawArgs,
+      identity,
+      sites: context.sites ?? listResolvableSiteConfigs(),
+      grants: context.grants,
+      defaultSite: context.defaultSite,
+    });
+    if (resolved) {
+      nextArgs = { ...rawArgs, site: resolved.name };
+    }
+  }
+
+  // Tools with no site context skip per-site checks. governance_status
+  // without a hint reports every granted/configured site and must not
+  // resolve (or fail on) the configured default first.
+  if (toolName === "drupal_list_sites") return handler(nextArgs);
+  if (toolName === "drupal_governance_status" && !nextArgs.site) {
+    return handler(nextArgs);
+  }
+
+  const site = getSiteConfig(nextArgs.site);
 
   // Source-governance gate (#176). The diagnostic tools stay callable while
   // governance fails — they are how an operator learns which condition failed.
@@ -81,15 +106,15 @@ export async function securityMiddleware(toolName, args, handler) {
   const op   = inferOperation(toolName);
 
   if (op === "delete") {
-    assertDestructiveAllowed(sec, extractEntityType(toolName, args), args?.id ?? "?");
+    assertDestructiveAllowed(sec, extractEntityType(toolName, nextArgs), nextArgs?.id ?? "?");
     assertNotReadOnly(sec, toolName);
   } else if (op === "write") {
     assertNotReadOnly(sec, toolName);
-  } else if (op === "graphql" && args?.query) {
-    assertGraphqlMutationAllowed(sec, args.query);
+  } else if (op === "graphql" && nextArgs?.query) {
+    assertGraphqlMutationAllowed(sec, nextArgs.query);
   }
 
-  return handler(args);
+  return handler(nextArgs);
 }
 
 /**
@@ -98,9 +123,10 @@ export async function securityMiddleware(toolName, args, handler) {
  *
  * @param {string} name - The MCP tool name.
  * @param {object} args - The tool arguments.
+ * @param {object} [context] Optional inbound identity / grant overrides.
  * @returns {Promise<object>} An MCP tool result payload.
  */
-export async function callTool(name, args) {
+export async function callTool(name, args, context = {}) {
   // eslint-disable-next-line security/detect-object-injection -- name is an MCP tool name from validated schema; allHandlers is a closed dispatch table built at startup
   const handler = allHandlers[name];
 
@@ -111,7 +137,7 @@ export async function callTool(name, args) {
   }
 
   try {
-    const result = await securityMiddleware(name, args ?? {}, handler);
+    const result = await securityMiddleware(name, args ?? {}, handler, context);
     return toolResult(result);
   } catch (err) {
     // Translate known error classes into clear, non-leaky isError responses;

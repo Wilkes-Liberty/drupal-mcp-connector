@@ -31,6 +31,7 @@ vi.mock("../../src/lib/config.js", async (orig) => {
 });
 
 import fetch from "node-fetch";
+import { getSiteConfig } from "../../src/lib/config.js";
 import { securityMiddleware, callTool, listResolvableSiteConfigs } from "../../src/lib/dispatch.js";
 import { GovernanceError, clearGovernanceCache } from "../../src/lib/governance.js";
 import { SecurityError } from "../../src/lib/security.js";
@@ -139,6 +140,73 @@ describe("callTool governance envelope", () => {
     expect(text).toContain("Source governance");
     expect(text).toContain("no_designated_consumer");
     expect(text).not.toContain("tok-secret-value");
+  });
+});
+
+describe("securityMiddleware inbound entitlement (#178)", () => {
+  const granted = [{
+    _name: "gov",
+    baseUrl: "https://gov.example.com",
+    requireGovernance: true,
+    security: { preset: "development", allowDestructive: true },
+  }];
+  const reader = {
+    sub: "reader",
+    clientId: "content-agent",
+    scopes: ["mcp_read"],
+    sites: null,
+  };
+
+  it("denies an unauthorized write without invoking the handler", async () => {
+    const handler = vi.fn();
+    await expect(securityMiddleware(
+      "drupal_create_node",
+      { site: "gov", title: "T" },
+      handler,
+      { identity: reader, sites: granted, grants: null, defaultSite: "gov" },
+    )).rejects.toBeInstanceOf(SecurityError);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("returns an Access denied envelope for a hidden tool that is called anyway", async () => {
+    const result = await callTool(
+      "drupal_create_node",
+      { site: "gov", title: "T" },
+      { identity: reader, sites: granted, grants: null, defaultSite: "gov" },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Access denied: Not entitled to invoke/);
+  });
+
+  it("does not resolve the default site for an unscoped governance_status", async () => {
+    vi.mocked(getSiteConfig).mockClear();
+    const handler = vi.fn(async () => ({ sites: [] }));
+    await expect(securityMiddleware(
+      "drupal_governance_status",
+      {},
+      handler,
+      {
+        identity: reader,
+        sites: granted,
+        grants: { "content-agent": ["gov"] },
+        defaultSite: "prod-admin",
+      },
+    )).resolves.toEqual({ sites: [] });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(getSiteConfig).not.toHaveBeenCalled();
+  });
+
+  it("rewrites a granted call onto the authoritative site name", async () => {
+    vi.mocked(fetch).mockResolvedValue(ready());
+    const handler = vi.fn(async (args) => args);
+    const out = await securityMiddleware(
+      "drupal_get_node",
+      { site: "gov", id: "1" },
+      handler,
+      { identity: reader, sites: granted, grants: null, defaultSite: "gov" },
+    );
+    expect(out.site).toBe("gov");
+    expect(handler).toHaveBeenCalledOnce();
   });
 });
 

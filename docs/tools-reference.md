@@ -249,7 +249,7 @@ GraphQL Compose exposes per-bundle connection fields (e.g. `nodeArticles { nodes
 |------|----------------|-------------|
 | `drupal_site_info` | — | Base URL and all available JSON:API resource types. |
 | `drupal_list_content_types` | — | All content types with machine names and descriptions. |
-| `drupal_list_sites` | — | All configured site profiles (from config.json). |
+| `drupal_list_sites` | — | Sites this principal may address. `sites` is the name list; `targets` names each authoritative site and base URL. |
 
 ---
 

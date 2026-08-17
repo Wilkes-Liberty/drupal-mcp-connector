@@ -68,11 +68,18 @@ export function scopesFromClaim(scope) {
 /**
  * Freeze a request identity from validated claims. Caller headers are not an input.
  * @param {object} claims
- * @returns {Readonly<{sub: ?string, iss: ?string, aud: string|string[]|null, scopes: readonly string[], exp: ?number, nbf: ?number, jti: ?string, clientId: ?string}>}
+ * @returns {Readonly<{sub: ?string, iss: ?string, aud: string|string[]|null, scopes: readonly string[], sites: readonly string[]|null, exp: ?number, nbf: ?number, jti: ?string, clientId: ?string}>}
  */
 export function buildIdentity(claims) {
   const scopes = scopesFromClaim(claims.scope ?? claims.scp);
   const aud = claims.aud;
+  const siteClaim = claims.sites ?? claims.mcp_sites;
+  let sites = null;
+  if (Array.isArray(siteClaim)) {
+    sites = Object.freeze(siteClaim.map(String).filter(Boolean));
+  } else if (typeof siteClaim === "string") {
+    sites = Object.freeze(siteClaim.split(/[\s,]+/).filter(Boolean));
+  }
   return Object.freeze({
     sub: claims.sub === undefined || claims.sub === null ? null : String(claims.sub),
     iss: claims.iss === undefined || claims.iss === null ? null : String(claims.iss),
@@ -80,6 +87,7 @@ export function buildIdentity(claims) {
       ? Object.freeze(aud.map(String))
       : (aud === undefined || aud === null ? null : String(aud)),
     scopes: Object.freeze([...scopes]),
+    sites,
     exp: typeof claims.exp === "number" ? claims.exp : null,
     nbf: typeof claims.nbf === "number" ? claims.nbf : null,
     jti: claims.jti === undefined || claims.jti === null ? null : String(claims.jti),

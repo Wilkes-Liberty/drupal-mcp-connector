@@ -70,6 +70,13 @@ A governance layer MAY require these scopes per tool/operation. The token's
 granted scopes are the authoritative capability set; the connector's own preset
 (below) is a complementary, client-side restriction.
 
+On a network-facing HTTPS connector the **inbound** access token is a second
+principal (#178). Its scopes gate which MCP tools, resources, and prompts are
+discovered or invoked; optional `auth.grants` (client id → site names) gate
+which configured targets that principal may address. Caller-supplied site or
+scope arguments never become that grant. The inbound token is still never
+forwarded to Drupal.
+
 ## 4. Authorization & governance (server-authoritative)
 
 Authorization is decided **inside Drupal**, keyed on the **authenticated account's
