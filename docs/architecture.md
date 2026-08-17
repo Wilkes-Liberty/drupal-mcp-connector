@@ -161,8 +161,10 @@ limiting run before body parsing and classification.
 
 HTTPS is mandatory; plain HTTP is refused on non-localhost unless
 `MCP_ALLOW_HTTP=1` is set explicitly (development only). Without TLS the server
-binds loopback only. Non-loopback TLS binds **require** `MCP_AUTH_TOKEN` (or
-`MCP_ALLOW_UNAUTHENTICATED=1` behind a trusted proxy) and default to a 120
+binds loopback only. Non-loopback TLS binds **require** an inbound OAuth
+resource server (`auth.issuer` + `auth.audience`). `MCP_AUTH_TOKEN` is
+loopback-only. `MCP_ALLOW_UNAUTHENTICATED=1` remains for a trusted proxy. They
+default to a 120
 req/min rate limit when `MCP_RATE_LIMIT` is unset. Bind-address restriction
 (`MCP_BIND_HOST`) and related controls are documented in
 [security-hardening.md](security-hardening.md).

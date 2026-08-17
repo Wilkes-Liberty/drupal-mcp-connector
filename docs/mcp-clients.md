@@ -211,7 +211,8 @@ subprocess:
 MCP_TRANSPORT=https \
 TLS_CERT_PATH=/etc/ssl/certs/mcp.crt \
 TLS_KEY_PATH=/etc/ssl/private/mcp.key \
-MCP_AUTH_TOKEN="$(openssl rand -hex 32)" \
+MCP_RESOURCE_ISSUER="https://idp.example.com" \
+MCP_RESOURCE_AUDIENCE="https://mcp.example.com/mcp" \
 MCP_BIND_HOST=0.0.0.0 \
 MCP_PORT=3443 \
   node src/index.js
@@ -220,8 +221,9 @@ MCP_PORT=3443 \
 
 Hardening (see [security-hardening.md](security-hardening.md)):
 
-- **`MCP_AUTH_TOKEN`** — require this bearer token on `/mcp`. Clients send
-  `Authorization: Bearer …`.
+- **Inbound OAuth resource server** — required on `/mcp` beyond loopback.
+  Clients send `Authorization: Bearer <access-token>` issued by `auth.issuer`.
+- **`MCP_AUTH_TOKEN`** — loopback-only shared bearer. Not accepted network-facing.
 - **TLS is mandatory** off localhost (plain HTTP is refused unless `MCP_ALLOW_HTTP=1`, dev only).
 - **`MCP_BIND_HOST`** — restrict the listen interface.
 - Source the OAuth client secret from env / a secrets manager (not a desktop keychain) on servers.

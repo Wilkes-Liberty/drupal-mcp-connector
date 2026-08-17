@@ -156,7 +156,7 @@ Additional connector-side gates (2.1+ / 2.2+):
 - **Entity allowlists** apply to specialized tools (`drupal_*_node`, media, taxonomy), not only `drupal_entity_*`.
 - **Publish gate:** `status: true` and `moderation_state: "published"` require `allowPublish`. Media create defaults **unpublished**. Published moderated node updates without a moderation state default to **draft** (forward revision).
 - **Uploads** only from `MCP_UPLOAD_ROOT` (or the process cwd); sensitive paths (`.env*`, `.ssh`, connector `config.json`) are refused.
-- **HTTPS:** non-loopback binds require `MCP_AUTH_TOKEN` (or `MCP_ALLOW_UNAUTHENTICATED=1` behind a trusted proxy); non-loopback TLS defaults to 120 req/min rate limiting.
+- **HTTPS:** non-loopback binds require an inbound OAuth resource server (`auth.issuer` + `auth.audience`), not `MCP_AUTH_TOKEN`. `MCP_AUTH_TOKEN` remains valid on loopback. `MCP_ALLOW_UNAUTHENTICATED=1` is only for a trusted proxy. Non-loopback TLS defaults to 120 req/min rate limiting.
 - **GraphQL is off by default.** `drupal_graphql` / introspect require `security.allowGraphql` (true only on the `development` preset). Raw GraphQL results still bypass entity allowlists and field redaction — prefer JSON:API entity tools when connector policy must hold. Mutations also need `allowGraphqlMutations`.
 
 Full detail: **[docs/security.md](docs/security.md)** and **[docs/security-hardening.md](docs/security-hardening.md)**.

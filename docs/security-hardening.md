@@ -22,20 +22,47 @@ export MCP_CLIENT_ID=""                 # disable entirely
 
 The `https` transport serves `/mcp` to MCP clients.
 
-**Fail closed when network-facing:** if the process binds beyond loopback
+**Network-facing product path (required):** if the process binds beyond loopback
 (`MCP_BIND_HOST` other than `127.0.0.1` / `::1` / `localhost`, or the TLS default
-`0.0.0.0`), **`MCP_AUTH_TOKEN` is required**. Without it the process exits at
-startup. Opt out only behind a trusted auth boundary:
+`0.0.0.0`), the connector is an OAuth **protected resource**. Configure a
+standards-based issuer (RFC 8414 / OIDC discovery) and the resource audience.
+`MCP_AUTH_TOKEN` is **not** accepted on this path.
 
-```sh
-export MCP_AUTH_TOKEN="<a long random secret>"
-# only when a reverse proxy / VPN already authenticates clients:
-export MCP_ALLOW_UNAUTHENTICATED=1
+```json
+"auth": {
+  "issuer": "https://idp.example.com",
+  "audience": "https://mcp.example.com/mcp",
+  "resource": "https://mcp.example.com/mcp",
+  "requiredScopes": ["mcp_read"],
+  "revocationFile": "/etc/drupal-mcp/revoked.json"
+}
 ```
 
-Clients must send `Authorization: Bearer <token>`. The `/health` endpoint stays
-open regardless. Loopback-only binds may omit the token (a startup warning is
-still logged when auth is off).
+```sh
+export MCP_RESOURCE_ISSUER="https://idp.example.com"
+export MCP_RESOURCE_AUDIENCE="https://mcp.example.com/mcp"
+```
+
+Clients send `Authorization: Bearer <access-token>`. The connector validates
+issuer, audience, expiry and scopes against the issuer's JWKS. A JSON revocation
+file (`{ "jti": [], "sub": [] }`) is re-read when it changes, so a revoke does
+not require a restart. Optional RFC 7662 introspection (`introspectionUrl`) is
+an additional fail-closed check when configured.
+
+Unauthenticated clients receive `401` with a `WWW-Authenticate` challenge that
+points at RFC 9728 metadata:
+
+`GET /.well-known/oauth-protected-resource` (and `/mcp` on that path).
+
+`/health` stays open. Missing a required scope is `403` with
+`error="insufficient_scope"`.
+
+The inbound access token is never forwarded to Drupal. Outbound Drupal
+credentials stay the per-site OAuth client or `apiTokenEnv`.
+
+**Loopback only:** `MCP_AUTH_TOKEN` remains a shared bearer for local HTTPS.
+**Trusted proxy:** `MCP_ALLOW_UNAUTHENTICATED=1` still opts out of connector-side
+auth when a reverse proxy already authenticates clients.
 
 For `/mcp`, rate limiting and bearer authentication run before any request body
 is parsed, converted, or classified. POST bodies are bounded to 1 MiB, read

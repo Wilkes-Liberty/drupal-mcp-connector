@@ -40,7 +40,12 @@ const secureConfig = (over = {}) => ({
 
 /** Runs the verifier with a fixed clock so evidence is comparable. */
 const run = (config, options = {}) =>
-  verifyStatic(config, { source: "test-fixture", now: () => new Date("2026-08-15T12:00:00Z"), ...options });
+  verifyStatic(config, {
+    source: "test-fixture",
+    now: () => new Date("2026-08-15T12:00:00Z"),
+    ...options,
+    env: { MCP_TRANSPORT: "stdio", ...(options.env || {}) },
+  });
 
 /** The status of one check id. */
 const statusOf = (result, id) => result.checks.find((c) => c.id === id)?.status;
@@ -85,6 +90,40 @@ describe("verifyStatic — a secure, tenant-neutral configuration", () => {
     config.sites.prod.oauth.clientSecret = "SUPER-SECRET-VALUE";
     const serialized = JSON.stringify(run(config));
     expect(serialized).not.toContain("SUPER-SECRET-VALUE");
+  });
+});
+
+describe("verifyStatic — inbound_auth", () => {
+  it("passes a stdio-shaped install that has no inbound resource server", () => {
+    expect(statusOf(run(secureConfig()), "inbound_auth")).toBe("pass");
+  });
+
+  it("fails network-facing HTTPS that still relies on MCP_AUTH_TOKEN", () => {
+    const result = run(secureConfig(), {
+      env: { MCP_TRANSPORT: "https", MCP_BIND_HOST: "0.0.0.0", MCP_AUTH_TOKEN: "shared-secret" },
+    });
+    expect(statusOf(result, "inbound_auth")).toBe("fail");
+    expect(detailOf(result, "inbound_auth").join(" ")).toContain("resource server");
+  });
+
+  it("passes network-facing HTTPS when issuer and audience are set", () => {
+    const result = run(secureConfig({
+      auth: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+        resource: "https://mcp.example.com/mcp",
+      },
+    }), {
+      env: { MCP_TRANSPORT: "https", MCP_BIND_HOST: "0.0.0.0" },
+    });
+    expect(statusOf(result, "inbound_auth")).toBe("pass");
+  });
+
+  it("fails an inbound issuer that is not HTTPS", () => {
+    const result = run(secureConfig({
+      auth: { issuer: "http://idp.example.com", audience: "https://mcp.example.com/mcp" },
+    }));
+    expect(statusOf(result, "inbound_auth")).toBe("fail");
   });
 });
 

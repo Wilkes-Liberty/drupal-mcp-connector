@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Network-facing HTTPS is an OAuth protected resource (#177).** `/mcp`
+  validates inbound JWTs against a configured issuer (RFC 8414 / OIDC
+  discovery + JWKS): issuer, audience/resource, expiry and required scopes.
+  RFC 9728 metadata is served at `/.well-known/oauth-protected-resource`.
+  A revocation file (`jti` / `sub`) is re-read when it changes, so a revoke
+  does not require a restart. Optional RFC 7662 introspection is fail-closed
+  when configured. Discovery requires the metadata `issuer` to match the
+  configured identifier (RFC 8414 §3.3), uses the RFC 8414 well-known path
+  for issuers that have a path component, and refuses HTTP issuers,
+  `jwks_uri`s, and introspection URLs. Trailing slashes on the issuer
+  identifier do not break JWT verification. RFC 9728 `authorization_servers`
+  advertises the issuer string returned by discovery. A thrown authenticator, a corrupt revocation file, or a
+  failed introspection returns `401` instead of hanging the request.
+  Caller-supplied identity headers never become the principal. The inbound
+  access token is never forwarded to Drupal. `MCP_AUTH_TOKEN` remains valid
+  only on loopback; a network-facing bind that still relies on the shared
+  secret refuses to start.
+
 ### Fixed
 - **A process no longer starts when every secret named by the active config
   is unset (#199).** 2.6.0 moved the launcher's Keychain table to the

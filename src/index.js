@@ -15,7 +15,9 @@
  *   DRUPAL_BASE_URL   Single-site fallback baseUrl
  *   DRUPAL_API_TOKEN  Single-site fallback Bearer token
  *   MCP_ALLOW_HTTP    Set to "1" to allow plain HTTP on localhost only (dev)
- *   MCP_AUTH_TOKEN    Bearer token required on /mcp in https mode (warns if unset)
+ *   MCP_AUTH_TOKEN    Loopback-only shared bearer for /mcp (not accepted network-facing)
+ *   MCP_RESOURCE_ISSUER / MCP_RESOURCE_AUDIENCE / MCP_RESOURCE
+ *                     Inbound OAuth resource-server (required beyond loopback)
  *   MCP_BIND_HOST     Bind address for https mode when TLS is present
  *                     (default: "0.0.0.0"; ignored without TLS, which forces loopback)
  *   MCP_RATE_LIMIT    Max /mcp requests per window per client IP (0/unset = off)
@@ -31,9 +33,14 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 
-import { listSiteNames, getTlsConfig, CLIENT_VERSION } from "./lib/config.js";
+import { listSiteNames, getTlsConfig, loadConfig, CLIENT_VERSION } from "./lib/config.js";
 import { loadLocalSecrets, secretLoadFatalMessage } from "./lib/load-secrets.js";
-import { makeBearerCheck } from "./lib/http-auth.js";
+import {
+  makeBearerCheck,
+  resolveInboundAuthConfig,
+  resolveInboundAuthMode,
+  createInboundHttpsAuth,
+} from "./lib/http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "./lib/http-handler.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
 import { createRateLimiter } from "./lib/rate-limit.js";
@@ -290,15 +297,7 @@ if (transport === "stdio") {
   const allowHttp  = process.env.MCP_ALLOW_HTTP === "1";
 
   const authToken   = process.env.MCP_AUTH_TOKEN || "";
-  const checkAuth   = makeBearerCheck(authToken);
   const allowUnauth = process.env.MCP_ALLOW_UNAUTHENTICATED === "1";
-  if (!authToken) {
-    console.error(
-      "[drupal-mcp-connector] WARNING: the /mcp endpoint is UNAUTHENTICATED. " +
-      "Set MCP_AUTH_TOKEN to require a bearer token, or front it with a trusted " +
-      "boundary (private network / auth proxy). Acceptable only behind such a boundary."
-    );
-  }
 
   // Security headers applied to every response
   function applySecurityHeaders(res) {
@@ -349,15 +348,42 @@ if (transport === "stdio") {
   const bindHost = hasTls ? (process.env.MCP_BIND_HOST || "0.0.0.0") : "127.0.0.1";
   const isLoopbackBind = bindHost === "127.0.0.1" || bindHost === "::1" || bindHost === "localhost";
 
-  // #141: fail closed when HTTPS is network-facing without a bearer token.
-  // Loopback binds and explicit MCP_ALLOW_UNAUTHENTICATED=1 remain for local/proxy setups.
-  if (!authToken && !isLoopbackBind && !allowUnauth) {
-    console.error(
-      "[drupal-mcp-connector] FATAL: MCP_AUTH_TOKEN is required when binding beyond loopback.\n" +
-      "  Set MCP_AUTH_TOKEN, bind to 127.0.0.1 (default without MCP_BIND_HOST), or set\n" +
-      "  MCP_ALLOW_UNAUTHENTICATED=1 only behind a trusted auth boundary."
-    );
+  const inboundCfg = resolveInboundAuthConfig(loadConfig());
+  const inboundMode = resolveInboundAuthMode({
+    bindHost,
+    allowUnauth,
+    sharedToken: authToken,
+    resourceServer: inboundCfg,
+  });
+  if (inboundMode.mode === "fatal") {
+    console.error(`[drupal-mcp-connector] FATAL: ${inboundMode.reason}`);
     process.exit(1);
+  }
+
+  let checkAuth = makeBearerCheck(inboundMode.mode === "shared_bearer" ? authToken : "");
+  let authenticate = null;
+  let protectedResource = null;
+  if (inboundMode.mode === "resource_server") {
+    try {
+      const inbound = await createInboundHttpsAuth({ inboundCfg });
+      authenticate = inbound.authenticate;
+      protectedResource = inbound.protectedResource;
+      checkAuth = () => false;
+      console.error(
+        `[drupal-mcp-connector] Inbound OAuth resource server: issuer ${inboundCfg.issuer}`
+      );
+    } catch (error) {
+      console.error(
+        "[drupal-mcp-connector] FATAL: inbound issuer discovery failed.\n" +
+        `  ${error instanceof Error ? error.message : "unknown error"}`
+      );
+      process.exit(1);
+    }
+  } else if (inboundMode.mode === "unauthenticated" && !allowUnauth) {
+    console.error(
+      "[drupal-mcp-connector] WARNING: the /mcp endpoint is UNAUTHENTICATED. " +
+      "Acceptable only on loopback or behind a trusted auth boundary."
+    );
   }
 
   // Optional fixed-window rate limiting on /mcp, keyed by client IP.
@@ -393,6 +419,8 @@ if (transport === "stdio") {
   });
   const requestHandler = createMcpRequestHandler({
     checkAuth,
+    authenticate,
+    protectedResource,
     modernHandler,
     legacyHandler,
     toolCount: allDefinitions.length,

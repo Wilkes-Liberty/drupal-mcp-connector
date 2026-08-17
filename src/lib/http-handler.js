@@ -10,6 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { isInitializeRequest, isJsonContentType, isLegacyRequest } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport, toWebRequest } from "@modelcontextprotocol/node";
+import { formatWwwAuthenticate } from "./http-auth.js";
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
@@ -143,7 +144,10 @@ export function createLegacySessionHandler({
  *   - everything else — 404.
  *
  * @param {object} deps
- * @param {(authHeader: any) => boolean} deps.checkAuth Bearer predicate (see http-auth.js).
+ * @param {(authHeader: any) => boolean} [deps.checkAuth] Shared-bearer predicate (loopback).
+ * @param {(req: import("http").IncomingMessage) => Promise<object>} [deps.authenticate]
+ *   Resource-server authenticator. When set, it replaces `checkAuth`.
+ * @param {object|null} [deps.protectedResource] RFC 9728 metadata served unauthenticated.
  * @param {number} deps.toolCount Tool count reported by /health.
  * @param {(req: object, res: object, body?: unknown) => Promise<void>} deps.modernHandler
  * @param {(req: object, res: object, body?: unknown) => Promise<void>} deps.legacyHandler
@@ -158,7 +162,10 @@ export function createLegacySessionHandler({
  * @returns {(req: import("http").IncomingMessage, res: import("http").ServerResponse) => Promise<void>}
  */
 export function createMcpRequestHandler({
-  checkAuth, toolCount,
+  checkAuth = () => true,
+  authenticate = null,
+  protectedResource = null,
+  toolCount,
   modernHandler = null,
   legacyHandler = null,
   rateLimiter = null,
@@ -172,7 +179,54 @@ export function createMcpRequestHandler({
     throw new Error("modernHandler and legacyHandler must be configured together for dual-era routing");
   }
 
+  function requestPath(req) {
+    return String(req.url || "").split("?")[0];
+  }
+
+  async function gateAuth(req, res) {
+    if (authenticate) {
+      let result;
+      try {
+        result = await authenticate(req);
+      } catch {
+        res.writeHead(401, {
+          "WWW-Authenticate": formatWwwAuthenticate({
+            error: "invalid_token",
+            errorDescription: "Token validation failed",
+          }),
+        }).end("Unauthorized");
+        return false;
+      }
+      if (!result.ok) {
+        res.writeHead(result.status, result.headers).end(result.body);
+        return false;
+      }
+      req.mcpIdentity = result.identity;
+      return true;
+    }
+    if (!checkAuth(req.headers["authorization"])) {
+      res.writeHead(401, { "WWW-Authenticate": "Bearer" }).end("Unauthorized");
+      return false;
+    }
+    return true;
+  }
+
   return async function handle(req, res) {
+    const path = requestPath(req);
+    if (
+      req.method === "GET"
+      && (path === "/.well-known/oauth-protected-resource"
+        || path.startsWith("/.well-known/oauth-protected-resource/"))
+    ) {
+      if (!protectedResource) {
+        res.writeHead(404).end("Not found");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" })
+        .end(JSON.stringify(protectedResource));
+      return;
+    }
+
     if (req.url === "/mcp" && ["POST", "GET", "DELETE"].includes(req.method)) {
       // Rate limit BEFORE auth so repeated bad-token attempts are throttled too.
       if (rateLimiter) {
@@ -182,11 +236,9 @@ export function createMcpRequestHandler({
           return;
         }
       }
-      // Auth gate: only the /mcp endpoint requires a token; /health stays open.
-      if (!checkAuth(req.headers["authorization"])) {
-        res.writeHead(401, { "WWW-Authenticate": "Bearer" }).end("Unauthorized");
-        return;
-      }
+      // Auth gate: only the /mcp endpoint requires a token; /health and
+      // protected-resource metadata stay open.
+      if (!await gateAuth(req, res)) return;
     }
 
     if (req.url === "/mcp" && (req.method === "GET" || req.method === "DELETE")) {

@@ -19,6 +19,7 @@
 
 import { createHash } from "node:crypto";
 import { CLIENT_VERSION } from "./config.js";
+import { resolveInboundAuthConfig, resolveInboundAuthMode } from "./http-auth.js";
 
 /** Check outcome vocabulary.
  *
@@ -44,6 +45,7 @@ export const STATIC_CHECKS = [
   "entitlement",
   "target_resolution",
   "tenant_neutrality",
+  "inbound_auth",
 ];
 
 /**
@@ -222,13 +224,14 @@ export function configDigest(config) {
  * credentials, no side effects.
  *
  * @param {object} config Parsed connector configuration.
- * @param {{source?: string, now?: () => Date}} [options]
+ * @param {{source?: string, now?: () => Date, env?: NodeJS.ProcessEnv}} [options]
  *   `source` names what was verified (a path, or a label) for the evidence;
- *   `now` is injectable so a run is reproducible in tests.
+ *   `now` is injectable so a run is reproducible in tests;
+ *   `env` is the process environment under verification (defaults to `process.env`).
  * @returns {object} Evidence document: tool, version, subject, checks,
  *   residuals and a summary. Never contains secret values.
  */
-export function verifyStatic(config, { source = "config", now = () => new Date() } = {}) {
+export function verifyStatic(config, { source = "config", now = () => new Date(), env = process.env } = {}) {
   const sites = Object.entries(config?.sites ?? {});
   const named = (name, message) => `${name}: ${message}`;
   const nothingToCheck = sites.length === 0;
@@ -364,10 +367,42 @@ export function verifyStatic(config, { source = "config", now = () => new Date()
   const tenantNeutrality = check(
     "tenant_neutrality",
     "The configuration names no real tenant hosts or identifiers",
-    mentionedHosts(config?.sites ?? {})
+    mentionedHosts({ sites: config?.sites ?? {}, auth: config?.auth ?? {} })
       .filter(({ host }) => !isNeutralHost(host))
       .map(({ path, host }) => `${path}: "${host}" is not a documentation-reserved host; a shipped example must not name a real deployment.`),
     { skipped: nothingToCheck },
+  );
+
+  const inbound = resolveInboundAuthConfig(config, env);
+  const inboundFindings = [];
+  if (inbound.issuer || inbound.audience || inbound.resource) {
+    if (!inbound.issuer) inboundFindings.push("auth.issuer is missing.");
+    else if (!String(inbound.issuer).startsWith("https://")) {
+      inboundFindings.push("auth.issuer is not HTTPS.");
+    }
+    if (!inbound.audience) inboundFindings.push("auth.audience is missing.");
+    if (inbound.resource && !String(inbound.resource).startsWith("https://")) {
+      inboundFindings.push("auth.resource is not HTTPS.");
+    }
+    if (inbound.introspectionUrl && !String(inbound.introspectionUrl).startsWith("https://")) {
+      inboundFindings.push("auth.introspectionUrl is not HTTPS.");
+    }
+  }
+  const transportName = env.MCP_TRANSPORT || "stdio";
+  if (transportName === "https" || transportName === "http") {
+    const decision = resolveInboundAuthMode({
+      bindHost: env.MCP_BIND_HOST || "0.0.0.0",
+      allowUnauth: env.MCP_ALLOW_UNAUTHENTICATED === "1",
+      sharedToken: env.MCP_AUTH_TOKEN || "",
+      resourceServer: inbound,
+    });
+    if (decision.mode === "fatal") inboundFindings.push(decision.reason);
+  }
+
+  const inboundAuth = check(
+    "inbound_auth",
+    "Network-facing HTTPS authenticates as an OAuth protected resource",
+    inboundFindings,
   );
 
   const checks = [
@@ -379,6 +414,7 @@ export function verifyStatic(config, { source = "config", now = () => new Date()
     entitlement,
     targetResolution,
     tenantNeutrality,
+    inboundAuth,
   ];
 
   const counts = checks.reduce(
