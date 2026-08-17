@@ -130,6 +130,28 @@ Paths under `.ssh`, `.gnupg`, `.env*`, and connector `config/config.json` are
 always refused, even when under an allowed root. Entity type, bundle, and field
 name path segments are validated as Drupal machine names.
 
+## Per-machine secret map
+
+`bin/drupal-mcp-launch.sh` only sets the working directory and (when present)
+a local mkcert CA. **Secret loading runs inside `node src/index.js`**, because
+MCP clients often spawn that file directly.
+
+The shipped Keychain table matches `config/config.example.json`. If your
+`config/config.json` uses different `oauth.clientSecretEnv` names, put the
+mapping in **`config/secrets.map`** (gitignored):
+
+```
+MCP_AGENT_CLIENT_SECRET=drupal-mcp-agent-secret
+```
+
+One `ENV_VAR=keychain-item` pair per line. `#` comments allowed. The file
+**replaces** the shipped table, it does not merge with it.
+
+If `config.json` names secret env vars and **none** of them are set after
+that step, the process exits 1 and names the variables. It will not start a
+server that can only advertise diagnostic tools. A single named variable
+being unset (an inert break-glass tier) is a warning, not a fatal.
+
 ## Keep tokens out of the config file (opt-in)
 
 Per site, set `"apiTokenEnv": "VARNAME"` instead of hard-coding `"apiToken"`. The token
