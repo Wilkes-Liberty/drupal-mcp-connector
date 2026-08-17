@@ -60,7 +60,23 @@ async function listConfiguredSites() {
  */
 async function getGovernanceStatus({ site: siteName } = {}) {
   const names = siteName ? [siteName] : listSiteNames();
-  return { sites: await governanceStatus(names.map((n) => getSiteConfig(n))) };
+  const resolved = [];
+  const unresolved = [];
+  for (const name of names) {
+    try {
+      resolved.push(getSiteConfig(name));
+    } catch (error) {
+      unresolved.push({
+        site: name,
+        required: null,
+        ok: false,
+        reason: "credential_unresolved",
+        detail: error instanceof Error ? error.message : "site could not be resolved",
+        checkedAt: null,
+      });
+    }
+  }
+  return { sites: [...unresolved, ...(await governanceStatus(resolved))] };
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +117,8 @@ export const definitions = [
     },
   },
 ];
+
+export { getGovernanceStatus };
 
 export const handlers = {
   drupal_site_info:          getSiteInfo,

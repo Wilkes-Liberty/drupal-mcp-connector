@@ -8,13 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **A missing client secret now names the unset env var (#199).**
-  `requireSecureAuth` used to say "provide an oauth block" when the block was
-  already there and `oauth.clientSecretEnv` (or `apiTokenEnv`) was simply
-  unset. The error now names the variable. The launcher still skips missing
-  Keychain items per tier, but warns on stderr when the whole table resolves
-  nothing — the case where the shipped example names and the active
-  `config.json` have drifted apart.
+- **A process no longer starts when every secret named by the active config
+  is unset (#199).** 2.6.0 moved the launcher's Keychain table to the
+  tenant-neutral example names and documented `config/secrets.map` as the
+  per-machine override. A checkout whose `config.json` still used the old
+  env-var names, and that never grew a `secrets.map`, started cleanly,
+  resolved zero sites, and advertised only `drupal_list_sites` and
+  `drupal_governance_status`. Worse, the diagnostic itself threw
+  `requireSecureAuth` with advice to "provide an oauth block" that was
+  already there. Now: `node src/index.js` (not only the shell launcher)
+  applies `config/secrets.map` or the shipped example table; the process
+  **refuses to start** when every `clientSecretEnv`/`apiTokenEnv` named in
+  `config.json` is still unset, listing those names; `requireSecureAuth`
+  names the unset variable; `drupal_governance_status` reports
+  `credential_unresolved` instead of throwing; `config/secrets.map` is
+  actually gitignored. Per-item Keychain misses stay silent so an inert
+  break-glass tier remains a missing item, not an error.
 
 ## [2.6.0] - 2026-08-15
 
