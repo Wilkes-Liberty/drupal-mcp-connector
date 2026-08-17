@@ -32,6 +32,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 
 import { listSiteNames, getTlsConfig, CLIENT_VERSION } from "./lib/config.js";
+import { loadLocalSecrets, secretLoadFatalMessage } from "./lib/load-secrets.js";
 import { makeBearerCheck } from "./lib/http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "./lib/http-handler.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
@@ -42,6 +43,22 @@ import { filterDiscoverableTools } from "./lib/governance.js";
 // Tools — aggregated (single source of truth, side-effect-free) and per-tool prompts
 import { allDefinitions, allHandlers, definitionsByName } from "./tools/index.js";
 import { buildToolPrompts, getToolPromptMessages } from "./lib/tool-prompts.js";
+
+// Apply config/secrets.map (or the shipped example table) before any site
+// resolution. MCP clients spawn this file directly; the shell launcher is
+// not guaranteed to have run.
+const secretLoad = loadLocalSecrets();
+const secretFatal = secretLoadFatalMessage(secretLoad);
+if (secretFatal) {
+  console.error(`[drupal-mcp-connector] FATAL: ${secretFatal}`);
+  process.exit(1);
+}
+if (secretLoad.unset.length) {
+  console.error(
+    "[drupal-mcp-connector] WARNING: config.json names secret env vars that are unset: " +
+    `${secretLoad.unset.join(", ")}. Those sites will fail closed.`
+  );
+}
 
 // ---------------------------------------------------------------------------
 // MCP Resources — browsable, always-fresh site context
