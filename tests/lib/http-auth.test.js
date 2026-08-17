@@ -11,6 +11,8 @@ import {
   resourceMetadataUrlFor,
   createRevocationStore,
   createResourceAuthenticator,
+  createInboundHttpsAuth,
+  authorizationServerDiscoveryUrls,
   discoverAuthorizationServer,
   introspectToken,
   resolveInboundAuthMode,
@@ -289,6 +291,24 @@ describe("createResourceAuthenticator", () => {
     expect(denied.headers["WWW-Authenticate"]).toContain("revoked");
   });
 
+  it("fails closed when the revocation file is corrupt", async () => {
+    const { privateKey, jwks } = await fixture();
+    const token = await signedToken({
+      privateKey, issuer, audience, claims: { sub: "agent-1", jti: "ok-1", scope: "mcp_read" },
+    });
+    const store = createRevocationStore({
+      filePath: "/tmp/revoked.json",
+      readFile: () => "{not-json",
+      stat: () => ({ mtimeMs: 3 }),
+    });
+    const authenticate = createResourceAuthenticator({
+      issuer, audience, jwks, revocationStore: store, resourceMetadataUrl: metadata,
+    });
+    const denied = await authenticate(`Bearer ${token}`);
+    expect(denied.ok).toBe(false);
+    expect(denied.status).toBe(401);
+  });
+
   it("uses introspection for an opaque token and when the AS says inactive", async () => {
     const authenticateOpaque = createResourceAuthenticator({
       issuer,
@@ -307,9 +327,29 @@ describe("createResourceAuthenticator", () => {
     expect(dead.ok).toBe(false);
     expect(dead.status).toBe(401);
   });
+
+  it("returns 401 when introspection throws", async () => {
+    const authenticate = createResourceAuthenticator({
+      issuer,
+      audience,
+      verifyJwt: async () => { throw new Error("not a jwt"); },
+      introspect: async () => { throw new Error("idp down"); },
+      resourceMetadataUrl: metadata,
+    });
+    const denied = await authenticate("Bearer opaque-ok");
+    expect(denied.ok).toBe(false);
+    expect(denied.status).toBe(401);
+  });
 });
 
 describe("discoverAuthorizationServer / introspectToken", () => {
+  it("inserts RFC 8414 well-known between host and path", () => {
+    expect(authorizationServerDiscoveryUrls("https://idp.example.com/realms/prod")).toEqual([
+      "https://idp.example.com/.well-known/oauth-authorization-server/realms/prod",
+      "https://idp.example.com/realms/prod/.well-known/openid-configuration",
+    ]);
+  });
+
   it("prefers RFC 8414 metadata and falls back to OIDC", async () => {
     const calls = [];
     const fetchFn = async (url) => {
@@ -326,8 +366,43 @@ describe("discoverAuthorizationServer / introspectToken", () => {
       return { ok: false, json: async () => ({}) };
     };
     const meta = await discoverAuthorizationServer("https://idp.example.com", fetchFn);
-    expect(calls[0]).toContain("oauth-authorization-server");
+    expect(calls[0]).toBe("https://idp.example.com/.well-known/oauth-authorization-server");
     expect(meta.jwks_uri).toBe("https://idp.example.com/jwks");
+  });
+
+  it("rejects metadata whose issuer does not match the queried identifier", async () => {
+    const fetchFn = async () => ({
+      ok: true,
+      json: async () => ({
+        issuer: "https://attacker.example",
+        jwks_uri: "https://attacker.example/jwks",
+      }),
+    });
+    await expect(discoverAuthorizationServer("https://idp.example.com", fetchFn))
+      .rejects.toThrow(/metadata not found/);
+  });
+
+  it("rejects a non-HTTPS jwks_uri", async () => {
+    const fetchFn = async () => ({
+      ok: true,
+      json: async () => ({
+        issuer: "https://idp.example.com",
+        jwks_uri: "http://idp.example.com/jwks",
+      }),
+    });
+    await expect(discoverAuthorizationServer("https://idp.example.com", fetchFn))
+      .rejects.toThrow(/metadata not found/);
+  });
+
+  it("refuses to start a resource server against an HTTP issuer", async () => {
+    await expect(createInboundHttpsAuth({
+      inboundCfg: {
+        issuer: "http://idp.example.com",
+        audience: "https://mcp.example.com",
+        resource: "https://mcp.example.com",
+      },
+      fetchFn: async () => ({ ok: false, json: async () => ({}) }),
+    })).rejects.toThrow(/issuer must be an https URL/);
   });
 
   it("returns null when introspection reports inactive", async () => {

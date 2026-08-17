@@ -201,6 +201,33 @@ function audienceMatches(aud, expected) {
   return aud === expected;
 }
 
+function normalizeIssuer(issuer) {
+  return String(issuer).replace(/\/+$/, "");
+}
+
+function isHttpsUrl(value) {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * RFC 8414 inserts `.well-known` between host and path. OIDC Discovery
+ * appends `/.well-known/openid-configuration` to the issuer identifier.
+ * @param {string} issuer
+ * @returns {string[]}
+ */
+export function authorizationServerDiscoveryUrls(issuer) {
+  const url = new URL(issuer);
+  const path = url.pathname.replace(/\/+$/, "");
+  const hasPath = path && path !== "/";
+  const rfc8414 = `${url.origin}/.well-known/oauth-authorization-server${hasPath ? path : ""}`;
+  const oidc = `${normalizeIssuer(issuer)}/.well-known/openid-configuration`;
+  return [rfc8414, oidc];
+}
+
 /**
  * Hot-reloaded revocation list. The file is re-read when its mtime changes, so
  * a revoke takes effect without restarting the process.
@@ -216,7 +243,7 @@ export function createRevocationStore({
   readFile = readFileSync,
   stat = statSync,
 } = {}) {
-  let cache = { mtimeMs: Number.NaN, jti: new Set(), sub: new Set() };
+  let cache = { mtimeMs: Number.NaN, jti: new Set(), sub: new Set(), denyAll: false };
 
   function load() {
     if (!filePath) return cache;
@@ -224,22 +251,29 @@ export function createRevocationStore({
     try {
       info = stat(filePath);
     } catch {
-      cache = { mtimeMs: Number.NaN, jti: new Set(), sub: new Set() };
+      cache = { mtimeMs: Number.NaN, jti: new Set(), sub: new Set(), denyAll: false };
       return cache;
     }
     if (info.mtimeMs === cache.mtimeMs) return cache;
-    const raw = JSON.parse(readFile(filePath, "utf8"));
-    cache = {
-      mtimeMs: info.mtimeMs,
-      jti: new Set((raw.jti ?? []).map(String)),
-      sub: new Set((raw.sub ?? []).map(String)),
-    };
+    try {
+      const raw = JSON.parse(readFile(filePath, "utf8"));
+      cache = {
+        mtimeMs: info.mtimeMs,
+        jti: new Set((raw.jti ?? []).map(String)),
+        sub: new Set((raw.sub ?? []).map(String)),
+        denyAll: false,
+      };
+    } catch {
+      // File exists but is unreadable or not JSON — fail closed.
+      cache = { mtimeMs: info.mtimeMs, jti: new Set(), sub: new Set(), denyAll: true };
+    }
     return cache;
   }
 
   return {
     isRevoked(identity) {
-      const { jti, sub } = load();
+      const { jti, sub, denyAll } = load();
+      if (denyAll) return true;
       if (identity.jti && jti.has(identity.jti)) return true;
       if (identity.sub && sub.has(identity.sub)) return true;
       return false;
@@ -254,16 +288,28 @@ export function createRevocationStore({
  * @returns {Promise<object>}
  */
 export async function discoverAuthorizationServer(issuer, fetchFn = fetch) {
-  const base = String(issuer).replace(/\/+$/, "");
-  const urls = [
-    `${base}/.well-known/oauth-authorization-server`,
-    `${base}/.well-known/openid-configuration`,
-  ];
-  for (const url of urls) {
-    const res = await fetchFn(url, { headers: { accept: "application/json" } });
+  if (!isHttpsUrl(issuer)) {
+    throw new Error(`Authorization server issuer must be HTTPS: ${issuer}`);
+  }
+  const expected = normalizeIssuer(issuer);
+  for (const url of authorizationServerDiscoveryUrls(issuer)) {
+    let res;
+    try {
+      res = await fetchFn(url, { headers: { accept: "application/json" } });
+    } catch {
+      continue;
+    }
     if (!res.ok) continue;
-    const body = await res.json();
-    if (body.issuer && body.jwks_uri) return body;
+    let body;
+    try {
+      body = await res.json();
+    } catch {
+      continue;
+    }
+    // RFC 8414 §3.3: metadata issuer must match the identifier we queried.
+    if (normalizeIssuer(body.issuer) !== expected) continue;
+    if (!isHttpsUrl(body.jwks_uri)) continue;
+    return body;
   }
   throw new Error(`Authorization server metadata not found for issuer ${issuer}`);
 }
@@ -349,12 +395,21 @@ export function createResourceAuthenticator({
       if (!introspect) {
         return fail(401, { error: "invalid_token", errorDescription: "Token validation failed" });
       }
-      claims = await introspect(token);
+      try {
+        claims = await introspect(token);
+      } catch {
+        claims = null;
+      }
       if (!claims) {
         return fail(401, { error: "invalid_token", errorDescription: "Token is not active" });
       }
     } else if (introspect) {
-      const active = await introspect(token);
+      let active;
+      try {
+        active = await introspect(token);
+      } catch {
+        active = null;
+      }
       if (!active) {
         return fail(401, { error: "invalid_token", errorDescription: "Token is not active" });
       }
@@ -448,8 +503,11 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
     throw new Error("createInboundHttpsAuth requires issuer and audience");
   }
   const resource = inboundCfg.resource || inboundCfg.audience;
-  if (!String(resource).startsWith("https://")) {
+  if (!isHttpsUrl(resource)) {
     throw new Error("auth.resource (or auth.audience) must be an https URL");
+  }
+  if (!isHttpsUrl(inboundCfg.issuer)) {
+    throw new Error("auth.issuer must be an https URL");
   }
   const asMeta = await discoverAuthorizationServer(inboundCfg.issuer, fetchFn);
   const jwks = createRemoteJWKSet(new URL(asMeta.jwks_uri));

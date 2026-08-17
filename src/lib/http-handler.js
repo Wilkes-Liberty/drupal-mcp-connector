@@ -10,6 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { isInitializeRequest, isJsonContentType, isLegacyRequest } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport, toWebRequest } from "@modelcontextprotocol/node";
+import { formatWwwAuthenticate } from "./http-auth.js";
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
@@ -184,7 +185,18 @@ export function createMcpRequestHandler({
 
   async function gateAuth(req, res) {
     if (authenticate) {
-      const result = await authenticate(req);
+      let result;
+      try {
+        result = await authenticate(req);
+      } catch {
+        res.writeHead(401, {
+          "WWW-Authenticate": formatWwwAuthenticate({
+            error: "invalid_token",
+            errorDescription: "Token validation failed",
+          }),
+        }).end("Unauthorized");
+        return false;
+      }
       if (!result.ok) {
         res.writeHead(result.status, result.headers).end(result.body);
         return false;

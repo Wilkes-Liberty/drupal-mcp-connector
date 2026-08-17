@@ -206,6 +206,21 @@ describe("createMcpRequestHandler", () => {
     expect(toWebRequestFn).not.toHaveBeenCalled();
   });
 
+  it("returns 401 when the authenticator throws", async () => {
+    const modernHandler = vi.fn();
+    const h = createMcpRequestHandler({
+      authenticate: async () => { throw new Error("corrupt revocation"); },
+      modernHandler,
+      legacyHandler,
+      toolCount: 66,
+    });
+    const res = mockRes();
+    await h(req("POST", "/mcp", { authorization: "Bearer x" }), res);
+    expect(res.statusCode).toBe(401);
+    expect(res.headers["WWW-Authenticate"]).toContain("invalid_token");
+    expect(modernHandler).not.toHaveBeenCalled();
+  });
+
   it("returns 429 with Retry-After when the rate limiter denies", async () => {
     const rateLimiter = { check: vi.fn(() => ({ allowed: false, retryAfterSec: 7, remaining: 0 })) };
     const h = createMcpRequestHandler({
