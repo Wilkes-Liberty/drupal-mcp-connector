@@ -109,7 +109,7 @@ export function loadLocalSecrets({
   readFile = readFileSync,
   lookup = lookupKeychainItem,
 } = {}) {
-  let pairs = DEFAULT_SECRET_PAIRS;
+  let pairs;
   try {
     pairs = parseSecretMap(readFile(join(cwd, "config", "secrets.map"), "utf8"));
   } catch {

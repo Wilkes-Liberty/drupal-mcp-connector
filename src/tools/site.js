@@ -58,6 +58,18 @@ async function listConfiguredSites() {
  * @param {object} args - { site? } (a named site narrows the report).
  * @returns {Promise<{sites: object[]}>} required/ok/reason per site.
  */
+/**
+ * Classify a getSiteConfig failure so the diagnostic reason matches the cause.
+ * @param {string} message
+ * @returns {string}
+ */
+export function classifySiteResolutionFailure(message) {
+  if (message.includes("Unknown site:")) return "unknown_site";
+  if (message.includes("baseUrl is not HTTPS")) return "insecure_base_url";
+  if (message.includes("is not set in the environment")) return "credential_unresolved";
+  return "site_unresolved";
+}
+
 async function getGovernanceStatus({ site: siteName } = {}) {
   const names = siteName ? [siteName] : listSiteNames();
   const resolved = [];
@@ -66,12 +78,13 @@ async function getGovernanceStatus({ site: siteName } = {}) {
     try {
       resolved.push(getSiteConfig(name));
     } catch (error) {
+      const detail = error instanceof Error ? error.message : "site could not be resolved";
       unresolved.push({
         site: name,
         required: null,
         ok: false,
-        reason: "credential_unresolved",
-        detail: error instanceof Error ? error.message : "site could not be resolved",
+        reason: classifySiteResolutionFailure(detail),
+        detail,
         checkedAt: null,
       });
     }
