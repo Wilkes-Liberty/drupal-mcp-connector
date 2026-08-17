@@ -142,6 +142,55 @@ describe("callTool governance envelope", () => {
   });
 });
 
+describe("securityMiddleware inbound entitlement (#178)", () => {
+  const granted = [{
+    _name: "gov",
+    baseUrl: "https://gov.example.com",
+    requireGovernance: true,
+    security: { preset: "development", allowDestructive: true },
+  }];
+  const reader = {
+    sub: "reader",
+    clientId: "content-agent",
+    scopes: ["mcp_read"],
+    sites: null,
+  };
+
+  it("denies an unauthorized write without invoking the handler", async () => {
+    const handler = vi.fn();
+    await expect(securityMiddleware(
+      "drupal_create_node",
+      { site: "gov", title: "T" },
+      handler,
+      { identity: reader, sites: granted, grants: null, defaultSite: "gov" },
+    )).rejects.toBeInstanceOf(SecurityError);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("returns an Access denied envelope for a hidden tool that is called anyway", async () => {
+    const result = await callTool(
+      "drupal_create_node",
+      { site: "gov", title: "T" },
+      { identity: reader, sites: granted, grants: null, defaultSite: "gov" },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Access denied: Not entitled to invoke/);
+  });
+
+  it("rewrites a granted call onto the authoritative site name", async () => {
+    vi.mocked(fetch).mockResolvedValue(ready());
+    const handler = vi.fn(async (args) => args);
+    const out = await securityMiddleware(
+      "drupal_get_node",
+      { site: "gov", id: "1" },
+      handler,
+      { identity: reader, sites: granted, grants: null, defaultSite: "gov" },
+    );
+    expect(out.site).toBe("gov");
+    expect(handler).toHaveBeenCalledOnce();
+  });
+});
+
 describe("listResolvableSiteConfigs", () => {
   it("skips sites whose resolution throws, so one inert site cannot kill discovery", () => {
     // prod-admin is the deliberately credential-less break-glass site: its

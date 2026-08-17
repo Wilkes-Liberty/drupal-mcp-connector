@@ -221,6 +221,29 @@ export function listSiteNames() {
   return Object.keys(loadConfig().sites);
 }
 
+/**
+ * Configured default site name (used only as a hint after entitlement).
+ * @returns {string}
+ */
+export function getDefaultSiteName() {
+  return loadConfig().defaultSite;
+}
+
+/**
+ * Server-resolved inbound site grants keyed by OAuth client id.
+ * A missing or empty map means "no grant table" (every resolvable site).
+ * A present map is fail-closed: unknown clients receive no sites.
+ * @returns {object|null}
+ */
+export function getInboundGrants() {
+  const grants = loadConfig().auth?.grants;
+  if (!grants || typeof grants !== "object" || Array.isArray(grants)) return null;
+  const entries = Object.entries(grants)
+    .filter(([clientId, sites]) => !clientId.startsWith("_") && Array.isArray(sites))
+    .map(([clientId, sites]) => [clientId, sites.map(String)]);
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Auth headers — never logged, never exposed in tool responses
 // ---------------------------------------------------------------------------

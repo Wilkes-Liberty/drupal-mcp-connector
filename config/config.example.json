@@ -29,6 +29,9 @@
     "audience": "https://mcp.example.com/mcp",
     "resource": "https://mcp.example.com/mcp",
     "requiredScopes": ["mcp_read"],
+    "grants": {
+      "_comment": "Optional. Map inbound OAuth client_id (azp) to site names, e.g. \"content-agent\": [\"production\", \"staging\"]. When the map names any client, unknown clients receive no sites. Omit this object (or leave only this comment) to let every resolvable site stay visible; inbound scopes still gate the tool surface."
+    },
     "revocationFile": "",
     "introspectionUrl": "",
     "introspectionClientIdEnv": "",

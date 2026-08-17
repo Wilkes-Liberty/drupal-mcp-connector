@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../../src/lib/http-handler.js";
+import { getRequestIdentity } from "../../src/lib/principal.js";
 
 /** Minimal Node-like ServerResponse mock that records status/headers/body. */
 function mockRes() {
@@ -181,6 +182,26 @@ describe("createMcpRequestHandler", () => {
     expect(authenticate).toHaveBeenCalled();
     expect(incoming.mcpIdentity.sub).toBe("agent-1");
     expect(legacyHandler).toHaveBeenCalled();
+  });
+
+  it("exposes the inbound identity to the request store for discovery", async () => {
+    let seen = "unset";
+    const identityHandler = vi.fn(async () => {
+      seen = getRequestIdentity()?.sub ?? null;
+    });
+    const incoming = req("GET", "/mcp", { authorization: "Bearer good" });
+    const h = createMcpRequestHandler({
+      authenticate: async () => ({
+        ok: true,
+        identity: Object.freeze({ sub: "agent-1", scopes: ["mcp_read"] }),
+      }),
+      modernHandler: vi.fn(),
+      legacyHandler: identityHandler,
+      toolCount: 66,
+    });
+    await h(incoming, mockRes());
+    expect(seen).toBe("agent-1");
+    expect(getRequestIdentity()).toBeNull();
   });
 
   it("returns the authenticator challenge without reading the body", async () => {

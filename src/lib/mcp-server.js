@@ -14,9 +14,9 @@ import { Server } from "@modelcontextprotocol/server";
  * @param {{name: string, version: string}} surface.serverInfo
  * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, call: (name: string, args: object, context: object) => Promise<object>}} surface.tools
  *   `definitions` is the full static surface (schema projection); the optional
- *   `list` hook decides what is DISCOVERABLE per request (governance gating).
- * @param {{definitions: Array<object>, read: (uri: string) => Promise<object>}} surface.resources
- * @param {{definitions: Array<object>, get: (name: string, args: object) => Array<object>}} surface.prompts
+ *   `list` hook decides what is DISCOVERABLE per request (governance + entitlement).
+ * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, read: (uri: string) => Promise<object>}} surface.resources
+ * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, get: (name: string, args: object) => Array<object>}} surface.prompts
  * @returns {(context: import("@modelcontextprotocol/server").McpRequestContext) => Server}
  */
 export function createConnectorServerFactory({ serverInfo, tools, resources, prompts }) {
@@ -37,9 +37,15 @@ export function createConnectorServerFactory({ serverInfo, tools, resources, pro
       return server.projectCallToolResult(result, toolDefinitions.get(name)?.outputSchema);
     });
 
-    server.setRequestHandler("resources/list", async () => ({ resources: resources.definitions }));
+    server.setRequestHandler("resources/list", async () => ({
+      resources: resources.list ? await resources.list() : resources.definitions,
+    }));
     server.setRequestHandler("resources/read", async (request) => {
       const { uri } = request.params;
+      const visible = resources.list ? await resources.list() : resources.definitions;
+      const listed = visible.some((resource) => resource.uri === uri
+        || (typeof resource.uri === "string" && resource.uri.includes("{site}")));
+      if (!listed) throw new Error(`Unknown resource: "${uri}"`);
       try {
         const data = await resources.read(uri);
         return {
@@ -50,10 +56,13 @@ export function createConnectorServerFactory({ serverInfo, tools, resources, pro
       }
     });
 
-    server.setRequestHandler("prompts/list", async () => ({ prompts: prompts.definitions }));
+    server.setRequestHandler("prompts/list", async () => ({
+      prompts: prompts.list ? await prompts.list() : prompts.definitions,
+    }));
     server.setRequestHandler("prompts/get", async (request) => {
       const { name, arguments: args } = request.params;
-      const known = prompts.definitions.find((prompt) => prompt.name === name);
+      const visible = prompts.list ? await prompts.list() : prompts.definitions;
+      const known = visible.find((prompt) => prompt.name === name);
       if (!known) throw new Error(`Unknown prompt: "${name}"`);
       return { description: known.description, messages: prompts.get(name, args ?? {}) };
     });

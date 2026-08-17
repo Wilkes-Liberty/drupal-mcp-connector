@@ -69,6 +69,14 @@ describe("parseBearerToken / scopes / identity", () => {
     expect(Object.isFrozen(identity.scopes)).toBe(true);
     expect(identityHasScopes(identity, ["mcp_read"])).toBe(true);
     expect(identityHasScopes(identity, ["mcp_admin"])).toBe(false);
+    expect(identity.sites).toBeNull();
+  });
+
+  it("captures a server-issued sites claim and ignores a missing one", () => {
+    expect(buildIdentity({ sites: ["production", "staging"] }).sites)
+      .toEqual(["production", "staging"]);
+    expect(buildIdentity({ mcp_sites: "staging" }).sites).toEqual(["staging"]);
+    expect(buildIdentity({}).sites).toBeNull();
   });
 });
 

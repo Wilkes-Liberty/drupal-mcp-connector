@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **Discovery and invocation follow the inbound principal (#178).** On
+  HTTPS resource-server requests the validated JWT — not caller `site`,
+  `environment`, `tenant`, `target`, or `scope` arguments — decides which
+  tools, resources, prompts, and sites are visible or callable. Empty
+  inbound scopes are no grants. `auth.grants` maps a client id to site
+  names; a present map is fail-closed for unknown clients. GraphQL and
+  raw SQL stay hidden unless an entitled site's preset actually allows
+  them. Stdio and loopback without a resource-server identity keep the
+  existing local-operator surface. `drupal_list_sites` now also returns
+  `targets` with the authoritative name and base URL.
 - **Network-facing HTTPS is an OAuth protected resource (#177).** `/mcp`
   validates inbound JWTs against a configured issuer (RFC 8414 / OIDC
   discovery + JWKS): issuer, audience/resource, expiry and required scopes.

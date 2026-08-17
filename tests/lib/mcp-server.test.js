@@ -35,6 +35,27 @@ describe("createConnectorServerFactory", () => {
     expect(second.getCapabilities()).toEqual(first.getCapabilities());
   });
 
+  it("uses per-request list hooks for tools, resources, and prompts", async () => {
+    const current = surface();
+    current.tools.list = vi.fn(async () => []);
+    current.resources.list = vi.fn(async () => []);
+    current.prompts.list = vi.fn(async () => []);
+    const server = createConnectorServerFactory(current)({ era: "legacy" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    expect((await client.listTools()).tools).toEqual([]);
+    expect((await client.listResources()).resources).toEqual([]);
+    expect((await client.listPrompts()).prompts).toEqual([]);
+    await expect(client.getPrompt({ name: "drupal-test" })).rejects.toThrow(/Unknown prompt/);
+
+    await client.close();
+    await server.close();
+  });
+
   it("serves the registered surface over the public MCP client interface", async () => {
     const current = surface();
     const server = createConnectorServerFactory(current)({ era: "legacy" });
