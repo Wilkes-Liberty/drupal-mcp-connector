@@ -8,6 +8,24 @@
 import { Server } from "@modelcontextprotocol/server";
 
 /**
+ * Whether a listed resource URI (possibly templated) covers a requested URI.
+ * @param {string} listed
+ * @param {string} requested
+ * @returns {boolean}
+ */
+function resourceUriIsListed(listed, requested) {
+  if (listed === requested) return true;
+  if (typeof listed !== "string" || !listed.includes("{site}")) return false;
+  const marker = "{site}";
+  const at = listed.indexOf(marker);
+  const prefix = listed.slice(0, at);
+  const suffix = listed.slice(at + marker.length);
+  if (!requested.startsWith(prefix) || !requested.endsWith(suffix)) return false;
+  const captured = requested.slice(prefix.length, requested.length - suffix.length);
+  return captured.length > 0 && !captured.includes("/");
+}
+
+/**
  * Create the server factory shared by HTTP and stdio transports.
  *
  * @param {object} surface
@@ -43,8 +61,7 @@ export function createConnectorServerFactory({ serverInfo, tools, resources, pro
     server.setRequestHandler("resources/read", async (request) => {
       const { uri } = request.params;
       const visible = resources.list ? await resources.list() : resources.definitions;
-      const listed = visible.some((resource) => resource.uri === uri
-        || (typeof resource.uri === "string" && resource.uri.includes("{site}")));
+      const listed = visible.some((resource) => resourceUriIsListed(resource.uri, uri));
       if (!listed) throw new Error(`Unknown resource: "${uri}"`);
       try {
         const data = await resources.read(uri);

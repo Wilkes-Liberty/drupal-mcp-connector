@@ -299,7 +299,12 @@ export function assertPrincipalEntitlement({
   if (!principalMayUseTool(toolName, identity, sites, grants)) {
     throw new SecurityError(`Not entitled to invoke ${toolName}.`);
   }
+  // list_sites has no target. governance_status without a hint reports every
+  // granted site — pinning it to the default would hide the rest.
   if (toolName === "drupal_list_sites") return null;
+  if (toolName === "drupal_governance_status" && callerTargetHints(args).length === 0) {
+    return null;
+  }
   return resolveAuthoritativeTarget(args, identity, sites, { grants, defaultSite });
 }
 

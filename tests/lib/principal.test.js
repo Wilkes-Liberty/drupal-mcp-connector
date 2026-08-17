@@ -221,6 +221,28 @@ describe("cross-target discovery and conflicting hints", () => {
     )).toBe(false);
   });
 
+  it("does not pin governance_status to a single site when no hint is given", () => {
+    expect(assertPrincipalEntitlement({
+      toolName: "drupal_governance_status",
+      args: {},
+      identity: identity(),
+      sites,
+      grants: { "content-agent": ["production", "staging"] },
+      defaultSite: "production",
+    })).toBeNull();
+  });
+
+  it("still denies governance_status against an ungranted hinted site", () => {
+    expect(() => assertPrincipalEntitlement({
+      toolName: "drupal_governance_status",
+      args: { site: "development" },
+      identity: identity(),
+      sites,
+      grants: { "content-agent": ["production"] },
+      defaultSite: "production",
+    })).toThrow(/Not entitled to the requested target/);
+  });
+
   it("returns the authoritative granted target on a clean call", () => {
     const resolved = resolveAuthoritativeTarget(
       { site: "production" },

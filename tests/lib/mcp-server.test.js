@@ -81,6 +81,47 @@ describe("createConnectorServerFactory", () => {
     await server.close();
   });
 
+  it("rejects a resource URI that is not on the filtered list", async () => {
+    const current = surface();
+    current.resources.list = vi.fn(async () => [{
+      uri: "drupal://sites", name: "Sites", mimeType: "application/json",
+    }]);
+    const server = createConnectorServerFactory(current)({ era: "legacy" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    await expect(client.readResource({ uri: "drupal://secret/security-policy" }))
+      .rejects.toThrow(/Unknown resource/);
+    expect(current.resources.read).not.toHaveBeenCalled();
+
+    await client.close();
+    await server.close();
+  });
+
+  it("matches a concrete site URI against a visible template", async () => {
+    const current = surface();
+    current.resources.definitions = [{
+      uri: "drupal://{site}/content-types", name: "Types", mimeType: "application/json",
+    }];
+    current.resources.read = vi.fn(async (uri) => ({ uri }));
+    const server = createConnectorServerFactory(current)({ era: "legacy" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const result = await client.readResource({ uri: "drupal://production/content-types" });
+    expect(result.contents[0].text).toContain("production");
+    expect(current.resources.read).toHaveBeenCalledWith("drupal://production/content-types");
+
+    await client.close();
+    await server.close();
+  });
+
   it("returns a stable non-secret error when resource reads throw non-Error values", async () => {
     const current = surface();
     current.resources.read.mockRejectedValue("resource-backend-secret");
