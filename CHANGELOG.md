@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-08-17
+
 ### Security
 - **Discovery and invocation follow the inbound principal (#178).** On
   HTTPS resource-server requests the validated JWT — not caller `site`,
