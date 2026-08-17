@@ -384,6 +384,9 @@ export function verifyStatic(config, { source = "config", now = () => new Date()
     if (inbound.resource && !String(inbound.resource).startsWith("https://")) {
       inboundFindings.push("auth.resource is not HTTPS.");
     }
+    if (inbound.introspectionUrl && !String(inbound.introspectionUrl).startsWith("https://")) {
+      inboundFindings.push("auth.introspectionUrl is not HTTPS.");
+    }
   }
   const transportName = env.MCP_TRANSPORT || "stdio";
   if (transportName === "https" || transportName === "http") {

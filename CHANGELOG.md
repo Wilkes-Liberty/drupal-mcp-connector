@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not require a restart. Optional RFC 7662 introspection is fail-closed
   when configured. Discovery requires the metadata `issuer` to match the
   configured identifier (RFC 8414 §3.3), uses the RFC 8414 well-known path
-  for issuers that have a path component, and refuses HTTP issuers and
-  `jwks_uri`s. A thrown authenticator, a corrupt revocation file, or a
+  for issuers that have a path component, and refuses HTTP issuers,
+  `jwks_uri`s, and introspection URLs. Trailing slashes on the issuer
+  identifier do not break JWT verification. A thrown authenticator, a corrupt revocation file, or a
   failed introspection returns `401` instead of hanging the request.
   Caller-supplied identity headers never become the principal. The inbound
   access token is never forwarded to Drupal. `MCP_AUTH_TOKEN` remains valid

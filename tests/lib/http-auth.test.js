@@ -201,6 +201,17 @@ describe("createResourceAuthenticator", () => {
     expect(Object.isFrozen(result.identity)).toBe(true);
   });
 
+  it("accepts a token when the configured issuer only differs by a trailing slash", async () => {
+    const { privateKey, jwks } = await fixture();
+    const token = await signedToken({
+      privateKey, issuer, audience, claims: { sub: "agent-1", scope: "mcp_read" },
+    });
+    const authenticate = createResourceAuthenticator({
+      issuer: `${issuer}/`, audience, jwks, resourceMetadataUrl: metadata,
+    });
+    expect((await authenticate(`Bearer ${token}`)).ok).toBe(true);
+  });
+
   it("rejects the wrong issuer, audience, and an expired token", async () => {
     const { privateKey, jwks } = await fixture();
     const authenticate = createResourceAuthenticator({
@@ -403,6 +414,18 @@ describe("discoverAuthorizationServer / introspectToken", () => {
       },
       fetchFn: async () => ({ ok: false, json: async () => ({}) }),
     })).rejects.toThrow(/issuer must be an https URL/);
+  });
+
+  it("refuses to start a resource server against an HTTP introspection URL", async () => {
+    await expect(createInboundHttpsAuth({
+      inboundCfg: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com",
+        resource: "https://mcp.example.com",
+        introspectionUrl: "http://idp.example.com/introspect",
+      },
+      fetchFn: async () => ({ ok: false, json: async () => ({}) }),
+    })).rejects.toThrow(/introspectionUrl must be an https URL/);
   });
 
   it("returns null when introspection reports inactive", async () => {

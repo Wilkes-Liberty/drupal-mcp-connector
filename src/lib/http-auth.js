@@ -363,12 +363,13 @@ export function createResourceAuthenticator({
   clockTolerance = 5,
 }) {
   const fail = (status, extra) => denyAuth(status, { resourceMetadata: resourceMetadataUrl, ...extra });
+  const expectedIssuer = issuer ? normalizeIssuer(issuer) : "";
 
   async function claimsFromJwt(token) {
     if (verifyJwt) return verifyJwt(token);
     if (!jwks) throw new Error("missing JWKS");
     const { payload } = await jwtVerify(token, jwks, {
-      issuer,
+      issuer: expectedIssuer ? [expectedIssuer, `${expectedIssuer}/`] : undefined,
       audience,
       clockTolerance,
     });
@@ -415,7 +416,7 @@ export function createResourceAuthenticator({
       }
     }
 
-    if (issuer && claims.iss && claims.iss !== issuer) {
+    if (expectedIssuer && claims.iss && normalizeIssuer(claims.iss) !== expectedIssuer) {
       return fail(401, { error: "invalid_token", errorDescription: "Issuer mismatch" });
     }
     if (audience && !audienceMatches(claims.aud, audience)) {
@@ -509,7 +510,11 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
   if (!isHttpsUrl(inboundCfg.issuer)) {
     throw new Error("auth.issuer must be an https URL");
   }
-  const asMeta = await discoverAuthorizationServer(inboundCfg.issuer, fetchFn);
+  if (inboundCfg.introspectionUrl && !isHttpsUrl(inboundCfg.introspectionUrl)) {
+    throw new Error("auth.introspectionUrl must be an https URL");
+  }
+  const issuer = normalizeIssuer(inboundCfg.issuer);
+  const asMeta = await discoverAuthorizationServer(issuer, fetchFn);
   const jwks = createRemoteJWKSet(new URL(asMeta.jwks_uri));
   const resourceMetadataUrl = resourceMetadataUrlFor(resource);
   const revocationStore = inboundCfg.revocationFile
@@ -530,7 +535,7 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
   }
 
   const check = createResourceAuthenticator({
-    issuer: inboundCfg.issuer,
+    issuer,
     audience: inboundCfg.audience,
     requiredScopes: inboundCfg.requiredScopes,
     resourceMetadataUrl,
@@ -543,7 +548,7 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
     authenticate: (req) => check(req.headers.authorization, req.headers),
     protectedResource: protectedResourceMetadata({
       resource,
-      authorizationServers: [inboundCfg.issuer],
+      authorizationServers: [issuer],
       scopesSupported: inboundCfg.requiredScopes,
     }),
     resourceMetadataUrl,
