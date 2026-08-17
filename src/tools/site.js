@@ -58,9 +58,38 @@ async function listConfiguredSites() {
  * @param {object} args - { site? } (a named site narrows the report).
  * @returns {Promise<{sites: object[]}>} required/ok/reason per site.
  */
+/**
+ * Classify a getSiteConfig failure so the diagnostic reason matches the cause.
+ * @param {string} message
+ * @returns {string}
+ */
+export function classifySiteResolutionFailure(message) {
+  if (message.includes("Unknown site:")) return "unknown_site";
+  if (message.includes("baseUrl is not HTTPS")) return "insecure_base_url";
+  if (message.includes("is not set in the environment")) return "credential_unresolved";
+  return "site_unresolved";
+}
+
 async function getGovernanceStatus({ site: siteName } = {}) {
   const names = siteName ? [siteName] : listSiteNames();
-  return { sites: await governanceStatus(names.map((n) => getSiteConfig(n))) };
+  const resolved = [];
+  const unresolved = [];
+  for (const name of names) {
+    try {
+      resolved.push(getSiteConfig(name));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "site could not be resolved";
+      unresolved.push({
+        site: name,
+        required: null,
+        ok: false,
+        reason: classifySiteResolutionFailure(detail),
+        detail,
+        checkedAt: null,
+      });
+    }
+  }
+  return { sites: [...unresolved, ...(await governanceStatus(resolved))] };
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +130,8 @@ export const definitions = [
     },
   },
 ];
+
+export { getGovernanceStatus };
 
 export const handlers = {
   drupal_site_info:          getSiteInfo,

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A process no longer starts when every secret named by the active config
+  is unset (#199).** 2.6.0 moved the launcher's Keychain table to the
+  tenant-neutral example names and documented `config/secrets.map` as the
+  per-machine override. A checkout whose `config.json` still used the old
+  env-var names, and that never grew a `secrets.map`, started cleanly,
+  resolved zero sites, and advertised only `drupal_list_sites` and
+  `drupal_governance_status`. Worse, the diagnostic itself threw
+  `requireSecureAuth` with advice to "provide an oauth block" that was
+  already there. Now: `node src/index.js` (not only the shell launcher)
+  applies `config/secrets.map` or the shipped example table; the process
+  **refuses to start** when every `clientSecretEnv`/`apiTokenEnv` named in
+  `config.json` is still unset, listing those names; `requireSecureAuth`
+  names the unset variable (and does not claim the env is unset when the
+  secret resolved but `clientId` is missing); `drupal_governance_status`
+  reports a classified reason (`credential_unresolved`, `unknown_site`,
+  `insecure_base_url`, or `site_unresolved`) instead of throwing;
+  `config/secrets.map` is actually gitignored. Per-item Keychain misses
+  stay silent so an inert break-glass tier remains a missing item, not an
+  error.
+
 ### Changed
 - **Versioning policy states the post-1.0 guarantees it actually operates under
   (#195).** `docs/versioning.md` still opened with a pre-1.0 section explaining
