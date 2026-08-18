@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.1] - 2026-08-18
+
 ### Fixed
 - **Paragraph ERR attach sends `meta.target_revision_id` (#192).** JSON:API
   only persists an Entity Reference Revisions item when the resource
