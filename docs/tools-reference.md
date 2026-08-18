@@ -463,7 +463,7 @@ Drive content under a `content_moderation` editorial workflow. Authoritative sta
 | Tool | Required params | Description |
 |------|----------------|-------------|
 | `drupal_set_moderation_state` | `type`, `id`, `state` | Transition a node to a moderation state, e.g. `draft`, `needs_review`, `published`, `archived`. Governed write. `state: "published"` requires `allowPublish: true`. |
-| `drupal_content_by_moderation_state` | `type`, `state` | List nodes of a content type currently in a given moderation state. Supports `limit` / `offset`. |
+| `drupal_content_by_moderation_state` | `type`, `state` | List nodes of a content type currently in a given moderation state. Supports `limit` / `offset`. Stock JSON:API cannot filter `moderation_state`; when that filter is rejected the tool samples recent nodes client-side (`source: "sampled"`, `approximate`) instead of returning Drupal's 500 (#162). |
 | `drupal_list_moderation_states` | `type` | List the moderation states observed on a content type's content (best-effort; `sample` controls how many recent items to inspect). |
 
 ### drupal_set_moderation_state

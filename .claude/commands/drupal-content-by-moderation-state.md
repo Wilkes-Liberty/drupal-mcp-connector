@@ -1,12 +1,12 @@
 ---
-description: "List nodes of a content type currently in a given moderation state (e.g. what is in 'draft' or 'needs_review')."
+description: "List nodes of a content type currently in a given moderation state (e.g. what is in 'draft' or 'needs_review'). Stock JSON:API cannot filter the computed moderation_state field; when the site rejects that filter the tool samples recent nodes client-side and marks the result approximate, instead of returning Drupal's 500."
 argument-hint: "<type> <state> [site] [limit] [offset]"
 allowed-tools: mcp__drupal__drupal_content_by_moderation_state
 ---
 
 Call the `mcp__drupal__drupal_content_by_moderation_state` MCP tool.
 
-List nodes of a content type currently in a given moderation state (e.g. what is in 'draft' or 'needs_review').
+List nodes of a content type currently in a given moderation state (e.g. what is in 'draft' or 'needs_review'). Stock JSON:API cannot filter the computed moderation_state field; when the site rejects that filter the tool samples recent nodes client-side and marks the result approximate, instead of returning Drupal's 500.
 
 Parse the request in `$ARGUMENTS` into this tool's parameters:
 
