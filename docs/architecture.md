@@ -73,7 +73,7 @@ Both backends normalize Drupal entities into one shape so that tool output is pr
 }
 ```
 
-`src/lib/canonical.js` defines the base attribute set and the helpers (`makeCanonicalEntity`, `normalizeRelationship`) both backends use.
+`src/lib/canonical.js` defines the base attribute set and the helpers (`makeCanonicalEntity`, `normalizeRelationship`) both backends use. Dispatch then attaches `_target: { name, baseUrl, source }` to the tool response so the resolved site is visible even when the caller omitted `site`.
 
 ### Capability model
 
@@ -232,7 +232,7 @@ export const definitions = [{
     type: "object",
     required: ["entityType"],
     properties: {
-      site:       { type: "string", description: "Named site (omit for default)" },
+      site:       { type: "string", description: "Named site. Omit only on reads (defaults to defaultSite, not production). Writes require this when more than one site is configured." },
       entityType: { type: "string", description: "Entity type machine name" },
       bundle:     { type: "string", description: "Bundle machine name" },
     },
@@ -263,11 +263,13 @@ handler(args)        ← entity-type/bundle checks on specialized + generic tool
       │              ← backend capability checks (write/delete gated)
       ▼
 toolResult(data)     ← field redaction applied before returning (JSON:API-shaped paths)
+                     ← `_target` { name, baseUrl, source } attached (#167)
 ```
 
-GraphQL tools call `assertGraphqlAllowed` (and mutations
-`assertGraphqlMutationAllowed`) before the handler runs. Default security when
-`security` is omitted is `production-strict`.
+Writes that omit `site` when more than one site is configured are refused
+before the handler runs. GraphQL tools call `assertGraphqlAllowed` (and
+mutations `assertGraphqlMutationAllowed`) before the handler runs. Default
+security when `security` is omitted is `production-strict`.
 
 `SecurityError` and `BackendCapabilityError` produce clean, explicit messages; all other errors surface as standard MCP error responses.
 

@@ -295,6 +295,12 @@ Add multiple named entries to `sites`. Each has its own backend, auth, and secur
 
 In your MCP client: "List all content types on the staging site" or "Run an SEO audit on production." To see all configured sites, call `drupal_list_sites`.
 
+Omitting `site` on a **read** uses `defaultSite`. That is often a local or
+dev environment, not production — the response `_target.source` field is
+`"default"` when that happens. **Writes require an explicit `site`** when
+more than one site is configured; a silent default is refused rather than
+applied to the wrong environment.
+
 ---
 
 ## 11. Enable the GraphQL Backend (optional)

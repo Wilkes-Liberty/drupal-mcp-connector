@@ -14,7 +14,7 @@ Parse the request in `$ARGUMENTS` into this tool's parameters:
 - `field` (string): Field machine name to check for emptiness, e.g. 'field_meta_description', 'field_image'
 
 **Optional:**
-- `site` (string): omit for the default site
+- `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
 - `type` (string): Content type machine name (default: article)
 - `sampleSize` (number): Max entities to scan
 

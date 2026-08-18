@@ -31,10 +31,11 @@ vi.mock("../../src/lib/config.js", async (orig) => {
 });
 
 import fetch from "node-fetch";
-import { getSiteConfig } from "../../src/lib/config.js";
+import { getSiteConfig, listSiteNames } from "../../src/lib/config.js";
 import { securityMiddleware, callTool, listResolvableSiteConfigs } from "../../src/lib/dispatch.js";
 import { GovernanceError, clearGovernanceCache } from "../../src/lib/governance.js";
 import { SecurityError } from "../../src/lib/security.js";
+import { withResolvedTarget } from "../../src/lib/site-target.js";
 
 const ready = () => ({
   ok: true,
@@ -217,5 +218,115 @@ describe("listResolvableSiteConfigs", () => {
     // exclude it from the discovery pool, never break tools/list (2.4.0 bug).
     const sites = listResolvableSiteConfigs();
     expect(sites.map((s) => s._name)).toEqual(["gov", "open"]);
+  });
+});
+
+describe("resolved target echo (#167)", () => {
+  it("names the default site and source:default when site is omitted on a multi-site config", async () => {
+    const result = await callTool("drupal_mcp_whoami", {});
+    expect(result.isError).toBeUndefined();
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload._target).toEqual({
+      name: "open",
+      baseUrl: "https://open.example.com",
+      source: "default",
+    });
+    expect(payload.target).toEqual(payload._target);
+  });
+
+  it("keeps whoami.target.source aligned with _target when identity defaults the site", async () => {
+    vi.mocked(fetch).mockResolvedValue(ready());
+    const writer = {
+      sub: "reader",
+      clientId: "content-agent",
+      scopes: ["mcp_read", "mcp_write"],
+      sites: null,
+    };
+    const entitled = [
+      { _name: "gov", baseUrl: "https://gov.example.com", requireGovernance: true, security: { preset: "development" } },
+      { _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" } },
+    ];
+    const result = await callTool(
+      "drupal_mcp_whoami",
+      {},
+      { identity: writer, sites: entitled, grants: null, defaultSite: "gov" },
+    );
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.target.source).toBe("default");
+    expect(payload._target.source).toBe("default");
+    expect(payload.target).toEqual(payload._target);
+    expect(payload.site).toBe("gov");
+  });
+
+  it("reports source:hint when the caller passed site", async () => {
+    const result = await callTool("drupal_mcp_whoami", { site: "open" });
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload._target).toEqual({
+      name: "open",
+      baseUrl: "https://open.example.com",
+      source: "hint",
+    });
+  });
+
+  it("echoes _target on a list_nodes-shaped payload when site is omitted", async () => {
+    const handler = vi.fn(async () => ({
+      total: 1,
+      nodes: [{ id: "n1", title: "Private Infrastructure", _backend: "jsonapi" }],
+    }));
+    const ctx = {};
+    const raw = await securityMiddleware(
+      "drupal_list_nodes",
+      { type: "solution", limit: 1 },
+      handler,
+      ctx,
+    );
+    const payload = withResolvedTarget(raw, ctx.resolvedTarget);
+    expect(payload._target).toEqual({
+      name: "open",
+      baseUrl: "https://open.example.com",
+      source: "default",
+    });
+    expect(payload.nodes[0]._backend).toBe("jsonapi");
+    expect(payload.nodes[0]).not.toHaveProperty("_target");
+  });
+
+  it("does not invent a single _target for list_sites", async () => {
+    const result = await callTool("drupal_list_sites", {});
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload._target).toBeUndefined();
+    expect(payload.sites).toEqual(expect.arrayContaining(["gov", "open"]));
+  });
+
+  it("refuses a write that omitted site when more than one site is configured", async () => {
+    const handler = vi.fn();
+    await expect(
+      securityMiddleware("drupal_create_node", { type: "article", title: "T" }, handler),
+    ).rejects.toBeInstanceOf(SecurityError);
+    expect(handler).not.toHaveBeenCalled();
+
+    const result = await callTool("drupal_create_node", { type: "article", title: "T" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Access denied:.*explicit site/s);
+    expect(result.content[0].text).toContain("open");
+    expect(result.content[0].text).toContain("https://open.example.com");
+  });
+
+  it("refuses a GraphQL mutation that omitted site on a multi-site config", async () => {
+    const handler = vi.fn();
+    await expect(securityMiddleware(
+      "drupal_graphql",
+      { query: "mutation { createNode { id } }" },
+      handler,
+    )).rejects.toThrow(/explicit site/);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("allows a write that omitted site when only one site is configured", async () => {
+    vi.mocked(listSiteNames).mockReturnValueOnce(["open"]);
+    const handler = vi.fn(async () => ({ id: "n1" }));
+    await expect(
+      securityMiddleware("drupal_create_node", { type: "article", title: "T" }, handler),
+    ).resolves.toEqual({ id: "n1" });
+    expect(handler).toHaveBeenCalledOnce();
   });
 });

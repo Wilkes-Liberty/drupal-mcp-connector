@@ -45,6 +45,10 @@ targeted tests while iterating (`npx vitest run tests/tools/nodes.test.js`).
 - **Tool names:** `drupal_<verb>_<noun>`. Operation gating is inferred from name
   prefixes (`get_`/`list_` = read, `create_`/`update_` = write, `delete_` =
   destructive, `graphql` = GraphQL). Follow the pattern so new tools stay gated.
+- **Resolved target:** every site-addressing response includes
+  `_target: { name, baseUrl, source }` (`hint` | `default` | `grant`). Reads may
+  omit `site` and default to `defaultSite`. Writes must pass `site` when more
+  than one site is configured.
 - New tools: implement + `definitions` + `handlers` in the right module; add
   tests. After tool description/schema changes run `npm run generate:commands`.
 - JSDoc on exported functions.

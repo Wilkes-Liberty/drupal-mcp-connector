@@ -6,6 +6,14 @@ Complete reference for all 119 tools across 26 modules.
 
 > **Backends & output shape.** Read tools run against whichever backend the site declares (`api`: JSON:API or GraphQL) and return a canonical entity shape
 > (`{ id, entityType, bundle, title, status, langcode, created, changed, url, fields, relationships, _backend }`), so the same tools behave identically across backends. Write tools (create/update/delete) require a JSON:API backend; against a read-only GraphQL site they return a clear capability error. On GraphQL, filters are applied client-side over a bounded fetch and results may be flagged `approximate`/`truncated`.
+>
+> **Resolved target (#167).** Every tool that addresses a site echoes
+> `_target: { name, baseUrl, source }` (`hint` | `default` | `grant`) — the
+> same shape as `drupal_mcp_whoami.target`. Omitting `site` on a read still
+> uses `defaultSite` (often local/dev, **not** production) and reports
+> `source: "default"`. Writes require an explicit `site` when more than one
+> site is configured. `drupal_list_sites` and an unscoped
+> `drupal_governance_status` have no single target and omit `_target`.
 
 ---
 
@@ -371,7 +379,7 @@ the server will deny. Requires a `serverTools` block on the site.
 | `drupal_config_get` | `name` | configRead + `mcp_config` | Read one config object (e.g. `system.site`). |
 | `drupal_config_list` | — | configRead + `mcp_config` | List config object names; optional `prefix`. |
 | `drupal_config_set` | `name`, `value` | configWrite + `mcp_config` | Set a config value (governed + audited server-side). |
-| `drupal_mcp_whoami` | — | — | Report effective tier, preset, scopes, and capabilities for a site. |
+| `drupal_mcp_whoami` | — | — | Report effective tier, preset, scopes, capabilities, and resolved `target` (`name`, `baseUrl`, `source`) for a site. |
 
 `drupal_config_set` requires the `config-editor` (Developer) tier or
 `security.allowConfigWrite: true`. The typical flow is: set config via

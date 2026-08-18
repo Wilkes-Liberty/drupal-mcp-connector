@@ -16,7 +16,10 @@ import { toolError, toolResult } from "./errors.js";
 import { BackendCapabilityError, BackendResolutionError } from "./backends/errors.js";
 import { inferOperation } from "./operations.js";
 import { assertSourceGovernance, GovernanceError, GOVERNANCE_DIAGNOSTIC_TOOLS } from "./governance.js";
-import { assertPrincipalEntitlement, getRequestIdentity } from "./principal.js";
+import {
+  assertPrincipalEntitlement, callerTargetHints, getRequestIdentity,
+} from "./principal.js";
+import { assertExplicitSiteForWrite, withResolvedTarget } from "./site-target.js";
 import { allHandlers } from "../tools/index.js";
 
 /**
@@ -37,6 +40,47 @@ export function listResolvableSiteConfigs() {
       return [];
     }
   });
+}
+
+/**
+ * Resolve which site this call addresses and how that name was chosen.
+ * Returns null for tools that do not address a single site (`list_sites`,
+ * unscoped `governance_status`).
+ *
+ * @param {string} toolName
+ * @param {object} rawArgs Caller arguments before any rewrite.
+ * @param {object} [context]
+ * @returns {?{site: object, source: string, name: string}}
+ * @throws {SecurityError}
+ */
+export function resolveCallTarget(toolName, rawArgs, context = {}) {
+  if (toolName === "drupal_list_sites") return null;
+  if (toolName === "drupal_governance_status" && callerTargetHints(rawArgs).length === 0) {
+    return null;
+  }
+
+  const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
+  if (identity) {
+    return assertPrincipalEntitlement({
+      toolName,
+      args: rawArgs,
+      identity,
+      sites: context.sites ?? listResolvableSiteConfigs(),
+      grants: context.grants,
+      defaultSite: context.defaultSite,
+    });
+  }
+
+  const hints = callerTargetHints(rawArgs);
+  const unique = [...new Set(hints.map((hint) => hint.value))];
+  if (unique.length > 1) {
+    throw new SecurityError(
+      "Conflicting caller target hints do not select a single target.",
+    );
+  }
+  const source = unique.length === 1 ? "hint" : "default";
+  const site = getSiteConfig(unique[0]);
+  return { site, source, name: site._name };
 }
 
 /**
@@ -72,18 +116,21 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
   const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
   let nextArgs = rawArgs;
 
-  if (identity) {
-    const resolved = assertPrincipalEntitlement({
-      toolName,
-      args: rawArgs,
-      identity,
-      sites: context.sites ?? listResolvableSiteConfigs(),
-      grants: context.grants,
-      defaultSite: context.defaultSite,
-    });
-    if (resolved) {
-      nextArgs = { ...rawArgs, site: resolved.name };
-    }
+  const resolved = resolveCallTarget(toolName, rawArgs, { ...context, identity });
+  if (context && typeof context === "object") {
+    context.resolvedTarget = resolved;
+  }
+  assertExplicitSiteForWrite(
+    toolName,
+    rawArgs,
+    resolved,
+    context.siteNames ?? listSiteNames(),
+  );
+
+  if (resolved) {
+    // Authoritative name plus the real source. Injecting `site` alone would
+    // make whoami report source:"hint" for a defaulted call (#167 / identity path).
+    nextArgs = { ...rawArgs, site: resolved.name, _resolvedSource: resolved.source };
   }
 
   // Tools with no site context skip per-site checks. governance_status
@@ -137,8 +184,9 @@ export async function callTool(name, args, context = {}) {
   }
 
   try {
-    const result = await securityMiddleware(name, args ?? {}, handler, context);
-    return toolResult(result);
+    const ctx = { ...context };
+    const result = await securityMiddleware(name, args ?? {}, handler, ctx);
+    return toolResult(withResolvedTarget(result, ctx.resolvedTarget));
   } catch (err) {
     // Translate known error classes into clear, non-leaky isError responses;
     // anything else falls through to toolError for a generic envelope.

@@ -11,7 +11,7 @@ Composite site-health dashboard: runs a battery of content, link, and configurat
 Parse the request in `$ARGUMENTS` into this tool's parameters:
 
 **Optional:**
-- `site` (string): omit for the default site
+- `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
 - `type` (string): Primary content type for content/link sections (default: article)
 - `sampleSize` (number): Per-section scan cap (kept small for a fast roll-up)
 - `sections` (array (pass as JSON)): Subset of sections to run (default: all). Available: content_summary, stale_content, seo_audit, accessibility, duplicate_content, readability, pii_exposure, broken_links, redirect_health, alias_coverage, log_404, config_best_practices, module_audit, permission_audit

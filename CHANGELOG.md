@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Every tool response names the resolved site (#167).** Omitting `site`
+  still defaults to `defaultSite`, but the payload now carries
+  `_target: { name, baseUrl, source }` — the same block `drupal_mcp_whoami`
+  already returned as `target`. `source` is `hint` when the caller named a
+  site, `default` when the configured default was used, or `grant` when a
+  principal had exactly one entitled site. A list_nodes-shaped success with
+  only `_backend` is no longer claimable as production. Writes (including
+  GraphQL mutations and generic `drupal_entity_*` writes) refuse a silent
+  default when more than one site is configured; a write on the wrong site
+  is not recoverable. Single-site configs are unchanged. Array-shaped
+  results are wrapped as `{ items, _target }` so the field survives
+  `JSON.stringify`.
+
 ## [2.7.3] - 2026-08-18
 
 ### Fixed

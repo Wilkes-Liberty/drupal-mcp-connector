@@ -44,6 +44,7 @@ Each site declares which backend(s) it exposes via the `api` key:
 - **`api` accepts** `"jsonapi"`, `"graphql"`, or a priority array like `["graphql","jsonapi"]`. Omit it to **auto-detect** (the connector probes both once and caches the result).
 - **One canonical shape.** Both backends return entities as
   `{ id, entityType, bundle, title, status, langcode, created, changed, url, fields, relationships, _backend }`, so tool output is identical regardless of protocol.
+  Every site-addressing response also includes `_target: { name, baseUrl, source }` so a defaulted call cannot be mistaken for another environment.
 - **Capability-aware.** Each backend advertises what it supports (read, write, delete, server-side filter/sort, revisions). GraphQL via GraphQL Compose is **read-only** (no mutations) and has no server-side field filter, so filters are applied client-side over a bounded fetch and flagged `approximate`/`truncated`. Write tools against a read-only backend return a clear capability error rather than failing silently.
 - **Writes go through JSON:API.** Use a JSON:API-enabled site as the write plane; keep GraphQL as a read plane where that suits your architecture.
 - **`defaultTextFormat` sets the body text format** used by the `body` convenience

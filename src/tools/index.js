@@ -37,14 +37,34 @@ import * as reportsConfig  from "./reports-config.js";
 import * as reportsContent from "./reports-content.js";
 import * as auditComposite from "./audit-composite.js";
 import * as config       from "./config.js";
+import { SITE_PARAM } from "../lib/site-target.js";
 
 export const allModules = [nodes, taxonomy, users, media, graphql, site, entities, reports, drush,
   revisions, moderation, scheduler, fields, references, bulk, translations, paragraphs, structure, redirects, search, reportsExtra,
   reportsLinks, reportsConfig, reportsContent, auditComposite, config];
 
+/**
+ * Stamp the shared `site` description onto every tool that accepts one so
+ * agents are not told "omit for the default" as if that meant production.
+ *
+ * @param {object} def Tool definition.
+ * @returns {object}
+ */
+function withSiteParam(def) {
+  const props = def.inputSchema?.properties;
+  if (!props?.site) return def;
+  return {
+    ...def,
+    inputSchema: {
+      ...def.inputSchema,
+      properties: { ...props, site: { ...props.site, ...SITE_PARAM } },
+    },
+  };
+}
+
 // Flatten every module's tool definitions into one ListTools payload, and merge
 // their handler maps into a single closed dispatch table keyed by tool name.
-export const allDefinitions = allModules.flatMap((m) => m.definitions);
+export const allDefinitions = allModules.flatMap((m) => m.definitions).map(withSiteParam);
 export const allHandlers    = Object.assign({}, ...allModules.map((m) => m.handlers));
 
 // Fast name → definition lookup for prompt/command rendering.

@@ -470,7 +470,7 @@ export function assertPublishAllowed(secConfig, attributes = {}) {
  * @param {string} query GraphQL document text.
  * @returns {boolean} True if any operation is a mutation.
  */
-function graphqlHasMutation(query) {
+export function graphqlHasMutation(query) {
   try {
     const doc = parse(query);
     return doc.definitions.some(
