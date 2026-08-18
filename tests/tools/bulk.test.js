@@ -6,6 +6,8 @@ const backend = {
   createEntity: vi.fn(),
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
+  rawQuery: vi.fn(),
+  resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 vi.mock("../../src/lib/config.js", () => ({
@@ -37,6 +39,8 @@ const openSec = () => ({
 
 beforeEach(() => {
   Object.values(backend).forEach((f) => f.mockReset());
+  backend.rawQuery.mockResolvedValue({ data: { type: "node--article", id: "n1" } });
+  backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
   assertWriteAllowed.mockReset();
   resolveSecurityConfig.mockReset();
   resolveSecurityConfig.mockImplementation(() => openSec());
@@ -219,6 +223,23 @@ describe("bulk tools", () => {
     const names = mod.definitions.map((d) => d.name);
     expect(names).toContain("drupal_bulk_create");
     expect(names).toContain("drupal_bulk_update");
+  });
+
+  it("bulk_create of paragraphs returns relationshipData with revision meta (#192)", async () => {
+    backend.createEntity.mockResolvedValue({
+      id: "p1", entityType: "paragraph", bundle: "capability",
+      fields: { drupal_internal__revision_id: 21 },
+    });
+    const out = await handlers.drupal_bulk_create({
+      entityType: "paragraph", bundle: "capability",
+      items: [{ attributes: { field_title: "One" } }],
+    });
+    expect(out.results[0]).toMatchObject({
+      index: 0, success: true, id: "p1",
+      relationshipData: {
+        type: "paragraph--capability", id: "p1", meta: { target_revision_id: 21 },
+      },
+    });
   });
 });
 

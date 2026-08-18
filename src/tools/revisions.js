@@ -112,12 +112,46 @@ function summarizeRevision(resource) {
   return {
     vid: attrs.get("drupal_internal__vid") ?? null,
     revisionTimestamp: attrs.get("revision_timestamp") ?? null,
+    changed: attrs.get("changed") ?? null,
     revisionLog: attrs.get("revision_log") ?? attrs.get("revision_log_message") ?? null,
     status: attrs.get("status") ?? null,
     title: attrs.get("title") ?? null,
     links: resource.links ?? null,
   };
 }
+
+/**
+ * Whether the default revision's `changed` is later than its own
+ * `revision_timestamp` — the readable fingerprint of a #201 node.
+ * @param {?object} summary
+ * @returns {boolean}
+ */
+function changedAheadOfRevision(summary) {
+  if (!summary?.changed || !summary?.revisionTimestamp) return false;
+  const changed = Date.parse(summary.changed);
+  const rev = Date.parse(summary.revisionTimestamp);
+  if (!Number.isFinite(changed) || !Number.isFinite(rev)) return false;
+  return changed > rev;
+}
+
+const LIST_REVISIONS_BASE_NOTE =
+  "JSON:API only addresses revisions by id (id:<vid>) or the rel:latest-version / " +
+  "rel:working-copy aliases; it cannot enumerate the full chronological history. " +
+  "Use drupal_get_revision with a specific vid to inspect a known revision, or the " +
+  "Drush bridge for complete revision-history enumeration. " +
+  "drupal_report_revision_hotspots can surface per-node revision counts.";
+
+const LIST_REVISIONS_NULL_WC_NOTE =
+  " workingCopy: null is not proof the node is PATCH-able. Drupal core rejects " +
+  "PATCH when the stored entity is not the latest revision even when " +
+  "content_moderation exposes no pending revision (connector #201, core #2795279). " +
+  "Inspect possiblyPatchBlocked before creating dependent paragraphs; dryRun on " +
+  "the host update runs the same guard.";
+
+const LIST_REVISIONS_FINGERPRINT_NOTE =
+  " The default revision's changed timestamp is later than its own " +
+  "revision_timestamp — a readable fingerprint that a newer revision row may " +
+  "exist without a content_moderation working copy.";
 
 /**
  * List the addressable revisions of an entity: the latest default revision and
@@ -145,19 +179,20 @@ async function listRevisions({ site: siteName, type, id }) {
     .then(summarizeRevision)
     .catch(() => null);
 
+  const possiblyPatchBlocked = Boolean(latestVersion && changedAheadOfRevision(latestVersion));
+  let note = LIST_REVISIONS_BASE_NOTE;
+  if (!workingCopy) note += LIST_REVISIONS_NULL_WC_NOTE;
+  if (possiblyPatchBlocked) note += LIST_REVISIONS_FINGERPRINT_NOTE;
+
   return {
     entityType: "node",
     bundle: type,
     id,
     latestVersion,
     workingCopy,
+    possiblyPatchBlocked,
     fullHistoryAvailable: false,
-    note:
-      "JSON:API only addresses revisions by id (id:<vid>) or the rel:latest-version / " +
-      "rel:working-copy aliases; it cannot enumerate the full chronological history. " +
-      "Use drupal_get_revision with a specific vid to inspect a known revision, or the " +
-      "Drush bridge for complete revision-history enumeration. " +
-      "drupal_report_revision_hotspots can surface per-node revision counts.",
+    note,
   };
 }
 
@@ -266,7 +301,7 @@ export const definitions = [
   {
     name: "drupal_list_revisions",
     description:
-      "Surface the addressable revisions of a content node: the latest default revision and the working-copy (forward) revision, with their version ids and links. NOTE: JSON:API cannot enumerate full chronological revision history — it only addresses revisions by id or the latest/working-copy aliases. Full history enumeration requires the Drush bridge. Use drupal_report_revision_hotspots for per-node revision counts.",
+      "Surface the addressable revisions of a content node: the latest default revision and the working-copy (forward) revision, with their version ids and links. workingCopy: null is not an all-clear — Drupal core can still reject PATCH when a revision row sits above the default without a content_moderation working copy (#201). The payload includes possiblyPatchBlocked (true when default changed is later than its revision_timestamp) plus changed and revisionTimestamp on latestVersion. Probe the host (this flag, then dryRun on the update) before creating dependent paragraphs. NOTE: JSON:API cannot enumerate full chronological revision history. Full history enumeration requires the Drush bridge.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {

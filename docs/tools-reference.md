@@ -51,7 +51,7 @@ Tools for creating, reading, updating, and deleting Drupal content nodes. Reads 
 | `drupal_list_nodes` | `type` | List nodes with filter, sort, pagination support. |
 | `drupal_search_content` | `query` | Search nodes by title substring. |
 | `drupal_create_node` | `type`, `title` | Create a node. Scalar fields via `fields`; **entity-reference fields (taxonomy, related content, media) via `relationships`** (JSON:API shape). `returning: "minimal"` for a compact identity+state response. |
-| `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. Reference fields go in `relationships`, not `fields`; `returning: "minimal"` bounds the response size. On a **published moderated** node, omitting `moderationState` defaults the write to `moderation_state: "draft"` (forward revision). An unrequested published-state flip in the persisted node is reported via `_statusChanged` (#171). |
+| `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. Reference fields go in `relationships`, not `fields`; `returning: "minimal"` bounds the response size. On a **published moderated** node, omitting `moderationState` defaults the write to `moderation_state: "draft"` (forward revision). An unrequested published-state flip in the persisted node is reported via `_statusChanged` (#171). Paragraph / ERR identifiers are resolved to include `meta.target_revision_id` before PATCH (#192); the write fails if any ref cannot be resolved. On moderated targets a no-op PATCH preflight runs first, including on `dryRun` (#201). |
 | `drupal_delete_node` | `type`, `id` | Permanently delete a node. Requires `allowDestructive: true`. Subject to entity allowlists like all node tools. |
 
 ### drupal_get_node
@@ -103,8 +103,13 @@ The `filter` object accepts raw JSON:API filter parameters for advanced filterin
 
 `drupal_create_node`, `drupal_update_node`, and `drupal_delete_node` all accept an
 optional `dryRun` boolean (default `false`). When `true`, the tool validates the
-request and returns a preview of exactly what would be written — without committing
-anything to Drupal. Use this to confirm the resolved attributes before a real write.
+request and returns a preview of exactly what would be written. Create and delete
+previews do not touch Drupal. On a **moderated** `update`, `dryRun` also issues a
+no-op PATCH probe against the same canonical URL so the core working-copy guard
+(#201 / Drupal #2795279) is exercised — a 400 fails the dryRun. Use this (and
+`drupal_list_revisions.possiblyPatchBlocked`) **before** creating dependent
+paragraphs; preflight inside the host update cannot un-orphan work that already
+happened.
 
 ```json
 {
@@ -264,7 +269,7 @@ Works with **any** Drupal entity type — paragraphs, commerce products, webform
 | `drupal_entity_list` | `entityType`, `bundle` | List entities with filter, sort, pagination. |
 | `drupal_entity_get` | `entityType`, `bundle`, `id` | Fetch any entity by UUID. |
 | `drupal_entity_create` | `entityType`, `bundle` | Create any entity with arbitrary attributes and relationships. `returning: "minimal"` for a compact response. |
-| `drupal_entity_update` | `entityType`, `bundle`, `id` | Update any entity. `returning: "minimal"` for a compact response. `status` is strictly opt-in; if a server-side gate flips the published state anyway, the response carries a `_statusChanged` marker instead of a silent success (#171). |
+| `drupal_entity_update` | `entityType`, `bundle`, `id` | Update any entity. `returning: "minimal"` for a compact response. `status` is strictly opt-in; if a server-side gate flips the published state anyway, the response carries a `_statusChanged` marker instead of a silent success (#171). Paragraph / ERR identifiers are resolved to include `meta.target_revision_id` (#192). Moderated targets run the same PATCH preflight as `drupal_update_node`, including on `dryRun` (#201). |
 | `drupal_entity_delete` | `entityType`, `bundle`, `id` | Delete any entity. Requires `allowDestructive: true`. |
 | `drupal_security_info` | — | Show active security configuration for a site. |
 
@@ -294,7 +299,8 @@ Works with **any** Drupal entity type — paragraphs, commerce products, webform
 ### Preview writes with `dryRun`
 
 `drupal_entity_create`, `drupal_entity_update`, and `drupal_entity_delete` accept an
-optional `dryRun` boolean (default `false`). When `true`, the tool validates the
+optional `dryRun` boolean (default `false`). On a **moderated** `update`, `dryRun`
+also issues the same no-op PATCH probe as `drupal_update_node` (#201). When `true`, the tool validates the
 request and returns a preview of the write without committing it.
 
 ```json
@@ -409,7 +415,7 @@ Address and restore node revisions over JSON:API. JSON:API cannot enumerate full
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_list_revisions` | `type`, `id` | Surface a node's addressable revisions: the latest default revision and the working-copy (forward) revision, with version ids and links. |
+| `drupal_list_revisions` | `type`, `id` | Surface a node's addressable revisions: the latest default revision and the working-copy (forward) revision, with version ids and links. `workingCopy: null` is not an all-clear. The payload includes `possiblyPatchBlocked` (true when default `changed` is later than `revision_timestamp`) — call this before creating paragraphs to attach (#201). |
 | `drupal_get_revision` | `type`, `id`, `version` | Fetch a single revision by version id or alias. Read-only; attributes redacted per security policy. |
 | `drupal_revert_revision` | `type`, `id`, `version` | Revert a node to a prior revision (governed write). Replays the target revision's editable content as a new current revision — history is preserved. Confirm before calling. |
 
@@ -597,12 +603,17 @@ Inspect and create entity translations (multilingual / `content_translation`). C
 
 ## Paragraphs
 
-Create and fetch [Paragraph](https://www.drupal.org/project/paragraphs) entities (content fragments). Paragraphs are **not** standalone — they must be referenced by a host entity's paragraph / Entity Reference Revisions field. The create tool returns `relationshipData` you can drop into a host field's `relationships` via [`drupal_entity_update`](#entities-generic) / [`drupal_update_node`](#nodes). Run [`drupal_get_entity_schema`](#entities-generic) (entityType `paragraph`, the bundle) first to discover fields.
+Create and fetch [Paragraph](https://www.drupal.org/project/paragraphs) entities (content fragments). Paragraphs are **not** standalone — they must be referenced by a host entity's paragraph / Entity Reference Revisions field. Drupal's ERR item is empty unless **both** `target_id` and `target_revision_id` are set; over JSON:API that means the resource identifier **must** carry `meta.target_revision_id`. `{ type, id }` alone persists an empty field — it is not a no-op.
+
+The create/update tools return `relationshipData` that includes that meta key. Host writes also resolve a missing vid before PATCH and fail the whole write if they cannot. Run [`drupal_get_entity_schema`](#entities-generic) (entityType `paragraph`, the bundle) first to discover fields.
+
+**Do not create paragraphs and then attach them without probing the host.** A doomed host PATCH (#201) leaves the paragraphs as orphans, and a content-tier agent cannot delete them. Call [`drupal_list_revisions`](#revisions) (`possiblyPatchBlocked`) and `dryRun` the host update *before* `drupal_create_paragraph`. Preflight inside `drupal_update_node` does not un-orphan work that already happened.
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_create_paragraph` | `paragraphType` | Create a Paragraph of a given bundle. Returns the paragraph plus `relationshipData` (`{ type: 'paragraph--<bundle>', id }`). Governed write. |
-| `drupal_get_paragraph` | `paragraphType`, `id` | Fetch a single Paragraph by bundle + UUID. Returns the redacted paragraph plus a `ref` for embedding in a host field. |
+| `drupal_create_paragraph` | `paragraphType` | Create a Paragraph of a given bundle. Returns the paragraph plus `relationshipData` (`{ type: 'paragraph--<bundle>', id, meta: { target_revision_id } }`). Governed write. |
+| `drupal_update_paragraph` | `paragraphType`, `id` | Partial update of an existing paragraph. Returns the same `relationshipData` shape (with the current revision id). |
+| `drupal_get_paragraph` | `paragraphType`, `id` | Fetch a single Paragraph by bundle + UUID. Returns the redacted paragraph (including `fields.drupal_internal__revision_id`) plus a `ref` with `meta.target_revision_id` when known. |
 
 ### drupal_create_paragraph
 

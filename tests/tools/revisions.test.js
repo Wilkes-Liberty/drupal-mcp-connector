@@ -100,6 +100,41 @@ describe("revisions tools", () => {
     const out = await handlers.drupal_list_revisions({ type: "article", id: "n1" });
     expect(out.latestVersion).toMatchObject({ vid: 42 });
     expect(out.workingCopy).toBeNull();
+    expect(out.possiblyPatchBlocked).toBe(false);
+    expect(out.note).toMatch(/not proof the node is PATCH-able/);
+  });
+
+  it("list_revisions sets possiblyPatchBlocked when changed is later than revision_timestamp (#201)", async () => {
+    backend.rawQuery
+      .mockResolvedValueOnce(rawResource({
+        attributes: {
+          drupal_internal__vid: 1959,
+          changed: "2026-08-14T17:16:14+00:00",
+          revision_timestamp: "2026-08-06T01:54:30+00:00",
+        },
+      }))
+      .mockRejectedValueOnce(new Error("403 No pending revision for moderated entity."));
+    const out = await handlers.drupal_list_revisions({ type: "solution", id: "n1" });
+    expect(out.workingCopy).toBeNull();
+    expect(out.possiblyPatchBlocked).toBe(true);
+    expect(out.latestVersion.changed).toBe("2026-08-14T17:16:14+00:00");
+    expect(out.latestVersion.revisionTimestamp).toBe("2026-08-06T01:54:30+00:00");
+    expect(out.note).toMatch(/changed timestamp is later/);
+    expect(out.note).toMatch(/#201/);
+  });
+
+  it("list_revisions does not flag when changed and revision_timestamp agree", async () => {
+    backend.rawQuery
+      .mockResolvedValueOnce(rawResource({
+        attributes: {
+          drupal_internal__vid: 10,
+          changed: "2026-08-06T01:54:30+00:00",
+          revision_timestamp: "2026-08-06T01:54:30+00:00",
+        },
+      }))
+      .mockRejectedValueOnce(new Error("404"));
+    const out = await handlers.drupal_list_revisions({ type: "article", id: "n1" });
+    expect(out.possiblyPatchBlocked).toBe(false);
   });
 
   it("get_revision fetches a numeric vid via resourceVersion=id:<vid> and redacts", async () => {

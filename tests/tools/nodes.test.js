@@ -7,6 +7,8 @@ const backend = {
   createEntity: vi.fn(),
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
+  rawQuery: vi.fn(),
+  resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 vi.mock("../../src/lib/config.js", () => ({
@@ -41,6 +43,8 @@ beforeEach(() => {
   backend.getEntity.mockResolvedValue(canonicalNode());
   backend.createEntity.mockResolvedValue(canonicalNode());
   backend.updateEntity.mockResolvedValue(canonicalNode());
+  backend.rawQuery.mockResolvedValue({ data: { type: "node--article", id: "n1" } });
+  backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
 });
 
 describe("nodes tools (migrated)", () => {
@@ -359,5 +363,116 @@ describe("#171 unrequested published-state flip is flagged on node updates", () 
     backend.getEntity.mockResolvedValue(canonicalNode({ status: false }));
     const out = await handlers.drupal_update_node({ type: "article", id: "n1", moderationState: "draft" });
     expect(out).not.toHaveProperty("_statusChanged");
+  });
+});
+
+const WC_400 = new Error(
+  "Drupal 400 on PATCH /jsonapi/node/article/n1: Updating a resource object " +
+  "that has a working copy is not yet supported. See " +
+  "https://www.drupal.org/project/drupal/issues/2795279."
+);
+
+describe("#192 ERR attach, #169 written revision, #201 preflight", () => {
+  const publishedModerated = () => canonicalNode({
+    status: true,
+    fields: { moderation_state: "published", body: { value: "B" } },
+    relationships: {
+      field_key_capabilities: [{ id: "old-1", entityType: "paragraph", bundle: "capability" }],
+    },
+  });
+
+  const paras = [
+    { type: "paragraph--capability", id: "p-a" },
+    { type: "paragraph--capability", id: "p-b" },
+  ];
+
+  it("resolves vids, probes, PATCHes with meta, and reads the working-copy", async () => {
+    backend.getEntity.mockImplementation(async ({ entityType, id, resourceVersion }) => {
+      if (entityType === "paragraph") {
+        return {
+          id, entityType: "paragraph", bundle: "capability",
+          fields: { drupal_internal__revision_id: id === "p-a" ? 11 : 12 },
+        };
+      }
+      if (resourceVersion === "rel:working-copy") {
+        return {
+          ...publishedModerated(),
+          status: false,
+          fields: { moderation_state: "draft" },
+          relationships: {
+            field_key_capabilities: [
+              { id: "p-a", entityType: "paragraph", bundle: "capability", meta: { target_revision_id: 11 } },
+              { id: "p-b", entityType: "paragraph", bundle: "capability", meta: { target_revision_id: 12 } },
+            ],
+          },
+        };
+      }
+      return publishedModerated();
+    });
+    // PATCH body is the default revision — the #169 lie if we returned it as proof.
+    backend.updateEntity.mockResolvedValue(publishedModerated());
+
+    const out = await handlers.drupal_update_node({
+      type: "article", id: "n1",
+      relationships: { field_key_capabilities: { data: paras } },
+    });
+
+    expect(backend.rawQuery).toHaveBeenCalledTimes(1);
+    const probe = backend.rawQuery.mock.calls[0][0];
+    expect(JSON.parse(probe.options.body).data).not.toHaveProperty("relationships");
+    const sent = backend.updateEntity.mock.calls[0][0];
+    expect(sent.relationships.field_key_capabilities.data).toEqual([
+      { type: "paragraph--capability", id: "p-a", meta: { target_revision_id: 11 } },
+      { type: "paragraph--capability", id: "p-b", meta: { target_revision_id: 12 } },
+    ]);
+    expect(out.relationships.field_key_capabilities).toHaveLength(2);
+    expect(out._revision.source).toBe("working-copy");
+    expect(out._revision.relationshipsUnverified).toBeUndefined();
+  });
+
+  it("does not call updateEntity when a paragraph GET 404s", async () => {
+    backend.getEntity.mockImplementation(async ({ entityType }) => {
+      if (entityType === "paragraph") return null;
+      return publishedModerated();
+    });
+    await expect(handlers.drupal_update_node({
+      type: "article", id: "n1",
+      relationships: { field_key_capabilities: { data: paras } },
+    })).rejects.toThrow(/target_revision_id/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(backend.rawQuery).not.toHaveBeenCalled();
+  });
+
+  it("probe 400 aborts before the real payload; dryRun also fails", async () => {
+    backend.getEntity.mockResolvedValue(publishedModerated());
+    backend.rawQuery.mockRejectedValue(WC_400);
+    await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "T" }))
+      .rejects.toThrow(/not the latest revision/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+
+    await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "T", dryRun: true }))
+      .rejects.toThrow(/#201/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("marks the response unverified when relationships were sent but no working-copy is addressable", async () => {
+    backend.getEntity.mockImplementation(async ({ entityType, resourceVersion }) => {
+      if (entityType === "paragraph") {
+        return { id: "p-a", entityType: "paragraph", bundle: "capability", fields: { drupal_internal__revision_id: 11 } };
+      }
+      if (resourceVersion === "rel:working-copy") {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return publishedModerated();
+    });
+    backend.updateEntity.mockResolvedValue(publishedModerated());
+    const out = await handlers.drupal_update_node({
+      type: "article", id: "n1",
+      relationships: { field_key_capabilities: { data: [paras[0]] } },
+    });
+    expect(out._revision.relationshipsUnverified).toBe(true);
+    // Canonical/PATCH body still has the old single ref — not accepted as proof.
+    expect(out.relationships.field_key_capabilities).toHaveLength(1);
+    expect(out.relationships.field_key_capabilities[0].id).toBe("old-1");
   });
 });

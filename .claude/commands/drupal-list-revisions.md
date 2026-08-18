@@ -1,12 +1,12 @@
 ---
-description: "Surface the addressable revisions of a content node: the latest default revision and the working-copy (forward) revision, with their version ids and links. NOTE: JSON:API cannot enumerate full chronological revision history — it only addresses revisions by id or the latest/working-copy aliases. Full history enumeration requires the Drush bridge. Use drupal_report_revision_hotspots for per-node revision counts."
+description: "Surface the addressable revisions of a content node: the latest default revision and the working-copy (forward) revision, with their version ids and links. workingCopy: null is not an all-clear — Drupal core can still reject PATCH when a revision row sits above the default without a content_moderation working copy (#201). The payload includes possiblyPatchBlocked (true when default changed is later than its revision_timestamp) plus changed and revisionTimestamp on latestVersion. Probe the host (this flag, then dryRun on the update) before creating dependent paragraphs. NOTE: JSON:API cannot enumerate full chronological revision history. Full history enumeration requires the Drush bridge."
 argument-hint: "<type> <id> [site]"
 allowed-tools: mcp__drupal__drupal_list_revisions
 ---
 
 Call the `mcp__drupal__drupal_list_revisions` MCP tool.
 
-Surface the addressable revisions of a content node: the latest default revision and the working-copy (forward) revision, with their version ids and links. NOTE: JSON:API cannot enumerate full chronological revision history — it only addresses revisions by id or the latest/working-copy aliases. Full history enumeration requires the Drush bridge. Use drupal_report_revision_hotspots for per-node revision counts.
+Surface the addressable revisions of a content node: the latest default revision and the working-copy (forward) revision, with their version ids and links. workingCopy: null is not an all-clear — Drupal core can still reject PATCH when a revision row sits above the default without a content_moderation working copy (#201). The payload includes possiblyPatchBlocked (true when default changed is later than its revision_timestamp) plus changed and revisionTimestamp on latestVersion. Probe the host (this flag, then dryRun on the update) before creating dependent paragraphs. NOTE: JSON:API cannot enumerate full chronological revision history. Full history enumeration requires the Drush bridge.
 
 Parse the request in `$ARGUMENTS` into this tool's parameters:
 

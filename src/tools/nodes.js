@@ -15,6 +15,9 @@ import {
 } from "../lib/security.js";
 import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
 import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA } from "../lib/entity-response.js";
+import { resolveErrRelationships, relationshipsWereSent } from "../lib/err-relationships.js";
+import { readWrittenRevision } from "../lib/write-revision.js";
+import { preflightPatchWritable, updateEntityGuarded } from "../lib/patch-preflight.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 
 /** Fallback language for an alias when the node exposes none. */
@@ -269,14 +272,15 @@ async function createNode({ site: siteName, type, title, body, summary, format, 
   const bodyAttr = buildBodyAttribute(body, summary, format, site);
   if (bodyAttr) attributes.body = bodyAttr;
   assertPublishAllowed(sec, attributes);
-  if (dryRun) return { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes, relationships };
   const backend = await resolveBackend(site);
+  const resolvedRelationships = await resolveErrRelationships(backend, relationships);
+  if (dryRun) return { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes, relationships: resolvedRelationships };
   // Alias handling: an explicit `path.alias` is set as a manual alias; otherwise
   // `path` is omitted so pathauto generates the alias (DEV-116).
   const { pathAttr } = await resolvePathWrite({ backend, type, id: null, providedPath: attributes.path, isCreate: true });
   if (pathAttr === undefined) delete attributes.path;
   else attributes.path = pathAttr;
-  const created = await backend.createEntity({ entityType: "node", bundle: type, attributes, relationships });
+  const created = await backend.createEntity({ entityType: "node", bundle: type, attributes, relationships: resolvedRelationships });
   // Honest response: re-read so the persisted alias (explicit or pathauto-generated)
   // is reflected rather than the pre-alias write response.
   const fresh = await backend.getEntity({ entityType: "node", bundle: type, id: created.id }).catch(() => null);
@@ -334,7 +338,20 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
     backend, entityType: "node", bundle: type, id, attributes, existingEntity: existing,
   });
   assertPublishAllowed(sec, attributes);
-  if (dryRun) return { dryRun: true, operation: "update", entityType: "node", bundle: type, id, attributes, relationships };
+  // #192: resolve paragraph ERR identifiers before any host PATCH. An unresolved
+  // list would persist empty — fail the whole write instead.
+  const resolvedRelationships = await resolveErrRelationships(backend, relationships);
+  // #201: the core working-copy guard runs before deserialize. A no-op probe
+  // against the same canonical URL is a true preflight, including on dryRun.
+  await preflightPatchWritable({
+    backend, entityType: "node", bundle: type, id, existing, attributes,
+  });
+  if (dryRun) {
+    return {
+      dryRun: true, operation: "update", entityType: "node", bundle: type, id,
+      attributes, relationships: resolvedRelationships,
+    };
+  }
   // Alias handling (DEV-116): an explicit `path.alias` is set in place by
   // round-tripping the existing alias's pid (no duplicate); a path-less update
   // re-pins the current alias *with its pid* so the save can't revert/duplicate
@@ -342,11 +359,18 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   const { pathAttr, redirect } = await resolvePathWrite({ backend, type, id, providedPath: attributes.path, isCreate: false });
   if (pathAttr === undefined) delete attributes.path;
   else attributes.path = pathAttr;
-  await backend.updateEntity({ entityType: "node", bundle: type, id, attributes, relationships });
+  const patched = await updateEntityGuarded(backend, {
+    entityType: "node", bundle: type, id, attributes, relationships: resolvedRelationships,
+  });
   const redirectResult = redirect ? await createRenameRedirect(backend, sec, redirect) : null;
-  // Honest response: re-read persisted state so the returned `url` is the alias
-  // that actually resolves, never the just-sent value.
-  const fresh = await backend.getEntity({ entityType: "node", bundle: type, id }).catch(() => null);
+  // #169: when relationships were sent, the canonical re-read is the published
+  // revision and is not proof an ERR field landed. Prefer rel:working-copy.
+  const fresh = await readWrittenRevision({
+    backend, entityType: "node", bundle: type, id,
+    relationshipsSent: relationshipsWereSent(resolvedRelationships),
+    patchResult: patched,
+    preferCanonical: true,
+  });
   // #171: an unrequested published-state flip in the persisted node is
   // reported via _statusChanged rather than returned as a clean success.
   const flagged = flagUnrequestedStatusChange(fresh, existing, attributes);
@@ -441,7 +465,7 @@ export const definitions = [
   },
   {
     name: "drupal_update_node",
-    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Entity-reference fields go in `relationships`, not `fields`.",
+    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Entity-reference fields go in `relationships`, not `fields`. Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved (an unresolved identifier persists as an empty field). On moderated targets a no-op PATCH preflight runs first — including on dryRun — so a core working-copy guard failure is reported before the real write. workingCopy:null from drupal_list_revisions is not proof the node is writable (possiblyPatchBlocked / #201). Preflight here does not un-orphan paragraphs already created; probe the host before creating dependents.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
@@ -455,8 +479,8 @@ export const definitions = [
         status:  { type: "boolean", description: "Published flag for NON-moderated types: true = publish, false = unpublish. Ignored if moderationState is set." },
         moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status. Required to keep or re-publish a live node — omitting it on a published moderated node defaults the write to 'draft'." },
         fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Entity-reference fields go in `relationships`, not here." },
-        relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }." },
-        dryRun:  { type: "boolean", default: false, description: "Validate and return a preview of the update without committing." },
+        relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }. Paragraph / ERR items must carry meta.target_revision_id — the connector injects it when missing, and fails the write if it cannot." },
+        dryRun:  { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. A 400 on that probe fails the dryRun." },
         returning: RETURNING_SCHEMA,
       },
     },
