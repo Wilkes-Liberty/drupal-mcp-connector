@@ -127,8 +127,10 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
     context.siteNames ?? listSiteNames(),
   );
 
-  if (identity && resolved) {
-    nextArgs = { ...rawArgs, site: resolved.name };
+  if (resolved) {
+    // Authoritative name plus the real source. Injecting `site` alone would
+    // make whoami report source:"hint" for a defaulted call (#167 / identity path).
+    nextArgs = { ...rawArgs, site: resolved.name, _resolvedSource: resolved.source };
   }
 
   // Tools with no site context skip per-site checks. governance_status

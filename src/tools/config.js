@@ -107,7 +107,7 @@ function inferTier(site, sec) {
  * @param {object} args - { site? }.
  * @returns {Promise<object>} Effective identity + capability summary.
  */
-async function whoami({ site: siteName }) {
+async function whoami({ site: siteName, _resolvedSource }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   const summary = getSecuritySummary(site);
@@ -119,9 +119,12 @@ async function whoami({ site: siteName }) {
   const canWrite  = !sec.readOnly && hasScope(site, "mcp_write");
   const canConfig = hasScope(site, "mcp_config");
   const identity = getRequestIdentity();
+  // Dispatch may inject `site` after a default/grant resolution. Prefer the
+  // authoritative source so `target` and `_target` cannot disagree (#167).
+  const source = _resolvedSource ?? (siteName ? "hint" : "default");
   return {
     site: site._name,
-    target: describeTarget(site, siteName ? "hint" : "default"),
+    target: describeTarget(site, source),
     principal: identity
       ? { sub: identity.sub, clientId: identity.clientId, scopes: [...(identity.scopes ?? [])] }
       : null,

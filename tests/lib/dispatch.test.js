@@ -234,6 +234,30 @@ describe("resolved target echo (#167)", () => {
     expect(payload.target).toEqual(payload._target);
   });
 
+  it("keeps whoami.target.source aligned with _target when identity defaults the site", async () => {
+    vi.mocked(fetch).mockResolvedValue(ready());
+    const writer = {
+      sub: "reader",
+      clientId: "content-agent",
+      scopes: ["mcp_read", "mcp_write"],
+      sites: null,
+    };
+    const entitled = [
+      { _name: "gov", baseUrl: "https://gov.example.com", requireGovernance: true, security: { preset: "development" } },
+      { _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" } },
+    ];
+    const result = await callTool(
+      "drupal_mcp_whoami",
+      {},
+      { identity: writer, sites: entitled, grants: null, defaultSite: "gov" },
+    );
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.target.source).toBe("default");
+    expect(payload._target.source).toBe("default");
+    expect(payload.target).toEqual(payload._target);
+    expect(payload.site).toBe("gov");
+  });
+
   it("reports source:hint when the caller passed site", async () => {
     const result = await callTool("drupal_mcp_whoami", { site: "open" });
     const payload = JSON.parse(result.content[0].text);
