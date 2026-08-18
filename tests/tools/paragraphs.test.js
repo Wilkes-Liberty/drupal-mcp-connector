@@ -21,11 +21,13 @@ import { handlers, definitions } from "../../src/tools/paragraphs.js";
 function setSecurity(s) { siteSecurity = s; }
 
 function canonicalParagraph(over = {}) {
+  const fields = { field_body: { value: "Hello", format: "full_html" }, drupal_internal__revision_id: 17, ...over.fields };
+  const { fields: _ignored, ...rest } = over;
   return {
     id: "p-uuid-1", entityType: "paragraph", bundle: "text", title: null, status: null,
     langcode: "en", created: null, changed: null, url: null,
-    fields: { field_body: { value: "Hello", format: "full_html" } },
-    relationships: {}, _backend: "jsonapi", ...over,
+    fields,
+    relationships: {}, _backend: "jsonapi", ...rest,
   };
 }
 
@@ -52,23 +54,41 @@ describe("paragraphs tools", () => {
     expect(arg.attributes.field_body).toEqual({ value: "Hello", format: "full_html" });
   });
 
-  it("create_paragraph returns a ref suitable for embedding (id + type)", async () => {
+  it("create_paragraph returns a ref suitable for embedding (id + type + revision meta) (#192)", async () => {
     backend.createEntity.mockResolvedValue(canonicalParagraph());
     const out = await handlers.drupal_create_paragraph({
       paragraphType: "text",
       attributes: { field_body: "x" },
     });
-    expect(out.ref).toMatchObject({ id: "p-uuid-1", type: "paragraph--text" });
+    expect(out.ref).toEqual({
+      id: "p-uuid-1", type: "paragraph--text", meta: { target_revision_id: 17 },
+    });
     expect(out.paragraph).toMatchObject({ id: "p-uuid-1", bundle: "text" });
+    expect(backend.getEntity).not.toHaveBeenCalled();
   });
 
-  it("create_paragraph surfaces a relationship-embedding hint with the field shape", async () => {
+  it("create_paragraph surfaces relationshipData with meta.target_revision_id (#192)", async () => {
     backend.createEntity.mockResolvedValue(canonicalParagraph());
     const out = await handlers.drupal_create_paragraph({ paragraphType: "text", attributes: {} });
-    // relationship data the caller drops into a host field via drupal_entity_update relationships
-    expect(out.relationshipData).toEqual({ type: "paragraph--text", id: "p-uuid-1" });
-    expect(typeof out.note).toBe("string");
-    expect(out.note.length).toBeGreaterThan(0);
+    expect(out.relationshipData).toEqual({
+      type: "paragraph--text", id: "p-uuid-1", meta: { target_revision_id: 17 },
+    });
+    expect(out.note).toMatch(/meta\.target_revision_id/);
+    expect(out.note).not.toMatch(/resolves target_id \+ target_revision_id from the UUID server-side/);
+  });
+
+  it("create_paragraph GETs the vid when the create result omitted it, and fails if still missing", async () => {
+    const noVid = { field_body: "x", drupal_internal__revision_id: undefined };
+    backend.createEntity.mockResolvedValue(canonicalParagraph({ fields: noVid }));
+    backend.getEntity.mockResolvedValue(canonicalParagraph({ fields: { drupal_internal__revision_id: 99 } }));
+    const out = await handlers.drupal_create_paragraph({ paragraphType: "text" });
+    expect(backend.getEntity).toHaveBeenCalledWith({ entityType: "paragraph", bundle: "text", id: "p-uuid-1" });
+    expect(out.relationshipData.meta.target_revision_id).toBe(99);
+
+    backend.createEntity.mockResolvedValue(canonicalParagraph({ fields: noVid }));
+    backend.getEntity.mockResolvedValue(canonicalParagraph({ fields: noVid }));
+    await expect(handlers.drupal_create_paragraph({ paragraphType: "text" }))
+      .rejects.toThrow(/revision_id/);
   });
 
   it("create_paragraph defaults attributes to an empty object when omitted", async () => {
@@ -91,8 +111,8 @@ describe("paragraphs tools", () => {
     const arg = backend.updateEntity.mock.calls[0][0];
     expect(arg).toMatchObject({ entityType: "paragraph", bundle: "text", id: "p-uuid-1" });
     expect(arg.attributes.field_body).toEqual({ value: "Updated", format: "full_html" });
-    expect(out.ref).toEqual({ type: "paragraph--text", id: "p-uuid-1" });
-    expect(out.relationshipData).toEqual({ type: "paragraph--text", id: "p-uuid-1" });
+    expect(out.ref).toEqual({ type: "paragraph--text", id: "p-uuid-1", meta: { target_revision_id: 17 } });
+    expect(out.relationshipData).toEqual({ type: "paragraph--text", id: "p-uuid-1", meta: { target_revision_id: 17 } });
   });
 
   it("update_paragraph requires an id", async () => {
@@ -113,7 +133,8 @@ describe("paragraphs tools", () => {
     const out = await handlers.drupal_get_paragraph({ paragraphType: "text", id: "p-uuid-1" });
     expect(backend.getEntity).toHaveBeenCalledWith({ entityType: "paragraph", bundle: "text", id: "p-uuid-1" });
     expect(out.id).toBe("p-uuid-1");
-    expect(out.ref).toEqual({ id: "p-uuid-1", type: "paragraph--text" });
+    expect(out.ref).toEqual({ id: "p-uuid-1", type: "paragraph--text", meta: { target_revision_id: 17 } });
+    expect(out.fields.drupal_internal__revision_id).toBe(17);
   });
 
   it("get_paragraph returns null when the paragraph is not found", async () => {

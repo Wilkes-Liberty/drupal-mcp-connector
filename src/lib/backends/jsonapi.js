@@ -204,9 +204,15 @@ export class JsonApiBackend extends Backend {
     const bundle = rawBundle || null;
     const attrs = resource.attributes || {};
     const fields = Object.fromEntries(
-      Object.entries(attrs).filter(
-        ([k]) => !BASE_ATTRIBUTE_FIELDS.includes(k) && !INTERNAL_ATTR_RE.test(k)
-      )
+      Object.entries(attrs).filter(([k]) => {
+        if (BASE_ATTRIBUTE_FIELDS.includes(k)) return false;
+        if (INTERNAL_ATTR_RE.test(k)) {
+          // Paragraph ERR attach needs the current revision id (#192).
+          // Other drupal_internal__* attributes stay stripped.
+          return entityType === "paragraph" && k === "drupal_internal__revision_id";
+        }
+        return true;
+      })
     );
     const relationships = Object.fromEntries(
       Object.entries(resource.relationships || {}).map(([k, rel]) => [k, normalizeRelationship(rel?.data ?? null)])
@@ -249,12 +255,16 @@ export class JsonApiBackend extends Backend {
 
   /**
    * Fetch a single entity by id.
-   * @param {{entityType: string, bundle: string, id: string}} ref
+   * @param {{entityType: string, bundle: string, id: string, resourceVersion?: string}} ref
    * @returns {Promise<?import("../canonical.js").CanonicalEntity>} Entity, or null.
    */
-  async getEntity({ entityType, bundle, id }) {
+  async getEntity({ entityType, bundle, id, resourceVersion }) {
     validateUuid(id);
-    const data = await drupalFetch(this.site, `${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`);
+    let path = `${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`;
+    if (resourceVersion) {
+      path += `?resourceVersion=${encodeURIComponent(resourceVersion)}`;
+    }
+    const data = await drupalFetch(this.site, path);
     return data?.data ? this.toCanonical(data.data) : null;
   }
 

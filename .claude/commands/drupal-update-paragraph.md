@@ -1,12 +1,12 @@
 ---
-description: "Update an existing Paragraph entity's field values by paragraph type (bundle) and UUID. Only the attributes you pass are changed (partial update); the host entity's reference to this paragraph is unchanged (same UUID), so this maintains a component paragraph in place without re-embedding. Use drupal_get_entity_schema (entityType 'paragraph', the bundle) to discover fields. Governed by the site security policy."
+description: "Update an existing Paragraph entity's field values by paragraph type (bundle) and UUID. Only the attributes you pass are changed (partial update); the host entity's reference to the paragraph is unchanged (same UUID), so this maintains a component paragraph in place without re-embedding. Returns relationshipData including meta.target_revision_id for a later host attach. Use drupal_get_entity_schema (entityType 'paragraph', the bundle) to discover fields. Governed by the site security policy."
 argument-hint: "<paragraphType> <id> [site] [attributes]"
 allowed-tools: mcp__drupal__drupal_update_paragraph
 ---
 
 Call the `mcp__drupal__drupal_update_paragraph` MCP tool.
 
-Update an existing Paragraph entity's field values by paragraph type (bundle) and UUID. Only the attributes you pass are changed (partial update); the host entity's reference to this paragraph is unchanged (same UUID), so this maintains a component paragraph in place without re-embedding. Use drupal_get_entity_schema (entityType 'paragraph', the bundle) to discover fields. Governed by the site security policy.
+Update an existing Paragraph entity's field values by paragraph type (bundle) and UUID. Only the attributes you pass are changed (partial update); the host entity's reference to the paragraph is unchanged (same UUID), so this maintains a component paragraph in place without re-embedding. Returns relationshipData including meta.target_revision_id for a later host attach. Use drupal_get_entity_schema (entityType 'paragraph', the bundle) to discover fields. Governed by the site security policy.
 
 Parse the request in `$ARGUMENTS` into this tool's parameters:
 

@@ -116,6 +116,40 @@ describe("JsonApiBackend.toCanonical", () => {
     expect(c.relationships.uid).toEqual({ id: "user-1", entityType: "user", bundle: "user" });
     expect(c.relationships.field_tags).toEqual([{ id: "term-1", entityType: "taxonomy_term", bundle: "tags" }]);
   });
+
+  it("keeps drupal_internal__revision_id on paragraphs and still strips other internals (#192)", () => {
+    const paragraph = {
+      type: "paragraph--capability",
+      id: "p-1",
+      attributes: {
+        drupal_internal__id: 9,
+        drupal_internal__revision_id: 44,
+        status: true,
+        field_body: { value: "x", format: "full_html" },
+      },
+    };
+    const c = backend.toCanonical(paragraph);
+    expect(c.fields.drupal_internal__revision_id).toBe(44);
+    expect(c.fields).not.toHaveProperty("drupal_internal__id");
+    expect(c.fields.field_body.value).toBe("x");
+  });
+
+  it("keeps relationship meta.target_revision_id (#192)", () => {
+    const node = {
+      type: "node--article",
+      id: "n-1",
+      attributes: { title: "T" },
+      relationships: {
+        field_cards: {
+          data: [{ type: "paragraph--capability", id: "p-1", meta: { target_revision_id: 44 } }],
+        },
+      },
+    };
+    const c = backend.toCanonical(node);
+    expect(c.relationships.field_cards).toEqual([
+      { id: "p-1", entityType: "paragraph", bundle: "capability", meta: { target_revision_id: 44 } },
+    ]);
+  });
 });
 
 describe("JsonApiBackend fetch methods", () => {
@@ -146,6 +180,18 @@ describe("JsonApiBackend fetch methods", () => {
     vi.mocked(drupalFetch).mockResolvedValue(null);
     const none = await backend.getEntity({ entityType: "node", bundle: "article", id: "22222222-2222-4222-8222-222222222222" });
     expect(none).toBeNull();
+  });
+
+  it("getEntity appends resourceVersion when requested (#169)", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({
+      data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Draft" } },
+    });
+    await backend.getEntity({
+      entityType: "node", bundle: "article",
+      id: "11111111-1111-4111-8111-111111111111",
+      resourceVersion: "rel:working-copy",
+    });
+    expect(vi.mocked(drupalFetch).mock.calls[0][1]).toContain("resourceVersion=rel%3Aworking-copy");
   });
 
   it("createEntity POSTs a JSON:API payload", async () => {
