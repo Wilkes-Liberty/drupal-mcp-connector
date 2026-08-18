@@ -15,7 +15,7 @@ const launcher = fileURLToPath(new URL("../../bin/drupal-mcp-launch.sh", import.
 let dir;
 
 /**
- * @param {{ config?: object, secretsMap?: string }} [files]
+ * @param {{ config?: object, secretsMap?: string, unreadableMap?: boolean }} [files]
  */
 function runLauncher(files = {}) {
   const bin = join(dir, "bin");
@@ -34,7 +34,9 @@ function runLauncher(files = {}) {
     writeFileSync(join(connectorRoot, "config", "config.json"), JSON.stringify(files.config));
   }
   if (files.secretsMap !== undefined) {
-    writeFileSync(join(connectorRoot, "config", "secrets.map"), files.secretsMap);
+    const mapPath = join(connectorRoot, "config", "secrets.map");
+    writeFileSync(mapPath, files.secretsMap);
+    if (files.unreadableMap) chmodSync(mapPath, 0);
   }
 
   const launched = spawnSync("/bin/sh", [join(connectorRoot, "bin", "launch.sh")], {
@@ -79,7 +81,9 @@ describe("bin/drupal-mcp-launch.sh", () => {
     expect(stderr).toMatch(/MCP_AGENT_CLIENT_SECRET/);
     expect(stderr).toMatch(/MCP_AGENT_ADMIN_SECRET/);
     expect(stderr).toMatch(/config\/secrets\.map is absent/);
-    expect(stderr).toMatch(/fail closed/);
+    expect(stderr).toMatch(/Unset: MCP_AGENT_CLIENT_SECRET, MCP_AGENT_ADMIN_SECRET/);
+    expect(stderr).toMatch(/Those sites will fail closed/);
+    expect(stderr).not.toMatch(/Every site requiring a client secret/);
     expect(stderr).not.toMatch(/drupal-mcp-launch:.*\n.*drupal-mcp-launch:/);
   });
 
@@ -113,6 +117,17 @@ describe("bin/drupal-mcp-launch.sh", () => {
       secretsMap: "MCP_OTHER=drupal-mcp-other\n",
     });
     expect(stderr).toMatch(/config\/secrets\.map does not name them/);
+  });
+
+  it("still execs node when secrets.map exists but cannot be read", () => {
+    const { env } = runLauncher({
+      config: {
+        sites: { prod: { oauth: { clientSecretEnv: "MCP_AGENT_CLIENT_SECRET" } } },
+      },
+      secretsMap: "MCP_AGENT_CLIENT_SECRET=drupal-mcp-agent-secret\n",
+      unreadableMap: true,
+    });
+    expect(env.PWD === join(dir, "connector") || env.PWD?.endsWith("/connector")).toBe(true);
   });
 
   it("collects apiTokenEnv as well as clientSecretEnv", () => {

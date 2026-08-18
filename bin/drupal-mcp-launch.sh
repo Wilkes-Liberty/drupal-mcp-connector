@@ -35,6 +35,7 @@ warn_secret_table_mismatch() {
   _src="default"
   if [ -f "$DIR/config/secrets.map" ]; then
     _src="map"
+    _map_body=$(sed -e 's/\r$//' -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$DIR/config/secrets.map" 2>/dev/null) || _map_body=""
     while IFS= read -r _line || [ -n "${_line-}" ]; do
       case "$_line" in
         *=*)
@@ -46,7 +47,7 @@ warn_secret_table_mismatch() {
           ;;
       esac
     done <<EOF
-$(sed -e 's/\r$//' -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$DIR/config/secrets.map")
+$_map_body
 EOF
   else
     _table=" MCP_CONTENT_PRODUCTION_SECRET MCP_CONTENT_STAGING_SECRET MCP_DEVELOPER_DEVELOPMENT_SECRET MCP_ADMIN_BREAKGLASS_SECRET "
@@ -57,7 +58,9 @@ EOF
   _named=""
   _ncount=0
   _overlap=0
+  _unset=""
   _take=
+  _cfg_tokens=$(tr '"' '\n' < "$_cfg" 2>/dev/null | tr -d '\r') || return 0
   while IFS= read -r _tok || [ -n "${_tok-}" ]; do
     if [ "$_take" = "colon" ]; then
       _take="value"
@@ -74,26 +77,37 @@ EOF
       case "$_table" in
         *" $_tok "*) _overlap=$((_overlap + 1)) ;;
       esac
+      if [ -z "$(printenv "$_tok" 2>/dev/null || true)" ]; then
+        _unset="$_unset$_tok "
+      fi
       continue
     fi
     if [ "$_tok" = "clientSecretEnv" ] || [ "$_tok" = "apiTokenEnv" ]; then
       _take="colon"
     fi
   done <<EOF
-$(tr '"' '\n' < "$_cfg" | tr -d '\r')
+$_cfg_tokens
 EOF
 
   [ "$_ncount" -gt 0 ] || return 0
   [ "$_overlap" -eq 0 ] || return 0
 
-  _list=$(printf '%s' "$_named" | sed -e 's/[[:space:]]*$//' -e 's/[[:space:]]\{1,\}/, /g')
-  if [ "$_src" = "default" ]; then
-    printf '%s\n' "drupal-mcp-launch: no secret-table entries match clientSecretEnv/apiTokenEnv names in config.json ($_list); using shipped defaults; config/secrets.map is absent. Every site requiring a client secret will fail closed." >&2
+  _list=$(printf '%s' "$_named" | sed -e 's/[[:space:]]*$//' -e 's/[[:space:]]\{1,\}/, /g') || return 0
+  if [ -n "$_unset" ]; then
+    _closer="Unset: $(printf '%s' "$_unset" | sed -e 's/[[:space:]]*$//' -e 's/[[:space:]]\{1,\}/, /g'). Those sites will fail closed."
   else
-    printf '%s\n' "drupal-mcp-launch: no secret-table entries match clientSecretEnv/apiTokenEnv names in config.json ($_list); config/secrets.map does not name them. Every site requiring a client secret will fail closed." >&2
+    _closer="Named secrets already in the environment stay set; the table will not populate any of them."
+  fi
+  if [ "$_src" = "default" ]; then
+    printf '%s\n' "drupal-mcp-launch: no secret-table entries match clientSecretEnv/apiTokenEnv names in config.json ($_list); using shipped defaults; config/secrets.map is absent. $_closer" >&2
+  else
+    printf '%s\n' "drupal-mcp-launch: no secret-table entries match clientSecretEnv/apiTokenEnv names in config.json ($_list); config/secrets.map does not name them. $_closer" >&2
   fi
 }
 
+# A diagnostic failure must not prevent start. Node still loads secrets.
+set +e
 warn_secret_table_mismatch
+set -e
 
 exec node src/index.js

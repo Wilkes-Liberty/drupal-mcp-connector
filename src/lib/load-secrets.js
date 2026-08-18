@@ -163,10 +163,14 @@ export function secretTableMismatchMessage(loaded) {
   const source = loaded.source === "map"
     ? "config/secrets.map does not name them"
     : "using shipped defaults; config/secrets.map is absent";
+  const unset = Array.isArray(loaded.unset) ? loaded.unset : [];
+  const closer = unset.length
+    ? "Unset: " + unset.join(", ") + ". Those sites will fail closed."
+    : "Named secrets already in the environment stay set; the table will not populate any of them.";
   return (
     "no secret-table entries match clientSecretEnv/apiTokenEnv names in config.json " +
     "(" + unmapped.join(", ") + "); " + source + ". " +
-    "Every site requiring a client secret will fail closed."
+    closer
   );
 }
 

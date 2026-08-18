@@ -89,6 +89,8 @@ describe("loadLocalSecrets", () => {
     expect(secretLoadFatalMessage(loaded)).toMatch(/MCP_AGENT_CLIENT_SECRET/);
     expect(secretLoadFatalMessage(loaded)).toMatch(/config\/secrets\.map is absent/);
     expect(secretLoadFatalMessage(loaded)).toMatch(/no secret-table entries match/);
+    expect(secretLoadFatalMessage(loaded)).toMatch(/Unset: MCP_AGENT_CLIENT_SECRET, MCP_AGENT_CLIENT_SECRET_STG/);
+    expect(secretLoadFatalMessage(loaded)).toMatch(/Those sites will fail closed/);
   });
 
   it("does not refuse when at least one named secret is present (inert tiers stay silent)", () => {
@@ -110,6 +112,9 @@ describe("loadLocalSecrets", () => {
     expect(secretTableMismatchMessage(loaded)).toMatch(/MCP_AGENT_CLIENT_SECRET/);
     expect(secretTableMismatchMessage(loaded)).toMatch(/MCP_AGENT_ADMIN_SECRET/);
     expect(secretTableMismatchMessage(loaded)).toMatch(/config\/secrets\.map is absent/);
+    expect(secretTableMismatchMessage(loaded)).toMatch(/Unset: MCP_AGENT_ADMIN_SECRET/);
+    expect(secretTableMismatchMessage(loaded)).toMatch(/Those sites will fail closed/);
+    expect(secretTableMismatchMessage(loaded)).not.toMatch(/Every site requiring a client secret/);
   });
 
   it("does not report a table mismatch when secrets.map names the config vars", () => {
