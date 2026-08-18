@@ -120,7 +120,7 @@ async function contentByModerationState({ site: siteName, type, state, limit = 2
     sawState = true;
     if (String(got).toLowerCase() === wanted) matches.push(entity);
   }
-  if (!sawState) {
+  if (!sawState && scanned.length > 0) {
     return {
       type, state, unavailable: true, source: "sampled", scanned: scanned.length,
       reason:

@@ -95,6 +95,20 @@ describe("moderation tools", () => {
     expect(out.reason).toMatch(/not filterable/i);
   });
 
+  it("content_by_moderation_state treats an empty bundle as an empty sample, not unavailable (#162)", async () => {
+    backend.capabilities = () => ({ filter: true });
+    backend.listEntities
+      .mockRejectedValueOnce(new Error(
+        "Drupal 500 on GET /jsonapi/node/article?filter[moderation_state]=draft: 'moderation_state' not found",
+      ))
+      .mockResolvedValue({ entities: [], page: { hasNext: false } });
+    const out = await handlers.drupal_content_by_moderation_state({ type: "article", state: "draft" });
+    expect(out.unavailable).toBeUndefined();
+    expect(out.source).toBe("sampled");
+    expect(out.nodes).toEqual([]);
+    expect(out.total).toBe(0);
+  });
+
   it("content_by_moderation_state still throws an unrelated Drupal error", async () => {
     backend.capabilities = () => ({ filter: true });
     backend.listEntities.mockRejectedValue(new Error("Drupal 500 on GET /jsonapi/node/article: SQLSTATE[HY000]"));
