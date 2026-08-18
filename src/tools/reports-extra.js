@@ -19,6 +19,8 @@ import { collectEntities, fieldValue } from "../lib/reports-support.js";
 const AUTHOR_BASE_FIELDS = new Set(["uid", "revision_uid"]);
 
 const POLICY_DENIED_REASON = "target entity type denied by policy";
+const ACCESS_DENIED_REASON = "target access denied";
+const UNVERIFIED_REASON = "target could not be verified";
 
 /**
  * Whether connector policy forbids reading this entity type.
@@ -38,17 +40,17 @@ function isEntityTypeDenied(sec, entityType) {
 
 /**
  * Classify a getEntity failure. Only a 404 (or an unaddressable ref) is an
- * orphan; 401/403 and policy denials are "you may not look."
+ * orphan. Connector policy, Drupal 401/403, and other failures are
+ * unverifiable — and must not share one reason.
  * @param {unknown} err
- * @returns {"missing"|"denied"|"failed"}
+ * @returns {"missing"|"forbidden"|"failed"}
  */
 function classifyTargetError(err) {
   const msg = String(err?.message || err || "");
   const statusMatch = msg.match(/\bDrupal (\d{3})\b/i);
   const status = statusMatch ? Number(statusMatch[1]) : NaN;
   if (status === 404) return "missing";
-  if (status === 401 || status === 403) return "denied";
-  if (err?.name === "SecurityError") return "denied";
+  if (status === 401 || status === 403) return "forbidden";
   if (/\b404\b/.test(msg) && !/\b40[13]\b/.test(msg)) return "missing";
   return "failed";
 }
@@ -223,12 +225,12 @@ async function orphanedReferences({ site: siteName, type, sampleSize = 50 }) {
 
   // Cache resolution results across all sampled entities so a target is only
   // looked up once (de-dupes both within and across entities).
-  const resolution = new Map(); // id -> "ok" | "missing" | "denied" | "failed"
+  const resolution = new Map(); // id -> "ok" | "missing" | "denied" | "forbidden" | "failed"
   /**
    * Resolve a referenced target, caching the classification.
    * @param {{id: string, entityType: ?string, bundle: ?string}} ref Reference to probe.
    * @param {string} fieldName Host field that holds the ref.
-   * @returns {Promise<"ok"|"missing"|"denied"|"failed">}
+   * @returns {Promise<"ok"|"missing"|"denied"|"forbidden"|"failed">}
    */
   async function classifyRef(ref, fieldName) {
     if (resolution.has(ref.id)) return resolution.get(ref.id);
@@ -262,6 +264,7 @@ async function orphanedReferences({ site: siteName, type, sampleSize = 50 }) {
   const findings = [];
   let unverifiable = 0;
   let deniedByPolicy = 0;
+  let accessDenied = 0;
   for (const e of entities) {
     for (const [fieldName, rel] of Object.entries(e.relationships ?? {})) {
       for (const ref of refsOf(rel)) {
@@ -280,12 +283,17 @@ async function orphanedReferences({ site: siteName, type, sampleSize = 50 }) {
         }
         unverifiable += 1;
         if (state === "denied") deniedByPolicy += 1;
+        if (state === "forbidden") accessDenied += 1;
       }
     }
   }
 
   const approximate = entities.length >= sampleSize;
   const orphaned = findings.length;
+  let reason;
+  if (deniedByPolicy > 0) reason = POLICY_DENIED_REASON;
+  else if (accessDenied > 0) reason = ACCESS_DENIED_REASON;
+  else if (unverifiable > 0) reason = UNVERIFIED_REASON;
   return {
     contentType,
     scanned: entities.length,
@@ -294,9 +302,7 @@ async function orphanedReferences({ site: siteName, type, sampleSize = 50 }) {
     orphaned,
     unverifiable,
     totalOrphaned: orphaned,
-    reason: deniedByPolicy > 0
-      ? POLICY_DENIED_REASON
-      : (unverifiable > 0 ? "target could not be verified" : undefined),
+    reason,
     note: approximate
       ? "Best-effort: reference integrity is checked over a sampling-bounded set of entities."
       : "Best-effort: each referenced target is probed once via JSON:API. "

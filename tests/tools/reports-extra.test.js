@@ -204,7 +204,8 @@ describe("reports-extra tools", () => {
       expect(out.totalOrphaned).toBe(0);
       expect(out.orphaned).toBe(0);
       expect(out.unverifiable).toBe(1);
-      expect(out.reason).toMatch(/denied/i);
+      expect(out.reason).toBe("target access denied");
+      expect(out.reason).not.toBe("target entity type denied by policy");
       expect(out.findings).toEqual([]);
     });
 
