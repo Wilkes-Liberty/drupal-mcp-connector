@@ -33,9 +33,8 @@ warn_secret_table_mismatch() {
 
   _table=" "
   _src="default"
-  if [ -f "$DIR/config/secrets.map" ]; then
+  if [ -f "$DIR/config/secrets.map" ] && _map_body=$(sed -e 's/\r$//' -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$DIR/config/secrets.map" 2>/dev/null); then
     _src="map"
-    _map_body=$(sed -e 's/\r$//' -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$DIR/config/secrets.map" 2>/dev/null) || _map_body=""
     while IFS= read -r _line || [ -n "${_line-}" ]; do
       case "$_line" in
         *=*)

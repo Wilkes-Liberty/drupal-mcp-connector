@@ -130,6 +130,17 @@ describe("bin/drupal-mcp-launch.sh", () => {
     expect(env.PWD === join(dir, "connector") || env.PWD?.endsWith("/connector")).toBe(true);
   });
 
+  it("falls back to the shipped table when secrets.map cannot be read", () => {
+    const { stderr } = runLauncher({
+      config: {
+        sites: { prod: { oauth: { clientSecretEnv: "MCP_CONTENT_PRODUCTION_SECRET" } } },
+      },
+      secretsMap: "MCP_OTHER=drupal-mcp-other\n",
+      unreadableMap: true,
+    });
+    expect(stderr).not.toMatch(/drupal-mcp-launch:/);
+  });
+
   it("collects apiTokenEnv as well as clientSecretEnv", () => {
     const { stderr } = runLauncher({
       config: {
