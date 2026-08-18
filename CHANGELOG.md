@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.3] - 2026-08-18
+
 ### Fixed
 - **Launcher and startup name a secret-table / config mismatch (#211).**
   The shipped Keychain table matches `config/config.example.json`. A

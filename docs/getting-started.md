@@ -22,7 +22,7 @@ cd drupal-mcp-connector
 npm install
 ```
 
-Prefer **2.7.2 or newer**. If a 2.6.0 client only lists `drupal_list_sites` and `drupal_governance_status`, the named secret env vars are unset — launch via `bin/drupal-mcp-launch.sh` with `config/secrets.map`, or upgrade. Restart the MCP client after either change. See [#199](https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues/199).
+Prefer **2.7.3 or newer**. If a 2.6.0 client only lists `drupal_list_sites` and `drupal_governance_status`, the named secret env vars are unset — launch via `bin/drupal-mcp-launch.sh` with `config/secrets.map`, or upgrade. Restart the MCP client after either change. See [#199](https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues/199).
 
 If `config/config.json` uses `clientSecretEnv` names other than the shipped example (`MCP_CONTENT_PRODUCTION_SECRET`, …), add `config/secrets.map` (`ENV_VAR=keychain-item`). Without it the default table matches nothing; the launcher prints that mismatch to stderr, and every site that needs a client secret fails closed. See [#211](https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues/211).
 

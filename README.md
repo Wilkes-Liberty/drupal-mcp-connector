@@ -9,7 +9,7 @@
 
 Built by **Jeremy Michael Cerda** (opensource@wilkesliberty.com). Maintained by [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty).
 
-**If the client only shows `drupal_list_sites` and `drupal_governance_status`**, the secret env vars named in `config.json` are unset. Upgrade to **2.7.2** (or at least 2.6.1), or stay on 2.6.0 and launch via `bin/drupal-mcp-launch.sh` with a `config/secrets.map` (`ENV_VAR=keychain-item`). Then restart the MCP server. See [#199](https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues/199).
+**If the client only shows `drupal_list_sites` and `drupal_governance_status`**, the secret env vars named in `config.json` are unset. Upgrade to **2.7.3** (or at least 2.6.1), or stay on 2.6.0 and launch via `bin/drupal-mcp-launch.sh` with a `config/secrets.map` (`ENV_VAR=keychain-item`). Then restart the MCP server. See [#199](https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues/199).
 
 ---
 
