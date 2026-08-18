@@ -62,14 +62,6 @@ async function listConfiguredSites() {
 }
 
 /**
- * Per-site source-governance condition (#176). The one governed-path
- * diagnostic that stays callable while governance is failing, so an operator
- * can see WHICH required condition failed. Never includes credentials.
- *
- * @param {object} args - { site? } (a named site narrows the report).
- * @returns {Promise<{sites: object[]}>} required/ok/reason per site.
- */
-/**
  * Classify a getSiteConfig failure so the diagnostic reason matches the cause.
  * @param {string} message
  * @returns {string}
@@ -81,6 +73,14 @@ export function classifySiteResolutionFailure(message) {
   return "site_unresolved";
 }
 
+/**
+ * Per-site source-governance condition (#176, #208). Stays callable while
+ * governed paths are denied. Always probes the source readiness endpoint
+ * for resolved sites; never reports ok:true without that check.
+ *
+ * @param {object} [args] - { site? } (a named site narrows the report).
+ * @returns {Promise<{sites: object[]}>} required/checked/ok/reason per site.
+ */
 async function getGovernanceStatus({ site: siteName } = {}) {
   const identity = getRequestIdentity();
   const configured = listSiteNames();
@@ -96,10 +96,10 @@ async function getGovernanceStatus({ site: siteName } = {}) {
       unresolved.push({
         site: name,
         required: null,
+        checked: false,
         ok: false,
         reason: classifySiteResolutionFailure(detail),
         detail,
-        checkedAt: null,
       });
     }
   }
@@ -129,7 +129,7 @@ export const definitions = [
   },
   {
     name: "drupal_governance_status",
-    description: "Report each configured site's source-governance condition: whether governance is required, whether the source contract verifies, and the failed condition when it does not. Callable even while governed paths are denied — this is the diagnostic for that denial.",
+    description: "Report each configured site's source-governance condition. Always probes GET /drupal-mcp/readiness (even when this client does not require governance) and surfaces the server's reason verbatim. Never reports ok:true unless that check ran. Callable even while governed paths are denied — this is the diagnostic for that denial.",
     inputSchema: {
       type: "object",
       properties: { site: { type: "string" } },

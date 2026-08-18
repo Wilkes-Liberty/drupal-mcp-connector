@@ -1,12 +1,12 @@
 ---
-description: "Report each configured site's source-governance condition: whether governance is required, whether the source contract verifies, and the failed condition when it does not. Callable even while governed paths are denied — this is the diagnostic for that denial."
+description: "Report each configured site's source-governance condition. Always probes GET /drupal-mcp/readiness (even when this client does not require governance) and surfaces the server's reason verbatim. Never reports ok:true unless that check ran. Callable even while governed paths are denied — this is the diagnostic for that denial."
 argument-hint: "[site]"
 allowed-tools: mcp__drupal__drupal_governance_status
 ---
 
 Call the `mcp__drupal__drupal_governance_status` MCP tool.
 
-Report each configured site's source-governance condition: whether governance is required, whether the source contract verifies, and the failed condition when it does not. Callable even while governed paths are denied — this is the diagnostic for that denial.
+Report each configured site's source-governance condition. Always probes GET /drupal-mcp/readiness (even when this client does not require governance) and surfaces the server's reason verbatim. Never reports ok:true unless that check ran. Callable even while governed paths are denied — this is the diagnostic for that denial.
 
 Parse the request in `$ARGUMENTS` into this tool's parameters:
 

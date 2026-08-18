@@ -16,7 +16,7 @@ Complete reference for all 119 tools across 26 modules.
 - [Users](#users) — 7 tools
 - [Media](#media) — 9 tools
 - [GraphQL](#graphql) — 2 tools
-- [Site](#site) — 3 tools
+- [Site](#site) — 4 tools
 - [Entities (Generic)](#entities-generic) — 8 tools
 - [Reports](#reports) — 10 tools
 - [Configuration & Governance](#configuration--governance) — 4 tools
@@ -108,7 +108,9 @@ previews do not touch Drupal. On a **moderated** `update`, `dryRun` also issues 
 PATCH probe against the same canonical URL so the core working-copy guard
 (#201 / Drupal #2795279) is exercised. The probe body uses a non-matching
 `data.id` so the guard still runs and Drupal does not `save()`. A working-copy
-400 fails the dryRun. Use this (and `drupal_list_revisions.possiblyPatchBlocked`)
+400 fails the dryRun. The rewritten error names a pending draft (vid) when
+`rel:working-copy` resolves, and revision surgery only when it does not.
+Use this (and `drupal_list_revisions.possiblyPatchBlocked`)
 **before** creating dependent paragraphs; preflight inside the host update cannot
 un-orphan work that already happened.
 
@@ -256,6 +258,7 @@ GraphQL Compose exposes per-bundle connection fields (e.g. `nodeArticles { nodes
 | `drupal_site_info` | — | Base URL and all available JSON:API resource types. |
 | `drupal_list_content_types` | — | All content types with machine names and descriptions. |
 | `drupal_list_sites` | — | Sites this principal may address. `sites` is the name list; `targets` names each authoritative site and base URL. |
+| `drupal_governance_status` | — | Per-site source-governance condition. Always probes `GET /drupal-mcp/readiness` (even when this client does not require governance) and surfaces the server's reason. Never reports `ok: true` unless that check ran. |
 
 ---
 
@@ -692,7 +695,7 @@ Additional read-only audit tools that complement the [Reports](#reports) module.
 |------|----------------|-------------|
 | `drupal_report_unpublished` | — | List unpublished/draft content of a type (default `article`). Returns titles, last-changed dates, and paths — surfaces forgotten drafts. |
 | `drupal_report_missing_field` | `field` | Find entities where a given field is empty (scalar or entity-reference). Bounded by `sampleSize`. |
-| `drupal_report_orphaned_references` | — | Find entities whose entity-reference fields point at targets that no longer exist. Best-effort; bounded by `sampleSize`. |
+| `drupal_report_orphaned_references` | — | Find entities whose entity-reference fields point at targets that no longer exist. A 404 is an orphan; 401/403 and policy-denied types are `unverifiable`, not missing. Bounded by `sampleSize`. |
 
 ### drupal_report_missing_field
 

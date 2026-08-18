@@ -166,13 +166,41 @@ describe("assertSourceGovernance", () => {
 
 describe("governanceStatus", () => {
   it("reports per-site condition without exposing credentials", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(notReady("no_designated_consumer"));
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(notReady("no_designated_consumer"))
+      .mockResolvedValueOnce(ready());
     const status = await governanceStatus([governedSite(), openSite()]);
     const gov = status.find((s) => s.site === "gov");
     const open = status.find((s) => s.site === "open");
-    expect(gov).toMatchObject({ required: true, ok: false, reason: "no_designated_consumer" });
-    expect(open).toMatchObject({ required: false, ok: true });
+    expect(gov).toMatchObject({
+      required: true, checked: true, ok: false, reason: "no_designated_consumer",
+    });
+    expect(open).toMatchObject({ required: false, checked: true, ok: true, reason: null });
+    expect(typeof open.checkedAt).toBe("number");
     expect(JSON.stringify(status)).not.toContain("tok-secret-value");
+  });
+
+  it("probes readiness even when the client does not require governance (#208)", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(notReady("designated_consumer_disabled"));
+    const status = await governanceStatus([openSite({ _name: "dev" })]);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("https://open.example.com/drupal-mcp/readiness");
+    expect(status[0]).toMatchObject({
+      site: "dev",
+      required: false,
+      checked: true,
+      ok: false,
+      reason: "designated_consumer_disabled",
+    });
+    expect(typeof status[0].checkedAt).toBe("number");
+  });
+
+  it("never reports ok:true when the readiness probe cannot complete (#208)", async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const status = await governanceStatus([openSite()]);
+    expect(status[0]).toMatchObject({
+      required: false, checked: true, ok: false, reason: "sentinel_unreachable",
+    });
+    expect(typeof status[0].checkedAt).toBe("number");
   });
 });
 

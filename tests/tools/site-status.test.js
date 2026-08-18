@@ -20,9 +20,10 @@ vi.mock("../../src/lib/governance.js", () => ({
   governanceStatus: vi.fn(async (sites) => sites.map((site) => ({
     site: site._name,
     required: false,
+    checked: true,
     ok: true,
     reason: null,
-    checkedAt: null,
+    checkedAt: 1,
   }))),
 }));
 
@@ -44,17 +45,18 @@ describe("drupal_governance_status", () => {
       {
         site: "prod",
         required: null,
+        checked: false,
         ok: false,
         reason: "credential_unresolved",
         detail: 'Site "prod": requireSecureAuth is set but oauth.clientSecretEnv "MCP_AGENT_CLIENT_SECRET" is not set in the environment.',
-        checkedAt: null,
       },
       {
         site: "open",
         required: false,
+        checked: true,
         ok: true,
         reason: null,
-        checkedAt: null,
+        checkedAt: 1,
       },
     ]);
   });

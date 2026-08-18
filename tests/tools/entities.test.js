@@ -245,18 +245,23 @@ describe("#192 / #201 on entity_update", () => {
   });
 
   it("probe 400 skips the real updateEntity; dryRun fails too", async () => {
-    backend.getEntity.mockResolvedValue(publishedModerated);
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        return { ...publishedModerated, fields: { ...publishedModerated.fields, drupal_internal__vid: 2070 } };
+      }
+      return publishedModerated;
+    });
     backend.rawQuery.mockRejectedValue(WC_400);
     await expect(handlers.drupal_entity_update({
       entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111",
       attributes: { title: "T" },
-    })).rejects.toThrow(/not the latest revision/);
+    })).rejects.toThrow(/pending draft \(vid 2070\)/);
     expect(backend.updateEntity).not.toHaveBeenCalled();
 
     await expect(handlers.drupal_entity_update({
       entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111",
       attributes: { title: "T" }, dryRun: true,
-    })).rejects.toThrow(/#201/);
+    })).rejects.toThrow(/Publish or discard/);
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 

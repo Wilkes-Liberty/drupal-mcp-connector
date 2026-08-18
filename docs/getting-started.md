@@ -106,8 +106,10 @@ contract (`GET /drupal-mcp/readiness`, authenticated as the connector's own
 principal — MCP Sentinel present, an applicable active policy profile, the
 enforcement wiring live). A failed, stale, or unreachable verification denies
 tool discovery and execution instead of falling back to a plain JSON:API or
-GraphQL path. `drupal_governance_status` stays callable throughout and names
-the failed condition. Recommended wherever MCP Sentinel governs the site.
+GraphQL path. `drupal_governance_status` stays callable throughout. It always
+probes the source readiness endpoint (even when this client does not require
+governance) and names the failed condition the server returned. Recommended
+wherever MCP Sentinel governs the site.
 
 ### Option B — Basic Auth (local dev only)
 
