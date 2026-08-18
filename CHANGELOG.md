@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.4] - 2026-08-18
+
 ### Fixed
 - **`drupal_content_by_moderation_state` no longer 500s on stock JSON:API
   (#162).** `moderation_state` is a computed field and is not filterable
