@@ -39,7 +39,10 @@ const openSec = () => ({
 
 beforeEach(() => {
   Object.values(backend).forEach((f) => f.mockReset());
-  backend.rawQuery.mockResolvedValue({ data: { type: "node--article", id: "n1" } });
+  backend.rawQuery.mockRejectedValue(new Error(
+    "Drupal 400 on PATCH /jsonapi/node/article/n1: The selected entity (n1) " +
+    "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
+  ));
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
   assertWriteAllowed.mockReset();
   resolveSecurityConfig.mockReset();
@@ -223,6 +226,20 @@ describe("bulk tools", () => {
     const names = mod.definitions.map((d) => d.name);
     expect(names).toContain("drupal_bulk_create");
     expect(names).toContain("drupal_bulk_update");
+  });
+
+  it("bulk_update probes unpublished moderated hosts via the pre-read entity", async () => {
+    backend.getEntity.mockResolvedValue({
+      status: false,
+      fields: { moderation_state: "draft" },
+    });
+    backend.updateEntity.mockResolvedValue({ id: "a1" });
+    await handlers.drupal_bulk_update({
+      entityType: "node", bundle: "article",
+      items: [{ id: "a1", attributes: { title: "Draft edit" } }],
+    });
+    expect(backend.rawQuery).toHaveBeenCalledTimes(1);
+    expect(backend.updateEntity).toHaveBeenCalled();
   });
 
   it("bulk_create of paragraphs returns relationshipData with revision meta (#192)", async () => {

@@ -8,6 +8,8 @@ import {
   linkageHasRevisionMeta,
   relationshipsWereSent,
   resolveErrRelationships,
+  resolveParagraphRevisionId,
+  missingParagraphRevisionError,
 } from "../../src/lib/err-relationships.js";
 
 function paragraphEntity(id, revisionId, bundle = "capability") {
@@ -159,6 +161,18 @@ describe("resolveErrRelationships (#192)", () => {
         },
       }
     )).rejects.toThrow(/p-missing/);
+  });
+
+  it("resolveParagraphRevisionId prefers the create result then GETs", async () => {
+    expect(await resolveParagraphRevisionId({}, paragraphEntity("p1", 17), "capability")).toBe(17);
+    const getEntity = vi.fn(async () => paragraphEntity("p1", 9));
+    expect(await resolveParagraphRevisionId(
+      { getEntity },
+      { id: "p1", entityType: "paragraph", bundle: "capability", fields: {} },
+      "capability"
+    )).toBe(9);
+    expect(getEntity).toHaveBeenCalledTimes(1);
+    expect(missingParagraphRevisionError("p1").message).toMatch(/p1/);
   });
 
   it("fails when the paragraph GET succeeds but exposes no revision id", async () => {

@@ -50,6 +50,39 @@ export function parseResourceType(type) {
 }
 
 /**
+ * Prefer the vid on a just-created/updated paragraph (before a follow-up GET).
+ * Fall back to an un-redacted GET when the write result did not carry it.
+ * @param {object} backend Backend with `getEntity`.
+ * @param {?object} paragraph Create/update result.
+ * @param {string} bundle Paragraph type machine name.
+ * @returns {Promise<?number>}
+ */
+export async function resolveParagraphRevisionId(backend, paragraph, bundle) {
+  const fromWrite = paragraphRevisionId(paragraph);
+  if (fromWrite !== null) return fromWrite;
+  if (!paragraph?.id || typeof backend?.getEntity !== "function") return null;
+  const fresh = await backend.getEntity({
+    entityType: "paragraph",
+    bundle: paragraph.bundle || bundle,
+    id: paragraph.id,
+  }).catch(() => null);
+  return paragraphRevisionId(fresh);
+}
+
+/**
+ * Error when a paragraph write succeeded but no revision id is readable.
+ * Returning `{type, id}` would persist an empty ERR field (#192).
+ * @param {string} id Paragraph UUID.
+ * @returns {Error}
+ */
+export function missingParagraphRevisionError(id) {
+  return new Error(
+    `Created paragraph ${id} but could not read drupal_internal__revision_id; ` +
+    "refusing to return a relationship identifier Drupal would persist as empty (#192)."
+  );
+}
+
+/**
  * Read `drupal_internal__revision_id` from a canonical entity (or a raw-ish
  * object that still carries the attribute at the top level).
  * @param {?object} entity

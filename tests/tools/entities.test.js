@@ -18,11 +18,15 @@ import { getSiteConfig } from "../../src/lib/config.js";
 const noPublishSite = { _name: "prod", baseUrl: "https://x", security: { preset: "write-plane" } };
 
 const ent = { id: "p1", entityType: "paragraph", bundle: "text", title: null, status: null,
-  langcode: "en", created: null, changed: null, url: null, fields: { field_body: "x" }, relationships: {}, _backend: "jsonapi" };
+  langcode: "en", created: null, changed: null, url: null,
+  fields: { field_body: "x", drupal_internal__revision_id: 3 }, relationships: {}, _backend: "jsonapi" };
 
 beforeEach(() => {
   Object.values(backend).forEach((f) => f.mockReset());
-  backend.rawQuery.mockResolvedValue({ data: { type: "node--article", id: "p1" } });
+  backend.rawQuery.mockRejectedValue(new Error(
+    "Drupal 400 on PATCH /jsonapi/node/article/n1: The selected entity (n1) " +
+    "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
+  ));
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
 });
 
@@ -254,6 +258,29 @@ describe("#192 / #201 on entity_update", () => {
       attributes: { title: "T" }, dryRun: true,
     })).rejects.toThrow(/#201/);
     expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("entity_create for a paragraph GETs the vid and fails if still missing", async () => {
+    backend.createEntity.mockResolvedValue({
+      ...ent, fields: { field_body: "x", drupal_internal__revision_id: undefined },
+    });
+    backend.getEntity.mockResolvedValue({
+      ...ent, fields: { field_body: "x", drupal_internal__revision_id: 8 },
+    });
+    const out = await handlers.drupal_entity_create({
+      entityType: "paragraph", bundle: "text", attributes: { field_body: "x" },
+    });
+    expect(out.relationshipData).toEqual({
+      type: "paragraph--text", id: "p1", meta: { target_revision_id: 8 },
+    });
+
+    backend.createEntity.mockResolvedValue({
+      ...ent, fields: { field_body: "x", drupal_internal__revision_id: undefined },
+    });
+    backend.getEntity.mockResolvedValue({ ...ent, fields: { field_body: "x" } });
+    await expect(handlers.drupal_entity_create({
+      entityType: "paragraph", bundle: "text", attributes: { field_body: "x" },
+    })).rejects.toThrow(/revision_id/);
   });
 
   it("entity_get for paragraph keeps drupal_internal__revision_id", async () => {

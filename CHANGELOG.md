@@ -27,13 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `drupal_list_revisions` reports `possiblyPatchBlocked` when the default
   revision's `changed` is later than its `revision_timestamp`, and never
   treats `workingCopy: null` as an all-clear. `drupal_update_node` /
-  `drupal_entity_update` (and their `dryRun`) issue a no-op PATCH against
-  the same canonical URL before the real write; a core 400 is rewritten to
-  say the stored entity is not the latest revision, the JSON:API aliases
-  cannot show the blocking row, and clearing it is revision surgery
-  outside JSON:API (Drush / the entity API). Preflight on the host write
-  does not un-orphan paragraphs already created — probe the host
-  (`possiblyPatchBlocked`, then `dryRun`) *before* `drupal_create_paragraph`.
+  `drupal_entity_update` (and their `dryRun`) probe the same canonical
+  URL before the real write. The probe PATCH uses a non-matching `data.id`
+  so core's working-copy guard still runs and `$entity->save()` does not
+  (an empty-body 2xx would have written a revision). A core working-copy
+  400 is rewritten to say the stored entity is not the latest revision,
+  the JSON:API aliases cannot show the blocking row, and clearing it is
+  revision surgery outside JSON:API (Drush / the entity API). Preflight
+  on the host write does not un-orphan paragraphs already created — probe
+  the host (`possiblyPatchBlocked`, then `dryRun`) *before*
+  `drupal_create_paragraph`.
 
 ## [2.7.0] - 2026-08-17
 

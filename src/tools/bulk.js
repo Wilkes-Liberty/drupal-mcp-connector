@@ -14,8 +14,11 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertWriteAllowed, assertPublishAllowed } from "../lib/security.js";
-import { applySafeDraftDefault } from "../lib/moderation-default.js";
-import { resolveErrRelationships, embedParagraphRef, paragraphRevisionId } from "../lib/err-relationships.js";
+import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
+import {
+  resolveErrRelationships, embedParagraphRef,
+  resolveParagraphRevisionId, missingParagraphRevisionError,
+} from "../lib/err-relationships.js";
 import { preflightPatchWritable, updateEntityGuarded } from "../lib/patch-preflight.js";
 
 /**
@@ -59,14 +62,9 @@ async function bulkCreate({ site: siteName, entityType, bundle, items = [] }) {
       created += 1;
       const row = { index, success: true, id: entity?.id };
       if (entityType === "paragraph" && entity?.id) {
-        let revisionId = paragraphRevisionId(entity);
-        if (revisionId === null) {
-          const fresh = await backend.getEntity({ entityType, bundle, id: entity.id }).catch(() => null);
-          revisionId = paragraphRevisionId(fresh);
-        }
-        if (revisionId !== null) {
-          row.relationshipData = embedParagraphRef(entity.bundle || bundle, entity.id, revisionId);
-        }
+        const revisionId = await resolveParagraphRevisionId(backend, entity, bundle);
+        if (revisionId === null) throw missingParagraphRevisionError(entity.id);
+        row.relationshipData = embedParagraphRef(entity.bundle || bundle, entity.id, revisionId);
       }
       results.push(row);
     } catch (err) {
@@ -105,14 +103,23 @@ async function bulkUpdate({ site: siteName, entityType, bundle, items = [] }) {
     const item = rawItem || {};
     try {
       if (!item.id) throw new Error("Missing 'id' for update item");
+      let existing = null;
+      if (!hasExplicitModerationState(item.attributes ?? {})) {
+        try {
+          existing = (await backend.getEntity({ entityType, bundle, id: item.id })) ?? null;
+        } catch {
+          existing = null;
+        }
+      }
       const attributes = await applySafeDraftDefault({
         backend, entityType, bundle, id: item.id,
         attributes: item.attributes ?? {},
+        existingEntity: existing,
       });
       assertPublishAllowed(sec, attributes);
       const resolvedRelationships = await resolveErrRelationships(backend, item.relationships ?? {});
       await preflightPatchWritable({
-        backend, entityType, bundle, id: item.id, attributes,
+        backend, entityType, bundle, id: item.id, existing, attributes,
       });
       const entity = await updateEntityGuarded(backend, {
         entityType, bundle, id: item.id,

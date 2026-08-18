@@ -12,7 +12,10 @@ import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA } from "../lib/entity-response.js";
 import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
-import { resolveErrRelationships, relationshipsWereSent, embedParagraphRef, paragraphRevisionId } from "../lib/err-relationships.js";
+import {
+  resolveErrRelationships, relationshipsWereSent, embedParagraphRef,
+  resolveParagraphRevisionId, missingParagraphRevisionError,
+} from "../lib/err-relationships.js";
 import { readWrittenRevision } from "../lib/write-revision.js";
 import { preflightPatchWritable, updateEntityGuarded } from "../lib/patch-preflight.js";
 import {
@@ -71,10 +74,9 @@ async function createEntity({ site: siteName, entityType, bundle, attributes = {
   if (dryRun) return { dryRun: true, operation: "create", entityType, bundle, attributes, relationships: resolvedRelationships };
   const created = await backend.createEntity({ entityType, bundle, attributes, relationships: resolvedRelationships });
   if (entityType === "paragraph") {
-    const revisionId = paragraphRevisionId(created);
-    if (revisionId !== null) {
-      created.relationshipData = embedParagraphRef(created.bundle || bundle, created.id, revisionId);
-    }
+    const revisionId = await resolveParagraphRevisionId(backend, created, bundle);
+    if (revisionId === null) throw missingParagraphRevisionError(created.id);
+    created.relationshipData = embedParagraphRef(created.bundle || bundle, created.id, revisionId);
   }
   return shapeWriteResponse(created, returning);
 }
@@ -274,7 +276,7 @@ export const definitions = [
   },
   {
     name: "drupal_entity_update",
-    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision). Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved. On moderated targets a no-op PATCH preflight runs first (including dryRun) so a core working-copy guard failure is reported before the real write (#201). Preflight does not un-orphan paragraphs already created — probe the host before creating dependents.",
+    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision). Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved. On moderated targets an id-mismatch PATCH preflight runs first (including dryRun) so a core working-copy guard failure is reported before the real write and no revision is saved by the probe (#201). Preflight does not un-orphan paragraphs already created — probe the host before creating dependents.",
     inputSchema: {
       type: "object", required: ["entityType", "bundle", "id"],
       properties: {
@@ -284,7 +286,7 @@ export const definitions = [
         id:            { type: "string" },
         attributes:    { type: "object" },
         relationships: { type: "object" },
-        dryRun:        { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. A 400 on that probe fails the dryRun." },
+        dryRun:        { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. The probe uses a non-matching data.id so Drupal does not save. A working-copy 400 fails the dryRun." },
         returning:     RETURNING_SCHEMA,
       },
     },

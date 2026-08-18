@@ -3,12 +3,15 @@
  *
  * `EntityResource::patchIndividual()` rejects a canonical PATCH when the
  * stored entity is not both the latest and the default revision. That check
- * runs against the revision table *before* the payload is deserialized, so a
- * no-op PATCH against the same URL is a true probe: 400 means no row is
- * written. Content-moderation's `rel:latest-version` / `rel:working-copy`
- * aliases can disagree with storage (a revision row with no
- * `content_moderation_state`), which is how every read tool reports clean
- * and the write then 400s.
+ * runs against the revision table *before* the payload is deserialized.
+ * An empty-body PATCH that returns 2xx still calls `$entity->save()` (and
+ * often `setNewRevision`) — so the probe must fail *after* the guard and
+ * *before* save. Core next compares `data.id` to the URL entity UUID; a
+ * well-formed but non-matching id yields 400 "does not match the ID in the
+ * payload" with no row written. Content-moderation's `rel:latest-version` /
+ * `rel:working-copy` aliases can disagree with storage (a revision row with
+ * no `content_moderation_state`), which is how every read tool reports
+ * clean and the write then 400s.
  *
  * `workingCopy: null` and "latest-version vid === default vid" are not proof
  * the node is writable. That is the #201 lie.
@@ -69,7 +72,7 @@ export function rewriteWorkingCopyPatchError(err) {
 }
 
 /**
- * Whether this update should run the no-op PATCH probe.
+ * Whether this update should run the PATCH probe.
  * Skip unmoderated / non-revisionable bundles — the guard is about
  * revisionable entities under content_moderation.
  * @param {{existing?: ?object, attributes?: object}} input
@@ -81,22 +84,34 @@ export function shouldPreflightPatch({ existing, attributes } = {}) {
 }
 
 /**
- * An empty-body PATCH can 422 when Drupal wants at least one field. That is
- * not a writability signal — the real write still has a body.
+ * UUID used as `data.id` on the probe PATCH so it cannot match the URL
+ * entity. Core throws after the working-copy guard and before save.
+ * @see EntityResource::patchIndividual()
+ */
+export const PATCH_PROBE_MISMATCH_ID = "00000000-0000-4000-a000-000000000001";
+
+const ID_MISMATCH_RE = /does not match the ID in the payload/i;
+
+/**
+ * Whether a probe error means the working-copy guard passed and no row
+ * was written (id mismatch, or a 422 during deserialize).
  * @param {unknown} err
  * @returns {boolean}
  */
-export function isInconclusiveEmptyPatchError(err) {
-  return /Drupal 422\b/.test(String(err?.message || ""));
+export function isProbePassedWithoutSave(err) {
+  const msg = String(err?.message || "");
+  return ID_MISMATCH_RE.test(msg) || /Drupal 422\b/.test(msg);
 }
 
 /**
  * Probe the same guard core uses on the canonical PATCH URL.
  *
- * Sends a PATCH with type + id and no attributes or relationships. Core
- * rejects before deserialize when the stored entity is not the latest
- * revision, so a 400 matching the working-copy phrase means no row was
- * written. Do not treat "latest-version vid === default vid" as writable.
+ * Sends a PATCH whose `data.id` does not match the URL entity. Core runs
+ * the working-copy check first; a match on that phrase means no row was
+ * written. An id-mismatch 400 (or deserialize 422) means the guard passed
+ * and save was not reached. A 2xx would have saved a revision and is
+ * treated as a probe failure. Do not treat "latest-version vid === default
+ * vid" as writable.
  *
  * @param {object} args
  * @param {object} args.backend Backend with `rawQuery` + `resourcePath`.
@@ -119,21 +134,27 @@ export async function preflightPatchWritable({
   }
   const path = `${backend.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`;
   const type = `${entityType}--${bundle}`;
+  const probeId = id === PATCH_PROBE_MISMATCH_ID
+    ? "00000000-0000-4000-a000-000000000002"
+    : PATCH_PROBE_MISMATCH_ID;
   try {
     await backend.rawQuery({
       path,
       options: {
         method: "PATCH",
-        body: JSON.stringify({ data: { type, id } }),
+        body: JSON.stringify({ data: { type, id: probeId } }),
       },
     });
-    return { probed: true, writable: true };
+    throw new Error(
+      "PATCH probe unexpectedly succeeded (2xx). The probe must fail after " +
+      "core's working-copy guard so no revision is written."
+    );
   } catch (err) {
     if (isWorkingCopyPatchError(err)) {
       throw new PatchBlockedError(err instanceof Error ? err : new Error(String(err)));
     }
-    if (isInconclusiveEmptyPatchError(err)) {
-      return { probed: true, writable: "unknown" };
+    if (isProbePassedWithoutSave(err)) {
+      return { probed: true, writable: true };
     }
     throw err;
   }

@@ -43,7 +43,10 @@ beforeEach(() => {
   backend.getEntity.mockResolvedValue(canonicalNode());
   backend.createEntity.mockResolvedValue(canonicalNode());
   backend.updateEntity.mockResolvedValue(canonicalNode());
-  backend.rawQuery.mockResolvedValue({ data: { type: "node--article", id: "n1" } });
+  backend.rawQuery.mockRejectedValue(new Error(
+    "Drupal 400 on PATCH /jsonapi/node/article/n1: The selected entity (n1) " +
+    "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
+  ));
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
 });
 
@@ -419,7 +422,10 @@ describe("#192 ERR attach, #169 written revision, #201 preflight", () => {
 
     expect(backend.rawQuery).toHaveBeenCalledTimes(1);
     const probe = backend.rawQuery.mock.calls[0][0];
-    expect(JSON.parse(probe.options.body).data).not.toHaveProperty("relationships");
+    const probeData = JSON.parse(probe.options.body).data;
+    expect(probeData).not.toHaveProperty("relationships");
+    expect(probeData).not.toHaveProperty("attributes");
+    expect(probeData.id).not.toBe("n1");
     const sent = backend.updateEntity.mock.calls[0][0];
     expect(sent.relationships.field_key_capabilities.data).toEqual([
       { type: "paragraph--capability", id: "p-a", meta: { target_revision_id: 11 } },

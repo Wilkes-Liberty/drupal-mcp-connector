@@ -8,6 +8,8 @@ import {
   shouldPreflightPatch,
   preflightPatchWritable,
   updateEntityGuarded,
+  isProbePassedWithoutSave,
+  PATCH_PROBE_MISMATCH_ID,
 } from "../../src/lib/patch-preflight.js";
 import { readWrittenRevision } from "../../src/lib/write-revision.js";
 
@@ -17,10 +19,15 @@ const WC_400 = new Error(
   "https://www.drupal.org/project/drupal/issues/2795279."
 );
 
+const ID_MISMATCH = new Error(
+  "Drupal 400 on PATCH /jsonapi/node/article/n1: The selected entity (n1) " +
+  `does not match the ID in the payload (${PATCH_PROBE_MISMATCH_ID}).`
+);
+
 function backendStub(over = {}) {
   return {
     resourcePath: (et, b) => `/jsonapi/${et}/${b}`,
-    rawQuery: vi.fn(async () => ({ data: { type: "node--article", id: "n1" } })),
+    rawQuery: vi.fn(async () => { throw ID_MISMATCH; }),
     getEntity: vi.fn(async () => null),
     updateEntity: vi.fn(async (input) => ({ id: input.id })),
     ...over,
@@ -65,7 +72,7 @@ describe("shouldPreflightPatch (#201)", () => {
 });
 
 describe("preflightPatchWritable (#201)", () => {
-  it("issues a no-op PATCH with no relationships and no attribute mutation", async () => {
+  it("PATCHes a mismatched id so the guard runs and save does not", async () => {
     const backend = backendStub();
     const out = await preflightPatchWritable({
       backend, entityType: "node", bundle: "article", id: "n1",
@@ -78,8 +85,21 @@ describe("preflightPatchWritable (#201)", () => {
     expect(arg.path).toBe("/jsonapi/node/article/n1");
     expect(arg.options.method).toBe("PATCH");
     expect(JSON.parse(arg.options.body)).toEqual({
-      data: { type: "node--article", id: "n1" },
+      data: { type: "node--article", id: PATCH_PROBE_MISMATCH_ID },
     });
+    expect(JSON.parse(arg.options.body).data).not.toHaveProperty("attributes");
+    expect(JSON.parse(arg.options.body).data).not.toHaveProperty("relationships");
+  });
+
+  it("treats a 2xx probe as a failure — that would have saved a revision", async () => {
+    const backend = backendStub({
+      rawQuery: vi.fn(async () => ({ data: { type: "node--article", id: "n1" } })),
+    });
+    await expect(preflightPatchWritable({
+      backend, entityType: "node", bundle: "article", id: "n1",
+      existing: { fields: { moderation_state: "published" } },
+      attributes: { moderation_state: "draft" },
+    })).rejects.toThrow(/unexpectedly succeeded/);
   });
 
   it("skips the probe on unmoderated targets", async () => {
@@ -102,7 +122,17 @@ describe("preflightPatchWritable (#201)", () => {
     })).rejects.toBeInstanceOf(PatchBlockedError);
   });
 
-  it("treats an empty-body 422 as inconclusive rather than blocked", async () => {
+  it("treats an id-mismatch 400 as the guard having passed with no save", async () => {
+    expect(isProbePassedWithoutSave(ID_MISMATCH)).toBe(true);
+    const backend = backendStub();
+    const out = await preflightPatchWritable({
+      backend, entityType: "node", bundle: "article", id: "n1",
+      attributes: { moderation_state: "draft" },
+    });
+    expect(out).toEqual({ probed: true, writable: true });
+  });
+
+  it("treats a deserialize 422 as the guard having passed with no save", async () => {
     const backend = backendStub({
       rawQuery: vi.fn(async () => { throw new Error("Drupal 422 on PATCH /jsonapi/node/article/n1: no fields"); }),
     });
@@ -110,7 +140,7 @@ describe("preflightPatchWritable (#201)", () => {
       backend, entityType: "node", bundle: "article", id: "n1",
       attributes: { moderation_state: "draft" },
     });
-    expect(out).toEqual({ probed: true, writable: "unknown" });
+    expect(out).toEqual({ probed: true, writable: true });
   });
 });
 

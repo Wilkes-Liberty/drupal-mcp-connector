@@ -40,7 +40,10 @@ const ids = Array.from({ length: N }, (_, i) => `p-${i}`);
 beforeEach(() => {
   Object.values(backend).forEach((f) => f.mockReset());
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
-  backend.rawQuery.mockResolvedValue({ data: { type: "node--solution", id: "n1" } });
+  backend.rawQuery.mockRejectedValue(new Error(
+    "Drupal 400 on PATCH /jsonapi/node/solution/n1: The selected entity (n1) " +
+    "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
+  ));
   backend.getPathInfo.mockResolvedValue({ alias: null, pid: null, langcode: "en", drupalId: 2 });
   backend.getEntity.mockImplementation(async ({ entityType, id, resourceVersion }) => {
     if (entityType === "paragraph") {

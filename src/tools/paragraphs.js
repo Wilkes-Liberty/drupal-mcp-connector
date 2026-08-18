@@ -39,7 +39,9 @@ import { resolveBackend } from "../lib/backends/index.js";
 import {
   resolveSecurityConfig, assertWriteAllowed, assertReadAllowed, redactCanonicalEntity,
 } from "../lib/security.js";
-import { embedParagraphRef, paragraphRevisionId } from "../lib/err-relationships.js";
+import {
+  embedParagraphRef, paragraphRevisionId, resolveParagraphRevisionId, missingParagraphRevisionError,
+} from "../lib/err-relationships.js";
 
 /**
  * Build the resource-identifier ref used to embed a paragraph in a host ERR /
@@ -68,26 +70,6 @@ const EMBED_NOTE =
   "the orphans (#201).";
 
 /**
- * Prefer the vid on a just-created/updated paragraph (before a follow-up GET).
- * Fall back to an un-redacted GET when the write result did not carry it.
- * @param {object} backend
- * @param {object} paragraph
- * @param {string} paragraphType
- * @returns {Promise<?number>}
- */
-async function revisionIdFrom(backend, paragraph, paragraphType) {
-  const fromWrite = paragraphRevisionId(paragraph);
-  if (fromWrite !== null) return fromWrite;
-  if (!paragraph?.id) return null;
-  const fresh = await backend.getEntity({
-    entityType: "paragraph",
-    bundle: paragraph.bundle || paragraphType,
-    id: paragraph.id,
-  }).catch(() => null);
-  return paragraphRevisionId(fresh);
-}
-
-/**
  * Create a paragraph entity of the given type and return a ref suitable for
  * embedding it in a host entity's paragraph/ERR field.
  *
@@ -108,13 +90,8 @@ async function createParagraph({ site: siteName, paragraphType, attributes = {} 
   const backend = await resolveBackend(site);
   const paragraph = await backend.createEntity({ entityType: "paragraph", bundle: paragraphType, attributes });
   const bundle = paragraph.bundle || paragraphType;
-  const revisionId = await revisionIdFrom(backend, paragraph, paragraphType);
-  if (revisionId === null) {
-    throw new Error(
-      `Created paragraph ${paragraph.id} but could not read drupal_internal__revision_id; ` +
-      "refusing to return a relationship identifier Drupal would persist as empty (#192)."
-    );
-  }
+  const revisionId = await resolveParagraphRevisionId(backend, paragraph, paragraphType);
+  if (revisionId === null) throw missingParagraphRevisionError(paragraph.id);
   const ref = embedRef(bundle, paragraph.id, revisionId);
   return { paragraph, ref, relationshipData: ref, note: EMBED_NOTE };
 }
@@ -142,13 +119,8 @@ async function updateParagraph({ site: siteName, paragraphType, id, attributes =
   const backend = await resolveBackend(site);
   const paragraph = await backend.updateEntity({ entityType: "paragraph", bundle: paragraphType, id, attributes });
   const bundle = paragraph.bundle || paragraphType;
-  const revisionId = await revisionIdFrom(backend, paragraph, paragraphType);
-  if (revisionId === null) {
-    throw new Error(
-      `Updated paragraph ${id} but could not read drupal_internal__revision_id; ` +
-      "refusing to return a relationship identifier Drupal would persist as empty (#192)."
-    );
-  }
+  const revisionId = await resolveParagraphRevisionId(backend, paragraph, paragraphType);
+  if (revisionId === null) throw missingParagraphRevisionError(id);
   const ref = embedRef(bundle, paragraph.id, revisionId);
   return { paragraph, ref, relationshipData: ref, note: EMBED_NOTE };
 }
