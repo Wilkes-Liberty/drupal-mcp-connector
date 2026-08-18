@@ -139,9 +139,11 @@ name path segments are validated as Drupal machine names.
 
 ## Per-machine secret map
 
-`bin/drupal-mcp-launch.sh` only sets the working directory and (when present)
-a local mkcert CA. **Secret loading runs inside `node src/index.js`**, because
-MCP clients often spawn that file directly.
+`bin/drupal-mcp-launch.sh` sets the working directory and (when present) a
+local mkcert CA. If the secret table and `config.json` share no
+`clientSecretEnv` / `apiTokenEnv` names, it prints one stderr line naming
+the mismatch. **Secret loading still runs inside `node src/index.js`**,
+because MCP clients often spawn that file directly.
 
 The shipped Keychain table matches `config/config.example.json`. If your
 `config/config.json` uses different `oauth.clientSecretEnv` names, put the

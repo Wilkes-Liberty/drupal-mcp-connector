@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Launcher and startup name a secret-table / config mismatch (#211).**
+  The shipped Keychain table matches `config/config.example.json`. A
+  `config.json` that uses different `clientSecretEnv` names without a
+  `config/secrets.map` left the table and the config each valid and
+  jointly inert. Per-item Keychain misses stay silent (break-glass).
+  When the table matches **no** named secret, `bin/drupal-mcp-launch.sh`
+  and `src/lib/load-secrets.js` now print one stderr line that names
+  the unmapped variables and says `secrets.map` is absent (or that the
+  map does not name them). Fail-closed start when every named secret is
+  unset is unchanged.
+
 ## [2.7.2] - 2026-08-18
 
 ### Fixed

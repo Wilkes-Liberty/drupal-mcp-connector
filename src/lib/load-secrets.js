@@ -9,8 +9,10 @@
  * The default table matches config/config.example.json. A gitignored
  * config/secrets.map replaces that table for a deployment whose env-var
  * names differ. Per-item Keychain misses stay silent (inert break-glass).
- * If the active config.json names secret env vars and none of them are set
- * after this step, the caller must refuse to start.
+ * Zero overlap between the table and the names in config.json is a
+ * distinct case — the two files are jointly inert — and the caller should
+ * say so. If every named secret is still unset after this step, the caller
+ * must refuse to start.
  */
 
 import { execFileSync } from "node:child_process";
@@ -101,7 +103,7 @@ export function lookupKeychainItem(item) {
  * @param {NodeJS.ProcessEnv} [options.env] Mutated when a lookup succeeds.
  * @param {typeof readFileSync} [options.readFile]
  * @param {(item: string) => string} [options.lookup]
- * @returns {{pairs: number, resolved: number, named: string[], unset: string[]}}
+ * @returns {{pairs: number, resolved: number, named: string[], unset: string[], tableVars: string[], source: "map"|"default"}}
  */
 export function loadLocalSecrets({
   cwd = process.cwd(),
@@ -109,11 +111,13 @@ export function loadLocalSecrets({
   readFile = readFileSync,
   lookup = lookupKeychainItem,
 } = {}) {
+  let source = "map";
   let pairs;
   try {
     pairs = parseSecretMap(readFile(join(cwd, "config", "secrets.map"), "utf8"));
   } catch {
     pairs = DEFAULT_SECRET_PAIRS;
+    source = "default";
   }
 
   let resolved = 0;
@@ -140,16 +144,43 @@ export function loadLocalSecrets({
 
   const envMap = new Map(Object.entries(env));
   const unset = named.filter((name) => !envMap.get(name));
-  return { pairs: pairs.length, resolved, named, unset };
+  const tableVars = pairs.map(([varName]) => varName);
+  return { pairs: pairs.length, resolved, named, unset, tableVars, source };
+}
+
+/**
+ * One-line diagnosis when the secret table and config.json share no names.
+ * Null when there is any overlap, or when config names no secrets.
+ * Per-item Keychain misses are not a mismatch.
+ * @param {{named: string[], tableVars?: string[], source?: "map"|"default"}} loaded
+ * @returns {string|null}
+ */
+export function secretTableMismatchMessage(loaded) {
+  if (!loaded.named.length) return null;
+  const table = new Set(loaded.tableVars || []);
+  const unmapped = loaded.named.filter((name) => !table.has(name));
+  if (unmapped.length !== loaded.named.length) return null;
+  const source = loaded.source === "map"
+    ? "config/secrets.map does not name them"
+    : "using shipped defaults; config/secrets.map is absent";
+  return (
+    "no secret-table entries match clientSecretEnv/apiTokenEnv names in config.json " +
+    "(" + unmapped.join(", ") + "); " + source + ". " +
+    "Every site requiring a client secret will fail closed."
+  );
 }
 
 /**
  * Refuse to boot a server that can only advertise diagnostic tools.
- * @param {{named: string[], unset: string[]}} loaded
+ * @param {{named: string[], unset: string[], tableVars?: string[], source?: "map"|"default"}} loaded
  * @returns {string|null} Fatal message, or null when start is allowed.
  */
 export function secretLoadFatalMessage(loaded) {
   if (!loaded.named.length || loaded.unset.length !== loaded.named.length) return null;
+  const mismatch = secretTableMismatchMessage(loaded);
+  if (mismatch) {
+    return mismatch + " Refusing to start. Map those names in config/secrets.map (ENV_VAR=keychain-item) or export them before launch.";
+  }
   return (
     `every clientSecretEnv/apiTokenEnv named in config.json is unset (${loaded.unset.join(", ")}). ` +
     "Refusing to start. Map those names in config/secrets.map (ENV_VAR=keychain-item) " +
