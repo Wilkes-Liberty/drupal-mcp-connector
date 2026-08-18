@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`drupal_content_by_moderation_state` no longer 500s on stock JSON:API
+  (#162).** `moderation_state` is a computed field and is not filterable
+  over core JSON:API. The tool still tries the server-side filter (so a
+  jsonapi_extras alias keeps working), and when Drupal rejects it the
+  connector samples recent nodes and filters client-side. The payload
+  reports `source: "sampled"` and `approximate` instead of a raw Drupal
+  500. If the field is not exposed at all, the result is a gated
+  `unavailable` payload.
 - **Every tool response names the resolved site (#167).** Omitting `site`
   still defaults to `defaultSite`, but the payload now carries
   `_target: { name, baseUrl, source }` — the same block `drupal_mcp_whoami`
