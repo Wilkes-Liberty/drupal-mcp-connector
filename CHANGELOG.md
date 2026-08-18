@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-08-18
+
 ### Fixed
 - **Orphan-reference report no longer treats 403 / policy denial as a missing
   target (#205).** `drupal_report_orphaned_references` used to count any
