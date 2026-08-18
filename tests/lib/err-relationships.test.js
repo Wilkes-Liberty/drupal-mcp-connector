@@ -172,7 +172,8 @@ describe("resolveErrRelationships (#192)", () => {
       "capability"
     )).toBe(9);
     expect(getEntity).toHaveBeenCalledTimes(1);
-    expect(missingParagraphRevisionError("p1").message).toMatch(/p1/);
+    expect(missingParagraphRevisionError("p1").message).toMatch(/^Created paragraph p1/);
+    expect(missingParagraphRevisionError("p1", "Updated").message).toMatch(/^Updated paragraph p1/);
   });
 
   it("fails when the paragraph GET succeeds but exposes no revision id", async () => {

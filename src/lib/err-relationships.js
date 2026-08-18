@@ -73,11 +73,13 @@ export async function resolveParagraphRevisionId(backend, paragraph, bundle) {
  * Error when a paragraph write succeeded but no revision id is readable.
  * Returning `{type, id}` would persist an empty ERR field (#192).
  * @param {string} id Paragraph UUID.
+ * @param {"Created"|"Updated"} [operation="Created"] The write that already landed.
  * @returns {Error}
  */
-export function missingParagraphRevisionError(id) {
+export function missingParagraphRevisionError(id, operation = "Created") {
+  const verb = operation === "Updated" ? "Updated" : "Created";
   return new Error(
-    `Created paragraph ${id} but could not read drupal_internal__revision_id; ` +
+    `${verb} paragraph ${id} but could not read drupal_internal__revision_id; ` +
     "refusing to return a relationship identifier Drupal would persist as empty (#192)."
   );
 }

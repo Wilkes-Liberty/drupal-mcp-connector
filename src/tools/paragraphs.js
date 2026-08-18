@@ -120,7 +120,7 @@ async function updateParagraph({ site: siteName, paragraphType, id, attributes =
   const paragraph = await backend.updateEntity({ entityType: "paragraph", bundle: paragraphType, id, attributes });
   const bundle = paragraph.bundle || paragraphType;
   const revisionId = await resolveParagraphRevisionId(backend, paragraph, paragraphType);
-  if (revisionId === null) throw missingParagraphRevisionError(id);
+  if (revisionId === null) throw missingParagraphRevisionError(id, "Updated");
   const ref = embedRef(bundle, paragraph.id, revisionId);
   return { paragraph, ref, relationshipData: ref, note: EMBED_NOTE };
 }
