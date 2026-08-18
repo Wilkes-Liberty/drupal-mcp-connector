@@ -34,7 +34,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 
 import { listSiteNames, getTlsConfig, loadConfig, CLIENT_VERSION } from "./lib/config.js";
-import { loadLocalSecrets, secretLoadFatalMessage } from "./lib/load-secrets.js";
+import { loadLocalSecrets, secretLoadFatalMessage, secretTableMismatchMessage } from "./lib/load-secrets.js";
 import {
   makeBearerCheck,
   resolveInboundAuthConfig,
@@ -68,7 +68,10 @@ if (secretFatal) {
   console.error(`[drupal-mcp-connector] FATAL: ${secretFatal}`);
   process.exit(1);
 }
-if (secretLoad.unset.length) {
+const secretMismatch = secretTableMismatchMessage(secretLoad);
+if (secretMismatch) {
+  console.error(`[drupal-mcp-connector] WARNING: ${secretMismatch}`);
+} else if (secretLoad.unset.length) {
   console.error(
     "[drupal-mcp-connector] WARNING: config.json names secret env vars that are unset: " +
     `${secretLoad.unset.join(", ")}. Those sites will fail closed.`

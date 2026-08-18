@@ -4,6 +4,7 @@ import {
   namedSecretEnvVars,
   loadLocalSecrets,
   secretLoadFatalMessage,
+  secretTableMismatchMessage,
   DEFAULT_SECRET_PAIRS,
 } from "../../src/lib/load-secrets.js";
 
@@ -84,8 +85,12 @@ describe("loadLocalSecrets", () => {
       lookup: () => "",
     });
     expect(loaded.unset).toEqual(["MCP_AGENT_CLIENT_SECRET", "MCP_AGENT_CLIENT_SECRET_STG"]);
+    expect(loaded.source).toBe("default");
     expect(secretLoadFatalMessage(loaded)).toMatch(/MCP_AGENT_CLIENT_SECRET/);
-    expect(secretLoadFatalMessage(loaded)).toMatch(/config\/secrets\.map/);
+    expect(secretLoadFatalMessage(loaded)).toMatch(/config\/secrets\.map is absent/);
+    expect(secretLoadFatalMessage(loaded)).toMatch(/no secret-table entries match/);
+    expect(secretLoadFatalMessage(loaded)).toMatch(/Unset: MCP_AGENT_CLIENT_SECRET, MCP_AGENT_CLIENT_SECRET_STG/);
+    expect(secretLoadFatalMessage(loaded)).toMatch(/Those sites will fail closed/);
   });
 
   it("does not refuse when at least one named secret is present (inert tiers stay silent)", () => {
@@ -103,6 +108,69 @@ describe("loadLocalSecrets", () => {
       lookup: () => "",
     });
     expect(loaded.unset).toEqual(["MCP_AGENT_ADMIN_SECRET"]);
+    expect(secretLoadFatalMessage(loaded)).toBeNull();
+    expect(secretTableMismatchMessage(loaded)).toMatch(/MCP_AGENT_CLIENT_SECRET/);
+    expect(secretTableMismatchMessage(loaded)).toMatch(/MCP_AGENT_ADMIN_SECRET/);
+    expect(secretTableMismatchMessage(loaded)).toMatch(/config\/secrets\.map is absent/);
+    expect(secretTableMismatchMessage(loaded)).toMatch(/Unset: MCP_AGENT_ADMIN_SECRET/);
+    expect(secretTableMismatchMessage(loaded)).toMatch(/Those sites will fail closed/);
+    expect(secretTableMismatchMessage(loaded)).not.toMatch(/Every site requiring a client secret/);
+  });
+
+  it("does not report a table mismatch when secrets.map names the config vars", () => {
+    const loaded = loadLocalSecrets({
+      cwd: "/connector",
+      env: { MCP_AGENT_CLIENT_SECRET: "already" },
+      readFile: files(new Map([
+        ["/connector/config/secrets.map", "MCP_AGENT_CLIENT_SECRET=drupal-mcp-agent-secret\nMCP_AGENT_ADMIN_SECRET=drupal-mcp-admin-secret\n"],
+        ["/connector/config/config.json", JSON.stringify({
+          sites: {
+            prod: { oauth: { clientSecretEnv: "MCP_AGENT_CLIENT_SECRET" } },
+            admin: { oauth: { clientSecretEnv: "MCP_AGENT_ADMIN_SECRET" } },
+          },
+        })],
+      ])),
+      lookup: () => "",
+    });
+    expect(loaded.source).toBe("map");
+    expect(loaded.unset).toEqual(["MCP_AGENT_ADMIN_SECRET"]);
+    expect(secretTableMismatchMessage(loaded)).toBeNull();
+    expect(secretLoadFatalMessage(loaded)).toBeNull();
+  });
+
+  it("does not report a table mismatch when the shipped table overlaps config (inert Keychain items stay silent)", () => {
+    const loaded = loadLocalSecrets({
+      cwd: "/connector",
+      env: { MCP_CONTENT_PRODUCTION_SECRET: "already" },
+      readFile: files(new Map([
+        ["/connector/config/config.json", JSON.stringify({
+          sites: {
+            prod: { oauth: { clientSecretEnv: "MCP_CONTENT_PRODUCTION_SECRET" } },
+            admin: { oauth: { clientSecretEnv: "MCP_ADMIN_BREAKGLASS_SECRET" } },
+          },
+        })],
+      ])),
+      lookup: () => "",
+    });
+    expect(loaded.unset).toEqual(["MCP_ADMIN_BREAKGLASS_SECRET"]);
+    expect(secretTableMismatchMessage(loaded)).toBeNull();
+    expect(secretLoadFatalMessage(loaded)).toBeNull();
+  });
+
+  it("names secrets.map as the table source when it exists but matches nothing", () => {
+    const loaded = loadLocalSecrets({
+      cwd: "/connector",
+      env: { MCP_AGENT_CLIENT_SECRET: "already" },
+      readFile: files(new Map([
+        ["/connector/config/secrets.map", "MCP_OTHER=drupal-mcp-other\n"],
+        ["/connector/config/config.json", JSON.stringify({
+          sites: { prod: { oauth: { clientSecretEnv: "MCP_AGENT_CLIENT_SECRET" } } },
+        })],
+      ])),
+      lookup: () => "",
+    });
+    expect(loaded.source).toBe("map");
+    expect(secretTableMismatchMessage(loaded)).toMatch(/config\/secrets\.map does not name them/);
     expect(secretLoadFatalMessage(loaded)).toBeNull();
   });
 
