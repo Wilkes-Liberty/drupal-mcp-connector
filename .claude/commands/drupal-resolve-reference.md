@@ -16,7 +16,7 @@ Parse the request in `$ARGUMENTS` into this tool's parameters:
 - `name` (string): Human name/title to resolve (matched as a substring)
 
 **Optional:**
-- `site` (string): Named site (omit for default)
+- `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
 - `limit` (number): Maximum candidates to consider
 
 If a required parameter is missing from `$ARGUMENTS`, ask before calling — do not invent values. Coerce each value to its JSON type (booleans → true/false, numbers → numeric, object/array → parse JSON), then make the single tool call and summarize the result.

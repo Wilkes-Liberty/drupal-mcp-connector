@@ -16,7 +16,7 @@ Parse the request in `$ARGUMENTS` into this tool's parameters:
 - `id` (string)
 
 **Optional:**
-- `site` (string): omit for the default site
+- `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
 - `attributes` (object (pass as JSON))
 - `relationships` (object (pass as JSON))
 - `dryRun` (boolean (true/false)): Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. The probe uses a non-matching data.id so Drupal does not save. A working-copy 400 fails the dryRun.

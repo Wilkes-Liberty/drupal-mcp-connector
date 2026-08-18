@@ -15,7 +15,7 @@ Parse the request in `$ARGUMENTS` into this tool's parameters:
 - `target` (string): Destination: a path ('/new-slug'), 'entity:node/42', or an absolute 'https://…' URL.
 
 **Optional:**
-- `site` (string): Named site (omit for default)
+- `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
 - `statusCode` (number): HTTP redirect status code. 301 (permanent, default) or 302 (temporary); 303/307/308 also accepted.
 - `language` (string): Langcode the redirect applies to. Defaults to 'und' (all languages).
 

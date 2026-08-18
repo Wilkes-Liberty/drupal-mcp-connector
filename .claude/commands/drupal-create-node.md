@@ -15,7 +15,7 @@ Parse the request in `$ARGUMENTS` into this tool's parameters:
 - `title` (string)
 
 **Optional:**
-- `site` (string): omit for the default site
+- `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
 - `body` (string): Body field HTML
 - `summary` (string): Body summary/teaser — writes the `summary` property of the body field (core `text_with_summary`). Many headless sites instead use a dedicated summary/deck field for teasers and meta descriptions; on those, set that field in `fields` — a value written here will be stored but may never be rendered.
 - `format` (string): Text format machine name for the body, e.g. 'basic_html'. Defaults to the site config's `defaultTextFormat`, then 'full_html'. Set this when the site's formats do not include full_html, or to avoid writing content into a more permissive format than intended.

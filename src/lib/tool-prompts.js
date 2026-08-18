@@ -15,6 +15,7 @@
  */
 
 import { isDestructiveTool } from "./operations.js";
+import { SITE_PARAM } from "./site-target.js";
 
 /** Convert a tool name to its prompt/command name: `drupal_create_node` → `drupal-create-node`. */
 export const toolNameToPromptName = (name) => name.replace(/_/g, "-");
@@ -54,7 +55,7 @@ export function paramList(inputSchema) {
     name,
     required: required.has(name),
     hint: typeHint(spec),
-    description: spec?.description || (name === "site" ? "omit for the default site" : ""),
+    description: spec?.description || (name === "site" ? SITE_PARAM.description : ""),
   }));
 }
 

@@ -150,7 +150,9 @@ mirrored by the connector preset:
 | Developer | `dev` | + `mcp_config` | `config-editor` | read + write |
 | Admin (break-glass) | `dev-admin` | + `mcp_admin` | `development` | read + write |
 
-`drupal_mcp_whoami` reports the effective tier, scopes, and capabilities for a site.
+`drupal_mcp_whoami` reports the effective tier, scopes, capabilities, and
+resolved `target` (`name`, `baseUrl`, `source`) for a site. Every other
+site-addressing tool echoes the same block as `_target`.
 `publish` is derived from the local `allowPublish` policy (default off in every preset
 except `development`); a write is publish-bearing if it carries `status: true` or
 `moderation_state: "published"`. The server-side governance remains the real authority. The drush bridge is wired on

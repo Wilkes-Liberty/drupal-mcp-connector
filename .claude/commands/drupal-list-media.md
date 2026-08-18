@@ -11,7 +11,7 @@ List media entities by type. Supports filtering by name substring and publish st
 Parse the request in `$ARGUMENTS` into this tool's parameters:
 
 **Optional:**
-- `site` (string): omit for the default site
+- `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
 - `type` (string): Media type machine name, e.g. 'image', 'document', 'remote_video'
 - `status` (boolean (true/false))
 - `name` (string): Filter by name substring

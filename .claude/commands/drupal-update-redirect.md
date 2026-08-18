@@ -14,7 +14,7 @@ Parse the request in `$ARGUMENTS` into this tool's parameters:
 - `id` (string): Redirect entity UUID
 
 **Optional:**
-- `site` (string): omit for the default site
+- `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
 - `source` (string): New source/old path (leading slash optional). Omit to leave unchanged.
 - `target` (string): New destination path/URI. Omit to leave unchanged.
 - `statusCode` (number): New HTTP redirect status code (301/302/303/307/308). Omit to leave unchanged.

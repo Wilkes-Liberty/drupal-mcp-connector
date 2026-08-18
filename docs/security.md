@@ -57,6 +57,15 @@ that path. Prefer JSON:API entity tools when connector policy must hold.
 Mutation documents additionally require `allowGraphqlMutations` (also off
 outside `development`).
 
+### Multi-site targeting
+
+Omitting `site` on a read still resolves to `defaultSite`. The response always
+echoes `_target: { name, baseUrl, source }` so a defaulted call cannot be
+mistaken for another environment (`source: "default"` vs `"hint"`). Writes
+(and GraphQL mutations) require an explicit `site` when more than one site is
+configured — a silent default is refused rather than applied to the wrong
+target.
+
 ### Backend capability gating
 
 Because the connector speaks both JSON:API and GraphQL, write protection is also enforced at the backend layer. The GraphQL (GraphQL Compose) backend advertises `write: false`, so any create/update/delete tool against a GraphQL-only site returns a clear capability error before reaching Drupal. Route writes through a JSON:API backend.

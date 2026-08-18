@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import { allDefinitions, definitionsByName } from "../../src/tools/index.js";
+import { SITE_PARAM } from "../../src/lib/site-target.js";
 import {
   buildToolPrompts,
   getToolPromptMessages,
@@ -86,6 +87,14 @@ describe("tool-prompts", () => {
     expect(prompt.arguments).toEqual([]);
     const text = getToolPromptMessages("drupal-list-sites", {}, definitionsByName)[0].content.text;
     expect(text).toContain("takes no arguments");
+  });
+
+  it("stamps the shared site warning onto every tool that accepts site (#167)", () => {
+    const withSite = allDefinitions.filter((d) => d.inputSchema?.properties?.site);
+    expect(withSite.length).toBeGreaterThan(10);
+    for (const def of withSite) {
+      expect(def.inputSchema.properties.site.description).toBe(SITE_PARAM.description);
+    }
   });
 
   it("falls back gracefully for an unknown prompt name", () => {

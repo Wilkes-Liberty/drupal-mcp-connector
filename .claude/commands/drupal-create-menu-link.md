@@ -16,7 +16,7 @@ Parse the request in `$ARGUMENTS` into this tool's parameters:
 - `menu` (string): Menu machine name to place the link in, e.g. 'main' or 'footer'
 
 **Optional:**
-- `site` (string): omit for the default site
+- `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
 - `weight` (number): Ordering weight within the menu (lower sorts first)
 - `parent` (string): Parent link plugin id to nest under, e.g. 'menu_link_content:<uuid>'. Omit for a top-level link.
 - `enabled` (boolean (true/false)): Whether the link is enabled (renders). Defaults to true.
