@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Paragraph ERR attach sends `meta.target_revision_id` (#192).** JSON:API
+  only persists an Entity Reference Revisions item when the resource
+  identifier carries the current revision id. The connector used to send
+  `{ type, id }` and document that Drupal would fill in the vid — Drupal
+  does not, and the field is saved empty. Host writes
+  (`drupal_update_node`, `drupal_entity_update`, bulk update) now resolve
+  each paragraph identifier (preferring a vid from the create response)
+  and fail the whole write if any ref cannot be resolved. Create/update/get
+  paragraph tools return `relationshipData` / `ref` with that meta key, and
+  paragraph reads surface `drupal_internal__revision_id`. An empty array is
+  still an explicit clear.
+- **Write responses no longer treat the canonical re-read as proof a
+  relationship landed (#169).** When relationships were sent, the returned
+  body is the `rel:working-copy` revision when addressable, otherwise the
+  PATCH body plus `_revision.relationshipsUnverified`.
+- **PATCH preflight for the core working-copy guard (#201).**
+  `drupal_list_revisions` reports `possiblyPatchBlocked` when the default
+  revision's `changed` is later than its `revision_timestamp`, and never
+  treats `workingCopy: null` as an all-clear. `drupal_update_node` /
+  `drupal_entity_update` (and their `dryRun`) probe the same canonical
+  URL before the real write. The probe PATCH uses a non-matching `data.id`
+  so core's working-copy guard still runs and `$entity->save()` does not
+  (an empty-body 2xx would have written a revision). A core working-copy
+  400 is rewritten to say the stored entity is not the latest revision,
+  the JSON:API aliases cannot show the blocking row, and clearing it is
+  revision surgery outside JSON:API (Drush / the entity API). Preflight
+  on the host write does not un-orphan paragraphs already created — probe
+  the host (`possiblyPatchBlocked`, then `dryRun`) *before*
+  `drupal_create_paragraph`.
+
 ## [2.7.0] - 2026-08-17
 
 ### Security

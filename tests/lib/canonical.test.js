@@ -55,6 +55,15 @@ describe("canonical", () => {
   it("normalizeRelationship returns null for empty input", () => {
     expect(normalizeRelationship(null)).toBeNull();
   });
+
+  it("normalizeRelationship keeps meta.target_revision_id (#192)", () => {
+    expect(normalizeRelationship({
+      type: "paragraph--capability", id: "p1", meta: { target_revision_id: 17 },
+    })).toEqual({
+      id: "p1", entityType: "paragraph", bundle: "capability",
+      meta: { target_revision_id: 17 },
+    });
+  });
 });
 
 describe("isRelationshipLinkage (#171)", () => {

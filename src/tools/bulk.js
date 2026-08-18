@@ -14,7 +14,12 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertWriteAllowed, assertPublishAllowed } from "../lib/security.js";
-import { applySafeDraftDefault } from "../lib/moderation-default.js";
+import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
+import {
+  resolveErrRelationships, embedParagraphRef,
+  resolveParagraphRevisionId, missingParagraphRevisionError,
+} from "../lib/err-relationships.js";
+import { preflightPatchWritable, updateEntityGuarded } from "../lib/patch-preflight.js";
 
 /**
  * Normalize an unknown thrown value into a human-readable message.
@@ -48,13 +53,20 @@ async function bulkCreate({ site: siteName, entityType, bundle, items = [] }) {
     const item = rawItem || {};
     try {
       assertPublishAllowed(sec, item.attributes ?? {});
+      const resolvedRelationships = await resolveErrRelationships(backend, item.relationships ?? {});
       const entity = await backend.createEntity({
         entityType, bundle,
         attributes: item.attributes ?? {},
-        relationships: item.relationships ?? {},
+        relationships: resolvedRelationships,
       });
       created += 1;
-      results.push({ index, success: true, id: entity?.id });
+      const row = { index, success: true, id: entity?.id };
+      if (entityType === "paragraph" && entity?.id) {
+        const revisionId = await resolveParagraphRevisionId(backend, entity, bundle);
+        if (revisionId === null) throw missingParagraphRevisionError(entity.id);
+        row.relationshipData = embedParagraphRef(entity.bundle || bundle, entity.id, revisionId);
+      }
+      results.push(row);
     } catch (err) {
       failed += 1;
       results.push({ index, success: false, error: errorMessage(err) });
@@ -91,15 +103,28 @@ async function bulkUpdate({ site: siteName, entityType, bundle, items = [] }) {
     const item = rawItem || {};
     try {
       if (!item.id) throw new Error("Missing 'id' for update item");
+      let existing = null;
+      if (!hasExplicitModerationState(item.attributes ?? {})) {
+        try {
+          existing = (await backend.getEntity({ entityType, bundle, id: item.id })) ?? null;
+        } catch {
+          existing = null;
+        }
+      }
       const attributes = await applySafeDraftDefault({
         backend, entityType, bundle, id: item.id,
         attributes: item.attributes ?? {},
+        existingEntity: existing,
       });
       assertPublishAllowed(sec, attributes);
-      const entity = await backend.updateEntity({
+      const resolvedRelationships = await resolveErrRelationships(backend, item.relationships ?? {});
+      await preflightPatchWritable({
+        backend, entityType, bundle, id: item.id, existing, attributes,
+      });
+      const entity = await updateEntityGuarded(backend, {
         entityType, bundle, id: item.id,
         attributes,
-        relationships: item.relationships ?? {},
+        relationships: resolvedRelationships,
       });
       updated += 1;
       results.push({ index, success: true, id: entity?.id ?? item.id });
@@ -123,7 +148,7 @@ const itemAttributesSchema = {
 export const definitions = [
   {
     name: "drupal_bulk_create",
-    description: "Create many entities of a single type + bundle in one call. Permission is checked once; each item is created independently, so the batch continues past individual failures (partial success). Returns per-item { index, success, id | error } and a summary { created, failed }. Writes default to unpublished/draft.",
+    description: "Create many entities of a single type + bundle in one call. Permission is checked once; each item is created independently, so the batch continues past individual failures (partial success). Returns per-item { index, success, id | error } and a summary { created, failed }. Paragraph items also return relationshipData with meta.target_revision_id for a later host attach. Writes default to unpublished/draft.",
     inputSchema: {
       type: "object", required: ["entityType", "bundle", "items"],
       properties: {

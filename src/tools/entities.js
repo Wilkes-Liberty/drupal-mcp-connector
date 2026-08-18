@@ -13,6 +13,12 @@ import { resolveBackend } from "../lib/backends/index.js";
 import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA } from "../lib/entity-response.js";
 import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
 import {
+  resolveErrRelationships, relationshipsWereSent, embedParagraphRef,
+  resolveParagraphRevisionId, missingParagraphRevisionError,
+} from "../lib/err-relationships.js";
+import { readWrittenRevision } from "../lib/write-revision.js";
+import { preflightPatchWritable, updateEntityGuarded } from "../lib/patch-preflight.js";
+import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
   redactCanonicalEntity, getSecuritySummary,
 } from "../lib/security.js";
@@ -63,9 +69,16 @@ async function createEntity({ site: siteName, entityType, bundle, attributes = {
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", entityType, bundle);
   assertPublishAllowed(sec, attributes);
-  if (dryRun) return { dryRun: true, operation: "create", entityType, bundle, attributes, relationships };
   const backend = await resolveBackend(site);
-  return shapeWriteResponse(await backend.createEntity({ entityType, bundle, attributes, relationships }), returning);
+  const resolvedRelationships = await resolveErrRelationships(backend, relationships);
+  if (dryRun) return { dryRun: true, operation: "create", entityType, bundle, attributes, relationships: resolvedRelationships };
+  const created = await backend.createEntity({ entityType, bundle, attributes, relationships: resolvedRelationships });
+  if (entityType === "paragraph") {
+    const revisionId = await resolveParagraphRevisionId(backend, created, bundle);
+    if (revisionId === null) throw missingParagraphRevisionError(created.id);
+    created.relationshipData = embedParagraphRef(created.bundle || bundle, created.id, revisionId);
+  }
+  return shapeWriteResponse(created, returning);
 }
 
 /**
@@ -103,9 +116,26 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
     backend, entityType, bundle, id, attributes, existingEntity: existing,
   });
   assertPublishAllowed(sec, safeAttributes);
-  if (dryRun) return { dryRun: true, operation: "update", entityType, bundle, id, attributes: safeAttributes, relationships };
-  const result = await backend.updateEntity({ entityType, bundle, id, attributes: safeAttributes, relationships });
-  return shapeWriteResponse(flagUnrequestedStatusChange(result, existing, safeAttributes), returning);
+  const resolvedRelationships = await resolveErrRelationships(backend, relationships);
+  await preflightPatchWritable({
+    backend, entityType, bundle, id, existing, attributes: safeAttributes,
+  });
+  if (dryRun) {
+    return {
+      dryRun: true, operation: "update", entityType, bundle, id,
+      attributes: safeAttributes, relationships: resolvedRelationships,
+    };
+  }
+  const result = await updateEntityGuarded(backend, {
+    entityType, bundle, id, attributes: safeAttributes, relationships: resolvedRelationships,
+  });
+  const written = await readWrittenRevision({
+    backend, entityType, bundle, id,
+    relationshipsSent: relationshipsWereSent(resolvedRelationships),
+    patchResult: result,
+    preferCanonical: false,
+  });
+  return shapeWriteResponse(flagUnrequestedStatusChange(written, existing, safeAttributes), returning);
 }
 
 /**
@@ -246,7 +276,7 @@ export const definitions = [
   },
   {
     name: "drupal_entity_update",
-    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision).",
+    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision). Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved. On moderated targets an id-mismatch PATCH preflight runs first (including dryRun) so a core working-copy guard failure is reported before the real write and no revision is saved by the probe (#201). Preflight does not un-orphan paragraphs already created — probe the host before creating dependents.",
     inputSchema: {
       type: "object", required: ["entityType", "bundle", "id"],
       properties: {
@@ -256,7 +286,7 @@ export const definitions = [
         id:            { type: "string" },
         attributes:    { type: "object" },
         relationships: { type: "object" },
-        dryRun:        { type: "boolean", default: false, description: "Validate and return a preview of the update without committing." },
+        dryRun:        { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. The probe uses a non-matching data.id so Drupal does not save. A working-copy 400 fails the dryRun." },
         returning:     RETURNING_SCHEMA,
       },
     },

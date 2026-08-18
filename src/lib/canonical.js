@@ -64,7 +64,17 @@ export function normalizeRelationship(ref) {
   if (Array.isArray(ref)) return ref.map(normalizeRelationship);
   // JSON:API encodes type as "entityType--bundle"; split into the two parts.
   const [entityType = null, bundle = null] = (ref.type || "").split("--");
-  return { id: ref.id, entityType, bundle };
+  const out = { id: ref.id, entityType, bundle };
+  // ERR identifiers carry the revision id in JSON:API `meta` (#192). Dropping
+  // it made every canonical re-read look like a plain {id, type} even when the
+  // write sent target_revision_id.
+  if (ref.meta && typeof ref.meta === "object") {
+    const vid = new Map(Object.entries(ref.meta)).get("target_revision_id");
+    if (vid !== undefined && vid !== null && vid !== "") {
+      out.meta = { target_revision_id: vid };
+    }
+  }
+  return out;
 }
 
 /**

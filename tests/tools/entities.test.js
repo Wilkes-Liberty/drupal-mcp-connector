@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const backend = {
   listEntities: vi.fn(), getEntity: vi.fn(), createEntity: vi.fn(), updateEntity: vi.fn(),
   deleteEntity: vi.fn(), listResourceTypes: vi.fn(), getEntitySchema: vi.fn(),
+  rawQuery: vi.fn(),
+  resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 vi.mock("../../src/lib/config.js", () => ({
@@ -16,9 +18,17 @@ import { getSiteConfig } from "../../src/lib/config.js";
 const noPublishSite = { _name: "prod", baseUrl: "https://x", security: { preset: "write-plane" } };
 
 const ent = { id: "p1", entityType: "paragraph", bundle: "text", title: null, status: null,
-  langcode: "en", created: null, changed: null, url: null, fields: { field_body: "x" }, relationships: {}, _backend: "jsonapi" };
+  langcode: "en", created: null, changed: null, url: null,
+  fields: { field_body: "x", drupal_internal__revision_id: 3 }, relationships: {}, _backend: "jsonapi" };
 
-beforeEach(() => Object.values(backend).forEach((f) => f.mockReset()));
+beforeEach(() => {
+  Object.values(backend).forEach((f) => f.mockReset());
+  backend.rawQuery.mockRejectedValue(new Error(
+    "Drupal 400 on PATCH /jsonapi/node/article/n1: The selected entity (n1) " +
+    "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
+  ));
+  backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
+});
 
 describe("entities tools (migrated)", () => {
   it("entity_list passes structured filters + page to listEntities", async () => {
@@ -197,5 +207,87 @@ describe("#171 live-state mediation on updates", () => {
       relationships: posterRel,
     });
     expect(out).not.toHaveProperty("_statusChanged");
+  });
+});
+
+const WC_400 = new Error(
+  "Drupal 400 on PATCH /jsonapi/node/article/n1: Updating a resource object " +
+  "that has a working copy is not yet supported. See " +
+  "https://www.drupal.org/project/drupal/issues/2795279."
+);
+
+describe("#192 / #201 on entity_update", () => {
+  const publishedModerated = {
+    id: "n1", entityType: "node", bundle: "article", title: "T", status: true,
+    langcode: "en", created: null, changed: null, url: "/t",
+    fields: { moderation_state: "published" }, relationships: {}, _backend: "jsonapi",
+  };
+
+  it("injects paragraph revision meta and does not PATCH when a ref 404s", async () => {
+    backend.getEntity.mockImplementation(async ({ entityType, id }) => {
+      if (entityType === "paragraph") {
+        return id === "p-ok"
+          ? { id, entityType: "paragraph", bundle: "text", fields: { drupal_internal__revision_id: 5 } }
+          : null;
+      }
+      return publishedModerated;
+    });
+    await expect(handlers.drupal_entity_update({
+      entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111",
+      relationships: {
+        field_cards: { data: [
+          { type: "paragraph--text", id: "p-ok" },
+          { type: "paragraph--text", id: "p-missing" },
+        ] },
+      },
+    })).rejects.toThrow(/p-missing/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("probe 400 skips the real updateEntity; dryRun fails too", async () => {
+    backend.getEntity.mockResolvedValue(publishedModerated);
+    backend.rawQuery.mockRejectedValue(WC_400);
+    await expect(handlers.drupal_entity_update({
+      entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111",
+      attributes: { title: "T" },
+    })).rejects.toThrow(/not the latest revision/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+
+    await expect(handlers.drupal_entity_update({
+      entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111",
+      attributes: { title: "T" }, dryRun: true,
+    })).rejects.toThrow(/#201/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("entity_create for a paragraph GETs the vid and fails if still missing", async () => {
+    backend.createEntity.mockResolvedValue({
+      ...ent, fields: { field_body: "x", drupal_internal__revision_id: undefined },
+    });
+    backend.getEntity.mockResolvedValue({
+      ...ent, fields: { field_body: "x", drupal_internal__revision_id: 8 },
+    });
+    const out = await handlers.drupal_entity_create({
+      entityType: "paragraph", bundle: "text", attributes: { field_body: "x" },
+    });
+    expect(out.relationshipData).toEqual({
+      type: "paragraph--text", id: "p1", meta: { target_revision_id: 8 },
+    });
+
+    backend.createEntity.mockResolvedValue({
+      ...ent, fields: { field_body: "x", drupal_internal__revision_id: undefined },
+    });
+    backend.getEntity.mockResolvedValue({ ...ent, fields: { field_body: "x" } });
+    await expect(handlers.drupal_entity_create({
+      entityType: "paragraph", bundle: "text", attributes: { field_body: "x" },
+    })).rejects.toThrow(/revision_id/);
+  });
+
+  it("entity_get for paragraph keeps drupal_internal__revision_id", async () => {
+    backend.getEntity.mockResolvedValue({
+      ...ent, fields: { ...ent.fields, drupal_internal__revision_id: 4 },
+    });
+    const out = await handlers.drupal_entity_get({ entityType: "paragraph", bundle: "text", id: "p1" });
+    expect(out.fields.drupal_internal__revision_id).toBe(4);
   });
 });

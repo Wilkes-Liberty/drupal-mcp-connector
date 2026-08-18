@@ -1,12 +1,12 @@
 ---
-description: "Create many entities of a single type + bundle in one call. Permission is checked once; each item is created independently, so the batch continues past individual failures (partial success). Returns per-item { index, success, id | error } and a summary { created, failed }. Writes default to unpublished/draft."
+description: "Create many entities of a single type + bundle in one call. Permission is checked once; each item is created independently, so the batch continues past individual failures (partial success). Returns per-item { index, success, id | error } and a summary { created, failed }. Paragraph items also return relationshipData with meta.target_revision_id for a later host attach. Writes default to unpublished/draft."
 argument-hint: "<entityType> <bundle> <items> [site]"
 allowed-tools: mcp__drupal__drupal_bulk_create
 ---
 
 Call the `mcp__drupal__drupal_bulk_create` MCP tool.
 
-Create many entities of a single type + bundle in one call. Permission is checked once; each item is created independently, so the batch continues past individual failures (partial success). Returns per-item { index, success, id | error } and a summary { created, failed }. Writes default to unpublished/draft.
+Create many entities of a single type + bundle in one call. Permission is checked once; each item is created independently, so the batch continues past individual failures (partial success). Returns per-item { index, success, id | error } and a summary { created, failed }. Paragraph items also return relationshipData with meta.target_revision_id for a later host attach. Writes default to unpublished/draft.
 
 Parse the request in `$ARGUMENTS` into this tool's parameters:
 

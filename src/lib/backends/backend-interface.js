@@ -66,7 +66,10 @@ export class Backend {
 
   /**
    * Fetch a single entity by reference.
-   * @param {{entityType: string, bundle: string, id: string}} _ref
+   * @param {{entityType: string, bundle: string, id: string, resourceVersion?: string}} _ref
+   *   `resourceVersion` is a JSON:API revision selector (`rel:working-copy`,
+   *   `rel:latest-version`, `id:<vid>`). Backends that cannot address revisions
+   *   ignore it.
    * @returns {Promise<?import("../canonical.js").CanonicalEntity>} Entity, or null when absent.
    */
   async getEntity(_ref) { return notImplemented("getEntity"); }
