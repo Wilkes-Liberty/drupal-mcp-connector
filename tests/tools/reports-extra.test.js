@@ -21,7 +21,13 @@ vi.mock("../../src/lib/security.js", async (orig) => {
   };
 });
 
+import { resolveSecurityConfig } from "../../src/lib/security.js";
 import { handlers, definitions } from "../../src/tools/reports-extra.js";
+
+const OPEN_SECURITY = {
+  globalRedactedFields: [], entityRules: {},
+  allowedEntityTypes: null, deniedEntityTypes: [],
+};
 
 function canonicalNode(over = {}) {
   return {
@@ -31,7 +37,10 @@ function canonicalNode(over = {}) {
   };
 }
 
-beforeEach(() => Object.values(backend).forEach((f) => f.mockReset()));
+beforeEach(() => {
+  Object.values(backend).forEach((f) => f.mockReset());
+  vi.mocked(resolveSecurityConfig).mockReturnValue(OPEN_SECURITY);
+});
 
 describe("reports-extra tools", () => {
   it("exports three definitions whose names match the handler keys", () => {
@@ -161,7 +170,7 @@ describe("reports-extra tools", () => {
       expect(out.findings.some((f) => f.targetId === "live")).toBe(false);
     });
 
-    it("treats a getEntity error as an unresolved (orphaned) reference", async () => {
+    it("treats a getEntity 404 as an unresolved (orphaned) reference", async () => {
       backend.listEntities.mockResolvedValue({
         entities: [
           canonicalNode({
@@ -170,10 +179,69 @@ describe("reports-extra tools", () => {
         ],
         page: { total: 1, hasNext: false }, approximate: false,
       });
-      backend.getEntity.mockRejectedValue(new Error("404"));
+      backend.getEntity.mockRejectedValue(new Error("Drupal 404 on GET /jsonapi/node/page/boom: Not Found"));
       const out = await handlers.drupal_report_orphaned_references({ type: "article" });
       expect(out.totalOrphaned).toBe(1);
+      expect(out.orphaned).toBe(1);
+      expect(out.unverifiable).toBe(0);
       expect(out.findings[0]).toMatchObject({ id: "n2", field: "field_ref", targetId: "boom" });
+    });
+
+    it("does not count a 403 as an orphan (#205)", async () => {
+      backend.listEntities.mockResolvedValue({
+        entities: [
+          canonicalNode({
+            id: "n2",
+            relationships: {
+              field_ref: { id: "secret", entityType: "node", bundle: "page" },
+            },
+          }),
+        ],
+        page: { total: 1, hasNext: false }, approximate: false,
+      });
+      backend.getEntity.mockRejectedValue(new Error("Drupal 403 on GET /jsonapi/node/page/secret: Access denied"));
+      const out = await handlers.drupal_report_orphaned_references({ type: "article" });
+      expect(out.totalOrphaned).toBe(0);
+      expect(out.orphaned).toBe(0);
+      expect(out.unverifiable).toBe(1);
+      expect(out.reason).toMatch(/denied/i);
+      expect(out.findings).toEqual([]);
+    });
+
+    it("does not report policy-denied user base fields as orphans (#205)", async () => {
+      vi.mocked(resolveSecurityConfig).mockReturnValue({
+        ...OPEN_SECURITY,
+        deniedEntityTypes: ["user"],
+      });
+      backend.listEntities.mockResolvedValue({
+        entities: [
+          canonicalNode({
+            id: "n1", title: "Keystone",
+            relationships: {
+              uid: { id: "author-1", entityType: "user", bundle: "user" },
+              revision_uid: { id: "editor-1", entityType: "user", bundle: "user" },
+              field_topic: { id: "live-term", entityType: "taxonomy_term", bundle: "tags" },
+            },
+          }),
+        ],
+        page: { total: 1, hasNext: false }, approximate: false,
+      });
+      backend.getEntity.mockImplementation(async ({ entityType, id }) => {
+        if (entityType === "user") {
+          throw new Error(`Drupal 403 on GET /jsonapi/user/user/${id}: Access denied`);
+        }
+        return canonicalNode({ id });
+      });
+
+      const out = await handlers.drupal_report_orphaned_references({ type: "article" });
+      expect(out.totalOrphaned).toBe(0);
+      expect(out.orphaned).toBe(0);
+      expect(out.unverifiable).toBe(2);
+      expect(out.reason).toBe("target entity type denied by policy");
+      expect(out.findings).toEqual([]);
+      const probedTypes = backend.getEntity.mock.calls.map((c) => c[0].entityType);
+      expect(probedTypes).not.toContain("user");
+      expect(probedTypes).toEqual(["taxonomy_term"]);
     });
 
     it("handles arrays of references and de-dupes target lookups", async () => {

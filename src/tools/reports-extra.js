@@ -12,8 +12,46 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
+import { resolveSecurityConfig, assertReadAllowed, assertEntityTypeAllowed } from "../lib/security.js";
 import { collectEntities, fieldValue } from "../lib/reports-support.js";
+
+/** Author base fields that only ever point at `user`. */
+const AUTHOR_BASE_FIELDS = new Set(["uid", "revision_uid"]);
+
+const POLICY_DENIED_REASON = "target entity type denied by policy";
+
+/**
+ * Whether connector policy forbids reading this entity type.
+ * @param {object} sec Resolved security config.
+ * @param {string} entityType Entity type machine name.
+ * @returns {boolean}
+ */
+function isEntityTypeDenied(sec, entityType) {
+  if (!entityType) return false;
+  try {
+    assertEntityTypeAllowed(sec, entityType);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Classify a getEntity failure. Only a 404 (or an unaddressable ref) is an
+ * orphan; 401/403 and policy denials are "you may not look."
+ * @param {unknown} err
+ * @returns {"missing"|"denied"|"failed"}
+ */
+function classifyTargetError(err) {
+  const msg = String(err?.message || err || "");
+  const statusMatch = msg.match(/\bDrupal (\d{3})\b/i);
+  const status = statusMatch ? Number(statusMatch[1]) : NaN;
+  if (status === 404) return "missing";
+  if (status === 401 || status === 403) return "denied";
+  if (err?.name === "SecurityError") return "denied";
+  if (/\b404\b/.test(msg) && !/\b40[13]\b/.test(msg)) return "missing";
+  return "failed";
+}
 
 /**
  * Determine whether a canonical field/relationship value counts as "empty".
@@ -161,9 +199,9 @@ async function missingField({ site: siteName, type, field, sampleSize = 100 }) {
 /**
  * Orphaned entity references: sampled entities whose entity-reference fields
  * point at targets that no longer exist. Best-effort — each distinct referenced
- * target is probed once via getEntity; a null result or a fetch error is treated
- * as an unresolved (orphaned) target. Sampling-bounded, so `approximate` is set
- * when the entity scan is capped.
+ * target is probed once via getEntity. Only a 404 / unaddressable ref is an
+ * orphan; 401/403 and connector policy denials are unverifiable (#205).
+ * Sampling-bounded, so `approximate` is set when the entity scan is capped.
  *
  * @param {object} args - { site?, type?, sampleSize? }. `type` defaults to "article".
  * @returns {Promise<object>} Orphaned-reference findings plus scan metadata.
@@ -181,40 +219,55 @@ async function orphanedReferences({ site: siteName, type, sampleSize = 50 }) {
     sampleSize
   );
 
+  const userDenied = isEntityTypeDenied(sec, "user");
+
   // Cache resolution results across all sampled entities so a target is only
   // looked up once (de-dupes both within and across entities).
-  const resolution = new Map(); // id -> boolean (true = exists)
+  const resolution = new Map(); // id -> "ok" | "missing" | "denied" | "failed"
   /**
-   * Resolve whether a referenced target exists, caching the result.
+   * Resolve a referenced target, caching the classification.
    * @param {{id: string, entityType: ?string, bundle: ?string}} ref Reference to probe.
-   * @returns {Promise<boolean>} True if the target resolves to an entity.
+   * @param {string} fieldName Host field that holds the ref.
+   * @returns {Promise<"ok"|"missing"|"denied"|"failed">}
    */
-  async function exists(ref) {
+  async function classifyRef(ref, fieldName) {
     if (resolution.has(ref.id)) return resolution.get(ref.id);
-    let ok = false;
-    try {
-      // entityType/bundle are derived from JSON:API "type"; both required to fetch.
-      if (ref.entityType && ref.bundle) {
-        const target = await backend.getEntity({ entityType: ref.entityType, bundle: ref.bundle, id: ref.id });
-        ok = Boolean(target);
-      } else {
-        // Cannot address the target without a concrete type+bundle; treat as
-        // unresolved rather than silently passing.
-        ok = false;
-      }
-    } catch {
-      ok = false;
+
+    const typeDenied = isEntityTypeDenied(sec, ref.entityType)
+      || (AUTHOR_BASE_FIELDS.has(fieldName) && userDenied);
+    if (typeDenied) {
+      resolution.set(ref.id, "denied");
+      return "denied";
     }
-    resolution.set(ref.id, ok);
-    return ok;
+
+    if (!ref.entityType || !ref.bundle) {
+      resolution.set(ref.id, "missing");
+      return "missing";
+    }
+
+    try {
+      const target = await backend.getEntity({
+        entityType: ref.entityType, bundle: ref.bundle, id: ref.id,
+      });
+      const state = target ? "ok" : "missing";
+      resolution.set(ref.id, state);
+      return state;
+    } catch (err) {
+      const state = classifyTargetError(err);
+      resolution.set(ref.id, state);
+      return state;
+    }
   }
 
   const findings = [];
+  let unverifiable = 0;
+  let deniedByPolicy = 0;
   for (const e of entities) {
     for (const [fieldName, rel] of Object.entries(e.relationships ?? {})) {
       for (const ref of refsOf(rel)) {
-        const ok = await exists(ref);
-        if (!ok) {
+        const state = await classifyRef(ref, fieldName);
+        if (state === "ok") continue;
+        if (state === "missing") {
           findings.push({
             id: e.id,
             title: e.title,
@@ -223,21 +276,31 @@ async function orphanedReferences({ site: siteName, type, sampleSize = 50 }) {
             targetEntityType: ref.entityType,
             targetBundle: ref.bundle,
           });
+          continue;
         }
+        unverifiable += 1;
+        if (state === "denied") deniedByPolicy += 1;
       }
     }
   }
 
   const approximate = entities.length >= sampleSize;
+  const orphaned = findings.length;
   return {
     contentType,
     scanned: entities.length,
     sampleSize,
     approximate,
-    totalOrphaned: findings.length,
+    orphaned,
+    unverifiable,
+    totalOrphaned: orphaned,
+    reason: deniedByPolicy > 0
+      ? POLICY_DENIED_REASON
+      : (unverifiable > 0 ? "target could not be verified" : undefined),
     note: approximate
       ? "Best-effort: reference integrity is checked over a sampling-bounded set of entities."
-      : "Best-effort: each referenced target is probed once via JSON:API.",
+      : "Best-effort: each referenced target is probed once via JSON:API. "
+        + "401/403 and policy-denied types are unverifiable, not orphans.",
     findings,
   };
 }
@@ -274,7 +337,7 @@ export const definitions = [
   },
   {
     name: "drupal_report_orphaned_references",
-    description: "Find entities whose entity-reference fields point at targets that no longer exist (orphaned references). Best-effort: samples entities and probes each distinct referenced target via JSON:API. Flags 'approximate' when sampling-bounded.",
+    description: "Find entities whose entity-reference fields point at targets that no longer exist (orphaned references). Best-effort: samples entities and probes each distinct referenced target via JSON:API. A 404 (or unaddressable ref) is an orphan; 401/403 and connector policy denials are counted as unverifiable, not missing. uid/revision_uid are skipped when the policy denies user. Flags 'approximate' when sampling-bounded.",
     inputSchema: {
       type: "object",
       properties: {

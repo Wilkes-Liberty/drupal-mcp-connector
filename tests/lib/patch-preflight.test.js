@@ -122,6 +122,50 @@ describe("preflightPatchWritable (#201)", () => {
     })).rejects.toBeInstanceOf(PatchBlockedError);
   });
 
+  it("names a visible pending draft instead of revision surgery (#201 follow-up)", async () => {
+    const backend = backendStub({
+      rawQuery: vi.fn(async () => { throw WC_400; }),
+      getEntity: vi.fn(async ({ resourceVersion }) => {
+        if (resourceVersion === "rel:working-copy") {
+          return { id: "n1", fields: { drupal_internal__vid: 2070 } };
+        }
+        return null;
+      }),
+    });
+    let caught;
+    try {
+      await preflightPatchWritable({
+        backend, entityType: "node", bundle: "solution", id: "n1",
+        existing: { fields: { moderation_state: "published" } },
+        attributes: { moderation_state: "draft" },
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(PatchBlockedError);
+    expect(caught.message).toMatch(/pending draft \(vid 2070\)/i);
+    expect(caught.message).toMatch(/Publish or discard/i);
+    expect(caught.message).not.toMatch(/revision surgery/i);
+    expect(caught.message).not.toMatch(/cannot show the blocking row/i);
+  });
+
+  it("keeps the surgery message when the working copy does not resolve (#201)", async () => {
+    const backend = backendStub({
+      rawQuery: vi.fn(async () => { throw WC_400; }),
+      getEntity: vi.fn(async () => {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }),
+    });
+    await expect(preflightPatchWritable({
+      backend, entityType: "node", bundle: "solution", id: "n1",
+      existing: { fields: { moderation_state: "published" } },
+      attributes: { moderation_state: "draft" },
+    })).rejects.toMatchObject({
+      name: "PatchBlockedError",
+      message: PATCH_BLOCKED_MESSAGE,
+    });
+  });
+
   it("treats an id-mismatch 400 as the guard having passed with no save", async () => {
     expect(isProbePassedWithoutSave(ID_MISMATCH)).toBe(true);
     const backend = backendStub();
@@ -149,6 +193,22 @@ describe("updateEntityGuarded (#201)", () => {
     const backend = backendStub({ updateEntity: vi.fn(async () => { throw WC_400; }) });
     await expect(updateEntityGuarded(backend, { entityType: "node", bundle: "a", id: "n1" }))
       .rejects.toBeInstanceOf(PatchBlockedError);
+  });
+
+  it("names a pending draft when the real write is blocked and the working copy resolves", async () => {
+    const backend = backendStub({
+      updateEntity: vi.fn(async () => { throw WC_400; }),
+      getEntity: vi.fn(async ({ resourceVersion }) => (
+        resourceVersion === "rel:working-copy"
+          ? { id: "n1", fields: { drupal_internal__vid: 42 } }
+          : null
+      )),
+    });
+    await expect(updateEntityGuarded(backend, { entityType: "node", bundle: "a", id: "n1" }))
+      .rejects.toMatchObject({
+        name: "PatchBlockedError",
+        message: expect.stringMatching(/pending draft \(vid 42\)/),
+      });
   });
 });
 

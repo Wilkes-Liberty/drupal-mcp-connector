@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Orphan-reference report no longer treats 403 / policy denial as a missing
+  target (#205).** `drupal_report_orphaned_references` used to count any
+  non-OK probe as an orphan. On a site whose policy denies `user`, every
+  `uid` / `revision_uid` became a false finding — 64 "orphans" across 32
+  healthy nodes in the report that produced this issue. Only a 404 (or an
+  unaddressable ref) is an orphan. Denied targets are a third state:
+  `unverifiable` plus `reason: "target entity type denied by policy"`.
+  Author base fields are skipped when the policy denies `user`, so the
+  auditor presets stop manufacturing corruption.
+- **PATCH-blocked message names a pending draft when one is visible
+  (#201 follow-up).** The preflight added in 2.7.1 always said the blocking
+  row was invisible and needed revision surgery. That is right for a stray
+  revision with no content_moderation working copy, and wrong for an
+  ordinary open draft — the common case, and the dangerous advice. The
+  preflight now loads `rel:working-copy`: if it resolves, the error is
+  "This node has a pending draft (vid N). Publish or discard it before a
+  canonical PATCH." Surgery is mentioned only when the working copy does
+  not resolve and the guard still fires.
+- **`drupal_governance_status` no longer reports `ok: true` without a
+  check (#208).** When the client did not set `requireGovernance`, the
+  diagnostic skipped the readiness probe and returned
+  `{ required: false, ok: true, checkedAt: null }` while the same site
+  503'd every governed request with `designated_consumer_disabled`. It
+  now always probes `GET /drupal-mcp/readiness`, sets `checked: true` and
+  `checkedAt`, and surfaces the server's reason verbatim. `ok: true` only
+  after that check. Unresolved site configs report `checked: false` and
+  omit `checkedAt`.
+
 ## [2.7.1] - 2026-08-18
 
 ### Fixed

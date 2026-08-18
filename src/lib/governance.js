@@ -162,20 +162,23 @@ export async function assertSourceGovernance(site) {
 
 /**
  * Per-site governance condition for operator diagnostics. No secrets: only
- * the site name, whether governance is required, the verdict, and the reason.
+ * the site name, whether this client requires governance, whether the
+ * readiness endpoint was probed, the verdict, and the server's reason.
+ *
+ * Always probes `GET /drupal-mcp/readiness`, even when `requireGovernance`
+ * is off — the server may still refuse governed paths (#208). Never reports
+ * `ok: true` without a check.
  *
  * @param {Array<object>} sites Resolved site configs.
- * @returns {Promise<Array<{site: string, required: boolean, ok: boolean, reason: string|null, checkedAt: number|null}>>}
+ * @returns {Promise<Array<{site: string, required: boolean, checked: boolean, ok: boolean, reason: string|null, checkedAt: number}>>}
  */
 export async function governanceStatus(sites) {
   return Promise.all(sites.map(async (site) => {
-    if (!requiresGovernance(site)) {
-      return { site: site._name, required: false, ok: true, reason: null, checkedAt: null };
-    }
     const result = await verifySourceGovernance(site);
     return {
       site: site._name,
-      required: true,
+      required: requiresGovernance(site),
+      checked: true,
       ok: result.ok,
       reason: result.reason,
       checkedAt: result.checkedAt,

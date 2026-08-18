@@ -28,8 +28,8 @@ export const PATCH_BLOCKED_CODE = "PATCH_BLOCKED";
 const WORKING_COPY_PATCH_RE = /has a working copy is not yet supported/i;
 
 /**
- * Actionable replacement for core's "has a working copy" 400.
- * Clearing the blocking row is revision surgery outside JSON:API.
+ * Actionable replacement for core's "has a working copy" 400 when no
+ * content_moderation working copy is addressable — a stray revision row.
  */
 export const PATCH_BLOCKED_MESSAGE =
   "This entity cannot be updated over JSON:API because the stored entity is not " +
@@ -39,14 +39,57 @@ export const PATCH_BLOCKED_MESSAGE =
   "See connector #201. Do not retry the same canonical PATCH.";
 
 /**
+ * Read a revision id off a working-copy body (canonical or raw-ish).
+ * @param {?object} workingCopy
+ * @returns {?number|string}
+ */
+function workingCopyVid(workingCopy) {
+  if (!workingCopy || typeof workingCopy !== "object") return null;
+  const fields = workingCopy.fields && typeof workingCopy.fields === "object"
+    ? workingCopy.fields
+    : {};
+  const attrs = workingCopy.attributes && typeof workingCopy.attributes === "object"
+    ? workingCopy.attributes
+    : {};
+  const raw = workingCopy.vid
+    ?? fields.drupal_internal__vid
+    ?? attrs.drupal_internal__vid
+    ?? workingCopy.drupal_internal__vid;
+  if (raw === undefined || raw === null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : raw;
+}
+
+/**
+ * Operator message for a core working-copy 400.
+ * A resolvable working copy is an ordinary pending draft — do not prescribe
+ * revision surgery. Surgery is only for the invisible-row case (#201 follow-up).
+ * @param {?object} [workingCopy]
+ * @returns {string}
+ */
+export function patchBlockedMessage(workingCopy) {
+  if (workingCopy) {
+    const vid = workingCopyVid(workingCopy);
+    const which = vid !== null && vid !== undefined ? ` (vid ${vid})` : "";
+    return `This node has a pending draft${which}. Publish or discard it `
+      + "before a canonical PATCH.";
+  }
+  return PATCH_BLOCKED_MESSAGE;
+}
+
+/**
  * Thrown when the core working-copy PATCH guard rejects a write (or its probe).
  */
 export class PatchBlockedError extends Error {
-  /** @param {?Error} [cause] The original Drupal 400. */
-  constructor(cause) {
-    super(PATCH_BLOCKED_MESSAGE);
+  /**
+   * @param {?Error} [cause] The original Drupal 400.
+   * @param {{workingCopy?: ?object}} [options]
+   */
+  constructor(cause, { workingCopy } = {}) {
+    super(patchBlockedMessage(workingCopy ?? null));
     this.name = "PatchBlockedError";
     this.code = PATCH_BLOCKED_CODE;
+    if (workingCopy) this.workingCopyVid = workingCopyVid(workingCopy);
     if (cause) this.cause = cause;
   }
 }
@@ -62,13 +105,36 @@ export function isWorkingCopyPatchError(err) {
 
 /**
  * Rewrite a core working-copy 400 into {@link PatchBlockedError}; otherwise
- * return the original value.
+ * return the original value. Pass `workingCopy` when the pending draft is
+ * addressable so the message does not prescribe revision surgery.
  * @param {unknown} err
+ * @param {{workingCopy?: ?object}} [options]
  * @returns {unknown}
  */
-export function rewriteWorkingCopyPatchError(err) {
+export function rewriteWorkingCopyPatchError(err, { workingCopy } = {}) {
   if (!isWorkingCopyPatchError(err)) return err;
-  return new PatchBlockedError(err instanceof Error ? err : new Error(String(err)));
+  return new PatchBlockedError(
+    err instanceof Error ? err : new Error(String(err)),
+    { workingCopy },
+  );
+}
+
+/**
+ * Load `rel:working-copy` so a blocked PATCH can name a pending draft.
+ * @param {object} backend
+ * @param {{entityType: string, bundle: string, id: string}} ref
+ * @returns {Promise<?object>}
+ */
+async function loadWorkingCopy(backend, { entityType, bundle, id }) {
+  if (typeof backend?.getEntity !== "function") return null;
+  try {
+    const wc = await backend.getEntity({
+      entityType, bundle, id, resourceVersion: "rel:working-copy",
+    });
+    return wc || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -151,7 +217,11 @@ export async function preflightPatchWritable({
     );
   } catch (err) {
     if (isWorkingCopyPatchError(err)) {
-      throw new PatchBlockedError(err instanceof Error ? err : new Error(String(err)));
+      const workingCopy = await loadWorkingCopy(backend, { entityType, bundle, id });
+      throw new PatchBlockedError(
+        err instanceof Error ? err : new Error(String(err)),
+        { workingCopy },
+      );
     }
     if (isProbePassedWithoutSave(err)) {
       return { probed: true, writable: true };
@@ -171,6 +241,8 @@ export async function updateEntityGuarded(backend, input) {
   try {
     return await backend.updateEntity(input);
   } catch (err) {
-    throw rewriteWorkingCopyPatchError(err);
+    if (!isWorkingCopyPatchError(err)) throw err;
+    const workingCopy = await loadWorkingCopy(backend, input);
+    throw rewriteWorkingCopyPatchError(err, { workingCopy });
   }
 }
