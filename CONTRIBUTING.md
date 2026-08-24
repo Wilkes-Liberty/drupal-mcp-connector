@@ -76,13 +76,15 @@ One instruction file for every agent/IDE assistant:
 | [`AGENTS.md`](AGENTS.md) | **Only** committed agent instructions (architecture, commands, security) |
 
 Do **not** add vendor-specific rule trees or duplicates
-(`.grok/`, `.cursor/rules/`, `.claude/rules/`, root `CLAUDE.md`, etc.). Personal
+(`.grok/`, `.cursor/rules/`, `.claude/`, root `CLAUDE.md`, etc.). Personal
 allowlists and machine paths stay in each tool’s home config.
 
-`.claude/commands/` is unrelated to how we *develop* this repo: it is a
-generated set of slash-command stubs so operators using Claude Code as an MCP
-*client* can call this server’s tools. Regenerate with
+`.agents/commands/` is unrelated to how we *develop* this repo: it is a
+generated set of harness-agnostic slash-command stubs so MCP *clients* can
+call this server’s tools as `/drupal-*`. Regenerate with
 `npm run generate:commands` after tool definition changes; do not hand-edit.
+To install into a client home directory (`~/.claude/commands`, `~/.grok/commands`)
+run `npm run install:commands` — never commit a vendor folder for that.
 
 ## Commit Messages
 

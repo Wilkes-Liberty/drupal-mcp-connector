@@ -4,8 +4,9 @@
  * Each tool module exports `definitions` (the MCP `{name, description, inputSchema}`
  * descriptors) and `handlers` (a name → function dispatch map). This module flattens
  * all of them into the runtime payloads consumed by the server (src/index.js) AND by
- * the offline slash-command generator (scripts/generate-commands.js), so the tool
- * list, the per-tool MCP prompts, and the `/drupal-*` command files can never drift.
+ * the offline slash-command generator (scripts/generate-commands.js →
+ * `.agents/commands/`), so the tool list, the per-tool MCP prompts, and the
+ * `/drupal-*` command files can never drift.
  *
  * Importing this module has NO side effects (unlike src/index.js, which boots the
  * transport), so generators and tests can import it freely.

@@ -71,6 +71,11 @@ claude mcp get drupal     # show one server
 claude mcp remove drupal  # remove it
 ```
 
+Bare `/drupal-*` commands: MCP prompts appear as `/mcp__drupal__…`. For the
+short form, from a connector clone run `npm run install:commands` (writes
+`~/.claude/commands`). Do not commit a `.claude/` folder to this or any
+consuming repo — see the README.
+
 For a remote endpoint instead of stdio: `claude mcp add --transport http drupal https://mcp.example.com/mcp --header "Authorization: Bearer $TOKEN"`.
 
 ### Claude Desktop (stdio)
@@ -116,6 +121,10 @@ grok mcp remove drupal    # remove it
 `✓ handshake OK` and `✓ N tools discovered`. Because Grok Build runs locally, it
 reaches Drupal over whatever network the host is on (VPN/Tailscale/localhost).
 For a remote endpoint instead: `grok mcp add drupal --url https://mcp.example.com/mcp --type http`.
+
+When this repo is the project, Grok loads `.agents/commands/` as `/drupal-*`.
+From any other directory, `npm run install:commands` copies the same stubs into
+`~/.grok/commands`.
 
 ### Grok API — Remote MCP Tools (remote HTTP)
 

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Slash-command stubs moved to `.agents/commands/` (#218).** Generated
+  `/drupal-*` files are harness-agnostic (protocol tool names, no
+  `mcp__drupal__*` `allowed-tools`). `.claude/` is no longer tracked or
+  published. `npm run install:commands` copies stubs into operator home
+  directories (`~/.claude/commands` with the Claude Code adapter,
+  `~/.grok/commands` as-is) so the bare `/drupal-*` form still works
+  without a vendor folder in this repo or in a consuming project. The npm
+  `files` list now ships `.agents/commands/` instead of `.claude/commands/`.
+
 ## [2.7.4] - 2026-08-18
 
 ### Fixed

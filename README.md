@@ -119,20 +119,27 @@ governed call to that tool. These are protocol-native, so they work everywhere t
 prompts capability is supported — the client renders them per its own convention
 (e.g. Claude Code shows `/mcp__drupal__drupal-create-node`).
 
-#### Claude Code slash commands (`/drupal-*`)
-For the literal bare `/drupal-<tool>` form in **Claude Code specifically**, the
-connector also ships generated command files under `.claude/commands/`. Because
-Claude Code project commands are per-project, copy them into your own project (or
-regenerate from the installed package):
+#### Filesystem slash commands (`/drupal-*`)
+MCP prompts (above) are the protocol-native slash surface. For the literal bare
+`/drupal-<tool>` form, the connector ships generated stubs under
+**`.agents/commands/`** — a harness-agnostic tree, not a vendor rule directory.
+Clients that scan `.agents/commands/` (including Grok Build when this repo is
+the project) pick them up automatically.
+
+Clients that only scan a vendor home path (Claude Code `~/.claude/commands`,
+Grok `~/.grok/commands`) install from that tree into the **operator home**, so
+no consuming project has to commit `.claude/` or `.grok/`:
 
 ```bash
-mkdir -p .claude/commands
-cp node_modules/drupal-mcp-connector/.claude/commands/drupal-*.md .claude/commands/
-# …or, from a clone of the connector:  npm run generate:commands
+npm run generate:commands    # refresh .agents/commands/ (from a clone)
+npm run install:commands     # copies into ~/.claude/commands and ~/.grok/commands
+# npm run install:commands -- --clients claude
+# npm run install:commands -- --home /path/to/fake-home   # tests / CI
 ```
 
-Other MCP agents don't need this step — they get the same coverage from the per-tool
-prompts above.
+From an npm install, the same files ship at
+`node_modules/drupal-mcp-connector/.agents/commands/`. Do not copy them into an
+application repo's `.claude/` or `.grok/` directory.
 
 ### Security Model
 

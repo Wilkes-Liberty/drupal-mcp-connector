@@ -20,7 +20,8 @@ npm run lint             # eslint src/
 npm run lint:fix
 npm run audit            # fail on high-severity npm advisories
 npm run check            # lint + audit (mirrors CI quality gate)
-npm run generate:commands  # regenerate client slash stubs under .claude/commands/
+npm run generate:commands  # regenerate slash stubs under .agents/commands/
+npm run install:commands   # copy stubs into ~/.claude/commands and ~/.grok/commands
 ```
 
 Before treating work as done: `npm test` and `npm run lint` must pass. Prefer
@@ -37,7 +38,7 @@ targeted tests while iterating (`npx vitest run tests/tools/nodes.test.js`).
 | `tests/` | Mirrors `src/` (e.g. `src/tools/nodes.js` → `tests/tools/nodes.test.js`) |
 | `config/config.example.json` | Documented example site config |
 | `config/config.json` | **Local only — gitignored secrets** |
-| `.claude/commands/` | Generated slash-command stubs for one MCP client (see below) |
+| `.agents/commands/` | Generated `/drupal-*` slash stubs (harness-agnostic; see below) |
 
 ## Conventions
 
@@ -80,8 +81,8 @@ targeted tests while iterating (`npx vitest run tests/tools/nodes.test.js`).
 
 | In the repo | Out of the repo |
 |-------------|-----------------|
-| **`AGENTS.md` only** for agent *development* rules | Vendor rule trees (`.grok/`, `.cursor/rules/`, `.claude/rules/`, root `CLAUDE.md`, `GEMINI.md`, …) |
-| Generated client stubs under `.claude/commands/` (product ergonomics for operators using one popular MCP client; not project rules) | Personal permission allowlists, host paths, API keys, model prefs |
+| **`AGENTS.md` only** for agent *development* rules | Vendor rule trees (`.grok/`, `.cursor/rules/`, `.claude/`, root `CLAUDE.md`, `GEMINI.md`, …) |
+| Generated client stubs under `.agents/commands/` (product ergonomics, not project rules). `npm run install:commands` writes vendor-home copies | Personal permission allowlists, host paths, API keys, model prefs |
 
 Personal or vendor-specific agent config belongs in the operator’s home
 directory for that tool — never committed here. Do not add a second instruction
