@@ -11,7 +11,8 @@
   "files": [
     "src/",
     "scripts/generate-commands.js",
-    ".claude/commands/",
+    "scripts/install-commands.js",
+    ".agents/commands/",
     "config/config.example.json",
     "README.md",
     "CHANGELOG.md",
@@ -50,6 +51,7 @@
     "start:https": "MCP_TRANSPORT=https node src/index.js",
     "start:dev": "MCP_TRANSPORT=https MCP_ALLOW_HTTP=1 MCP_PORT=3443 node src/index.js",
     "generate:commands": "node scripts/generate-commands.js",
+    "install:commands": "node scripts/install-commands.js",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",

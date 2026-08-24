@@ -1,22 +1,21 @@
 #!/usr/bin/env node
 /**
- * generate-commands.js — generate Claude Code slash commands for every tool.
+ * generate-commands.js — generate harness-agnostic slash-command stubs for every tool.
  *
- * Writes one `.claude/commands/drupal-<tool>.md` per Drupal tool, giving the
- * literal `/drupal-<tool>` slash command in Claude Code (e.g.
- * `/drupal-create-node`). Each file is scoped via `allowed-tools` to only its own
- * `mcp__drupal__<tool>` and instructs the model to parse `$ARGUMENTS` into the
- * tool's parameters before making a single call.
+ * Writes one `.agents/commands/drupal-<tool>.md` per Drupal tool. The files use
+ * protocol tool names (`drupal_list_nodes`) so any MCP client can consume them;
+ * they are not a vendor rule tree. Clients that scan `.agents/commands/` (Grok
+ * Build, when this repo is the project) pick them up as `/drupal-<tool>`.
  *
- * These files are *client ergonomics* for operators using Claude Code as an MCP
- * client against this server — not provider-specific project rules. Development
- * instructions for any agent live only in AGENTS.md.
+ * Clients that only scan a vendor home directory (Claude Code `~/.claude/commands`,
+ * Grok `~/.grok/commands`) get the same files via `npm run install:commands`.
  *
  * Driven from the same tool definitions as the server (src/tools/index.js), so the
  * command set never drifts from the tools. Run: `npm run generate:commands`.
  *
- * Exports `renderCommandMarkdown`, `commandFileName`, and `generate` for tests; the
- * file-writing side effect runs only when executed directly.
+ * Exports `renderCommandMarkdown`, `renderClaudeCommandMarkdown`, `commandFileName`,
+ * `COMMANDS_DIR`, and `generate` for tests; the file-writing side effect runs only
+ * when executed directly.
  */
 
 import { mkdirSync, readdirSync, rmSync, writeFileSync, realpathSync } from "fs";
@@ -26,7 +25,8 @@ import { allDefinitions } from "../src/tools/index.js";
 import { paramList, toolNameToPromptName } from "../src/lib/tool-prompts.js";
 import { isDestructiveTool } from "../src/lib/operations.js";
 
-const COMMANDS_DIR = new URL("../.claude/commands/", import.meta.url);
+/** Canonical, harness-agnostic command tree shipped in the repo and the npm package. */
+export const COMMANDS_DIR = new URL("../.agents/commands/", import.meta.url);
 
 /** Map a tool definition to its command filename: `drupal_create_node` → `drupal-create-node.md`. */
 export function commandFileName(def) {
@@ -49,19 +49,26 @@ function argumentHint(params) {
  * Render the markdown for one tool's slash command.
  *
  * @param {object} def - The tool definition ({name, description, inputSchema}).
+ * @param {object} [options]
+ * @param {string} [options.allowedTools] - Optional Claude Code `allowed-tools` value.
+ * @param {string} [options.argumentsPhrase="the arguments supplied with this command"]
+ *   Phrase used in the parse-arguments instruction. Claude Code install rewrites
+ *   this to `` `$ARGUMENTS` `` because that client substitutes the placeholder.
  * @returns {string} File contents (ends with a trailing newline).
  */
-export function renderCommandMarkdown(def) {
+export function renderCommandMarkdown(def, options = {}) {
   const params   = paramList(def.inputSchema);
   const required = params.filter((p) => p.required);
   const optional = params.filter((p) => !p.required);
   const line = (p) => `- \`${p.name}\` (${p.hint})${p.description ? `: ${p.description}` : ""}`;
+  const argumentsPhrase = options.argumentsPhrase ?? "the arguments supplied with this command";
 
   const frontmatter = ["---", `description: ${yamlString(def.description)}`];
   if (params.length) frontmatter.push(`argument-hint: ${yamlString(argumentHint(params))}`);
-  frontmatter.push(`allowed-tools: mcp__drupal__${def.name}`, "---");
+  if (options.allowedTools) frontmatter.push(`allowed-tools: ${options.allowedTools}`);
+  frontmatter.push("---");
 
-  const body = [`Call the \`mcp__drupal__${def.name}\` MCP tool.`, "", def.description];
+  const body = [`Call the MCP tool \`${def.name}\`.`, "", def.description];
 
   if (isDestructiveTool(def.name)) {
     body.push("", "> ⚠ **Destructive** — this permanently changes or deletes data. Confirm with the user before calling.");
@@ -69,9 +76,9 @@ export function renderCommandMarkdown(def) {
 
   body.push("");
   if (params.length === 0) {
-    body.push("This tool takes no arguments — call it directly (ignore `$ARGUMENTS`).");
+    body.push("This tool takes no arguments — call it directly.");
   } else {
-    body.push("Parse the request in `$ARGUMENTS` into this tool's parameters:", "");
+    body.push(`Parse ${argumentsPhrase} into this tool's parameters:`, "");
     if (required.length) {
       body.push("**Required:**");
       required.forEach((p) => body.push(line(p)));
@@ -83,13 +90,27 @@ export function renderCommandMarkdown(def) {
       body.push("");
     }
     body.push(
-      "If a required parameter is missing from `$ARGUMENTS`, ask before calling — do not " +
-      "invent values. Coerce each value to its JSON type (booleans → true/false, numbers → " +
-      "numeric, object/array → parse JSON), then make the single tool call and summarize the result."
+      "If a required parameter is missing, ask before calling — do not invent values. " +
+      "Coerce each value to its JSON type (booleans → true/false, numbers → numeric, " +
+      "object/array → parse JSON), then make the single tool call and summarize the result."
     );
   }
 
   return `${frontmatter.join("\n")}\n\n${body.join("\n")}\n`;
+}
+
+/**
+ * Claude Code adapter: same stub plus `allowed-tools` scoped to that client's
+ * MCP tool name, and `$ARGUMENTS` so typed `/drupal-*` args are not dropped.
+ *
+ * @param {object} def - The tool definition.
+ * @returns {string} File contents.
+ */
+export function renderClaudeCommandMarkdown(def) {
+  return renderCommandMarkdown(def, {
+    allowedTools: `mcp__drupal__${def.name}`,
+    argumentsPhrase: "`$ARGUMENTS`",
+  });
 }
 
 /**
@@ -118,5 +139,5 @@ const invokedDirectly =
   process.argv[1] && pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url;
 if (invokedDirectly) {
   const written = generate();
-  console.error(`[generate-commands] wrote ${written.length} command files to .claude/commands/`);
+  console.error(`[generate-commands] wrote ${written.length} command files to .agents/commands/`);
 }
