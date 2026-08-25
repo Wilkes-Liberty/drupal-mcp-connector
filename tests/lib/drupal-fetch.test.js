@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { writeFileSync, mkdirSync, rmSync } from "fs";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 vi.mock("node-fetch", () => ({ default: vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) })) }));
 import fetch from "node-fetch";
@@ -134,21 +135,25 @@ describe("drupalFetch northbound data-flow (#179)", () => {
   });
 
   it("rewrites an upload-path source denial without leaking the body", async () => {
-    const dir = join(process.cwd(), ".tmp-upload-budget");
-    const file = join(dir, "ok.png");
-    mkdirSync(dir, { recursive: true });
+    const file = join(tmpdir(), "mcp-connector-upload-budget.png");
     writeFileSync(file, "x");
-    afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
-    vi.mocked(fetch).mockResolvedValue({
-      ok: false,
-      status: 429,
-      text: async () => JSON.stringify({
-        errors: [{ code: REASON_READ, detail: "restricted-body leaked" }],
-      }),
-    });
-    await expect(runWithDataFlow(flow(), () =>
-      drupalUploadFile({ _name: "t", baseUrl: "https://x" }, "media", "image", "field_media_image", file))).rejects.toMatchObject({
-      reason: REASON_READ,
-    });
+    const previousRoot = process.env.MCP_UPLOAD_ROOT;
+    process.env.MCP_UPLOAD_ROOT = tmpdir();
+    try {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 429,
+        text: async () => JSON.stringify({
+          errors: [{ code: REASON_READ, detail: "restricted-body leaked" }],
+        }),
+      });
+      await expect(runWithDataFlow(flow(), () =>
+        drupalUploadFile({ _name: "t", baseUrl: "https://x" }, "media", "image", "field_media_image", file))).rejects.toMatchObject({
+        reason: REASON_READ,
+      });
+    } finally {
+      if (previousRoot === undefined) delete process.env.MCP_UPLOAD_ROOT;
+      else process.env.MCP_UPLOAD_ROOT = previousRoot;
+    }
   });
 });
