@@ -4,6 +4,7 @@ const backend = {
   listEntities: vi.fn(),
   getEntity: vi.fn(),
   getPathInfo: vi.fn(),
+  getEntitySchema: vi.fn(),
   createEntity: vi.fn(),
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
@@ -11,6 +12,16 @@ const backend = {
   resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
   getFieldDefinition: vi.fn(),
 };
+
+function schemaWithBody(type, over = {}) {
+  return {
+    entityType: "node",
+    bundle: "article",
+    attributes: { title: "string", body: type },
+    relationships: {},
+    ...over,
+  };
+}
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 vi.mock("../../src/lib/config.js", () => ({
   getSiteConfig: vi.fn((n) => ({ _name: n || "d", baseUrl: "https://x", security: {} })),
@@ -51,6 +62,9 @@ beforeEach(() => {
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
   // Unknown allowed_formats keeps the historical default chain (full_html).
   backend.getFieldDefinition.mockResolvedValue(null);
+  // Existing summary tests assume a core text_with_summary body. #163 cases
+  // that need a different storage shape override this per test.
+  backend.getEntitySchema.mockResolvedValue(schemaWithBody("text_with_summary"));
 });
 
 /** Authoritative Field API definition returned by the backend mock. */
@@ -353,6 +367,67 @@ describe("body text format and summary handling", () => {
     await handlers.drupal_update_node({ type: "article", id: "n1", body: "<p>y</p>", summary: "" });
     const arg = backend.updateEntity.mock.calls[0][0];
     expect(arg.attributes.body.summary).toBe("");
+  });
+});
+
+describe("#163 summary is refused when body has no summary property", () => {
+  it("create_node refuses summary against a text_formatted body and does not write", async () => {
+    backend.getEntitySchema.mockResolvedValue(schemaWithBody("text_formatted"));
+    await expect(handlers.drupal_create_node({
+      type: "article", title: "T", body: "<p>x</p>", summary: "teaser",
+    })).rejects.toThrow(/no summary property/i);
+    expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("update_node refuses summary against a text_formatted body and does not write", async () => {
+    backend.getEntitySchema.mockResolvedValue(schemaWithBody("text_formatted"));
+    await expect(handlers.drupal_update_node({
+      type: "article", id: "n1", body: "<p>y</p>", summary: "teaser",
+    })).rejects.toThrow(/no summary property/i);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("create_node refuses summary when the body schema cannot be determined", async () => {
+    backend.getEntitySchema.mockResolvedValue({
+      entityType: "node",
+      bundle: "article",
+      note: "No entities exist yet — schema unavailable.",
+      attributes: {},
+      relationships: {},
+    });
+    await expect(handlers.drupal_create_node({
+      type: "article", title: "T", body: "<p>x</p>", summary: "teaser",
+    })).rejects.toThrow(/no summary property|could not be determined/i);
+    expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("create_node dryRun refuses summary against a text_formatted body", async () => {
+    backend.getEntitySchema.mockResolvedValue(schemaWithBody("text_formatted"));
+    await expect(handlers.drupal_create_node({
+      type: "article", title: "T", body: "<p>x</p>", summary: "teaser", dryRun: true,
+    })).rejects.toThrow(/no summary property/i);
+  });
+
+  it("update_node dryRun refuses summary against a text_formatted body", async () => {
+    backend.getEntitySchema.mockResolvedValue(schemaWithBody("text_formatted"));
+    await expect(handlers.drupal_update_node({
+      type: "article", id: "n1", body: "<p>y</p>", summary: "teaser", dryRun: true,
+    })).rejects.toThrow(/no summary property/i);
+  });
+
+  it("create_node still writes summary on text_with_summary and flags deprecation", async () => {
+    const out = await handlers.drupal_create_node({
+      type: "article", title: "T", body: "<p>x</p>", summary: "teaser",
+    });
+    expect(backend.createEntity.mock.calls[0][0].attributes.body.summary).toBe("teaser");
+    expect(out._warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "summary_parameter_deprecated" }),
+    ]));
+  });
+
+  it("create_node without summary does not introspect the schema", async () => {
+    await handlers.drupal_create_node({ type: "article", title: "T", body: "<p>x</p>" });
+    expect(backend.getEntitySchema).not.toHaveBeenCalled();
   });
 });
 

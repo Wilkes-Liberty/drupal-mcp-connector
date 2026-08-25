@@ -107,6 +107,12 @@ The `filter` object accepts raw JSON:API filter parameters for advanced filterin
 }
 ```
 
+`summary` writes `body.summary` only when the sampled body field is
+`text_with_summary`. A `text_long` / `text_formatted` body (or an undetermined
+schema) is refused — set the site's dedicated deck/summary field via `fields`
+instead (#163). A successful `summary` write includes `_warnings` with
+`summary_parameter_deprecated`.
+
 ### Formatted-text payloads
 
 Body and other formatted fields (`text`, `text_long`, `text_with_summary`) are

@@ -16,7 +16,7 @@ Parse the arguments supplied with this command into this tool's parameters:
 **Optional:**
 - `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
 - `body` (string): Body field HTML
-- `summary` (string): Body summary/teaser — writes the `summary` property of the body field (core `text_with_summary`). Many headless sites instead use a dedicated summary/deck field for teasers and meta descriptions; on those, set that field in `fields` — a value written here will be stored but may never be rendered.
+- `summary` (string): Body summary/teaser — writes body.summary on core text_with_summary only. Refused when the sampled body field has no summary property (text_long / text_formatted) or the schema cannot be determined. Prefer the site's dedicated deck/summary field via `fields`.
 - `format` (string): Text format machine name for the body, e.g. 'basic_html'. When the body field's allowed_formats lists exactly one format, that is the default. A caller format outside that list is refused before write. When allowed_formats cannot be resolved, defaults to the site config's `defaultTextFormat`, then 'full_html'.
 - `status` (boolean (true/false)): Published flag for NON-moderated types. true to publish immediately. Ignored if moderationState is set; on a moderated type it is dropped automatically.
 - `moderationState` (string): Moderation state for content_moderation types, e.g. 'draft' or 'published'. Takes precedence over status.
