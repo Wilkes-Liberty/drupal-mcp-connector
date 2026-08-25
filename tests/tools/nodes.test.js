@@ -565,11 +565,15 @@ describe("#192 ERR attach, #169 written revision, #201 preflight", () => {
 
 describe("#166 iterative working-copy PATCH", () => {
   const live = () => canonicalNode({
+    title: "Published",
     status: true,
+    url: "/published",
     fields: { moderation_state: "published", drupal_internal__vid: 1500, body: { value: "B" } },
   });
   const draft = (vid = 1510) => canonicalNode({
+    title: "CTA pass",
     status: false,
+    url: "/draft-alias",
     fields: { moderation_state: "draft", drupal_internal__vid: vid, body: { value: "B" } },
   });
 
@@ -608,6 +612,9 @@ describe("#166 iterative working-copy PATCH", () => {
     expect(backend.createEntity).not.toHaveBeenCalled();
     expect(backend.updateEntity).toHaveBeenCalledTimes(1);
     expect(backend.updateEntity.mock.calls[0][0].resourceVersion).toBe("rel:working-copy");
+    expect(out.title).toBe("CTA pass");
+    expect(out.status).toBe(false);
+    expect(out.url).toBe("/draft-alias");
     expect(out._revisions).toEqual({ live: 1500, working: 1510 });
   });
 

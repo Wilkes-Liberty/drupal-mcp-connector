@@ -43,6 +43,7 @@ export function attachRevisionPair(entity, { live, working }) {
   if (!entity || live === null || live === undefined || working === null || working === undefined) {
     return entity;
   }
+  if (String(live) === String(working)) return entity;
   return { ...entity, _revisions: { live, working } };
 }
 
@@ -75,7 +76,6 @@ export async function attachWrittenRevisionPair({
       workingVid = null;
     }
   }
-  if (workingVid === null) workingVid = entityRevisionId(entity);
   return attachRevisionPair(entity, { live: liveVid, working: workingVid });
 }
 
@@ -88,15 +88,23 @@ export async function attachWrittenRevisionPair({
  * @param {boolean} args.relationshipsSent
  * @param {?object} [args.patchResult] Canonicalised PATCH response body.
  * @param {boolean} [args.preferCanonical] When no relationships were sent,
- *   re-GET the canonical resource (nodes do this for the persisted alias).
+ *   re-GET the written resource (nodes do this for the persisted alias).
+ * @param {?string} [args.resourceVersion] JSON:API revision selector used
+ *   for the write (e.g. `rel:working-copy`). PreferCanonical re-reads this
+ *   resource instead of the default revision so a draft PATCH is not
+ *   replaced by the live body.
  * @returns {Promise<object>} Entity to return, with `_revision` when relevant.
  */
 export async function readWrittenRevision({
   backend, entityType, bundle, id, relationshipsSent, patchResult = null, preferCanonical = false,
+  resourceVersion,
 }) {
   if (!relationshipsSent) {
     if (preferCanonical && typeof backend.getEntity === "function") {
-      const fresh = await backend.getEntity({ entityType, bundle, id }).catch(() => null);
+      const fresh = await backend.getEntity({
+        entityType, bundle, id,
+        ...(resourceVersion ? { resourceVersion } : {}),
+      }).catch(() => null);
       return fresh ?? patchResult ?? { id };
     }
     return patchResult ?? { id };

@@ -172,7 +172,7 @@ export async function resolveWorkingCopyPatchTarget(backend, { entityType, bundl
   const workingCopy = await loadWorkingCopy(backend, { entityType, bundle, id });
   let liveVid = entityRevisionId(existing);
   if (workingCopy && (liveVid === null || liveVid === undefined) && typeof backend?.getEntity === "function") {
-    const live = existing ?? await backend.getEntity({ entityType, bundle, id }).catch(() => null);
+    const live = await backend.getEntity({ entityType, bundle, id }).catch(() => null);
     liveVid = entityRevisionId(live);
   }
   if (!workingCopy) {
@@ -304,7 +304,7 @@ export async function prepareGuardedPatch(backend, {
 }) {
   const target = shouldPreflightPatch({ existing, attributes })
     ? await resolveWorkingCopyPatchTarget(backend, { entityType, bundle, id, existing })
-    : { resourceVersion: undefined, workingCopy: null, liveVid: entityRevisionId(existing), workingVid: null };
+    : { resourceVersion: undefined, workingCopy: null, liveVid: null, workingVid: null };
   await preflightPatchWritable({
     backend, entityType, bundle, id, existing, attributes,
     resourceVersion: target.resourceVersion,

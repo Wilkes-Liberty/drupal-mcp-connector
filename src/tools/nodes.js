@@ -380,6 +380,7 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
     relationshipsSent: relationshipsWereSent(resolvedRelationships),
     patchResult: patched,
     preferCanonical: true,
+    resourceVersion: patchTarget.resourceVersion,
   });
   const withRevs = await attachWrittenRevisionPair({
     backend, entityType: "node", bundle: type, id, entity: fresh, liveVid: patchTarget.liveVid,

@@ -9,11 +9,17 @@ import {
   rewriteWorkingCopyPatchError,
   shouldPreflightPatch,
   preflightPatchWritable,
+  prepareGuardedPatch,
+  resolveWorkingCopyPatchTarget,
   updateEntityGuarded,
   isProbePassedWithoutSave,
   PATCH_PROBE_MISMATCH_ID,
 } from "../../src/lib/patch-preflight.js";
-import { readWrittenRevision } from "../../src/lib/write-revision.js";
+import {
+  attachRevisionPair,
+  attachWrittenRevisionPair,
+  readWrittenRevision,
+} from "../../src/lib/write-revision.js";
 
 const WC_400 = new Error(
   "Drupal 400 on PATCH /jsonapi/node/solution/n1: Updating a resource object " +
@@ -295,5 +301,88 @@ describe("readWrittenRevision (#169)", () => {
     });
     expect(out.url).toBe("/kept");
     expect(out._revision).toBeUndefined();
+  });
+
+  it("re-reads rel:working-copy after a draft-targeted write, not the live body", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => (
+        resourceVersion === "rel:working-copy"
+          ? { id: "n1", title: "Draft title", url: "/draft" }
+          : { id: "n1", title: "Live title", url: "/live" }
+      )),
+    });
+    const out = await readWrittenRevision({
+      backend, entityType: "node", bundle: "article", id: "n1",
+      relationshipsSent: false,
+      patchResult: { id: "n1", title: "Draft title", url: null },
+      preferCanonical: true,
+      resourceVersion: "rel:working-copy",
+    });
+    expect(out.title).toBe("Draft title");
+    expect(out.url).toBe("/draft");
+    expect(backend.getEntity).toHaveBeenCalledWith({
+      entityType: "node", bundle: "article", id: "n1",
+      resourceVersion: "rel:working-copy",
+    });
+  });
+});
+
+describe("attachRevisionPair (#166)", () => {
+  it("attaches only when live and working vids are both present and distinct", () => {
+    expect(attachRevisionPair({ id: "n1" }, { live: 10, working: 11 }))
+      .toEqual({ id: "n1", _revisions: { live: 10, working: 11 } });
+    const entity = { id: "n1" };
+    expect(attachRevisionPair(entity, { live: 10, working: 10 })).toBe(entity);
+    expect(attachRevisionPair(entity, { live: 10, working: null })).toBe(entity);
+  });
+});
+
+describe("attachWrittenRevisionPair (#166)", () => {
+  it("does not invent a working vid from the write body when the alias cannot be read", async () => {
+    const entity = { id: "n1", fields: { drupal_internal__vid: 10 } };
+    const backend = backendStub({
+      getEntity: vi.fn(async () => { throw new Error("no working copy"); }),
+    });
+    const out = await attachWrittenRevisionPair({
+      backend, entityType: "node", bundle: "a", id: "n1", entity, liveVid: 10,
+    });
+    expect(out._revisions).toBeUndefined();
+  });
+});
+
+describe("prepareGuardedPatch (#166)", () => {
+  it("does not report a live vid when the PATCH probe is skipped", async () => {
+    const backend = backendStub();
+    const out = await prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "page", id: "n1",
+      existing: { fields: { body: "x", drupal_internal__vid: 4 } },
+      attributes: { title: "T" },
+    });
+    expect(out.liveVid).toBeNull();
+    expect(out.workingVid).toBeNull();
+    expect(out.resourceVersion).toBeUndefined();
+  });
+});
+
+describe("resolveWorkingCopyPatchTarget (#166)", () => {
+  it("fetches the canonical entity when existing has no readable vid", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => {
+        if (resourceVersion === "rel:working-copy") {
+          return { id: "n1", fields: { drupal_internal__vid: 20 } };
+        }
+        return { id: "n1", fields: { drupal_internal__vid: 10 } };
+      }),
+    });
+    const out = await resolveWorkingCopyPatchTarget(backend, {
+      entityType: "node", bundle: "article", id: "n1",
+      existing: { id: "n1", title: "T" },
+    });
+    expect(out.liveVid).toBe(10);
+    expect(out.workingVid).toBe(20);
+    expect(out.resourceVersion).toBe("rel:working-copy");
+    expect(backend.getEntity).toHaveBeenCalledWith({
+      entityType: "node", bundle: "article", id: "n1",
+    });
   });
 });
