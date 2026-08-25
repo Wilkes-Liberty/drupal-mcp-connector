@@ -18,6 +18,7 @@ import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA } fro
 import { resolveErrRelationships, relationshipsWereSent } from "../lib/err-relationships.js";
 import { readWrittenRevision } from "../lib/write-revision.js";
 import { preflightPatchWritable, updateEntityGuarded } from "../lib/patch-preflight.js";
+import { assertBodySummaryWritable, attachSummaryDeprecation } from "../lib/body-summary.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 
 /** Fallback language for an alias when the node exposes none. */
@@ -273,8 +274,12 @@ async function createNode({ site: siteName, type, title, body, summary, format, 
   if (bodyAttr) attributes.body = bodyAttr;
   assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
+  const summaryWrite = await assertBodySummaryWritable(backend, type, summary);
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
-  if (dryRun) return { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes, relationships: resolvedRelationships };
+  if (dryRun) {
+    const preview = { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes, relationships: resolvedRelationships };
+    return summaryWrite.deprecated && bodyAttr ? attachSummaryDeprecation(preview) : preview;
+  }
   // Alias handling: an explicit `path.alias` is set as a manual alias; otherwise
   // `path` is omitted so pathauto generates the alias (DEV-116).
   const { pathAttr } = await resolvePathWrite({ backend, type, id: null, providedPath: attributes.path, isCreate: true });
@@ -284,7 +289,8 @@ async function createNode({ site: siteName, type, title, body, summary, format, 
   // Honest response: re-read so the persisted alias (explicit or pathauto-generated)
   // is reflected rather than the pre-alias write response.
   const fresh = await backend.getEntity({ entityType: "node", bundle: type, id: created.id }).catch(() => null);
-  return shapeWriteResponse(fresh ?? created, returning);
+  const shaped = shapeWriteResponse(fresh ?? created, returning);
+  return summaryWrite.deprecated && bodyAttr ? attachSummaryDeprecation(shaped) : shaped;
 }
 
 /**
@@ -316,6 +322,7 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", "node", type);
   const backend = await resolveBackend(site);
+  const summaryWrite = await assertBodySummaryWritable(backend, type, summary);
   let attributes = { ...fields };
   if (title !== undefined) attributes.title = title;
   if (moderationState !== undefined) attributes.moderation_state = moderationState;
@@ -347,10 +354,11 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
     backend, entityType: "node", bundle: type, id, existing, attributes,
   });
   if (dryRun) {
-    return {
+    const preview = {
       dryRun: true, operation: "update", entityType: "node", bundle: type, id,
       attributes, relationships: resolvedRelationships,
     };
+    return summaryWrite.deprecated && bodyAttr ? attachSummaryDeprecation(preview) : preview;
   }
   // Alias handling (DEV-116): an explicit `path.alias` is set in place by
   // round-tripping the existing alias's pid (no duplicate); a path-less update
@@ -374,8 +382,10 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   // #171: an unrequested published-state flip in the persisted node is
   // reported via _statusChanged rather than returned as a clean success.
   const flagged = flagUnrequestedStatusChange(fresh, existing, attributes);
-  if (flagged && redirectResult) return shapeWriteResponse({ ...flagged, _redirect: redirectResult }, returning);
-  return shapeWriteResponse(flagged ?? { id }, returning);
+  const shaped = flagged && redirectResult
+    ? shapeWriteResponse({ ...flagged, _redirect: redirectResult }, returning)
+    : shapeWriteResponse(flagged ?? { id }, returning);
+  return summaryWrite.deprecated && bodyAttr ? attachSummaryDeprecation(shaped) : shaped;
 }
 
 /**
@@ -452,7 +462,7 @@ export const definitions = [
         type:    { type: "string", description: "Content type machine name" },
         title:   { type: "string" },
         body:    { type: "string", description: "Body field HTML" },
-        summary: { type: "string", description: "Body summary/teaser — writes the `summary` property of the body field (core `text_with_summary`). Many headless sites instead use a dedicated summary/deck field for teasers and meta descriptions; on those, set that field in `fields` — a value written here will be stored but may never be rendered." },
+        summary: { type: "string", description: "Body summary/teaser — writes body.summary on core text_with_summary only. Refused when the sampled body field has no summary property (text_long / text_formatted) or the schema cannot be determined. Prefer the site's dedicated deck/summary field via `fields`." },
         format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. Defaults to the site config's `defaultTextFormat`, then 'full_html'. Set this when the site's formats do not include full_html, or to avoid writing content into a more permissive format than intended." },
         status:  { type: "boolean", default: false, description: "Published flag for NON-moderated types. true to publish immediately. Ignored if moderationState is set; on a moderated type it is dropped automatically." },
         moderationState: { type: "string", description: "Moderation state for content_moderation types, e.g. 'draft' or 'published'. Takes precedence over status." },
@@ -474,7 +484,7 @@ export const definitions = [
         id:      { type: "string", description: "Node UUID" },
         title:   { type: "string" },
         body:    { type: "string" },
-        summary: { type: "string", description: "Body summary/teaser — writes the `summary` property of the body field (core `text_with_summary`). Many headless sites instead use a dedicated summary/deck field for teasers and meta descriptions; on those, set that field in `fields` — a value written here will be stored but may never be rendered." },
+        summary: { type: "string", description: "Body summary/teaser — writes body.summary on core text_with_summary only. Refused when the sampled body field has no summary property (text_long / text_formatted) or the schema cannot be determined. Prefer the site's dedicated deck/summary field via `fields`." },
         format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. Defaults to the site config's `defaultTextFormat`, then 'full_html'. Set this when the site's formats do not include full_html, or to avoid writing content into a more permissive format than intended." },
         status:  { type: "boolean", description: "Published flag for NON-moderated types: true = publish, false = unpublish. Ignored if moderationState is set." },
         moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status. Required to keep or re-publish a live node — omitting it on a published moderated node defaults the write to 'draft'." },
