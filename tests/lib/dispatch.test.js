@@ -407,6 +407,24 @@ describe("securityMiddleware northbound data-flow (#179)", () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
+  it("does not burn a chained-action slot when source governance fails", async () => {
+    vi.mocked(fetch).mockResolvedValue(notReady());
+    vi.mocked(getSiteConfig).mockReturnValue(tightGov);
+    const handler = vi.fn(async () => ({ ok: true }));
+    const ctx = { identity: reader, sites: [tightGov], grants: null, defaultSite: "gov" };
+    await expect(
+      securityMiddleware("drupal_get_node", { site: "gov", id: "1" }, handler, ctx),
+    ).rejects.toBeInstanceOf(GovernanceError);
+    expect(handler).not.toHaveBeenCalled();
+
+    clearGovernanceCache();
+    vi.mocked(fetch).mockResolvedValue(ready());
+    await expect(
+      securityMiddleware("drupal_get_node", { site: "gov", id: "1" }, handler, ctx),
+    ).resolves.toEqual({ ok: true });
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
   it("does not consume a chained-action slot for list_sites", async () => {
     const handler = vi.fn(async () => ({ sites: ["gov"] }));
     await securityMiddleware(

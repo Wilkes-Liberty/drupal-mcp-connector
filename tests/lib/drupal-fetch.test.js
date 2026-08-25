@@ -1,7 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { writeFileSync, mkdirSync, rmSync } from "fs";
+import { join } from "path";
 vi.mock("node-fetch", () => ({ default: vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) })) }));
 import fetch from "node-fetch";
-import { drupalFetch, drupalGraphqlFetch } from "../../src/lib/drupal-fetch.js";
+import { drupalFetch, drupalGraphqlFetch, drupalUploadFile } from "../../src/lib/drupal-fetch.js";
 import { CLIENT_VERSION } from "../../src/lib/config.js";
 import { clearToken } from "../../src/lib/oauth.js";
 import {
@@ -129,5 +131,24 @@ describe("drupalFetch northbound data-flow (#179)", () => {
       expect(err.message).toBe("read_budget_exceeded (correlation corr-fetch)");
       expect(err.message).not.toContain("restricted-body");
     }
+  });
+
+  it("rewrites an upload-path source denial without leaking the body", async () => {
+    const dir = join(process.cwd(), ".tmp-upload-budget");
+    const file = join(dir, "ok.png");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, "x");
+    afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status: 429,
+      text: async () => JSON.stringify({
+        errors: [{ code: REASON_READ, detail: "restricted-body leaked" }],
+      }),
+    });
+    await expect(runWithDataFlow(flow(), () =>
+      drupalUploadFile({ _name: "t", baseUrl: "https://x" }, "media", "image", "field_media_image", file))).rejects.toMatchObject({
+      reason: REASON_READ,
+    });
   });
 });

@@ -35,6 +35,7 @@ export const SOURCE_BUDGET_REASONS = Object.freeze([
   REASON_READ,
   REASON_PAGE,
   REASON_RESPONSE_SIZE,
+  REASON_CHAINED_ACTION,
   "classification_egress_denied",
 ]);
 

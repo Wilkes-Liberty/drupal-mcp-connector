@@ -144,7 +144,7 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
 
   const site = getSiteConfig(nextArgs.site);
 
-  const invoke = async () => {
+  const assertCallAllowed = async () => {
     // Source-governance gate (#176). The diagnostic tools stay callable while
     // governance fails — they are how an operator learns which condition failed.
     if (!GOVERNANCE_DIAGNOSTIC_TOOLS.has(toolName)) {
@@ -162,12 +162,11 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
     } else if (op === "graphql" && nextArgs?.query) {
       assertGraphqlMutationAllowed(sec, nextArgs.query);
     }
-
-    return handler(nextArgs);
   };
 
   if (!resolved) {
-    return invoke();
+    await assertCallAllowed();
+    return handler(nextArgs);
   }
 
   const flow = buildDataFlowContext({
@@ -176,8 +175,13 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
     site,
   });
   return runWithDataFlow(flow, async () => {
-    consumeBudgetIfEnforced("chained_action");
-    return invoke();
+    await assertCallAllowed();
+    // Charge only after governance and policy gates pass, so an outage or a
+    // local deny cannot exhaust the window. Diagnostics do not consume.
+    if (!GOVERNANCE_DIAGNOSTIC_TOOLS.has(toolName)) {
+      consumeBudgetIfEnforced("chained_action");
+    }
+    return handler(nextArgs);
   });
 }
 

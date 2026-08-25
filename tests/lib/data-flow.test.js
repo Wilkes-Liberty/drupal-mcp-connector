@@ -14,6 +14,7 @@ import {
   principalBudgetKey,
   resetDataFlowBudgets,
   runWithDataFlow,
+  sourceBudgetDenial,
 } from "../../src/lib/data-flow.js";
 import { SecurityError } from "../../src/lib/security.js";
 
@@ -208,6 +209,21 @@ describe("consumeBudget", () => {
       expect(err).toBeInstanceOf(SecurityError);
       expect(err.reason).toBe(REASON_BUDGET_CONTEXT_MISSING);
       expect(err.correlationId).toBeTruthy();
+    }
+  });
+
+  it("remaps every documented source reason without echoing the body", () => {
+    for (const reason of [
+      REASON_READ,
+      REASON_PAGE,
+      REASON_RESPONSE_SIZE,
+      REASON_CHAINED_ACTION,
+      "classification_egress_denied",
+    ]) {
+      const err = sourceBudgetDenial(`prefix ${reason} restricted-body`, "corr-src");
+      expect(err.reason).toBe(reason);
+      expect(err.correlationId).toBe("corr-src");
+      expect(err.message).not.toContain("restricted-body");
     }
   });
 

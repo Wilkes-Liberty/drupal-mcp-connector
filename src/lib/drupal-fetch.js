@@ -191,6 +191,8 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
 
   if (!res.ok) {
     const body = await res.text();
+    const mapped = sourceBudgetDenial(body);
+    if (mapped) throw mapped;
     throw new Error(`File upload failed ${res.status}: ${body}`);
   }
 
