@@ -32,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a vendor folder in this repo or in a consuming project. The npm
   `files` list now ships `.agents/commands/` instead of `.claude/commands/`.
 
+### Fixed
+- **Node writes honor field `allowed_formats` (#168).** Create/update (including
+  `dryRun`) resolve Field API `allowed_formats` from JSON:API `field_config`
+  and, when that is unavailable, Drush `config:get`. A single allowed format
+  is the default when the caller omits `format`. A caller format outside the
+  list is refused before mutation. The historical `defaultTextFormat` /
+  `full_html` fallback applies only while the list cannot be resolved — never
+  when `full_html` is excluded by field config.
+
 ## [2.7.4] - 2026-08-18
 
 ### Fixed
