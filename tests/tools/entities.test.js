@@ -255,13 +255,13 @@ describe("#192 / #201 on entity_update", () => {
     await expect(handlers.drupal_entity_update({
       entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111",
       attributes: { title: "T" },
-    })).rejects.toThrow(/pending draft \(vid 2070\)/);
+    })).rejects.toThrow(/stale or concurrent|#166/);
     expect(backend.updateEntity).not.toHaveBeenCalled();
 
     await expect(handlers.drupal_entity_update({
       entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111",
       attributes: { title: "T" }, dryRun: true,
-    })).rejects.toThrow(/Publish or discard/);
+    })).rejects.toThrow(/stale or concurrent|#166/);
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
@@ -294,5 +294,32 @@ describe("#192 / #201 on entity_update", () => {
     });
     const out = await handlers.drupal_entity_get({ entityType: "paragraph", bundle: "text", id: "p1" });
     expect(out.fields.drupal_internal__revision_id).toBe(4);
+  });
+});
+
+describe("#166 entity_update targets an addressable working copy", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const live = {
+    id, entityType: "node", bundle: "article", title: "T", status: true,
+    langcode: "en", created: null, changed: null, url: "/t",
+    fields: { moderation_state: "published", drupal_internal__vid: 1500 },
+    relationships: {}, _backend: "jsonapi",
+  };
+  const draft = {
+    ...live, status: false,
+    fields: { moderation_state: "draft", drupal_internal__vid: 1510 },
+  };
+
+  it("PATCHes rel:working-copy and returns distinct live/working vids", async () => {
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => (
+      resourceVersion === "rel:working-copy" ? draft : live
+    ));
+    backend.updateEntity.mockResolvedValue(draft);
+    const out = await handlers.drupal_entity_update({
+      entityType: "node", bundle: "article", id, attributes: { title: "CTA" },
+    });
+    expect(backend.createEntity).not.toHaveBeenCalled();
+    expect(backend.updateEntity.mock.calls[0][0].resourceVersion).toBe("rel:working-copy");
+    expect(out._revisions).toEqual({ live: 1500, working: 1510 });
   });
 });

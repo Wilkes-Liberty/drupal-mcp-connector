@@ -1,8 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   PatchBlockedError,
+  WorkingCopyStaleError,
   PATCH_BLOCKED_CODE,
   PATCH_BLOCKED_MESSAGE,
+  PATCH_WORKING_COPY_STALE_MESSAGE,
   isWorkingCopyPatchError,
   rewriteWorkingCopyPatchError,
   shouldPreflightPatch,
@@ -122,7 +124,7 @@ describe("preflightPatchWritable (#201)", () => {
     })).rejects.toBeInstanceOf(PatchBlockedError);
   });
 
-  it("names a visible pending draft instead of revision surgery (#201 follow-up)", async () => {
+  it("does not prescribe publish-or-discard when a working copy is addressable (#166)", async () => {
     const backend = backendStub({
       rawQuery: vi.fn(async () => { throw WC_400; }),
       getEntity: vi.fn(async ({ resourceVersion }) => {
@@ -142,11 +144,10 @@ describe("preflightPatchWritable (#201)", () => {
     } catch (err) {
       caught = err;
     }
-    expect(caught).toBeInstanceOf(PatchBlockedError);
-    expect(caught.message).toMatch(/pending draft \(vid 2070\)/i);
-    expect(caught.message).toMatch(/Publish or discard/i);
+    expect(caught).toBeInstanceOf(WorkingCopyStaleError);
+    expect(caught.message).toBe(PATCH_WORKING_COPY_STALE_MESSAGE);
+    expect(caught.message).not.toMatch(/Publish or discard/i);
     expect(caught.message).not.toMatch(/revision surgery/i);
-    expect(caught.message).not.toMatch(/cannot show the blocking row/i);
   });
 
   it("keeps the surgery message when the working copy does not resolve (#201)", async () => {
@@ -186,6 +187,30 @@ describe("preflightPatchWritable (#201)", () => {
     });
     expect(out).toEqual({ probed: true, writable: true });
   });
+
+  it("probes the working-copy URL when resourceVersion is set (#166)", async () => {
+    const backend = backendStub();
+    const out = await preflightPatchWritable({
+      backend, entityType: "node", bundle: "article", id: "n1",
+      existing: { fields: { moderation_state: "published" } },
+      attributes: { title: "T", moderation_state: "draft" },
+      resourceVersion: "rel:working-copy",
+    });
+    expect(out).toEqual({ probed: true, writable: true });
+    expect(backend.rawQuery.mock.calls[0][0].path).toBe(
+      "/jsonapi/node/article/n1?resourceVersion=rel%3Aworking-copy",
+    );
+  });
+
+  it("treats a working-copy 400 on the working-copy probe as stale (#166)", async () => {
+    const backend = backendStub({ rawQuery: vi.fn(async () => { throw WC_400; }) });
+    await expect(preflightPatchWritable({
+      backend, entityType: "node", bundle: "solution", id: "n1",
+      existing: { fields: { moderation_state: "published" } },
+      attributes: { moderation_state: "draft" },
+      resourceVersion: "rel:working-copy",
+    })).rejects.toThrow(/stale or concurrent|#166/i);
+  });
 });
 
 describe("updateEntityGuarded (#201)", () => {
@@ -195,7 +220,7 @@ describe("updateEntityGuarded (#201)", () => {
       .rejects.toBeInstanceOf(PatchBlockedError);
   });
 
-  it("names a pending draft when the real write is blocked and the working copy resolves", async () => {
+  it("treats a blocked write as stale when the working copy is addressable (#166)", async () => {
     const backend = backendStub({
       updateEntity: vi.fn(async () => { throw WC_400; }),
       getEntity: vi.fn(async ({ resourceVersion }) => (
@@ -206,9 +231,19 @@ describe("updateEntityGuarded (#201)", () => {
     });
     await expect(updateEntityGuarded(backend, { entityType: "node", bundle: "a", id: "n1" }))
       .rejects.toMatchObject({
-        name: "PatchBlockedError",
-        message: expect.stringMatching(/pending draft \(vid 42\)/),
+        name: "WorkingCopyStaleError",
+        message: PATCH_WORKING_COPY_STALE_MESSAGE,
       });
+  });
+
+  it("treats a working-copy-targeted write 400 as stale and does not retry canonical (#166)", async () => {
+    const backend = backendStub({
+      updateEntity: vi.fn(async () => { throw WC_400; }),
+    });
+    await expect(updateEntityGuarded(backend, {
+      entityType: "node", bundle: "a", id: "n1", resourceVersion: "rel:working-copy",
+    })).rejects.toBeInstanceOf(WorkingCopyStaleError);
+    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
   });
 });
 

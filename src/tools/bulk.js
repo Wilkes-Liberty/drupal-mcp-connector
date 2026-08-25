@@ -19,7 +19,7 @@ import {
   resolveErrRelationships, embedParagraphRef,
   resolveParagraphRevisionId, missingParagraphRevisionError,
 } from "../lib/err-relationships.js";
-import { preflightPatchWritable, updateEntityGuarded } from "../lib/patch-preflight.js";
+import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
 
 /**
  * Normalize an unknown thrown value into a human-readable message.
@@ -118,13 +118,14 @@ async function bulkUpdate({ site: siteName, entityType, bundle, items = [] }) {
       });
       assertPublishAllowed(sec, attributes);
       const resolvedRelationships = await resolveErrRelationships(backend, item.relationships ?? {});
-      await preflightPatchWritable({
-        backend, entityType, bundle, id: item.id, existing, attributes,
+      const patchTarget = await prepareGuardedPatch(backend, {
+        entityType, bundle, id: item.id, existing, attributes,
       });
       const entity = await updateEntityGuarded(backend, {
         entityType, bundle, id: item.id,
         attributes,
         relationships: resolvedRelationships,
+        ...(patchTarget.resourceVersion ? { resourceVersion: patchTarget.resourceVersion } : {}),
       });
       updated += 1;
       results.push({ index, success: true, id: entity?.id ?? item.id });

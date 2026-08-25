@@ -59,7 +59,7 @@ Tools for creating, reading, updating, and deleting Drupal content nodes. Reads 
 | `drupal_list_nodes` | `type` | List nodes with filter, sort, pagination support. |
 | `drupal_search_content` | `query` | Search nodes by title substring. |
 | `drupal_create_node` | `type`, `title` | Create a node. Scalar fields via `fields`; **entity-reference fields (taxonomy, related content, media) via `relationships`** (JSON:API shape). `returning: "minimal"` for a compact identity+state response. |
-| `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. Reference fields go in `relationships`, not `fields`; `returning: "minimal"` bounds the response size. On a **published moderated** node, omitting `moderationState` defaults the write to `moderation_state: "draft"` (forward revision). An unrequested published-state flip in the persisted node is reported via `_statusChanged` (#171). Paragraph / ERR identifiers are resolved to include `meta.target_revision_id` before PATCH (#192); the write fails if any ref cannot be resolved. On moderated targets an id-mismatch PATCH preflight runs first, including on `dryRun` (#201). |
+| `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. Reference fields go in `relationships`, not `fields`; `returning: "minimal"` bounds the response size. On a **published moderated** node, omitting `moderationState` defaults the write to `moderation_state: "draft"` (forward revision). An unrequested published-state flip in the persisted node is reported via `_statusChanged` (#171). Paragraph / ERR identifiers are resolved to include `meta.target_revision_id` before PATCH (#192); the write fails if any ref cannot be resolved. On moderated targets an id-mismatch PATCH preflight runs first, including on `dryRun`, against the same URL the write will hit. An addressable working copy is PATCHed via `?resourceVersion=rel:working-copy` (#166). A successful write may include `_revisions: { live, working }` when both vids can be read. A stray revision with no addressable working copy still fails with revision-surgery language (#201). |
 | `drupal_delete_node` | `type`, `id` | Permanently delete a node. Requires `allowDestructive: true`. Subject to entity allowlists like all node tools. |
 
 ### drupal_get_node
@@ -119,14 +119,17 @@ instead (#163). A successful `summary` write includes `_warnings` with
 optional `dryRun` boolean (default `false`). When `true`, the tool validates the
 request and returns a preview of exactly what would be written. Create and delete
 previews do not touch Drupal. On a **moderated** `update`, `dryRun` also issues a
-PATCH probe against the same canonical URL so the core working-copy guard
-(#201 / Drupal #2795279) is exercised. The probe body uses a non-matching
-`data.id` so the guard still runs and Drupal does not `save()`. A working-copy
-400 fails the dryRun. The rewritten error names a pending draft (vid) when
-`rel:working-copy` resolves, and revision surgery only when it does not.
-Use this (and `drupal_list_revisions.possiblyPatchBlocked`)
-**before** creating dependent paragraphs; preflight inside the host update cannot
-un-orphan work that already happened.
+PATCH probe against the **same URL the real write will hit** so the core
+working-copy guard (#201 / Drupal #2795279) is exercised. When
+`rel:working-copy` resolves, that URL includes `?resourceVersion=rel:working-copy`
+(#166) — the draft is edited in place; the connector does not ask you to
+publish or discard it. The probe body uses a non-matching `data.id` so the
+guard still runs and Drupal does not `save()`. A working-copy 400 fails the
+dryRun (stale/concurrent if the working copy was the target; revision surgery
+only when the alias does not resolve). Use this (and
+`drupal_list_revisions.possiblyPatchBlocked`) **before** creating dependent
+paragraphs; preflight inside the host update cannot un-orphan work that
+already happened.
 
 ```json
 {
@@ -287,7 +290,7 @@ Works with **any** Drupal entity type — paragraphs, commerce products, webform
 | `drupal_entity_list` | `entityType`, `bundle` | List entities with filter, sort, pagination. |
 | `drupal_entity_get` | `entityType`, `bundle`, `id` | Fetch any entity by UUID. |
 | `drupal_entity_create` | `entityType`, `bundle` | Create any entity with arbitrary attributes and relationships. `returning: "minimal"` for a compact response. |
-| `drupal_entity_update` | `entityType`, `bundle`, `id` | Update any entity. `returning: "minimal"` for a compact response. `status` is strictly opt-in; if a server-side gate flips the published state anyway, the response carries a `_statusChanged` marker instead of a silent success (#171). Paragraph / ERR identifiers are resolved to include `meta.target_revision_id` (#192). Moderated targets run the same PATCH preflight as `drupal_update_node`, including on `dryRun` (#201). |
+| `drupal_entity_update` | `entityType`, `bundle`, `id` | Update any entity. `returning: "minimal"` for a compact response. `status` is strictly opt-in; if a server-side gate flips the published state anyway, the response carries a `_statusChanged` marker instead of a silent success (#171). Paragraph / ERR identifiers are resolved to include `meta.target_revision_id` (#192). Moderated targets run the same PATCH preflight and working-copy targeting as `drupal_update_node`, including on `dryRun` (#166 / #201). |
 | `drupal_entity_delete` | `entityType`, `bundle`, `id` | Delete any entity. Requires `allowDestructive: true`. |
 | `drupal_security_info` | — | Show active security configuration for a site. |
 
@@ -318,9 +321,11 @@ Works with **any** Drupal entity type — paragraphs, commerce products, webform
 
 `drupal_entity_create`, `drupal_entity_update`, and `drupal_entity_delete` accept an
 optional `dryRun` boolean (default `false`). On a **moderated** `update`, `dryRun`
-also issues the same id-mismatch PATCH probe as `drupal_update_node` (#201) — the
-guard runs, no revision is written. When `true`, the tool validates the
-request and returns a preview of the write without committing it.
+also issues the same id-mismatch PATCH probe as `drupal_update_node` against the
+same URL the write will hit (canonical, or `?resourceVersion=rel:working-copy`
+when a draft is addressable) — the guard runs, no revision is written. When
+`true`, the tool validates the request and returns a preview of the write
+without committing it.
 
 ```json
 {

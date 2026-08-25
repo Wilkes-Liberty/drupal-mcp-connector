@@ -117,6 +117,21 @@ describe("JsonApiBackend.toCanonical", () => {
     expect(c.relationships.field_tags).toEqual([{ id: "term-1", entityType: "taxonomy_term", bundle: "tags" }]);
   });
 
+  it("keeps drupal_internal__vid on nodes so live vs working vids can be reported (#166)", () => {
+    const node = {
+      type: "node--article",
+      id: "uuid-1",
+      attributes: {
+        drupal_internal__nid: 42,
+        drupal_internal__vid: 1510,
+        title: "Draft",
+      },
+    };
+    const c = backend.toCanonical(node);
+    expect(c.fields.drupal_internal__vid).toBe(1510);
+    expect(c.fields).not.toHaveProperty("drupal_internal__nid");
+  });
+
   it("keeps drupal_internal__revision_id on paragraphs and still strips other internals (#192)", () => {
     const paragraph = {
       type: "paragraph--capability",
@@ -212,6 +227,19 @@ describe("JsonApiBackend fetch methods", () => {
     expect(path).toBe("/jsonapi/node/article/11111111-1111-4111-8111-111111111111");
     expect(opts.method).toBe("PATCH");
     expect(JSON.parse(opts.body)).toEqual({ data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Updated" } } });
+  });
+
+  it("updateEntity appends resourceVersion when requested (#166)", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({
+      data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Draft" } },
+    });
+    await backend.updateEntity({
+      entityType: "node", bundle: "article",
+      id: "11111111-1111-4111-8111-111111111111",
+      attributes: { title: "Draft" },
+      resourceVersion: "rel:working-copy",
+    });
+    expect(vi.mocked(drupalFetch).mock.calls[0][1]).toContain("resourceVersion=rel%3Aworking-copy");
   });
 
   it("deleteEntity issues a DELETE and resolves void", async () => {

@@ -208,8 +208,10 @@ export class JsonApiBackend extends Backend {
         if (BASE_ATTRIBUTE_FIELDS.includes(k)) return false;
         if (INTERNAL_ATTR_RE.test(k)) {
           // Paragraph ERR attach needs the current revision id (#192).
+          // Node / revisionable writes need the working vs live vid (#166).
           // Other drupal_internal__* attributes stay stripped.
-          return entityType === "paragraph" && k === "drupal_internal__revision_id";
+          return k === "drupal_internal__vid"
+            || (entityType === "paragraph" && k === "drupal_internal__revision_id");
         }
         return true;
       })
@@ -339,17 +341,24 @@ export class JsonApiBackend extends Backend {
   /**
    * Update an entity via JSON:API PATCH. Retries without `status` on moderated
    * bundles — see writeWithModerationFallback.
-   * @param {{entityType: string, bundle: string, id: string, attributes?: object, relationships?: object}} input
+   * @param {{entityType: string, bundle: string, id: string, attributes?: object, relationships?: object, resourceVersion?: string}} input
+   *   `resourceVersion` is a JSON:API revision selector (e.g. `rel:working-copy`).
+   *   When set, it is appended so a forward revision is PATCHed instead of the
+   *   canonical default (#166 / Drupal #2795279).
    * @returns {Promise<import("../canonical.js").CanonicalEntity>} The updated entity.
    */
-  async updateEntity({ entityType, bundle, id, attributes = {}, relationships }) {
+  async updateEntity({ entityType, bundle, id, attributes = {}, relationships, resourceVersion }) {
     validateUuid(id);
     const buildPayload = (attrs) => {
       const payload = { data: { type: `${entityType}--${bundle}`, id, attributes: attrs } };
       if (relationships) payload.data.relationships = relationships;
       return payload;
     };
-    const data = await this.writeWithModerationFallback(`${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`, "PATCH", buildPayload, attributes);
+    let path = `${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`;
+    if (resourceVersion) {
+      path += `?resourceVersion=${encodeURIComponent(resourceVersion)}`;
+    }
+    const data = await this.writeWithModerationFallback(path, "PATCH", buildPayload, attributes);
     return this.toCanonical(data.data);
   }
 

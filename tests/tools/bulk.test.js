@@ -152,9 +152,11 @@ describe("bulk tools", () => {
   });
 
   it("bulk_update defaults published moderated items to draft (#131)", async () => {
-    backend.getEntity.mockResolvedValue({
-      status: true,
-      fields: { moderation_state: "published" },
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return { id: "a1", status: true, fields: { moderation_state: "published" } };
     });
     backend.updateEntity.mockResolvedValue({ id: "a1" });
     await handlers.drupal_bulk_update({
@@ -169,9 +171,11 @@ describe("bulk tools", () => {
   });
 
   it("bulk_update respects an explicit moderation_state on items (#131)", async () => {
-    backend.getEntity.mockResolvedValue({
-      status: true,
-      fields: { moderation_state: "published" },
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return { id: "a1", status: true, fields: { moderation_state: "published" } };
     });
     backend.updateEntity.mockResolvedValue({ id: "a1" });
     await handlers.drupal_bulk_update({
@@ -183,8 +187,9 @@ describe("bulk tools", () => {
       attributes: { title: "Live save", moderation_state: "published" },
       relationships: {},
     });
-    // Explicit state short-circuits the capability sniff.
-    expect(backend.getEntity).not.toHaveBeenCalled();
+    // Explicit state still skips the #131 existing-entity pre-read; #166 may
+    // GET rel:working-copy so the PATCH can target a draft when one exists.
+    expect(backend.getEntity.mock.calls.every(([arg]) => arg.resourceVersion === "rel:working-copy")).toBe(true);
   });
 
   it("bulk_update continues past a per-item failure (partial success)", async () => {
