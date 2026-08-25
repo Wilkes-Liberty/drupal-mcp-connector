@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`summary` is refused when body has no summary property (#163).**
+  `drupal_create_node` and `drupal_update_node` introspect the sampled body
+  field before writing `summary`. A `text_long` / `text_formatted` body (or
+  an undetermined schema) fails closed with an actionable message to set the
+  site's deck field via `fields`. Core `text_with_summary` still accepts
+  `summary` and returns `_warnings` with `summary_parameter_deprecated`.
+  dryRun uses the same check.
+
 ### Added
 - **Northbound data-flow budgets bind to principal and target (#179).** Every
   governed tool call that resolves a site now carries request-scoped principal
