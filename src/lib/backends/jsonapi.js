@@ -9,6 +9,7 @@
 
 import { drupalFetch, drupalUploadFile } from "../drupal-fetch.js";
 import { validateUuid, validateMachineName } from "../validate.js";
+import { parseFieldConfigObject } from "../field-definition.js";
 import { Backend } from "./backend-interface.js";
 import {
   makeCanonicalEntity,
@@ -519,6 +520,39 @@ export class JsonApiBackend extends Backend {
         const [entityType, ...rest] = k.split("--");
         return { resourceType: k, entityType, bundle: rest.join("--") };
       });
+  }
+
+  /**
+   * Read Field API metadata from JSON:API `field_config` (chain step 1).
+   *
+   * This is an internal introspection call, not an agent entity-tool read:
+   * `field_config` is on the connector deny list. Do not invent
+   * `allowed_formats` from `this.site.defaultTextFormat` or `full_html`.
+   * Empty / unreadable `field_config` returns null so the caller can try
+   * Drush `config:get field.field.{entityType}.{bundle}.{field}` and, if
+   * that also fails, keep the historical default chain only while the list
+   * is unknown.
+   *
+   * @param {{entityType: string, bundle: string, fieldName: string}} ref
+   * @returns {Promise<?{fieldName: string, fieldType: ?string, allowedFormats: string[]}>}
+   */
+  async getFieldDefinition({ entityType, bundle, fieldName }) {
+    validateMachineName(entityType, "entityType");
+    validateMachineName(bundle, "bundle");
+    validateMachineName(fieldName, "fieldName");
+    const params = new URLSearchParams();
+    params.set("filter[entity_type]", entityType);
+    params.set("filter[bundle]", bundle);
+    params.set("filter[field_name]", fieldName);
+    params.set("page[limit]", "1");
+    let data;
+    try {
+      data = await drupalFetch(this.site, `/jsonapi/field_config/field_config?${params}`);
+    } catch {
+      return null;
+    }
+    const row = Array.isArray(data?.data) ? data.data[0] : data?.data;
+    return parseFieldConfigObject(row?.attributes, fieldName);
   }
 
   /**

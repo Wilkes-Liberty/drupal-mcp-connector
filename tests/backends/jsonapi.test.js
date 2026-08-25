@@ -449,6 +449,62 @@ describe("JsonApiBackend.getEntitySchema", () => {
   });
 });
 
+describe("JsonApiBackend.getFieldDefinition", () => {
+  const backend = new JsonApiBackend({ _name: "t", baseUrl: "https://x" });
+  beforeEach(() => vi.mocked(drupalFetch).mockReset());
+
+  it("reads allowed_formats from JSON:API field_config, not from defaultTextFormat", async () => {
+    const siteAware = new JsonApiBackend({
+      _name: "t", baseUrl: "https://x", defaultTextFormat: "full_html",
+    });
+    vi.mocked(drupalFetch).mockResolvedValue({
+      data: [{
+        type: "field_config--field_config",
+        id: "fc1",
+        attributes: {
+          field_name: "field_mission_impact",
+          entity_type: "node",
+          bundle: "solution",
+          field_type: "text_long",
+          settings: { allowed_formats: ["headless_clean"] },
+        },
+      }],
+    });
+    const out = await siteAware.getFieldDefinition({
+      entityType: "node", bundle: "solution", fieldName: "field_mission_impact",
+    });
+    expect(out).toEqual({
+      fieldName: "field_mission_impact",
+      fieldType: "text_long",
+      allowedFormats: ["headless_clean"],
+    });
+    const path = decodeURIComponent(vi.mocked(drupalFetch).mock.calls[0][1]);
+    expect(path).toContain("/jsonapi/field_config/field_config");
+    expect(path).toContain("filter[entity_type]=node");
+    expect(path).toContain("filter[bundle]=solution");
+    expect(path).toContain("filter[field_name]=field_mission_impact");
+  });
+
+  it("returns null when field_config is empty so callers do not invent a list", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({ data: [] });
+    const out = await backend.getFieldDefinition({
+      entityType: "node", bundle: "article", fieldName: "body",
+    });
+    expect(out).toBeNull();
+  });
+
+  it("returns null when field_config is not readable", async () => {
+    vi.mocked(drupalFetch).mockRejectedValueOnce(
+      new Error("Drupal 403 on GET /jsonapi/field_config/field_config")
+    );
+    const isolated = new JsonApiBackend({ _name: "t", baseUrl: "https://x" });
+    const out = await isolated.getFieldDefinition({
+      entityType: "node", bundle: "article", fieldName: "body",
+    });
+    expect(out).toBeNull();
+  });
+});
+
 describe("JsonApiBackend.uploadFile", () => {
   const backend = new JsonApiBackend({ _name: "t", baseUrl: "https://x" });
   beforeEach(() => vi.mocked(drupalUploadFile).mockReset());
