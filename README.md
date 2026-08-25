@@ -170,6 +170,7 @@ Additional connector-side gates (2.1+ / 2.2+):
 - **Uploads** only from `MCP_UPLOAD_ROOT` (or the process cwd); sensitive paths (`.env*`, `.ssh`, connector `config.json`) are refused.
 - **HTTPS:** non-loopback binds require an inbound OAuth resource server (`auth.issuer` + `auth.audience`), not `MCP_AUTH_TOKEN`. `MCP_AUTH_TOKEN` remains valid on loopback. `MCP_ALLOW_UNAUTHENTICATED=1` is only for a trusted proxy. Non-loopback TLS defaults to 120 req/min rate limiting. Inbound JWT scopes (and optional `auth.grants`) filter which tools, resources, prompts, and sites a principal can discover or invoke.
 - **GraphQL is off by default.** `drupal_graphql` / introspect require `security.allowGraphql` (true only on the `development` preset). Raw GraphQL results still bypass entity allowlists and field redaction — prefer JSON:API entity tools when connector policy must hold. Mutations also need `allowGraphqlMutations`.
+- **Northbound data-flow budgets (2.8+):** row, byte, page, request, and chained-action counters keyed by inbound principal + authoritative target (same finite defaults as MCP Sentinel), so pagination, retries, batching, or a new chain id cannot reset them. Governed reads carry the declared-ceiling / declared-destination wire contract; tune with `security.declaredCeiling` and `security.readBudgets`.
 
 Full detail: **[docs/security.md](docs/security.md)** and **[docs/security-hardening.md](docs/security-hardening.md)**.
 
