@@ -19,6 +19,7 @@ MCP Client
   · Upload path allowlist (MCP_UPLOAD_ROOT / cwd)
   · Safe draft default for published moderated node updates
   · Backend capability gating (writes refused on a read-only backend)
+  · Northbound data-flow budgets bound to inbound principal + target (#179)
     │
     ▼
 [Layer 2] Drupal-side enforcement
@@ -69,6 +70,37 @@ target.
 ### Backend capability gating
 
 Because the connector speaks both JSON:API and GraphQL, write protection is also enforced at the backend layer. The GraphQL (GraphQL Compose) backend advertises `write: false`, so any create/update/delete tool against a GraphQL-only site returns a clear capability error before reaching Drupal. Route writes through a JSON:API backend.
+
+### Northbound data-flow budgets (#179)
+
+When an inbound OAuth principal is present, the connector binds the same
+finite budget classes mcp_sentinel already enforces — rows, bytes, pages,
+requests, and chained actions — to `(principal, authoritative target)`.
+Counters live in process memory and are request-scoped through
+`AsyncLocalStorage`. They are **not** keyed by MCP session, client IP, or a
+caller-supplied site/tenant field, so paging, a 401 retry, a batch, or a new
+chain id cannot start a fresh window.
+
+Defaults match the module (`500` results, `8 MiB`, `600` requests / 60s,
+`120` pages / 60s, `600` chained actions / 60s). Override per site with
+`security.readBudgets`. Omit a key to keep the shared default.
+
+Every northbound Drupal request (JSON:API, GraphQL, server-tool bridge) also
+sends the source wire contract:
+
+- `X-MCP-Declared-Ceiling` — optional `security.declaredCeiling`
+  (`public` / `internal` / `restricted`). The source applies
+  `min(profile, declared)`; a higher or malformed value is dropped.
+- `X-MCP-Declared-Destination` — `{clientId}:{targetName}` from the
+  entitlement model, sanitized to `[A-Za-z0-9._:-]{1,128}`.
+
+Denials use the source reason codes (`read_budget_exceeded`,
+`page_budget_exceeded`, `response_size_cap_exceeded`,
+`chained_action_budget_exceeded`, `classification_egress_denied`) plus a
+correlation id, and never echo the refused body. Stdio / local-operator
+calls still send the declared headers so source evidence can record
+destination; connector-side counters enforce on authenticated inbound
+principals (the source uid budget remains the floor on stdio).
 
 ---
 

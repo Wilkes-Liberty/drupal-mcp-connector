@@ -4,6 +4,12 @@ vi.mock("node-fetch", () => ({ default: vi.fn() }));
 import fetch from "node-fetch";
 import { callServerTool, SERVER_TOOLS } from "../../src/lib/server-tools.js";
 import { clearToken } from "../../src/lib/oauth.js";
+import {
+  HEADER_DECLARED_DESTINATION,
+  buildDataFlowContext,
+  resetDataFlowBudgets,
+  runWithDataFlow,
+} from "../../src/lib/data-flow.js";
 
 // Unique site name per test keeps the module-scope session cache from leaking
 // between cases (callServerTool caches the Mcp-Session-Id by site._name).
@@ -50,7 +56,7 @@ const initOk = (sessionId = "sess-1") => [
 ];
 const toolOk = (result) => mcpRes({ json: { jsonrpc: "2.0", id: 2, result } });
 
-beforeEach(() => { vi.mocked(fetch).mockReset(); });
+beforeEach(() => { vi.mocked(fetch).mockReset(); resetDataFlowBudgets(); });
 
 describe("callServerTool", () => {
   it("keeps the private Drupal bridge sessionful and pinned to MCP 2025-06-18", async () => {
@@ -186,5 +192,23 @@ describe("callServerTool", () => {
       .mockResolvedValueOnce(initOk("sess-f")[1])
       .mockResolvedValueOnce(toolOk({ isError: true, content: [{ type: "text", text: "denied" }] }));
     await expect(callServerTool(site, "config_set", {})).rejects.toThrow(/denied/);
+  });
+
+  it("sends declared destination on the governed tools/call", async () => {
+    const site = plainSite();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk("sess-g")[0])
+      .mockResolvedValueOnce(initOk("sess-g")[1])
+      .mockResolvedValueOnce(toolOk({ content: [] }));
+    const flow = buildDataFlowContext({
+      identity: { sub: "alice", clientId: "content-agent" },
+      target: { name: "production", source: "grant" },
+      site: { security: { declaredCeiling: "internal" } },
+      correlationId: "corr-st",
+    });
+    await runWithDataFlow(flow, () => callServerTool(site, SERVER_TOOLS.configGet, { name: "system.site" }));
+    const toolCall = vi.mocked(fetch).mock.calls.find(([, opts]) =>
+      JSON.parse(opts.body).method === "tools/call");
+    expect(toolCall[1].headers[HEADER_DECLARED_DESTINATION]).toBe("content-agent:production");
   });
 });

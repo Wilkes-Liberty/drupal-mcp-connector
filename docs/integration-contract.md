@@ -1,6 +1,6 @@
 # Integration Contract
 
-**Contract version: 1.0**
+**Contract version: 1.1**
 
 This document defines the contract between `drupal-mcp-connector` and an optional
 **Drupal-side governance layer**. The connector works against plain Drupal core
@@ -30,6 +30,30 @@ User-Agent:   drupal-mcp-connector/<version>
   disabled by setting it to an empty string.
 - A governance layer MAY record this string for audit/attribution display, but
   MUST key authorization on the authenticated identity (below), never on this header.
+
+### 1b. Declared classification and destination (#179)
+
+Governed northbound requests MAY also carry the source's narrow-only
+classification contract (shipped in mcp_sentinel 2.9.0):
+
+```
+X-MCP-Declared-Ceiling: internal
+X-MCP-Declared-Destination: content-agent:production
+```
+
+- `X-MCP-Declared-Ceiling` can only **narrow** the effective ceiling. The
+  source computes `min(profile ceiling, declared)`. Declaring a higher label,
+  or a value that is not in the site's vocabulary, MUST change nothing.
+- `X-MCP-Declared-Destination` is a bounded identifier from the connector's
+  entitlement model (`{inbound client id}:{authoritative target name}`). The
+  source records it in evidence and MUST NOT use it as a flood or budget key.
+- Values are `[A-Za-z0-9._:-]+`, max 128 characters. Malformed values are
+  dropped, never rewritten into a wider grant.
+- Connector-side row/byte/page/request/chained-action budgets bind to the
+  inbound principal and resolved target. They use the same finite defaults as
+  the source. Pagination, retries, batching, and chained actions MUST NOT
+  reset that key. Denials name a stable reason code and a correlation id
+  and MUST NOT echo restricted payload.
 
 ## 2. Authentication
 
@@ -171,6 +195,7 @@ connector functions without it.
 | `drupal-mcp-connector` | Reference governance module (`drupal/mcp_sentinel`) | Contract |
 |------------------------|-----------------------------------------------------|----------|
 | ≥ 0.6 | ≥ 1.0 | 1.0 |
+| unreleased | ≥ 2.9.0 | 1.1 (declared ceiling/destination + principal-bound budgets) |
 
 The connector does **not** depend on the governance module, and the governance
 module does **not** depend on this specific connector. They are released

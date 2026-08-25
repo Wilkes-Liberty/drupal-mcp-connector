@@ -7,7 +7,7 @@
   },
 
   "_security_options": {
-    "_comment": "apiTokenEnv / oauth.clientSecretEnv: read credentials from the environment, never from this file. requireSecureAuth: reject anon/basic, require HTTPS+Bearer — set it on every remote site. requireGovernance: deny every governed path unless the source governance contract (GET /drupal-mcp/readiness, mcp_sentinel) verifies — no ungoverned JSON:API/GraphQL fallback. Env overrides: MCP_CLIENT_ID overrides or disables the outbound identity header; MCP_BIND_HOST restricts the listen interface (with TLS). Network-facing HTTPS /mcp requires the top-level auth block (issuer + audience), not MCP_AUTH_TOKEN. MCP_AUTH_TOKEN remains valid only on loopback. See docs/security-hardening.md."
+    "_comment": "apiTokenEnv / oauth.clientSecretEnv: read credentials from the environment, never from this file. requireSecureAuth: reject anon/basic, require HTTPS+Bearer — set it on every remote site. requireGovernance: deny every governed path unless the source governance contract (GET /drupal-mcp/readiness, mcp_sentinel) verifies — no ungoverned JSON:API/GraphQL fallback. Env overrides: MCP_CLIENT_ID overrides or disables the outbound identity header; MCP_BIND_HOST restricts the listen interface (with TLS). Network-facing HTTPS /mcp requires the top-level auth block (issuer + audience), not MCP_AUTH_TOKEN. MCP_AUTH_TOKEN remains valid only on loopback. Optional security.declaredCeiling (narrow-only X-MCP-Declared-Ceiling) and security.readBudgets (same finite classes as mcp_sentinel) bind northbound data-flow to the inbound principal and target. See docs/security.md and docs/security-hardening.md."
   },
 
   "_governance_tiers": {

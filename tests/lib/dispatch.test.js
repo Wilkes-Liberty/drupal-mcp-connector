@@ -36,6 +36,13 @@ import { securityMiddleware, callTool, listResolvableSiteConfigs } from "../../s
 import { GovernanceError, clearGovernanceCache } from "../../src/lib/governance.js";
 import { SecurityError } from "../../src/lib/security.js";
 import { withResolvedTarget } from "../../src/lib/site-target.js";
+import {
+  HEADER_DECLARED_DESTINATION,
+  REASON_CHAINED_ACTION,
+  getDataFlowContext,
+  northboundHeaders,
+  resetDataFlowBudgets,
+} from "../../src/lib/data-flow.js";
 
 const ready = () => ({
   ok: true,
@@ -51,6 +58,7 @@ const notReady = (reason = "no_designated_consumer") => ({
 beforeEach(() => {
   vi.mocked(fetch).mockReset();
   clearGovernanceCache();
+  resetDataFlowBudgets();
 });
 
 // Every governed product path — JSON:API-backed entity writes and reads,
@@ -327,6 +335,105 @@ describe("resolved target echo (#167)", () => {
     await expect(
       securityMiddleware("drupal_create_node", { type: "article", title: "T" }, handler),
     ).resolves.toEqual({ id: "n1" });
+    expect(handler).toHaveBeenCalledOnce();
+  });
+});
+
+describe("securityMiddleware northbound data-flow (#179)", () => {
+  const reader = {
+    sub: "alice",
+    clientId: "content-agent",
+    scopes: ["mcp_read"],
+    sites: null,
+  };
+  const tightGov = {
+    _name: "gov",
+    baseUrl: "https://gov.example.com",
+    requireGovernance: true,
+    security: {
+      preset: "development",
+      allowDestructive: true,
+      declaredCeiling: "internal",
+      readBudgets: {
+        chainedActions: 1,
+        chainedActionWindowSec: 60,
+        requests: 2,
+        requestWindowSec: 60,
+        pages: 2,
+        pageWindowSec: 60,
+        results: 5,
+        bytes: 1024,
+      },
+    },
+  };
+
+  it("binds principal and target onto the request and sends declared destination", async () => {
+    vi.mocked(fetch).mockResolvedValue(ready());
+    vi.mocked(getSiteConfig).mockReturnValue(tightGov);
+    const handler = vi.fn(async () => {
+      const flow = getDataFlowContext();
+      expect(flow.principalKey).toBe("alice:content-agent");
+      expect(flow.targetName).toBe("gov");
+      expect(flow.enforce).toBe(true);
+      expect(northboundHeaders()[HEADER_DECLARED_DESTINATION]).toBe("content-agent:gov");
+      return { ok: true };
+    });
+    await securityMiddleware(
+      "drupal_get_node",
+      { site: "gov", id: "1" },
+      handler,
+      { identity: reader, sites: [tightGov], grants: null, defaultSite: "gov" },
+    );
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("exhausts chained actions for one principal without leaking payload", async () => {
+    vi.mocked(fetch).mockResolvedValue(ready());
+    vi.mocked(getSiteConfig).mockReturnValue(tightGov);
+    const handler = vi.fn(async () => ({ secret: "restricted-body" }));
+    const ctx = { identity: reader, sites: [tightGov], grants: null, defaultSite: "gov" };
+    await expect(
+      securityMiddleware("drupal_get_node", { site: "gov", id: "1" }, handler, ctx),
+    ).resolves.toEqual({ secret: "restricted-body" });
+    const denied = await callTool(
+      "drupal_get_node",
+      { site: "gov", id: "2" },
+      ctx,
+    );
+    expect(denied.isError).toBe(true);
+    expect(denied.content[0].text).toContain(REASON_CHAINED_ACTION);
+    expect(denied.content[0].text).toMatch(/correlation /);
+    expect(denied.content[0].text).not.toContain("restricted-body");
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("does not burn a chained-action slot when source governance fails", async () => {
+    vi.mocked(fetch).mockResolvedValue(notReady());
+    vi.mocked(getSiteConfig).mockReturnValue(tightGov);
+    const handler = vi.fn(async () => ({ ok: true }));
+    const ctx = { identity: reader, sites: [tightGov], grants: null, defaultSite: "gov" };
+    await expect(
+      securityMiddleware("drupal_get_node", { site: "gov", id: "1" }, handler, ctx),
+    ).rejects.toBeInstanceOf(GovernanceError);
+    expect(handler).not.toHaveBeenCalled();
+
+    clearGovernanceCache();
+    vi.mocked(fetch).mockResolvedValue(ready());
+    await expect(
+      securityMiddleware("drupal_get_node", { site: "gov", id: "1" }, handler, ctx),
+    ).resolves.toEqual({ ok: true });
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("does not consume a chained-action slot for list_sites", async () => {
+    const handler = vi.fn(async () => ({ sites: ["gov"] }));
+    await securityMiddleware(
+      "drupal_list_sites",
+      {},
+      handler,
+      { identity: reader, sites: [tightGov], grants: null },
+    );
+    expect(getDataFlowContext()).toBeNull();
     expect(handler).toHaveBeenCalledOnce();
   });
 });
