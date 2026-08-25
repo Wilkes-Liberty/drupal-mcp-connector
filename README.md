@@ -49,7 +49,9 @@ Each site declares which backend(s) it exposes via the `api` key:
 - **Writes go through JSON:API.** Use a JSON:API-enabled site as the write plane; keep GraphQL as a read plane where that suits your architecture.
 - **`defaultTextFormat` sets the body text format** used by the `body` convenience
   parameter on node writes, e.g. `{ "baseUrl": "…", "defaultTextFormat": "basic_html" }`.
-  Individual calls can override it with `format`. Without either, the connector falls
+  Individual calls can override it with `format`. Field API `allowed_formats` wins
+  when it can be resolved: a single allowed format is the default, and a format
+  outside the list is refused. Without a resolved list, the connector falls
   back to `full_html`, which many governed sites deliberately do not define — and which
   is the most permissive core format, so setting this per site is the safer posture. A
   text format is Drupal's HTML-filtering boundary, so it is worth choosing deliberately

@@ -10,6 +10,7 @@ const backend = {
   deleteEntity: vi.fn(),
   rawQuery: vi.fn(),
   resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
+  getFieldDefinition: vi.fn(),
 };
 
 function schemaWithBody(type, over = {}) {
@@ -59,10 +60,22 @@ beforeEach(() => {
     "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
   ));
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
+  // Unknown allowed_formats keeps the historical default chain (full_html).
+  backend.getFieldDefinition.mockResolvedValue(null);
   // Existing summary tests assume a core text_with_summary body. #163 cases
   // that need a different storage shape override this per test.
   backend.getEntitySchema.mockResolvedValue(schemaWithBody("text_with_summary"));
 });
+
+/** Authoritative Field API definition returned by the backend mock. */
+function fieldDef(fieldName, allowedFormats, fieldType = "text_long") {
+  return { fieldName, fieldType, allowedFormats };
+}
+
+function mockFieldDefs(defsByName) {
+  const map = new Map(Object.entries(defsByName));
+  backend.getFieldDefinition.mockImplementation(async ({ fieldName }) => map.get(fieldName) ?? null);
+}
 
 describe("nodes tools (migrated)", () => {
   it("get_node returns the canonical entity", async () => {
@@ -560,5 +573,130 @@ describe("#192 ERR attach, #169 written revision, #201 preflight", () => {
     // Canonical/PATCH body still has the old single ref — not accepted as proof.
     expect(out.relationships.field_key_capabilities).toHaveLength(1);
     expect(out.relationships.field_key_capabilities[0].id).toBe("old-1");
+  });
+});
+
+describe("#168 honor field allowed_formats on node writes", () => {
+  const IMPACT = "field_mission_impact";
+
+  it("refuses a disallowed explicit format on a fields value before createEntity", async () => {
+    mockFieldDefs({ [IMPACT]: fieldDef(IMPACT, ["headless_clean"]) });
+    await expect(handlers.drupal_create_node({
+      type: "solution", title: "T",
+      fields: { [IMPACT]: { value: "<p>x</p>", format: "full_html" } },
+    })).rejects.toThrow(/field_mission_impact[\s\S]*full_html[\s\S]*headless_clean/s);
+    expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("defaults an omitted format to the single allowed format for a string field", async () => {
+    mockFieldDefs({ [IMPACT]: fieldDef(IMPACT, ["headless_clean"]) });
+    await handlers.drupal_create_node({
+      type: "solution", title: "T",
+      fields: { [IMPACT]: "<p>x</p>" },
+    });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes[IMPACT]).toEqual({ value: "<p>x</p>", format: "headless_clean" });
+  });
+
+  it("defaults an omitted format on a { value } object to the single allowed format", async () => {
+    mockFieldDefs({ [IMPACT]: fieldDef(IMPACT, ["headless_clean"]) });
+    await handlers.drupal_create_node({
+      type: "solution", title: "T",
+      fields: { [IMPACT]: { value: "<p>x</p>" } },
+    });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes[IMPACT]).toEqual({ value: "<p>x</p>", format: "headless_clean" });
+  });
+
+  it("accepts an explicit format that is on the allowed list", async () => {
+    mockFieldDefs({ [IMPACT]: fieldDef(IMPACT, ["headless_clean"]) });
+    await handlers.drupal_create_node({
+      type: "solution", title: "T",
+      fields: { [IMPACT]: { value: "<p>x</p>", format: "headless_clean" } },
+    });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes[IMPACT].format).toBe("headless_clean");
+  });
+
+  it("uses site defaultTextFormat when it is one of several allowed formats", async () => {
+    const { getSiteConfig } = await import("../../src/lib/config.js");
+    getSiteConfig.mockReturnValueOnce({
+      _name: "d", baseUrl: "https://x", security: {}, defaultTextFormat: "basic_html",
+    });
+    mockFieldDefs({ [IMPACT]: fieldDef(IMPACT, ["basic_html", "restricted_html"]) });
+    await handlers.drupal_create_node({
+      type: "solution", title: "T",
+      fields: { [IMPACT]: { value: "<p>x</p>" } },
+    });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes[IMPACT].format).toBe("basic_html");
+  });
+
+  it("refuses an omitted format when the site default is not in the allowed list", async () => {
+    const { getSiteConfig } = await import("../../src/lib/config.js");
+    getSiteConfig.mockReturnValueOnce({
+      _name: "d", baseUrl: "https://x", security: {}, defaultTextFormat: "full_html",
+    });
+    mockFieldDefs({ [IMPACT]: fieldDef(IMPACT, ["headless_clean", "basic_html"]) });
+    await expect(handlers.drupal_create_node({
+      type: "solution", title: "T",
+      fields: { [IMPACT]: { value: "<p>x</p>" } },
+    })).rejects.toThrow(/field_mission_impact[\s\S]*headless_clean[\s\S]*basic_html/s);
+    expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("applies the same allowed_formats check to the top-level body format", async () => {
+    mockFieldDefs({ body: fieldDef("body", ["headless_clean"], "text_with_summary") });
+    await expect(handlers.drupal_create_node({
+      type: "solution", title: "T", body: "<p>x</p>", format: "full_html",
+    })).rejects.toThrow(/body[\s\S]*full_html[\s\S]*headless_clean/s);
+    expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("defaults body format to the single allowed format when omitted", async () => {
+    mockFieldDefs({ body: fieldDef("body", ["headless_clean"], "text_with_summary") });
+    await handlers.drupal_create_node({ type: "solution", title: "T", body: "<p>x</p>" });
+    const arg = backend.createEntity.mock.calls[0][0];
+    expect(arg.attributes.body.format).toBe("headless_clean");
+  });
+
+  it("refuses a disallowed format on dryRun without calling createEntity", async () => {
+    mockFieldDefs({ [IMPACT]: fieldDef(IMPACT, ["headless_clean"]) });
+    await expect(handlers.drupal_create_node({
+      type: "solution", title: "T", dryRun: true,
+      fields: { [IMPACT]: { value: "<p>x</p>", format: "full_html" } },
+    })).rejects.toThrow(/field_mission_impact[\s\S]*full_html[\s\S]*headless_clean/s);
+    expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("shows the defaulted format on dryRun attributes", async () => {
+    mockFieldDefs({ [IMPACT]: fieldDef(IMPACT, ["headless_clean"]) });
+    const out = await handlers.drupal_create_node({
+      type: "solution", title: "T", dryRun: true,
+      fields: { [IMPACT]: { value: "<p>x</p>" } },
+    });
+    expect(out.dryRun).toBe(true);
+    expect(out.attributes[IMPACT]).toEqual({ value: "<p>x</p>", format: "headless_clean" });
+    expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("refuses a disallowed format on update before updateEntity", async () => {
+    mockFieldDefs({ [IMPACT]: fieldDef(IMPACT, ["headless_clean"]) });
+    await expect(handlers.drupal_update_node({
+      type: "solution", id: "n1",
+      fields: { [IMPACT]: { value: "<p>x</p>", format: "full_html" } },
+    })).rejects.toThrow(/field_mission_impact[\s\S]*full_html[\s\S]*headless_clean/s);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("defaults an omitted format on update dryRun attributes", async () => {
+    mockFieldDefs({ [IMPACT]: fieldDef(IMPACT, ["headless_clean"]) });
+    const out = await handlers.drupal_update_node({
+      type: "solution", id: "n1", dryRun: true,
+      fields: { [IMPACT]: "<p>x</p>" },
+    });
+    expect(out.dryRun).toBe(true);
+    expect(out.attributes[IMPACT]).toEqual({ value: "<p>x</p>", format: "headless_clean" });
+    expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 });

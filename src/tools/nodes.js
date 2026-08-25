@@ -20,6 +20,7 @@ import { readWrittenRevision } from "../lib/write-revision.js";
 import { preflightPatchWritable, updateEntityGuarded } from "../lib/patch-preflight.js";
 import { assertBodySummaryWritable, attachSummaryDeprecation } from "../lib/body-summary.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
+import { applyAllowedFormatsToAttributes } from "../lib/field-definition.js";
 
 /** Fallback language for an alias when the node exposes none. */
 const DEFAULT_ALIAS_LANGCODE = "en";
@@ -132,21 +133,13 @@ async function createRenameRedirect(backend, sec, redirect) {
 }
 
 /**
- * Fallback text format when neither the call nor the site config names one.
- *
- * Retained for backward compatibility only. A site whose text formats do not
- * include `full_html` — or whose agent account may not use it — must set
- * `defaultTextFormat` in its site config or pass `format` per call.
- */
-const FALLBACK_TEXT_FORMAT = "full_html";
-
-/**
  * Build a Drupal body field descriptor from plain HTML + optional summary.
  *
- * The text format is a security boundary in Drupal (it decides which HTML
- * survives filtering), so it is resolved explicitly rather than assumed:
- * an explicit `format` argument wins, then the site's `defaultTextFormat`,
- * then the historical fallback.
+ * Format is left omitted when the caller did not pass one so
+ * `applyAllowedFormatsToAttributes` can honor Field API `allowed_formats`
+ * before applying the historical `defaultTextFormat` / `full_html` chain.
+ * Applying that fallback first would treat `full_html` as a caller format
+ * and refuse a single-allowed-format field (#168).
  *
  * `summary` is only included when the caller supplied it. Sending an empty
  * string on every write would blank an existing body summary whenever a
@@ -155,17 +148,14 @@ const FALLBACK_TEXT_FORMAT = "full_html";
  * @param {string} [body]    - Body HTML; when undefined the field is omitted.
  * @param {string} [summary] - Teaser/summary text; omitted when undefined.
  * @param {string} [format]  - Text format machine name.
- * @param {object} [site]    - Site config, read for `defaultTextFormat`.
- * @returns {{value: string, format: string, summary?: string}|undefined}
+ * @returns {{value: string, format?: string, summary?: string}|undefined}
  *   A body attribute object, or undefined when no body was supplied (so callers
  *   can skip the field on update rather than blanking it).
  */
-function buildBodyAttribute(body, summary, format, site) {
+function buildBodyAttribute(body, summary, format) {
   if (body === undefined) return undefined;
-  const attr = {
-    value: body,
-    format: format ?? site?.defaultTextFormat ?? FALLBACK_TEXT_FORMAT,
-  };
+  const attr = { value: body };
+  if (format !== undefined) attr.format = format;
   if (summary !== undefined) attr.summary = summary;
   return attr;
 }
@@ -264,17 +254,20 @@ async function createNode({ site: siteName, type, title, body, summary, format, 
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", "node", type);
+  const backend = await resolveBackend(site);
   const attributes = { title, ...fields };
   if (moderationState !== undefined) {
     attributes.moderation_state = moderationState;
   } else {
     attributes.status = status === undefined ? false : status;
   }
-  const bodyAttr = buildBodyAttribute(body, summary, format, site);
+  const bodyAttr = buildBodyAttribute(body, summary, format);
   if (bodyAttr) attributes.body = bodyAttr;
-  assertPublishAllowed(sec, attributes);
-  const backend = await resolveBackend(site);
+  await applyAllowedFormatsToAttributes({
+    backend, site, entityType: "node", bundle: type, attributes,
+  });
   const summaryWrite = await assertBodySummaryWritable(backend, type, summary);
+  assertPublishAllowed(sec, attributes);
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
   if (dryRun) {
     const preview = { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes, relationships: resolvedRelationships };
@@ -327,8 +320,11 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   if (title !== undefined) attributes.title = title;
   if (moderationState !== undefined) attributes.moderation_state = moderationState;
   else if (status !== undefined) attributes.status = status;
-  const bodyAttr = buildBodyAttribute(body, summary, format, site);
+  const bodyAttr = buildBodyAttribute(body, summary, format);
   if (bodyAttr) attributes.body = bodyAttr;
+  await applyAllowedFormatsToAttributes({
+    backend, site, entityType: "node", bundle: type, attributes,
+  });
   // One pre-read serves the #131 draft default and the #171 unrequested-
   // status-change flag. Skipped when the caller pinned the moderation state.
   let existing = null;
@@ -463,10 +459,10 @@ export const definitions = [
         title:   { type: "string" },
         body:    { type: "string", description: "Body field HTML" },
         summary: { type: "string", description: "Body summary/teaser — writes body.summary on core text_with_summary only. Refused when the sampled body field has no summary property (text_long / text_formatted) or the schema cannot be determined. Prefer the site's dedicated deck/summary field via `fields`." },
-        format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. Defaults to the site config's `defaultTextFormat`, then 'full_html'. Set this when the site's formats do not include full_html, or to avoid writing content into a more permissive format than intended." },
+        format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. When the body field's allowed_formats lists exactly one format, that is the default. A caller format outside that list is refused before write. When allowed_formats cannot be resolved, defaults to the site config's `defaultTextFormat`, then 'full_html'." },
         status:  { type: "boolean", default: false, description: "Published flag for NON-moderated types. true to publish immediately. Ignored if moderationState is set; on a moderated type it is dropped automatically." },
         moderationState: { type: "string", description: "Moderation state for content_moderation types, e.g. 'draft' or 'published'. Takes precedence over status." },
-        fields:  { type: "object", description: "Scalar/attribute field values keyed by Drupal machine name. Do NOT put entity-reference fields here — Drupal rejects them as attributes; use `relationships`." },
+        fields:  { type: "object", description: "Scalar/attribute field values keyed by Drupal machine name. Formatted text: a string or { value, format?, summary? }. format must be in the field's allowed_formats; a single allowed format is used when omitted. Do NOT put entity-reference fields here — Drupal rejects them as attributes; use `relationships`." },
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value: { field_resource_type: { data: { type: 'taxonomy_term--resource_type', id: '<uuid>' } } }. Multi-value: { field_tags: { data: [{ type: 'taxonomy_term--tags', id: '<uuid>' }] } }." },
         dryRun:  { type: "boolean", default: false, description: "Validate and return a preview of the write without committing." },
         returning: RETURNING_SCHEMA,
@@ -485,10 +481,10 @@ export const definitions = [
         title:   { type: "string" },
         body:    { type: "string" },
         summary: { type: "string", description: "Body summary/teaser — writes body.summary on core text_with_summary only. Refused when the sampled body field has no summary property (text_long / text_formatted) or the schema cannot be determined. Prefer the site's dedicated deck/summary field via `fields`." },
-        format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. Defaults to the site config's `defaultTextFormat`, then 'full_html'. Set this when the site's formats do not include full_html, or to avoid writing content into a more permissive format than intended." },
+        format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. When the body field's allowed_formats lists exactly one format, that is the default. A caller format outside that list is refused before write. When allowed_formats cannot be resolved, defaults to the site config's `defaultTextFormat`, then 'full_html'." },
         status:  { type: "boolean", description: "Published flag for NON-moderated types: true = publish, false = unpublish. Ignored if moderationState is set." },
         moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status. Required to keep or re-publish a live node — omitting it on a published moderated node defaults the write to 'draft'." },
-        fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Entity-reference fields go in `relationships`, not here." },
+        fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Formatted text: a string or { value, format?, summary? }. format must be in the field's allowed_formats; a single allowed format is used when omitted. Entity-reference fields go in `relationships`, not here." },
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }. Paragraph / ERR items must carry meta.target_revision_id — the connector injects it when missing, and fails the write if it cannot." },
         dryRun:  { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. The probe uses a non-matching data.id so Drupal does not save. A working-copy 400 fails the dryRun." },
         returning: RETURNING_SCHEMA,

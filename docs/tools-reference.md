@@ -113,6 +113,35 @@ schema) is refused — set the site's dedicated deck/summary field via `fields`
 instead (#163). A successful `summary` write includes `_warnings` with
 `summary_parameter_deprecated`.
 
+### Formatted-text payloads
+
+Body and other formatted fields (`text`, `text_long`, `text_with_summary`) are
+Drupal `{ value, format }` items. Represent them in tool payloads as:
+
+- a **string** — the connector stores it as `value` and supplies `format`
+- `{ "value": "<p>…</p>" }` — same, format omitted
+- `{ "value": "<p>…</p>", "format": "headless_clean" }` — explicit format
+- `{ "value": "<p>…</p>", "format": "basic_html", "summary": "…" }` — body /
+  `text_with_summary` only, when you also want the teaser
+
+`format` is a Field API machine name. Before create/update (including
+`dryRun`) the connector resolves the field's `allowed_formats` from JSON:API
+`field_config` (internal introspection, not `drupal_entity_get`) and, if that
+is unavailable, from Drush `config:get field.field.{entity}.{bundle}.{field}`.
+
+- Exactly one allowed format → used when the caller omits `format`.
+- Caller `format` not in the list → the write is refused before mutation. The
+  error names the field, the requested format, and the allowed formats.
+- Several allowed formats and `format` omitted → site `defaultTextFormat` is
+  used only if it is in the list; otherwise the write is refused.
+- If `allowed_formats` cannot be resolved at all, the connector does **not**
+  invent a list. Body then keeps the historical default (`defaultTextFormat`,
+  then `full_html`). A known list never persists `full_html` (or any other
+  format) when it is not in that list.
+
+Dry-run previews return the validated/defaulted `format` on each formatted
+attribute so you can see what would be persisted.
+
 ### Preview writes with `dryRun`
 
 `drupal_create_node`, `drupal_update_node`, and `drupal_delete_node` all accept an
@@ -145,7 +174,7 @@ Returns a preview envelope instead of a created entity:
   "operation": "create",
   "entityType": "node",
   "bundle": "article",
-  "attributes": { "title": "My New Article", "body": { "value": "<p>Article body HTML</p>" } }
+  "attributes": { "title": "My New Article", "body": { "value": "<p>Article body HTML</p>", "format": "full_html" } }
 }
 ```
 
