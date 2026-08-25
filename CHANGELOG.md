@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Iterative updates PATCH an existing working copy (#166).**
+  `drupal_update_node`, `drupal_entity_update`, and `drupal_bulk_update`
+  resolve `rel:working-copy` before the write. When that alias is
+  addressable, both the dryRun probe and the real PATCH use
+  `?resourceVersion=rel:working-copy` instead of the canonical URL, so a
+  second edit lands on the same forward revision. dryRun can no longer
+  succeed when that write would 400. An addressable draft is edited in
+  place — the connector does not discard it or tell the caller to publish
+  first. The stray-revision case (alias does not resolve, core still
+  blocks) still refuses with revision-surgery language (#201). A stale or
+  concurrent working-copy 400 is refused without retrying the canonical
+  URL. Successful writes include `_revisions: { live, working }` when both
+  vids can be read.
 - **`summary` is refused when body has no summary property (#163).**
   `drupal_create_node` and `drupal_update_node` introspect the sampled body
   field before writing `summary`. A `text_long` / `text_formatted` body (or

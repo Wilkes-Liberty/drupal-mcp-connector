@@ -93,7 +93,10 @@ export class Backend {
 
   /**
    * Update an entity.
-   * @param {{entityType: string, bundle: string, id: string, attributes?: object, relationships?: object}} _input
+   * @param {{entityType: string, bundle: string, id: string, attributes?: object, relationships?: object, resourceVersion?: string}} _input
+   *   `resourceVersion` is a JSON:API revision selector (`rel:working-copy`,
+   *   `rel:latest-version`, `id:<vid>`). Backends that cannot address revisions
+   *   ignore it.
    * @returns {Promise<import("../canonical.js").CanonicalEntity>}
    */
   async updateEntity(_input) { return notImplemented("updateEntity"); }

@@ -1,17 +1,25 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   PatchBlockedError,
+  WorkingCopyStaleError,
   PATCH_BLOCKED_CODE,
   PATCH_BLOCKED_MESSAGE,
+  PATCH_WORKING_COPY_STALE_MESSAGE,
   isWorkingCopyPatchError,
   rewriteWorkingCopyPatchError,
   shouldPreflightPatch,
   preflightPatchWritable,
+  prepareGuardedPatch,
+  resolveWorkingCopyPatchTarget,
   updateEntityGuarded,
   isProbePassedWithoutSave,
   PATCH_PROBE_MISMATCH_ID,
 } from "../../src/lib/patch-preflight.js";
-import { readWrittenRevision } from "../../src/lib/write-revision.js";
+import {
+  attachRevisionPair,
+  attachWrittenRevisionPair,
+  readWrittenRevision,
+} from "../../src/lib/write-revision.js";
 
 const WC_400 = new Error(
   "Drupal 400 on PATCH /jsonapi/node/solution/n1: Updating a resource object " +
@@ -122,7 +130,7 @@ describe("preflightPatchWritable (#201)", () => {
     })).rejects.toBeInstanceOf(PatchBlockedError);
   });
 
-  it("names a visible pending draft instead of revision surgery (#201 follow-up)", async () => {
+  it("does not prescribe publish-or-discard when a working copy is addressable (#166)", async () => {
     const backend = backendStub({
       rawQuery: vi.fn(async () => { throw WC_400; }),
       getEntity: vi.fn(async ({ resourceVersion }) => {
@@ -142,11 +150,10 @@ describe("preflightPatchWritable (#201)", () => {
     } catch (err) {
       caught = err;
     }
-    expect(caught).toBeInstanceOf(PatchBlockedError);
-    expect(caught.message).toMatch(/pending draft \(vid 2070\)/i);
-    expect(caught.message).toMatch(/Publish or discard/i);
+    expect(caught).toBeInstanceOf(WorkingCopyStaleError);
+    expect(caught.message).toBe(PATCH_WORKING_COPY_STALE_MESSAGE);
+    expect(caught.message).not.toMatch(/Publish or discard/i);
     expect(caught.message).not.toMatch(/revision surgery/i);
-    expect(caught.message).not.toMatch(/cannot show the blocking row/i);
   });
 
   it("keeps the surgery message when the working copy does not resolve (#201)", async () => {
@@ -186,6 +193,30 @@ describe("preflightPatchWritable (#201)", () => {
     });
     expect(out).toEqual({ probed: true, writable: true });
   });
+
+  it("probes the working-copy URL when resourceVersion is set (#166)", async () => {
+    const backend = backendStub();
+    const out = await preflightPatchWritable({
+      backend, entityType: "node", bundle: "article", id: "n1",
+      existing: { fields: { moderation_state: "published" } },
+      attributes: { title: "T", moderation_state: "draft" },
+      resourceVersion: "rel:working-copy",
+    });
+    expect(out).toEqual({ probed: true, writable: true });
+    expect(backend.rawQuery.mock.calls[0][0].path).toBe(
+      "/jsonapi/node/article/n1?resourceVersion=rel%3Aworking-copy",
+    );
+  });
+
+  it("treats a working-copy 400 on the working-copy probe as stale (#166)", async () => {
+    const backend = backendStub({ rawQuery: vi.fn(async () => { throw WC_400; }) });
+    await expect(preflightPatchWritable({
+      backend, entityType: "node", bundle: "solution", id: "n1",
+      existing: { fields: { moderation_state: "published" } },
+      attributes: { moderation_state: "draft" },
+      resourceVersion: "rel:working-copy",
+    })).rejects.toThrow(/stale or concurrent|#166/i);
+  });
 });
 
 describe("updateEntityGuarded (#201)", () => {
@@ -195,7 +226,7 @@ describe("updateEntityGuarded (#201)", () => {
       .rejects.toBeInstanceOf(PatchBlockedError);
   });
 
-  it("names a pending draft when the real write is blocked and the working copy resolves", async () => {
+  it("treats a blocked write as stale when the working copy is addressable (#166)", async () => {
     const backend = backendStub({
       updateEntity: vi.fn(async () => { throw WC_400; }),
       getEntity: vi.fn(async ({ resourceVersion }) => (
@@ -206,9 +237,19 @@ describe("updateEntityGuarded (#201)", () => {
     });
     await expect(updateEntityGuarded(backend, { entityType: "node", bundle: "a", id: "n1" }))
       .rejects.toMatchObject({
-        name: "PatchBlockedError",
-        message: expect.stringMatching(/pending draft \(vid 42\)/),
+        name: "WorkingCopyStaleError",
+        message: PATCH_WORKING_COPY_STALE_MESSAGE,
       });
+  });
+
+  it("treats a working-copy-targeted write 400 as stale and does not retry canonical (#166)", async () => {
+    const backend = backendStub({
+      updateEntity: vi.fn(async () => { throw WC_400; }),
+    });
+    await expect(updateEntityGuarded(backend, {
+      entityType: "node", bundle: "a", id: "n1", resourceVersion: "rel:working-copy",
+    })).rejects.toBeInstanceOf(WorkingCopyStaleError);
+    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -260,5 +301,88 @@ describe("readWrittenRevision (#169)", () => {
     });
     expect(out.url).toBe("/kept");
     expect(out._revision).toBeUndefined();
+  });
+
+  it("re-reads rel:working-copy after a draft-targeted write, not the live body", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => (
+        resourceVersion === "rel:working-copy"
+          ? { id: "n1", title: "Draft title", url: "/draft" }
+          : { id: "n1", title: "Live title", url: "/live" }
+      )),
+    });
+    const out = await readWrittenRevision({
+      backend, entityType: "node", bundle: "article", id: "n1",
+      relationshipsSent: false,
+      patchResult: { id: "n1", title: "Draft title", url: null },
+      preferCanonical: true,
+      resourceVersion: "rel:working-copy",
+    });
+    expect(out.title).toBe("Draft title");
+    expect(out.url).toBe("/draft");
+    expect(backend.getEntity).toHaveBeenCalledWith({
+      entityType: "node", bundle: "article", id: "n1",
+      resourceVersion: "rel:working-copy",
+    });
+  });
+});
+
+describe("attachRevisionPair (#166)", () => {
+  it("attaches only when live and working vids are both present and distinct", () => {
+    expect(attachRevisionPair({ id: "n1" }, { live: 10, working: 11 }))
+      .toEqual({ id: "n1", _revisions: { live: 10, working: 11 } });
+    const entity = { id: "n1" };
+    expect(attachRevisionPair(entity, { live: 10, working: 10 })).toBe(entity);
+    expect(attachRevisionPair(entity, { live: 10, working: null })).toBe(entity);
+  });
+});
+
+describe("attachWrittenRevisionPair (#166)", () => {
+  it("does not invent a working vid from the write body when the alias cannot be read", async () => {
+    const entity = { id: "n1", fields: { drupal_internal__vid: 10 } };
+    const backend = backendStub({
+      getEntity: vi.fn(async () => { throw new Error("no working copy"); }),
+    });
+    const out = await attachWrittenRevisionPair({
+      backend, entityType: "node", bundle: "a", id: "n1", entity, liveVid: 10,
+    });
+    expect(out._revisions).toBeUndefined();
+  });
+});
+
+describe("prepareGuardedPatch (#166)", () => {
+  it("does not report a live vid when the PATCH probe is skipped", async () => {
+    const backend = backendStub();
+    const out = await prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "page", id: "n1",
+      existing: { fields: { body: "x", drupal_internal__vid: 4 } },
+      attributes: { title: "T" },
+    });
+    expect(out.liveVid).toBeNull();
+    expect(out.workingVid).toBeNull();
+    expect(out.resourceVersion).toBeUndefined();
+  });
+});
+
+describe("resolveWorkingCopyPatchTarget (#166)", () => {
+  it("fetches the canonical entity when existing has no readable vid", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => {
+        if (resourceVersion === "rel:working-copy") {
+          return { id: "n1", fields: { drupal_internal__vid: 20 } };
+        }
+        return { id: "n1", fields: { drupal_internal__vid: 10 } };
+      }),
+    });
+    const out = await resolveWorkingCopyPatchTarget(backend, {
+      entityType: "node", bundle: "article", id: "n1",
+      existing: { id: "n1", title: "T" },
+    });
+    expect(out.liveVid).toBe(10);
+    expect(out.workingVid).toBe(20);
+    expect(out.resourceVersion).toBe("rel:working-copy");
+    expect(backend.getEntity).toHaveBeenCalledWith({
+      entityType: "node", bundle: "article", id: "n1",
+    });
   });
 });

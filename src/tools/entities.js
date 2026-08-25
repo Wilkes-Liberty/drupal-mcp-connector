@@ -16,8 +16,8 @@ import {
   resolveErrRelationships, relationshipsWereSent, embedParagraphRef,
   resolveParagraphRevisionId, missingParagraphRevisionError,
 } from "../lib/err-relationships.js";
-import { readWrittenRevision } from "../lib/write-revision.js";
-import { preflightPatchWritable, updateEntityGuarded } from "../lib/patch-preflight.js";
+import { attachWrittenRevisionPair, readWrittenRevision } from "../lib/write-revision.js";
+import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
   redactCanonicalEntity, getSecuritySummary,
@@ -117,8 +117,8 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   });
   assertPublishAllowed(sec, safeAttributes);
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
-  await preflightPatchWritable({
-    backend, entityType, bundle, id, existing, attributes: safeAttributes,
+  const patchTarget = await prepareGuardedPatch(backend, {
+    entityType, bundle, id, existing, attributes: safeAttributes,
   });
   if (dryRun) {
     return {
@@ -128,6 +128,7 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   }
   const result = await updateEntityGuarded(backend, {
     entityType, bundle, id, attributes: safeAttributes, relationships: resolvedRelationships,
+    ...(patchTarget.resourceVersion ? { resourceVersion: patchTarget.resourceVersion } : {}),
   });
   const written = await readWrittenRevision({
     backend, entityType, bundle, id,
@@ -135,7 +136,10 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
     patchResult: result,
     preferCanonical: false,
   });
-  return shapeWriteResponse(flagUnrequestedStatusChange(written, existing, safeAttributes), returning);
+  const withRevs = await attachWrittenRevisionPair({
+    backend, entityType, bundle, id, entity: written, liveVid: patchTarget.liveVid,
+  });
+  return shapeWriteResponse(flagUnrequestedStatusChange(withRevs, existing, safeAttributes), returning);
 }
 
 /**
@@ -276,7 +280,7 @@ export const definitions = [
   },
   {
     name: "drupal_entity_update",
-    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision). Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved. On moderated targets an id-mismatch PATCH preflight runs first (including dryRun) so a core working-copy guard failure is reported before the real write and no revision is saved by the probe (#201). Preflight does not un-orphan paragraphs already created — probe the host before creating dependents.",
+    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision). Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved. On moderated targets an id-mismatch PATCH preflight runs first (including dryRun) against the same URL the write will hit. An addressable working copy is PATCHed via ?resourceVersion=rel:working-copy (#166); a stray revision with no addressable working copy still fails with revision-surgery language (#201). Preflight does not un-orphan paragraphs already created — probe the host before creating dependents.",
     inputSchema: {
       type: "object", required: ["entityType", "bundle", "id"],
       properties: {
@@ -286,7 +290,7 @@ export const definitions = [
         id:            { type: "string" },
         attributes:    { type: "object" },
         relationships: { type: "object" },
-        dryRun:        { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. The probe uses a non-matching data.id so Drupal does not save. A working-copy 400 fails the dryRun." },
+        dryRun:        { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. The probe uses a non-matching data.id so Drupal does not save, and hits the same URL as the real write (canonical, or ?resourceVersion=rel:working-copy when a draft is addressable). A working-copy 400 fails the dryRun." },
         returning:     RETURNING_SCHEMA,
       },
     },

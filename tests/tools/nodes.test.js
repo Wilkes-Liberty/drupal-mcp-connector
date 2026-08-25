@@ -546,11 +546,11 @@ describe("#192 ERR attach, #169 written revision, #201 preflight", () => {
     });
     backend.rawQuery.mockRejectedValue(WC_400);
     await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "T" }))
-      .rejects.toThrow(/pending draft \(vid 2070\)/);
+      .rejects.toThrow(/stale or concurrent|#166/);
     expect(backend.updateEntity).not.toHaveBeenCalled();
 
     await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "T", dryRun: true }))
-      .rejects.toThrow(/Publish or discard/);
+      .rejects.toThrow(/stale or concurrent|#166/);
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
@@ -573,6 +573,105 @@ describe("#192 ERR attach, #169 written revision, #201 preflight", () => {
     // Canonical/PATCH body still has the old single ref — not accepted as proof.
     expect(out.relationships.field_key_capabilities).toHaveLength(1);
     expect(out.relationships.field_key_capabilities[0].id).toBe("old-1");
+  });
+});
+
+describe("#166 iterative working-copy PATCH", () => {
+  const live = () => canonicalNode({
+    title: "Published",
+    status: true,
+    url: "/published",
+    fields: { moderation_state: "published", drupal_internal__vid: 1500, body: { value: "B" } },
+  });
+  const draft = (vid = 1510) => canonicalNode({
+    title: "CTA pass",
+    status: false,
+    url: "/draft-alias",
+    fields: { moderation_state: "draft", drupal_internal__vid: vid, body: { value: "B" } },
+  });
+
+  function mockNoWorkingCopy() {
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return live();
+    });
+  }
+
+  function mockWorkingCopy({ id = "n1" } = {}) {
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") return { ...draft(), id };
+      return live();
+    });
+  }
+
+  it("published with no working copy PATCHes the canonical URL", async () => {
+    mockNoWorkingCopy();
+    backend.updateEntity.mockResolvedValue(live());
+    await handlers.drupal_update_node({ type: "article", id: "n1", title: "First draft" });
+    expect(backend.createEntity).not.toHaveBeenCalled();
+    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
+    const sent = backend.updateEntity.mock.calls[0][0];
+    expect(sent).not.toHaveProperty("resourceVersion");
+    expect(backend.rawQuery.mock.calls[0][0].path).toBe("/jsonapi/node/article/n1");
+    expect(backend.rawQuery.mock.calls[0][0].path).not.toMatch(/working-copy/);
+  });
+
+  it("addressable working copy PATCHes rel:working-copy and does not say publish or discard", async () => {
+    mockWorkingCopy();
+    backend.updateEntity.mockResolvedValue(draft());
+    const out = await handlers.drupal_update_node({ type: "article", id: "n1", title: "CTA pass" });
+    expect(backend.createEntity).not.toHaveBeenCalled();
+    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
+    expect(backend.updateEntity.mock.calls[0][0].resourceVersion).toBe("rel:working-copy");
+    expect(out.title).toBe("CTA pass");
+    expect(out.status).toBe(false);
+    expect(out.url).toBe("/draft-alias");
+    expect(out._revisions).toEqual({ live: 1500, working: 1510 });
+  });
+
+  it("dryRun with a working copy probes the working-copy URL", async () => {
+    mockWorkingCopy();
+    const out = await handlers.drupal_update_node({ type: "article", id: "n1", title: "CTA", dryRun: true });
+    expect(out.dryRun).toBe(true);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(backend.rawQuery.mock.calls[0][0].path).toContain("resourceVersion=rel%3Aworking-copy");
+    expect(backend.rawQuery.mock.calls[0][0].path).not.toBe("/jsonapi/node/article/n1");
+  });
+
+  it("dryRun fails when the working-copy probe 400s — it does not report success", async () => {
+    mockWorkingCopy();
+    backend.rawQuery.mockRejectedValue(WC_400);
+    await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "CTA", dryRun: true }))
+      .rejects.toThrow(/stale or concurrent|#166/i);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(backend.rawQuery.mock.calls[0][0].path).toContain("resourceVersion=rel%3Aworking-copy");
+  });
+
+  it("working copy does not resolve plus core 400 keeps the #201 stray-revision message", async () => {
+    mockNoWorkingCopy();
+    backend.rawQuery.mockRejectedValue(WC_400);
+    await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "T" }))
+      .rejects.toThrow(/revision surgery|#201/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stale working-copy write and does not retry the canonical URL", async () => {
+    mockWorkingCopy();
+    backend.updateEntity.mockRejectedValue(WC_400);
+    await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "CTA" }))
+      .rejects.toThrow(/stale or concurrent|#166/i);
+    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
+    expect(backend.updateEntity.mock.calls[0][0].resourceVersion).toBe("rel:working-copy");
+  });
+
+  it("refuses when the working-copy id does not match the target", async () => {
+    mockWorkingCopy({ id: "other-node" });
+    await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "CTA" }))
+      .rejects.toThrow(/does not match|ambiguous|#166/i);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(backend.createEntity).not.toHaveBeenCalled();
   });
 });
 
