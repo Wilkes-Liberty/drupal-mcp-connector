@@ -53,6 +53,17 @@ import { parse } from "graphql";
  *
  *  globalRedactedFields string[]         stripped from every response, every type
  *
+ *  declaredCeiling     string            narrow-only X-MCP-Declared-Ceiling
+ *                                        (public|internal|restricted). Invalid
+ *                                        values are dropped, never widened.
+ *  readBudgets         object            finite northbound budgets bound to
+ *                                        principal+target (#179). Same classes
+ *                                        as mcp_sentinel: results, bytes,
+ *                                        requests, requestWindowSec, pages,
+ *                                        pageWindowSec, chainedActions,
+ *                                        chainedActionWindowSec. Omitted keys
+ *                                        use the module defaults.
+ *
  * ─── Field redaction ──────────────────────────────────────────────────────
  *
  *  Redacted fields are replaced with "[REDACTED]" in response attributes.
@@ -259,6 +270,8 @@ export function resolveSecurityConfig(site) {
       ...(preset.globalRedactedFields ?? []),
       ...(raw.globalRedactedFields    ?? []),
     ],
+    declaredCeiling:       raw.declaredCeiling ?? preset.declaredCeiling,
+    readBudgets:           raw.readBudgets ?? preset.readBudgets ?? null,
   };
 }
 
@@ -754,5 +767,6 @@ export function getSecuritySummary(site) {
     deniedEntityTypes:     cfg.deniedEntityTypes,
     entityRules:           cfg.entityRules,
     globalRedactedFields:  cfg.globalRedactedFields,
+    declaredCeiling:       cfg.declaredCeiling ?? null,
   };
 }

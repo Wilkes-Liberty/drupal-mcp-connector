@@ -24,6 +24,7 @@
 
 import fetch from "node-fetch";
 import { authHeadersAsync, clientHeaders, CLIENT_VERSION } from "./config.js";
+import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial } from "./data-flow.js";
 import { clearToken } from "./oauth.js";
 
 /**
@@ -90,6 +91,7 @@ async function baseHeaders(site, sessionId) {
     Accept: "application/json, text/event-stream",
     "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
     ...clientHeaders(),
+    ...northboundHeaders(),
     ...(await authHeadersAsync(site)),
   };
   if (sessionId) headers["Mcp-Session-Id"] = sessionId;
@@ -263,9 +265,12 @@ export async function callServerTool(site, toolName, args = {}) {
   let sessionId = await ensureSession(site, endpoint);
   let refreshedAuth = false;
   let reinitedSession = false;
+  let paid = false;
 
   // Retry loop: at most one auth refresh and one session re-init, each replayed once.
   while (true) {
+    consumeBudgetIfEnforced("request", 1, { retry: paid });
+    paid = true;
     const res = await fetch(endpoint, {
       method: "POST",
       headers: await baseHeaders(site, sessionId),
@@ -289,6 +294,8 @@ export async function callServerTool(site, toolName, args = {}) {
     }
 
     if (!res.ok) {
+      const mapped = sourceBudgetDenial(rawText);
+      if (mapped) throw mapped;
       throw new Error(`Server-tool call ${toolName} failed ${res.status}: ${rawText}`);
     }
 
@@ -303,6 +310,8 @@ export async function callServerTool(site, toolName, args = {}) {
     const result = body?.result;
     if (result?.isError) {
       const detail = extractTextContent(result) || "tool reported an error";
+      const mapped = sourceBudgetDenial(detail);
+      if (mapped) throw mapped;
       throw new Error(`Server-tool ${toolName} reported an error: ${detail}`);
     }
     return result;

@@ -20,6 +20,7 @@ import {
   assertPrincipalEntitlement, callerTargetHints, getRequestIdentity,
 } from "./principal.js";
 import { assertExplicitSiteForWrite, withResolvedTarget } from "./site-target.js";
+import { buildDataFlowContext, consumeBudgetIfEnforced, runWithDataFlow } from "./data-flow.js";
 import { allHandlers } from "../tools/index.js";
 
 /**
@@ -143,25 +144,41 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
 
   const site = getSiteConfig(nextArgs.site);
 
-  // Source-governance gate (#176). The diagnostic tools stay callable while
-  // governance fails — they are how an operator learns which condition failed.
-  if (!GOVERNANCE_DIAGNOSTIC_TOOLS.has(toolName)) {
-    await assertSourceGovernance(site);
+  const invoke = async () => {
+    // Source-governance gate (#176). The diagnostic tools stay callable while
+    // governance fails — they are how an operator learns which condition failed.
+    if (!GOVERNANCE_DIAGNOSTIC_TOOLS.has(toolName)) {
+      await assertSourceGovernance(site);
+    }
+
+    const sec  = resolveSecurityConfig(site);
+    const op   = inferOperation(toolName);
+
+    if (op === "delete") {
+      assertDestructiveAllowed(sec, extractEntityType(toolName, nextArgs), nextArgs?.id ?? "?");
+      assertNotReadOnly(sec, toolName);
+    } else if (op === "write") {
+      assertNotReadOnly(sec, toolName);
+    } else if (op === "graphql" && nextArgs?.query) {
+      assertGraphqlMutationAllowed(sec, nextArgs.query);
+    }
+
+    return handler(nextArgs);
+  };
+
+  if (!resolved) {
+    return invoke();
   }
 
-  const sec  = resolveSecurityConfig(site);
-  const op   = inferOperation(toolName);
-
-  if (op === "delete") {
-    assertDestructiveAllowed(sec, extractEntityType(toolName, nextArgs), nextArgs?.id ?? "?");
-    assertNotReadOnly(sec, toolName);
-  } else if (op === "write") {
-    assertNotReadOnly(sec, toolName);
-  } else if (op === "graphql" && nextArgs?.query) {
-    assertGraphqlMutationAllowed(sec, nextArgs.query);
-  }
-
-  return handler(nextArgs);
+  const flow = buildDataFlowContext({
+    identity,
+    target: { name: resolved.name, baseUrl: site.baseUrl, source: resolved.source },
+    site,
+  });
+  return runWithDataFlow(flow, async () => {
+    consumeBudgetIfEnforced("chained_action");
+    return invoke();
+  });
 }
 
 /**

@@ -8,12 +8,38 @@ import { basename } from "path";
 import { authHeadersAsync, clientHeaders } from "./config.js";
 import { clearToken } from "./oauth.js";
 import {
+  accountNorthboundBody,
+  consumeBudgetIfEnforced,
+  isCollectionJsonApiPath,
+  northboundHeaders,
+  sourceBudgetDenial,
+} from "./data-flow.js";
+import {
   assertUploadPathAllowed,
   sanitizeUploadFilename,
   validateMachineName,
 } from "./validate.js";
 
 const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
+
+/**
+ * Read a 2xx body once. Prefers text() so byte accounting can see the payload;
+ * falls back to json() for test doubles that only implement that.
+ * @param {object} res node-fetch Response or test double.
+ * @returns {Promise<{json: object|null, text: string}>}
+ */
+async function readOkBody(res) {
+  if (typeof res.text === "function") {
+    const text = await res.text();
+    if (!text) return { json: null, text: "" };
+    try {
+      return { json: JSON.parse(text), text };
+    } catch {
+      return { json: null, text };
+    }
+  }
+  return { json: await res.json(), text: "" };
+}
 
 /**
  * Standard JSON:API request against a site.
@@ -28,30 +54,38 @@ const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
  */
 export async function drupalFetch(site, path, options = {}) {
   const url = `${site.baseUrl}${path}`;
+  const collection = isCollectionJsonApiPath(path);
+  let paid = false;
 
-  async function attempt() {
+  async function attempt(isRetry = false) {
+    consumeBudgetIfEnforced("request", 1, { retry: isRetry || paid });
+    if (collection) consumeBudgetIfEnforced("page", 1, { retry: isRetry || paid });
+    paid = true;
     return fetch(url, {
       ...options,
       headers: {
         "Content-Type": JSON_API_CONTENT_TYPE,
         Accept: JSON_API_CONTENT_TYPE,
         ...clientHeaders(),
-        ...(await authHeadersAsync(site)),
         ...(options.headers || {}),
+        ...northboundHeaders(),
+        ...(await authHeadersAsync(site)),
       },
     });
   }
 
-  let res = await attempt();
+  let res = await attempt(false);
 
   // OAuth sites: a 401 may mean the token expired server-side. Refresh once.
   if (res.status === 401 && site.oauth) {
     clearToken(site);
-    res = await attempt();
+    res = await attempt(true);
   }
 
   if (!res.ok) {
     const body = await res.text();
+    const mapped = sourceBudgetDenial(body);
+    if (mapped) throw mapped;
     let detail = body;
     try {
       const parsed = JSON.parse(body);
@@ -64,7 +98,9 @@ export async function drupalFetch(site, path, options = {}) {
   }
 
   if (res.status === 204) return null; // No Content (e.g. DELETE success)
-  return res.json();
+  const { json, text } = await readOkBody(res);
+  accountNorthboundBody(json, text);
+  return json;
 }
 
 /**
@@ -78,12 +114,14 @@ export async function drupalGraphqlFetch(site, body) {
   const endpoint = site.graphqlEndpoint || "/graphql";
   const url = `${site.baseUrl}${endpoint}`;
 
+  consumeBudgetIfEnforced("request");
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
       ...clientHeaders(),
+      ...northboundHeaders(),
       ...(await authHeadersAsync(site)),
     },
     body: JSON.stringify(body),
@@ -94,10 +132,14 @@ export async function drupalGraphqlFetch(site, body) {
     // cached token so the next request re-acquires, then surface the error.
     if (res.status === 401 && site.oauth) clearToken(site);
     const text = await res.text();
+    const mapped = sourceBudgetDenial(text);
+    if (mapped) throw mapped;
     throw new Error(`GraphQL request failed ${res.status}: ${text}`);
   }
 
-  return res.json();
+  const { json, text } = await readOkBody(res);
+  accountNorthboundBody(json, text);
+  return json;
 }
 
 /**
@@ -130,6 +172,7 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
   const stat = statSync(safePath);
   const url = `${site.baseUrl}/jsonapi/${encodeURIComponent(entityType)}/${encodeURIComponent(bundle)}/${encodeURIComponent(fieldName)}`;
 
+  consumeBudgetIfEnforced("request");
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -137,6 +180,7 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
       "Content-Disposition": `file; filename="${filename}"`,
       Accept: JSON_API_CONTENT_TYPE,
       ...clientHeaders(),
+      ...northboundHeaders(),
       ...(await authHeadersAsync(site)),
     },
     // eslint-disable-next-line security/detect-non-literal-fs-filename -- path allowlisted via assertUploadPathAllowed

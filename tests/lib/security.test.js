@@ -196,6 +196,19 @@ describe("config capability presets", () => {
     expect(s.allowConfigRead).toBe(true);
     expect(s.allowConfigWrite).toBe(true);
   });
+
+  it("passes declaredCeiling and readBudgets through from site security", () => {
+    const cfg = resolveSecurityConfig({
+      security: { preset: "content-editor", declaredCeiling: "internal", readBudgets: { results: 10 } },
+    });
+    expect(cfg.declaredCeiling).toBe("internal");
+    expect(cfg.readBudgets).toEqual({ results: 10 });
+    const s = getSecuritySummary({
+      _name: "prod",
+      security: { preset: "content-editor", declaredCeiling: "internal" },
+    });
+    expect(s.declaredCeiling).toBe("internal");
+  });
 });
 
 describe("assertConfigReadAllowed / assertConfigWriteAllowed", () => {

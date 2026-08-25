@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Northbound data-flow budgets bind to principal and target (#179).** Every
+  governed tool call that resolves a site now carries request-scoped principal
+  and authoritative-target context. Row, byte, page, request, and chained-action
+  counters use the same finite defaults as mcp_sentinel (500 results / 8 MiB /
+  600 req/60s / 120 pages/60s) and are keyed by inbound principal + target —
+  not by MCP session — so pagination, retries, batching, and a new chain id
+  cannot reset them. JSON:API, GraphQL, and the server-tool bridge send the
+  source wire contract (`X-MCP-Declared-Ceiling`, narrow-only;
+  `X-MCP-Declared-Destination` from the entitlement pair). Denials name a
+  stable reason plus a correlation id and do not echo restricted payload.
+  Optional `security.declaredCeiling` and `security.readBudgets` override the
+  defaults. Stdio / local-operator traffic still sends the declared headers;
+  connector-side counters enforce when an inbound OAuth principal is present.
+
 ### Changed
 - **Slash-command stubs moved to `.agents/commands/` (#218).** Generated
   `/drupal-*` files are harness-agnostic (protocol tool names, no

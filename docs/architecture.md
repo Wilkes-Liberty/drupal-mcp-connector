@@ -184,6 +184,7 @@ src/
 │   ├── http-handler.js       # Auth-first, bounded, explicit modern/legacy routing
 │   ├── mcp-server.js         # Shared transport-neutral MCP server factory
 │   ├── security.js           # Presets, assertions, field redaction
+│   ├── data-flow.js          # Principal+target budgets + declared headers (#179)
 │   ├── reports-support.js    # Shared collectors/helpers for the reports module
 │   ├── errors.js             # toolResult / toolError helpers
 │   └── backends/

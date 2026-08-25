@@ -1,9 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("node-fetch", () => ({ default: vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) })) }));
 import fetch from "node-fetch";
-import { drupalFetch } from "../../src/lib/drupal-fetch.js";
+import { drupalFetch, drupalGraphqlFetch } from "../../src/lib/drupal-fetch.js";
 import { CLIENT_VERSION } from "../../src/lib/config.js";
 import { clearToken } from "../../src/lib/oauth.js";
+import {
+  HEADER_DECLARED_CEILING,
+  HEADER_DECLARED_DESTINATION,
+  REASON_READ,
+  buildDataFlowContext,
+  resetDataFlowBudgets,
+  runWithDataFlow,
+} from "../../src/lib/data-flow.js";
 
 const ok = () => ({ ok: true, status: 200, json: async () => ({ data: [] }) });
 const oauthSite = (name) => ({
@@ -12,7 +20,12 @@ const oauthSite = (name) => ({
   oauth: { tokenUrl: "/oauth/token", clientId: "c", clientSecret: "s", grant: "client_credentials", scopes: ["mcp:read"] },
 });
 
-beforeEach(() => { vi.mocked(fetch).mockReset(); vi.mocked(fetch).mockImplementation(async () => ok()); delete process.env.MCP_CLIENT_ID; });
+beforeEach(() => {
+  vi.mocked(fetch).mockReset();
+  vi.mocked(fetch).mockImplementation(async () => ok());
+  delete process.env.MCP_CLIENT_ID;
+  resetDataFlowBudgets();
+});
 
 describe("drupalFetch identity header", () => {
   it("sends X-MCP-Client + User-Agent on requests", async () => {
@@ -60,5 +73,61 @@ describe("drupalFetch oauth integration", () => {
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
     const opts = vi.mocked(fetch).mock.calls[0][1];
     expect(opts.headers.Authorization).toBe("Bearer static");
+  });
+});
+
+describe("drupalFetch northbound data-flow (#179)", () => {
+  const flow = () => buildDataFlowContext({
+    identity: { sub: "alice", clientId: "content-agent" },
+    target: { name: "production", baseUrl: "https://x", source: "grant" },
+    site: { security: { declaredCeiling: "internal" } },
+    limits: { requests: 2, requestWindowSec: 60, pages: 1, pageWindowSec: 60, results: 2, bytes: 4096 },
+    now: () => 1_000,
+    correlationId: "corr-fetch",
+  });
+
+  it("attaches declared ceiling and destination on JSON:API and GraphQL", async () => {
+    await runWithDataFlow(flow(), () => drupalFetch({ _name: "t", baseUrl: "https://x" }, "/jsonapi/node/article/abcd"));
+    const jsonapi = vi.mocked(fetch).mock.calls[0][1].headers;
+    expect(jsonapi[HEADER_DECLARED_CEILING]).toBe("internal");
+    expect(jsonapi[HEADER_DECLARED_DESTINATION]).toBe("content-agent:production");
+
+    vi.mocked(fetch).mockClear();
+    vi.mocked(fetch).mockImplementation(async () => ok());
+    await runWithDataFlow(flow(), () => drupalGraphqlFetch({ _name: "t", baseUrl: "https://x" }, { query: "{ ping }" }));
+    const gql = vi.mocked(fetch).mock.calls[0][1].headers;
+    expect(gql[HEADER_DECLARED_CEILING]).toBe("internal");
+    expect(gql[HEADER_DECLARED_DESTINATION]).toBe("content-agent:production");
+  });
+
+  it("does not let a collection page evade the page budget", async () => {
+    const ctx = flow();
+    await runWithDataFlow(ctx, () =>
+      drupalFetch({ _name: "t", baseUrl: "https://x" }, "/jsonapi/node/article?page[limit]=2"));
+    await expect(runWithDataFlow(ctx, () =>
+      drupalFetch({ _name: "t", baseUrl: "https://x" }, "/jsonapi/node/article?page[offset]=2"))).rejects.toMatchObject({
+      reason: "page_budget_exceeded",
+      correlationId: "corr-fetch",
+    });
+  });
+
+  it("rewrites a source budget denial to a stable reason and drops the payload", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status: 429,
+      text: async () => JSON.stringify({
+        errors: [{ code: REASON_READ, detail: "restricted-body leaked" }],
+      }),
+    });
+    try {
+      await runWithDataFlow(flow(), () =>
+        drupalFetch({ _name: "t", baseUrl: "https://x" }, "/jsonapi/node/article"));
+      throw new Error("expected source budget denial");
+    } catch (err) {
+      expect(err.reason).toBe(REASON_READ);
+      expect(err.correlationId).toBe("corr-fetch");
+      expect(err.message).toBe("read_budget_exceeded (correlation corr-fetch)");
+      expect(err.message).not.toContain("restricted-body");
+    }
   });
 });
