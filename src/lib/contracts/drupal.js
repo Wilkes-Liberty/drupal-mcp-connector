@@ -485,6 +485,9 @@ async function applyBackend(backend, manifest) {
   }
   if (manifest.operation === "create" || manifest.operation === "publish") {
     if (manifest.operation === "publish") ref.attributes.status = true;
+    if (manifest.operation === "publish" && manifest.id) {
+      return backend.updateEntity(ref);
+    }
     return backend.createEntity(ref);
   }
   if (manifest.operation === "update") {

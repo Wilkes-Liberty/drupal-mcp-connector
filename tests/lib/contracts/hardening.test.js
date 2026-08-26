@@ -146,6 +146,34 @@ describe("Drupal adapter review closures", () => {
     expect(backend.store.has("n1")).toBe(true);
   });
 
+  it("publishes an existing entity in place instead of creating a duplicate", async () => {
+    const backend = createMemoryBackend({
+      entities: [{
+        id: "n-pub",
+        entityType: "node",
+        bundle: "article",
+        status: false,
+        attributes: { status: false },
+      }],
+    });
+    const adapter = harness({ backend });
+    const manifest = adapter.propose({
+      operation: "publish",
+      entityType: "node",
+      bundle: "article",
+      id: "n-pub",
+      hints: { target: "staging" },
+    });
+    const decision = adapter.evaluate(manifest);
+    const issued = adapter.approval.issue(manifest, "agent-1");
+    const receipt = await adapter.execute(manifest, decision, {
+      approvalId: issued.approvalId,
+    });
+    expect(receipt.outcome).toBe("ok");
+    expect(backend.store.size).toBe(1);
+    expect(backend.store.get("n-pub").status).toBe(true);
+  });
+
   it("rolls back a mutation when the final required-evidence write fails", async () => {
     const backend = createMemoryBackend({
       entities: [{ id: "n-del", entityType: "node", bundle: "article" }],

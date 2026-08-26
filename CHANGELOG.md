@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   approvals cannot be consumed without that actor. Vendor keys are rejected
   on `hints`. `propose` and `policyDigest` use the same relay hint keys as
   evaluate. A required-evidence failure after a backend write rolls the
-  mutation back.
+  mutation back. `publish` with an id updates that entity instead of
+  creating a duplicate.
 
 ### Added
 - **Provider-neutral adapter contracts and a Drupal conformance kit (#181).**
