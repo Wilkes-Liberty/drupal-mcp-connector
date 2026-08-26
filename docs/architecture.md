@@ -185,6 +185,7 @@ src/
 │   ├── mcp-server.js         # Shared transport-neutral MCP server factory
 │   ├── security.js           # Presets, assertions, field redaction
 │   ├── data-flow.js          # Principal+target budgets + declared headers (#179)
+│   ├── contracts/            # Adapter contracts + Drupal SoR (#181)
 │   ├── reports-support.js    # Shared collectors/helpers for the reports module
 │   ├── errors.js             # toolResult / toolError helpers
 │   └── backends/

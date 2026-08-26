@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Provider-neutral adapter contracts and a Drupal conformance kit (#181).**
+  Versioned evaluator, relay, approval, evidence-sink, and system-of-record
+  contracts live at `src/lib/contracts/` (contract 1.0). Typed decisions
+  (`deny` / `allow` / `allow_with_obligations` / `require_approval`), stable
+  reason codes, obligations, and execution receipts are verified at that
+  seam. Final target-side denial stays authoritative: an upstream allow
+  cannot widen local policy. Model and agent vendors are outside the
+  contract. The Drupal adapter is the only system-of-record implementation;
+  JSON:API and GraphQL remain transport adapters. The offline conformance
+  kit covers allowed and denied actions, hostile input, tenant escape,
+  required-evidence write failure, replay, and post-condition discrepancy.
+  See [docs/adapter-contracts.md](docs/adapter-contracts.md).
+
 ## [2.8.0] - 2026-08-25
 
 ### Fixed
