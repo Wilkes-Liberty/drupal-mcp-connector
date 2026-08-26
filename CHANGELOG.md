@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Lab-only outbound-relay harness (DEV-293).** Isolated under
+  `lab/outbound-relay/` with tests in `tests/lab/`. A tenant agent dials out
+  to a loopback relay; one MCP 2026-07-28 Streamable-HTTP request (stateless,
+  no `Mcp-Session-Id`) reaches an in-process stub private Drupal; reconnect
+  keeps the same tunnel identity; revocation is checked per request (next
+  request denied, no grace window). This is not a public surface, not a
+  hosted-service claim, and not DEV-294. Hosted MCP is unstarted.
+
 ## [2.9.0] - 2026-08-26
 
 ### Fixed
