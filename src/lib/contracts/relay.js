@@ -34,7 +34,7 @@ export function createLocalRelay({ sites, grants = null, defaultSite } = {}) {
      */
     resolve(identity, hints = {}) {
       if (!identity) {
-        const hintName = firstHint(hints);
+        const hintName = hintTargetName(hints);
         if (hintName) {
           const site = catalog.find((entry) => entry._name === hintName);
           if (!site) {
@@ -68,10 +68,13 @@ export function createLocalRelay({ sites, grants = null, defaultSite } = {}) {
 }
 
 /**
- * @param {object} hints
+ * First caller hint that can name a target. Order matches
+ * `resolveAuthoritativeTarget`: site, then target, environment, tenant.
+ *
+ * @param {object} [hints]
  * @returns {string|undefined}
  */
-function firstHint(hints) {
+export function hintTargetName(hints) {
   for (const key of ["site", "target", "environment", "tenant"]) {
     const value = new Map(Object.entries(hints ?? {})).get(key);
     if (typeof value === "string" && value.trim()) return value.trim();

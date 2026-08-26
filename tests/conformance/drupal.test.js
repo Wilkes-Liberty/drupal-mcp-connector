@@ -146,6 +146,11 @@ describe("Drupal conformance kit — hostile input modalities", () => {
       entityType: "node",
       agentVendor: "acme",
     });
+    caseHostileVendorField(adapter(), {
+      operation: "read",
+      entityType: "node",
+      hints: { model: "gpt" },
+    });
   });
 
   it("denies script HTML and path-escape uploads", () => {

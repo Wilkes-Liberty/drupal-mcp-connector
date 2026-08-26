@@ -22,9 +22,10 @@ import { createMemoryApproval } from "./approval.js";
 import { composeDecisions, ContractError, REASON } from "./decisions.js";
 import { createMemoryEvidenceSink, requiresEvidence } from "./evidence-sink.js";
 import { createMemoryBackend } from "./fixtures.js";
-import { createLocalRelay } from "./relay.js";
+import { createLocalRelay, hintTargetName } from "./relay.js";
 import { bindApprovalForExecute, comparePostconditions } from "./system-of-record.js";
 import {
+  DECISION_RESULTS,
   createActionManifest,
   createDecisionRecord,
   createExecutionReceipt,
@@ -96,7 +97,9 @@ export function createDrupalAdapter(options = {}) {
         ...proposal,
         actionClass: mapDrupalAction(proposal),
         contractVersion: ADAPTER_CONTRACT_VERSION,
-        target: proposal.target ?? { name: proposal.hints?.site ?? defaultSite?._name },
+        target: proposal.target ?? {
+          name: hintTargetName(proposal.hints) ?? defaultSite?._name,
+        },
       });
     },
 
@@ -119,23 +122,40 @@ export function createDrupalAdapter(options = {}) {
     },
 
     /**
+     * Execute only after a fresh evaluation. A caller allow cannot widen
+     * a local deny or skip required approval. `decision.decisionId` is
+     * kept on the receipt when present.
+     *
      * @param {object} manifest
-     * @param {object} decision
+     * @param {object} [decision]
      * @param {{approvalId?: string}} [execOptions]
      * @returns {Promise<object>}
      */
-    async execute(manifest, decision, execOptions = {}) {
-      if (decision.result === "deny") {
+    async execute(manifest, decision = {}, execOptions = {}) {
+      if (decision.actionDigest && decision.actionDigest !== manifest.digest) {
         return createExecutionReceipt({
           decisionId: decision.decisionId,
+          outcome: "failed",
+          reason: REASON.REPLAY,
+        });
+      }
+
+      const local = this.evaluate(manifest);
+      const caller = typedCallerDecision(decision);
+      const authoritative = composeDecisions(caller, local);
+      const decisionId = decision.decisionId ?? authoritative.decisionId;
+
+      if (authoritative.result === "deny") {
+        return createExecutionReceipt({
+          decisionId,
           outcome: "denied",
-          reason: decision.reason,
+          reason: authoritative.reason,
         });
       }
 
       try {
         bindApprovalForExecute(
-          decision,
+          authoritative,
           manifest,
           approval,
           execOptions.approvalId,
@@ -143,26 +163,31 @@ export function createDrupalAdapter(options = {}) {
         );
       } catch (err) {
         return createExecutionReceipt({
-          decisionId: decision.decisionId,
+          decisionId,
           outcome: "failed",
           reason: err instanceof ContractError ? err.reason : REASON.APPROVAL_REQUIRED,
         });
       }
 
-      if (requiresEvidence(manifest.actionClass, assuranceClass)) {
+      const needsEvidence = requiresEvidence(manifest.actionClass, assuranceClass);
+      if (needsEvidence) {
         try {
           evidence.writeRequired(createExecutionReceipt({
-            decisionId: decision.decisionId,
+            decisionId,
             outcome: "pending",
           }));
         } catch (err) {
           return createExecutionReceipt({
-            decisionId: decision.decisionId,
+            decisionId,
             outcome: "failed",
             reason: err instanceof ContractError ? err.reason : REASON.EVIDENCE_WRITE_FAILED,
           });
         }
       }
+
+      const snapshot = typeof backend.captureState === "function"
+        ? await backend.captureState()
+        : null;
 
       const written = await applyBackend(backend, manifest);
       const observed = written
@@ -175,7 +200,7 @@ export function createDrupalAdapter(options = {}) {
       const declared = declaredEffects(manifest);
       const post = comparePostconditions(declared, flattenObserved(observed));
       const receipt = createExecutionReceipt({
-        decisionId: decision.decisionId,
+        decisionId,
         outcome: post.ok ? "ok" : "unknown",
         reason: post.ok ? undefined : post.reason,
         nativeActor: identity?.subject ?? "local-operator",
@@ -185,10 +210,11 @@ export function createDrupalAdapter(options = {}) {
         observed: flattenObserved(observed),
       });
 
-      if (requiresEvidence(manifest.actionClass, assuranceClass)) {
+      if (needsEvidence) {
         try {
           evidence.writeRequired(receipt);
         } catch (err) {
+          await restoreBackend(backend, snapshot);
           return createExecutionReceipt({
             ...receipt,
             receiptId: randomUUID(),
@@ -238,11 +264,10 @@ export function mapDrupalAction(proposal = {}) {
  * @returns {object}
  */
 function evaluateLocal(manifest, ctx) {
-  const policyDigest = policyDigestFor(ctx.defaultSite);
   const base = {
     actionDigest: manifest.digest,
     actionClass: manifest.actionClass,
-    policyDigest,
+    policyDigest: policyDigestFor(ctx.defaultSite),
     policyRevision: ADAPTER_CONTRACT_POLICY_REVISION,
     evaluatorVersion: ADAPTER_CONTRACT_VERSION,
   };
@@ -261,10 +286,14 @@ function evaluateLocal(manifest, ctx) {
   }
 
   const site = resolved.site;
+  const evaluated = {
+    ...base,
+    policyDigest: policyDigestFor(site),
+  };
   const sec = resolveSecurityConfig(site);
   const scope = requiredScope(manifest);
   if (ctx.identity && scope && !ctx.identity.scopes.includes(scope)) {
-    return deny(base, REASON.POLICY_DENIED, resolved, {
+    return deny(evaluated, REASON.POLICY_DENIED, resolved, {
       type: "scope",
       scope,
     });
@@ -274,14 +303,14 @@ function evaluateLocal(manifest, ctx) {
     applySecurityGates(sec, manifest);
   } catch (err) {
     const reason = err instanceof SecurityError ? REASON.TARGET_DENIED : REASON.POLICY_DENIED;
-    return deny(base, reason, resolved);
+    return deny(evaluated, reason, resolved);
   }
 
   if (manifest.actionClass === "publish_or_destructive" || manifest.actionClass === "control_plane") {
     const writeLike = manifest.operation !== "config_get" && manifest.operation !== "read";
     if (writeLike) {
       return createDecisionRecord({
-        ...base,
+        ...evaluated,
         result: "require_approval",
         reason: REASON.APPROVAL_REQUIRED,
         target: { name: resolved.name },
@@ -291,7 +320,7 @@ function evaluateLocal(manifest, ctx) {
 
   if (manifest.actionClass === "exfiltration_read") {
     return createDecisionRecord({
-      ...base,
+      ...evaluated,
       result: "allow_with_obligations",
       reason: "read_budget",
       obligations: [{ type: "read_budget" }],
@@ -300,7 +329,7 @@ function evaluateLocal(manifest, ctx) {
   }
 
   return createDecisionRecord({
-    ...base,
+    ...evaluated,
     result: "allow",
     reason: "allow",
     target: { name: resolved.name },
@@ -414,6 +443,28 @@ function deny(base, reason, target, challenge) {
     target: target?.name ? { name: target.name } : target,
     challenge,
   });
+}
+
+/**
+ * @param {object} [decision]
+ * @returns {object|null}
+ */
+function typedCallerDecision(decision) {
+  if (!decision || typeof decision !== "object") return null;
+  if (!DECISION_RESULTS.includes(decision.result)) return null;
+  return decision;
+}
+
+/**
+ * @param {object} backend
+ * @param {*} snapshot
+ * @returns {Promise<void>}
+ */
+async function restoreBackend(backend, snapshot) {
+  if (snapshot === undefined || snapshot === null || typeof backend.restoreState !== "function") {
+    return;
+  }
+  await backend.restoreState(snapshot);
 }
 
 /**

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Adapter-contract execute trusts a fresh evaluation (#181).**
+  Manifest digests are always hashed (caller-supplied digests are ignored).
+  `execute` re-evaluates and will not honor a forged allow. Actor-bound
+  approvals cannot be consumed without that actor. Vendor keys are rejected
+  on `hints`. `propose` and `policyDigest` use the same relay hint keys as
+  evaluate. A required-evidence failure after a backend write rolls the
+  mutation back.
+
 ### Added
 - **Provider-neutral adapter contracts and a Drupal conformance kit (#181).**
   Versioned evaluator, relay, approval, evidence-sink, and system-of-record

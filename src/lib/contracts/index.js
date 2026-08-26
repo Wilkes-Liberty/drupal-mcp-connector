@@ -38,7 +38,7 @@ export {
 } from "./decisions.js";
 
 export { createEvaluator } from "./evaluator.js";
-export { createLocalRelay } from "./relay.js";
+export { createLocalRelay, hintTargetName } from "./relay.js";
 export { createMemoryApproval } from "./approval.js";
 export { createMemoryEvidenceSink, requiresEvidence } from "./evidence-sink.js";
 export { bindApprovalForExecute, comparePostconditions } from "./system-of-record.js";

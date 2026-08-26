@@ -79,6 +79,26 @@ export function createMemoryBackend({ entities = [], mismatch } = {}) {
     async deleteEntity(ref) {
       store.delete(ref.id);
     },
+
+    /**
+     * @returns {Promise<Map<string, object>>}
+     */
+    async captureState() {
+      return new Map(
+        [...store.entries()].map(([id, entity]) => [id, structuredClone(entity)]),
+      );
+    },
+
+    /**
+     * @param {Map<string, object>} snapshot
+     * @returns {Promise<void>}
+     */
+    async restoreState(snapshot) {
+      store.clear();
+      for (const [id, entity] of snapshot) {
+        store.set(id, structuredClone(entity));
+      }
+    },
   });
 }
 

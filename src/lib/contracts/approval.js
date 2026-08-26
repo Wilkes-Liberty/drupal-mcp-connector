@@ -57,7 +57,7 @@ export function createMemoryApproval() {
       if (entry.digest !== digest) {
         throw new ContractError("Approval digest mismatch.", REASON.REPLAY);
       }
-      if (entry.actor && actor && entry.actor !== actor) {
+      if (entry.actor && entry.actor !== actor) {
         throw new ContractError("Approval actor mismatch.", REASON.REPLAY);
       }
       store.set(approvalId, { ...entry, used: true });

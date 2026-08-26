@@ -163,6 +163,9 @@ export function createDecisionRecord(raw) {
 }
 
 /**
+ * Build an immutable action manifest. The digest is always computed from
+ * the canonical payload — a caller-supplied digest is ignored.
+ *
  * @param {object} raw
  * @returns {object}
  */
@@ -179,7 +182,8 @@ export function createActionManifest(raw) {
   const target = raw.target && typeof raw.target === "object"
     ? Object.freeze({ name: raw.target.name, version: raw.target.version })
     : undefined;
-  const digest = raw.digest || digestPayload({
+  if (raw.hints) assertNoVendorFields(raw.hints);
+  const digest = digestPayload({
     actionClass,
     operation: raw.operation,
     entityType: raw.entityType,

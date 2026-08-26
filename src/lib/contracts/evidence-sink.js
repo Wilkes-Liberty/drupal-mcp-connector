@@ -15,11 +15,16 @@ import { ContractError, REASON } from "./decisions.js";
 
 /**
  * In-process evidence sink. `failRequired` makes every required write fail.
+ * `failFinalRequired` fails only the post-mutation receipt (outcome other
+ * than `pending`).
  *
- * @param {{failRequired?: boolean}} [options]
+ * @param {{failRequired?: boolean, failFinalRequired?: boolean}} [options]
  * @returns {EvidenceSink & {records: object[]}}
  */
-export function createMemoryEvidenceSink({ failRequired = false } = {}) {
+export function createMemoryEvidenceSink({
+  failRequired = false,
+  failFinalRequired = false,
+} = {}) {
   const records = [];
 
   return Object.freeze({
@@ -29,7 +34,7 @@ export function createMemoryEvidenceSink({ failRequired = false } = {}) {
      * @returns {void}
      */
     writeRequired(receipt) {
-      if (failRequired) {
+      if (failRequired || (failFinalRequired && receipt?.outcome !== "pending")) {
         throw new ContractError(
           "Required evidence write failed.",
           REASON.EVIDENCE_WRITE_FAILED,

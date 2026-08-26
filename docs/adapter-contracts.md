@@ -99,6 +99,12 @@ upstream evaluator with the target-side decision.
 The Drupal adapter applies connector security and principal grants first, then
 composes any optional upstream evaluator through that function.
 
+`execute` re-runs `evaluate` and composes the caller-supplied decision with
+that fresh local result. A forged or stale `allow` cannot skip a deny or a
+required approval. The manifest digest is always hashed from the canonical
+payload — a caller-supplied digest is ignored. Vendor keys are rejected on
+`hints` as well as on the top-level proposal.
+
 ---
 
 ## 5. Stable reason codes
@@ -146,7 +152,8 @@ Covered cases:
 - Denied delete, publish, and control-plane write
 - Hostile input: vendor fields, script HTML, path escape
 - Tenant escape via a site hint the principal is not granted
-- Required-evidence write failure (fail closed, no mutation)
+- Required-evidence write failure (fail closed, no mutation — including
+  after the backend write, which rolls back)
 - Replay of a consumed approval
 - Post-condition discrepancy (`unknown`, never green)
 - Upstream allow cannot widen a local deny
