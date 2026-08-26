@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Adapter-contract execute trusts a fresh evaluation (#181).**
+  Manifest digests are always hashed (caller-supplied digests are ignored).
+  `execute` re-evaluates and will not honor a forged allow. Actor-bound
+  approvals cannot be consumed without that actor. Vendor keys are rejected
+  on `hints`. `propose` and `policyDigest` use the same relay hint keys as
+  evaluate. A required-evidence failure after a backend write rolls the
+  mutation back. `publish` with an id updates that entity instead of
+  creating a duplicate.
+
+### Added
+- **Provider-neutral adapter contracts and a Drupal conformance kit (#181).**
+  Versioned evaluator, relay, approval, evidence-sink, and system-of-record
+  contracts live at `src/lib/contracts/` (contract 1.0). Typed decisions
+  (`deny` / `allow` / `allow_with_obligations` / `require_approval`), stable
+  reason codes, obligations, and execution receipts are verified at that
+  seam. Final target-side denial stays authoritative: an upstream allow
+  cannot widen local policy. Model and agent vendors are outside the
+  contract. The Drupal adapter is the only system-of-record implementation;
+  JSON:API and GraphQL remain transport adapters. The offline conformance
+  kit covers allowed and denied actions, hostile input, tenant escape,
+  required-evidence write failure, replay, and post-condition discrepancy.
+  See [docs/adapter-contracts.md](docs/adapter-contracts.md).
+
 ## [2.8.0] - 2026-08-25
 
 ### Fixed

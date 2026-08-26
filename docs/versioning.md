@@ -29,7 +29,11 @@ A change that breaks any of these is a **MAJOR** change:
   `production-strict`, `write-plane` (semantics may *tighten* in a minor only if
   it never grants more than before).
 - **Integration contract** — versioned independently; see
-  [integration-contract.md](integration-contract.md) (currently 1.0).
+  [integration-contract.md](integration-contract.md) (currently 1.1).
+- **Adapter contracts** — versioned independently; see
+  [adapter-contracts.md](adapter-contracts.md) (currently 1.0). A breaking
+  change to typed records, reason codes, or the narrowing rule is a **MAJOR**
+  change of that contract (not automatically of the npm package).
 
 Additive changes to the above (new tools, new optional inputs, new env vars, new
 presets) are **MINOR**.

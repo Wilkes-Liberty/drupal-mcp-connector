@@ -308,6 +308,7 @@ an operator channel: keep the agent's credentials off it, and pin
 | [Threat Model](docs/threat-model.md) | Trust boundaries, threats & mitigations, residual risks, and the security-pass results |
 | [Deployment](docs/deployment.md) | Run the HTTPS transport in production: Docker, systemd, launchd, reverse proxy, pre-exposure checklist |
 | [Integration Contract](docs/integration-contract.md) | The connector ↔ Drupal-governance contract (identity, OAuth scopes, compatibility) |
+| [Adapter Contracts](docs/adapter-contracts.md) | Provider-neutral evaluator / relay / approval / evidence / SoR contracts and the Drupal conformance kit |
 | [Versioning & Stability](docs/versioning.md) | Semver policy: the stable surface, deprecation process, MCP protocol + Node support |
 | [Whitepaper](docs/whitepaper.md) | Vision, personas, and use cases |
 

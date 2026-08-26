@@ -201,6 +201,13 @@ The connector does **not** depend on the governance module, and the governance
 module does **not** depend on this specific connector. They are released
 independently; this contract is the stable surface between them.
 
+Provider-neutral evaluator, relay, approval, evidence-sink, and
+system-of-record contracts — including version negotiation for adapter
+implementers — are documented separately in
+[adapter-contracts.md](adapter-contracts.md). That family is not this wire
+contract, and this package still ships only the Drupal system-of-record
+adapter.
+
 ## 8. Versioning
 
 This contract is versioned independently of either project. Backward-compatible
