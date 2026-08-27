@@ -21,6 +21,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   product edge's northbound OAuth is DEV-294 work, not this harness.
 
 ### Added
+- **Relay edge and tenant-agent entry points (#232).** `drupal-mcp-edge`
+  terminates northbound MCP on the inbound OAuth resource server — the only
+  authentication arm on this entry point; a missing issuer/audience is fatal
+  at any bind host, including loopback — and fans requests down an outbound
+  tenant channel. The edge requires a non-empty `auth.grants` table and an
+  agent channel credential store to start, resolves the authoritative target
+  per request before fan-down, strips caller credential and
+  identity-assertion headers before framing (the frame carries the validated
+  identity object only), and holds no site credentials — a catalog entry
+  carrying credential material refuses startup. `drupal-mcp-agent` dials out
+  (it never listens), authenticates the channel with its own issued,
+  revocable credential, and serves the real connector tool surface, so site
+  credentials exist only in the tenant process. Northbound is stateless MCP
+  2026-07-28 with no session ids in either direction; revocation of both the
+  northbound principal and the agent channel is per-request with no grace
+  window. The frame codec lives at `src/lib/relay/frames.js` with hard size,
+  teardown, and timeout bounds. These are entry points and libraries only;
+  nothing here is a hosted service.
 - **Lab-only outbound-relay harness (DEV-293).** Isolated under
   `lab/outbound-relay/` with tests in `tests/lab/`. A tenant agent dials out
   to a loopback relay; one MCP 2026-07-28 Streamable-HTTP request (stateless,
