@@ -52,6 +52,17 @@ const HOP_BY_HOP = new Set([
   "host",
 ]);
 
+/**
+ * Caller credential headers. The northbound caller's credentials authenticate
+ * the caller to the edge; they must never cross the tunnel toward the tenant
+ * (#229). The tenant side receives the bound identity object, not headers.
+ */
+const CALLER_CREDENTIAL_HEADERS = new Set([
+  "authorization",
+  "cookie",
+  "proxy-authorization",
+]);
+
 const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 const FAN_DOWN_TIMEOUT_MS = 10_000;
 
@@ -358,7 +369,7 @@ export async function createLabRelay({
         id,
         method: req.method,
         url: path,
-        headers: { ...req.headers },
+        headers: fanDownHeaders(req.headers),
         body,
       });
     });
@@ -585,6 +596,21 @@ function forwardHeaders(headers = {}) {
     if (HOP_BY_HOP.has(String(name).toLowerCase())) continue;
     if (value == null) continue;
     out[name] = Array.isArray(value) ? value.join(", ") : String(value);
+  }
+  return out;
+}
+
+/**
+ * Headers a northbound request may carry down the tunnel: hop-by-hop and
+ * caller credential headers are stripped before framing (#229).
+ * @param {Record<string, string|string[]>} [headers]
+ * @returns {Record<string, string>}
+ */
+function fanDownHeaders(headers = {}) {
+  const out = {};
+  for (const [name, value] of Object.entries(forwardHeaders(headers))) {
+    if (CALLER_CREDENTIAL_HEADERS.has(String(name).toLowerCase())) continue;
+    out[name] = value;
   }
   return out;
 }

@@ -156,6 +156,46 @@ describe("DEV-293 lab outbound relay", () => {
     expect(secondTraffic.every((row) => row.headers["mcp-session-id"] === undefined)).toBe(true);
   });
 
+  it("never forwards caller credential headers down the tunnel", async () => {
+    const authMarker = "lab-northbound-bearer-marker-3f9a17c2";
+    const cookieMarker = "lab-northbound-cookie-marker-8d41b6e5";
+    const lab = track(await startLabHarness());
+
+    const frames = [];
+    const realHandleMcp = lab.stub.handleMcp.bind(lab.stub);
+    lab.stub.handleMcp = async (frame) => {
+      frames.push(frame);
+      return realHandleMcp(frame);
+    };
+
+    const client = new Client(
+      { name: "lab-northbound", version: "0.0.0-lab" },
+      { capabilities: { roots: {} }, versionNegotiation: { mode: "auto" } }
+    );
+    closers.push(() => client.close());
+    await client.connect(new StreamableHTTPClientTransport(lab.northboundUrl, {
+      fetch: (input, init) => {
+        const request = new Request(input, init);
+        const headers = new Headers(request.headers);
+        headers.set("authorization", `Bearer ${authMarker}`);
+        headers.set("cookie", `lab_session=${cookieMarker}`);
+        return fetch(new Request(request, { headers }));
+      },
+    }));
+    await client.callTool({ name: "drupal_lab_echo", arguments: {} });
+
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) {
+      const names = Object.keys(frame.headers ?? {}).map((name) => name.toLowerCase());
+      expect(names).not.toContain("authorization");
+      expect(names).not.toContain("cookie");
+      expect(names).not.toContain("proxy-authorization");
+    }
+    const crossed = JSON.stringify(frames);
+    expect(crossed).not.toContain(authMarker);
+    expect(crossed).not.toContain(cookieMarker);
+  });
+
   it("denies the next request after revoke with no grace window", async () => {
     expect(LAB_REVOCATION_BOUND).toEqual({
       name: "per-request",
