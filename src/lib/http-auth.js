@@ -11,7 +11,7 @@
 
 import { timingSafeEqual } from "crypto";
 import { readFileSync, statSync } from "fs";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
 
 /** Header names that must never become identity. */
 export const SPOOFABLE_IDENTITY_HEADERS = Object.freeze([
@@ -524,7 +524,9 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
   const issuer = normalizeIssuer(inboundCfg.issuer);
   const asMeta = await discoverAuthorizationServer(issuer, fetchFn);
   const advertisedIssuer = asMeta.issuer || issuer;
-  const jwks = createRemoteJWKSet(new URL(asMeta.jwks_uri));
+  // JWKS retrieval goes through the same injectable fetch as issuer
+  // discovery; with the default global fetch the behavior is unchanged.
+  const jwks = createRemoteJWKSet(new URL(asMeta.jwks_uri), { [customFetch]: fetchFn });
   const resourceMetadataUrl = resourceMetadataUrlFor(resource);
   const revocationStore = inboundCfg.revocationFile
     ? createRevocationStore({ filePath: inboundCfg.revocationFile })

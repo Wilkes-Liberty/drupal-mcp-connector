@@ -191,7 +191,7 @@ export function forwardHeaders(headers = {}) {
   const entries = [];
   for (const [name, value] of Object.entries(headers)) {
     if (HOP_BY_HOP.has(String(name).toLowerCase())) continue;
-    if (value == null) continue;
+    if (value === null || value === undefined) continue;
     entries.push([name, Array.isArray(value) ? value.join(", ") : String(value)]);
   }
   return Object.fromEntries(entries);
