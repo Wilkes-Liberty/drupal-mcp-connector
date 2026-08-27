@@ -16,6 +16,7 @@ import {
   discoverAuthorizationServer,
   introspectToken,
   resolveInboundAuthMode,
+  inboundAuthDeprecationWarning,
   resolveInboundAuthConfig,
 } from "../../src/lib/http-auth.js";
 import { authHeaders, authHeadersAsync } from "../../src/lib/config.js";
@@ -151,6 +152,25 @@ describe("resolveInboundAuthMode", () => {
       bindHost: "0.0.0.0",
       allowUnauth: true,
     }).mode).toBe("unauthenticated");
+  });
+});
+
+describe("inboundAuthDeprecationWarning", () => {
+  it("warns for shared_bearer and names the removal major", () => {
+    const warning = inboundAuthDeprecationWarning("shared_bearer");
+    expect(warning).toEqual(expect.stringContaining("WARNING"));
+    expect(warning).toEqual(expect.stringContaining("shared_bearer"));
+    expect(warning).toEqual(expect.stringContaining("v3.0.0"));
+    expect(warning).toEqual(expect.stringContaining("#231"));
+  });
+
+  it("is silent in resource-server mode", () => {
+    expect(inboundAuthDeprecationWarning("resource_server")).toBeNull();
+  });
+
+  it("is silent for unauthenticated and fatal modes", () => {
+    expect(inboundAuthDeprecationWarning("unauthenticated")).toBeNull();
+    expect(inboundAuthDeprecationWarning("fatal")).toBeNull();
   });
 });
 

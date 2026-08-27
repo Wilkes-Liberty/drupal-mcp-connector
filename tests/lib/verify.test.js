@@ -85,6 +85,16 @@ describe("verifyStatic — a secure, tenant-neutral configuration", () => {
     expect(residual.detail.toLowerCase()).toContain("not");
   });
 
+  it("names loopback shared_bearer as a managed residual with a dated kill", () => {
+    const result = run(secureConfig());
+    expect(RESIDUALS.map((r) => r.id)).toContain("loopback_shared_bearer");
+    const residual = result.residuals.find((r) => r.id === "loopback_shared_bearer");
+    expect(residual.status).toBe("managed");
+    expect(residual.detail).toEqual(expect.stringContaining("shared_bearer"));
+    expect(residual.detail).toEqual(expect.stringContaining("v3.0.0"));
+    expect(residual.detail).toEqual(expect.stringContaining("#231"));
+  });
+
   it("never lets a secret value reach the evidence", () => {
     const config = secureConfig();
     config.sites.prod.oauth.clientSecret = "SUPER-SECRET-VALUE";

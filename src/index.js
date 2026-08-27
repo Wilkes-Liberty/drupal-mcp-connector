@@ -39,6 +39,7 @@ import {
   makeBearerCheck,
   resolveInboundAuthConfig,
   resolveInboundAuthMode,
+  inboundAuthDeprecationWarning,
   createInboundHttpsAuth,
 } from "./lib/http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "./lib/http-handler.js";
@@ -404,6 +405,8 @@ if (transport === "stdio") {
     console.error(`[drupal-mcp-connector] FATAL: ${inboundMode.reason}`);
     process.exit(1);
   }
+  const deprecation = inboundAuthDeprecationWarning(inboundMode.mode);
+  if (deprecation) console.error(deprecation);
 
   let checkAuth = makeBearerCheck(inboundMode.mode === "shared_bearer" ? authToken : "");
   let authenticate = null;
