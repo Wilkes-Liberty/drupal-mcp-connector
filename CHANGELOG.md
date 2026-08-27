@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   product edge's northbound OAuth is DEV-294 work, not this harness.
 
 ### Added
+- **Deployment documentation for the relay edge and tenant-agent entry
+  points (#232).** `docs/deployment.md` gains the outbound-path section:
+  startup requirements, credential-header stripping, channel credentials,
+  and the issuer claim requirements.
 - **Relay edge and tenant-agent entry points (#232).** `drupal-mcp-edge`
   terminates northbound MCP on the inbound OAuth resource server — the only
   authentication arm on this entry point; a missing issuer/audience is fatal
