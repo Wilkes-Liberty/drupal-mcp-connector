@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Lab fan-down strips caller credential headers (#229).** The
+  outbound-relay lab harness framed the northbound request's headers down
+  the tenant tunnel verbatim, including `Authorization` — invisible in the
+  lab (the stub is in-process and the lab northbound carries no bearer),
+  but the wrong pattern for anyone wiring the README's optional live hop.
+  `Authorization`, `Cookie`, and `Proxy-Authorization` are now stripped,
+  with hop-by-hop headers, before framing; a test asserts marker
+  credentials never appear in any frame crossing the tunnel. The lab
+  README now states plainly that the lab northbound does not authenticate
+  the caller (the lab credential authenticates the agent channel) — the
+  product edge's northbound OAuth is DEV-294 work, not this harness.
+
 ### Added
 - **Lab-only outbound-relay harness (DEV-293).** Isolated under
   `lab/outbound-relay/` with tests in `tests/lab/`. A tenant agent dials out
