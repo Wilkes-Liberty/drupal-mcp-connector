@@ -698,4 +698,23 @@ describe("agent refuses an identity-less request frame", () => {
     expect(JSON.parse(received[0].body)).toEqual({ error: "missing_identity" });
     expect(tenant.calls).toEqual([]);
   });
+
+  it("reports a lost channel through onChannelClose so the entry point can fail loudly", async () => {
+    const harness = await startHarness();
+    const tenant = tenantSurface();
+    let closed = 0;
+    const agent = createRelayAgent({
+      host: "127.0.0.1",
+      port: harness.edge.agentPort,
+      token: harness.token,
+      surface: tenant.surface,
+      onChannelClose: () => { closed += 1; },
+    });
+    closers.push(() => agent.close());
+    const hello = await agent.dial();
+    expect(hello.ok).toBe(true);
+
+    await harness.edge.close();
+    await expect.poll(() => closed).toBe(1);
+  });
 });

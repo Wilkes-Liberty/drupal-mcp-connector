@@ -32,6 +32,9 @@ import { attachFramer, forwardHeaders, writeFrame } from "./frames.js";
  *   holding the site config and credentials tenant-side.
  * @param {typeof netConnect} [options.connectFn] Injectable dialer (e.g. a
  *   TLS connect wrapper). The agent only ever dials; it never listens.
+ * @param {?() => void} [options.onChannelClose] Called when an established
+ *   channel is lost (not on deliberate `drop`/`close`), so an entry point
+ *   can fail loudly instead of idling disconnected.
  * @param {?{recordConnect: Function}} [options.ledger]
  * @returns {object}
  */
@@ -41,6 +44,7 @@ export function createRelayAgent({
   token,
   surface,
   connectFn = netConnect,
+  onChannelClose = null,
   ledger = null,
 }) {
   if (!host || !port) {
@@ -121,9 +125,11 @@ export function createRelayAgent({
           writeFrame(next, { type: "hello", token });
         });
         socket = next;
+        let established = false;
         attachFramer(next, (frame) => {
           if (frame.type === "hello-ok") {
             agentInfo = frame.agent ?? null;
+            established = true;
             resolve({ ok: true, agent: agentInfo });
             return;
           }
@@ -135,6 +141,12 @@ export function createRelayAgent({
           void serveFrame(next, frame);
         });
         next.on("error", reject);
+        next.on("close", () => {
+          if (socket === next) {
+            socket = null;
+            if (established) onChannelClose?.();
+          }
+        });
       });
     },
 

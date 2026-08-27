@@ -439,6 +439,7 @@ export async function startEdge({
   }
 
   const scheme = hasTls ? "https" : "http";
+  let closed = false;
   return {
     northboundUrl: `${scheme}://${northAddr.host}:${northAddr.port}/mcp`,
     port: northAddr.port,
@@ -451,6 +452,8 @@ export async function startEdge({
       return session?.agentId ?? null;
     },
     async close() {
+      if (closed) return;
+      closed = true;
       session?.socket.destroy();
       session = null;
       broker.rejectAll(new Error("Relay edge closed."));
