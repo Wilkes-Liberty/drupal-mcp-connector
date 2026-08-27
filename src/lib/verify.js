@@ -75,6 +75,16 @@ export const RESIDUALS = [
       "responsibility; the connector reads secrets from the environment and never " +
       "stores them.",
   },
+  {
+    id: "loopback_shared_bearer",
+    status: "managed",
+    detail:
+      "Loopback MCP_AUTH_TOKEN (inbound mode shared_bearer) still ships. It is " +
+      "deprecated as of this release and will be removed in v3.0.0 (#231). " +
+      "Network-facing product paths already refuse it. MCP_ALLOW_UNAUTHENTICATED " +
+      "is a separate named residual: an explicit trusted-proxy opt-in, not a " +
+      "shared credential, and is not retired by #231.",
+  },
 ];
 
 /** Hostname suffixes reserved for documentation and testing (RFC 2606/6761). */

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Deprecated
+- **Loopback `shared_bearer` inbound auth (#231).** Startup warns when
+  `resolveInboundAuthMode` is `shared_bearer`, naming removal in v3.0.0.
+  Resource-server mode is silent. `npm run verify` lists the residual.
+  This is the deprecation half only; removal waits for the next major.
+
 ## [2.10.0] - 2026-08-27
 
 ### Security

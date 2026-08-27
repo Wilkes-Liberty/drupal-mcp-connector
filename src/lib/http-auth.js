@@ -480,6 +480,26 @@ export function resolveInboundAuthMode({
 }
 
 /**
+ * Startup deprecation warning for inbound auth mode `shared_bearer` (#231).
+ *
+ * Removal is the next major (v3.0.0). Resource-server and unauthenticated
+ * modes are silent. The warning names the issue and the removal version so
+ * a loopback install cannot miss the kill criterion.
+ *
+ * @param {string} mode
+ * @returns {?string} Warning text, or null when this mode is not deprecated.
+ */
+export function inboundAuthDeprecationWarning(mode) {
+  if (mode !== "shared_bearer") return null;
+  return (
+    "[drupal-mcp-connector] WARNING: inbound auth mode shared_bearer is deprecated " +
+    "and will be removed in v3.0.0 (#231). Configure an OAuth resource server " +
+    "(auth.issuer + auth.audience) or run unauthenticated loopback. " +
+    "MCP_ALLOW_UNAUTHENTICATED remains the explicit trusted-proxy opt-in."
+  );
+}
+
+/**
  * Merge config.auth with environment overrides.
  * @param {object} [cfg]
  * @param {NodeJS.ProcessEnv} [env]
