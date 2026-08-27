@@ -109,3 +109,50 @@ classification. A successful local or non-production test is not evidence of a
 production public URL: record the client version, gateway configuration,
 protocol mismatch tests, date, and artifact separately before making an
 exposure claim.
+
+## Relay edge and tenant agent (outbound path)
+
+`drupal-mcp-edge` and `drupal-mcp-agent` (#232) split the deployment into an
+authenticated northbound edge and a tenant-side agent that dials out, so the
+Drupal site and its credentials never face inbound traffic. These are entry
+points and libraries; running them is not a hosted service, and nothing in this
+section is a production-exposure claim.
+
+**The edge** terminates northbound `/mcp` on the inbound OAuth resource server
+— the only authentication arm compiled into this entry point. `MCP_AUTH_TOKEN`
+and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
+
+- `auth.issuer` + `auth.audience` (an HTTPS resource identifier), at any bind
+  host including loopback;
+- a non-empty `auth.grants` table (client id → site names) — the library's
+  all-sites fallback does not apply here;
+- an agent channel credential store (`MCP_CHANNEL_CREDENTIALS_FILE`, SHA-256
+  digests only, hot-reloaded so revocation needs no restart);
+- TLS material, or the explicit loopback-only `MCP_ALLOW_HTTP=1` opt-in;
+- a site catalog with **no credential material** — an entry carrying a token,
+  password, or OAuth block refuses startup. The edge cannot leak what it does
+  not hold.
+
+Caller credential headers (`Authorization`, `Cookie`, `Proxy-Authorization`)
+and identity-assertion headers are stripped before a request is framed down the
+tunnel; the frame carries the validated identity object only. Entitlement is
+decided before anything about the tenant is disclosed. Revocation of both the
+northbound principal and the agent channel is per-request with no grace window.
+Northbound is stateless MCP 2026-07-28; sessionful traffic is refused.
+
+**The agent** dials out to the edge's channel port and never listens. It
+authenticates the channel with its own issued credential (`MCP_CHANNEL_TOKEN`
+or `MCP_CHANNEL_TOKEN_FILE`) — never a northbound token, never a site
+credential — and serves the real connector surface with the site config, so
+southbound credentials exist only in the tenant process. The channel is TLS by
+default (`MCP_EDGE_ALLOW_TCP=1` permits plain TCP to loopback only). A lost
+channel exits non-zero for a supervised restart.
+
+**Issuer requirements.** The edge validates the token's audience against its
+HTTPS resource identifier and keys grants on the `azp`/`client_id` claim. An
+issuer that mints neither — a plain simple_oauth Drupal site mints `aud` = the
+consumer's client id and no client identity claim — fails closed at every
+layer and can never be entitled. Use an issuer that mints audience-bound
+tokens with a client identity claim (for example Keycloak with an audience
+mapper), or see the upstream enhancement tracked on the MCP Sentinel issue
+queue (d.o #3619398).
