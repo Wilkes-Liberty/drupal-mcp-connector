@@ -102,12 +102,12 @@ describe("JsonApiBackend.toCanonical", () => {
     expect(c._backend).toBe("jsonapi");
   });
 
-  it("puts non-base, non-internal attributes in fields", () => {
+  it("puts non-base attributes and the numeric node id in fields", () => {
     const c = backend.toCanonical(resource);
     expect(c.fields.body).toEqual({ value: "<p>hi</p>", summary: "hi" });
     expect(c.fields.field_meta_description).toBe("desc");
+    expect(c.fields.drupal_internal__nid).toBe(42);
     expect(c.fields).not.toHaveProperty("title");
-    expect(c.fields).not.toHaveProperty("drupal_internal__nid");
     expect(c.fields).not.toHaveProperty("path");
   });
 
@@ -117,7 +117,7 @@ describe("JsonApiBackend.toCanonical", () => {
     expect(c.relationships.field_tags).toEqual([{ id: "term-1", entityType: "taxonomy_term", bundle: "tags" }]);
   });
 
-  it("keeps drupal_internal__vid on nodes so live vs working vids can be reported (#166)", () => {
+  it("keeps node nid and vid so reads report numeric identity and revision state (#166, #237)", () => {
     const node = {
       type: "node--article",
       id: "uuid-1",
@@ -128,8 +128,8 @@ describe("JsonApiBackend.toCanonical", () => {
       },
     };
     const c = backend.toCanonical(node);
+    expect(c.fields.drupal_internal__nid).toBe(42);
     expect(c.fields.drupal_internal__vid).toBe(1510);
-    expect(c.fields).not.toHaveProperty("drupal_internal__nid");
   });
 
   it("keeps drupal_internal__revision_id on paragraphs and still strips other internals (#192)", () => {

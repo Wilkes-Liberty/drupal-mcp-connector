@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Node reads include the numeric Drupal node ID (#237).** JSON:API-backed
+  `drupal_get_node` and `drupal_entity_get` results retain
+  `fields.drupal_internal__nid`, matching schema discovery while preserving
+  entity allowlists and configured field redaction. The canonical top-level
+  `id` remains the UUID.
+
 ### Deprecated
 - **Loopback `shared_bearer` inbound auth (#231).** Startup warns when
   `resolveInboundAuthMode` is `shared_bearer`, naming removal in v3.0.0.

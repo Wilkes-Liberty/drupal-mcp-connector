@@ -79,9 +79,12 @@ function mockFieldDefs(defsByName) {
 
 describe("nodes tools (migrated)", () => {
   it("get_node returns the canonical entity", async () => {
-    backend.getEntity.mockResolvedValue(canonicalNode());
+    backend.getEntity.mockResolvedValue(canonicalNode({
+      fields: { body: { value: "B" }, drupal_internal__nid: 42 },
+    }));
     const out = await handlers.drupal_get_node({ type: "article", id: "n1" });
     expect(out.id).toBe("n1");
+    expect(out.fields.drupal_internal__nid).toBe(42);
     expect(backend.getEntity).toHaveBeenCalledWith({ entityType: "node", bundle: "article", id: "n1" });
   });
 

@@ -289,6 +289,18 @@ describe("redactCanonicalEntity", () => {
     expect(r.title).toBe("[REDACTED]");
   });
 
+  it("redacts the numeric node id when configured", () => {
+    const node = {
+      ...entity(),
+      entityType: "node",
+      bundle: "article",
+      fields: { drupal_internal__nid: 42 },
+    };
+    const nidRedactionPolicy = { globalRedactedFields: [], entityRules: { node: { redactedFields: ["drupal_internal__nid"] } } };
+    const r = redactCanonicalEntity(node, nidRedactionPolicy, "node");
+    expect(r.fields.drupal_internal__nid).toBe("[REDACTED]");
+  });
+
   it("returns the entity unchanged when nothing matches", () => {
     const r = redactCanonicalEntity(entity(), { globalRedactedFields: [], entityRules: {} }, "node");
     expect(r.fields.mail).toBe("j@x.com");

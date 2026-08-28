@@ -17,8 +17,9 @@ import {
   BASE_ATTRIBUTE_FIELDS,
 } from "../canonical.js";
 
-// Drupal exposes internal numeric ids under drupal_internal__* attributes;
-// these are dropped from canonical `fields` (the canonical id is the UUID).
+// Drupal exposes internal identifiers under drupal_internal__* attributes.
+// They are dropped from canonical `fields` except for the identifiers that
+// governed read/write workflows explicitly need.
 const INTERNAL_ATTR_RE = /^drupal_internal__/;
 
 // countEntities() pagination. Drupal core JSON:API returns no total in `meta`,
@@ -194,8 +195,9 @@ export class JsonApiBackend extends Backend {
 
   /**
    * Convert a JSON:API resource object into a CanonicalEntity. Base attributes
-   * (title/status/...) are promoted; drupal_internal__* and base fields are
-   * stripped from `fields`; relationships are normalized to canonical refs.
+   * (title/status/...) are promoted; base fields and unneeded
+   * drupal_internal__* attributes are stripped from `fields`; relationships
+   * are normalized to canonical refs.
    * @param {object} resource A JSON:API resource object.
    * @returns {import("../canonical.js").CanonicalEntity}
    */
@@ -208,10 +210,13 @@ export class JsonApiBackend extends Backend {
       Object.entries(attrs).filter(([k]) => {
         if (BASE_ATTRIBUTE_FIELDS.includes(k)) return false;
         if (INTERNAL_ATTR_RE.test(k)) {
+          // Node reads expose the numeric nid advertised by schema discovery
+          // while the UUID remains the canonical top-level id (#237).
           // Paragraph ERR attach needs the current revision id (#192).
           // Node / revisionable writes need the working vs live vid (#166).
           // Other drupal_internal__* attributes stay stripped.
-          return k === "drupal_internal__vid"
+          return (entityType === "node" && k === "drupal_internal__nid")
+            || k === "drupal_internal__vid"
             || (entityType === "paragraph" && k === "drupal_internal__revision_id");
         }
         return true;
