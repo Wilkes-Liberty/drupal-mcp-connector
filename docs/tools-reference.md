@@ -72,7 +72,7 @@ Tools for creating, reading, updating, and deleting Drupal content nodes. Reads 
 }
 ```
 
-Returns a canonical entity: `id`, `entityType`, `bundle`, `title`, `status`, `langcode`, `created`, `changed`, `url`, `fields` (body, summary, and other non-base fields), `relationships`, `_backend`.
+Returns a canonical entity: `id`, `entityType`, `bundle`, `title`, `status`, `langcode`, `created`, `changed`, `url`, `fields` (body, summary, other non-base fields, and `drupal_internal__nid` on JSON:API node reads), `relationships`, `_backend`. The top-level `id` remains the node UUID.
 
 ### drupal_list_nodes
 

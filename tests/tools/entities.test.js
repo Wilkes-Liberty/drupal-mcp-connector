@@ -99,10 +99,16 @@ describe("entities tools (migrated)", () => {
     expect(backend.deleteEntity).not.toHaveBeenCalled();
   });
 
-  it("entity_get returns the canonical entity", async () => {
-    backend.getEntity.mockResolvedValue(ent);
-    const out = await handlers.drupal_entity_get({ entityType: "paragraph", bundle: "text", id: "p1" });
+  it("entity_get returns a node's canonical entity with its numeric id", async () => {
+    backend.getEntity.mockResolvedValue({
+      ...ent,
+      entityType: "node",
+      bundle: "article",
+      fields: { drupal_internal__nid: 42 },
+    });
+    const out = await handlers.drupal_entity_get({ entityType: "node", bundle: "article", id: "p1" });
     expect(out.id).toBe("p1");
+    expect(out.fields.drupal_internal__nid).toBe(42);
   });
 
   it("entity_create passes attributes + relationships through", async () => {
