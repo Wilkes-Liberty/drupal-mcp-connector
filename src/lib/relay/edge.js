@@ -188,6 +188,17 @@ export function selectTenantSession({
   return { session: null, reason: "no_agent" };
 }
 
+/**
+ * Canonical form of a tenant site bind. Null and empty both mean unscoped.
+ *
+ * @param {unknown} sites
+ * @returns {string}
+ */
+export function siteBindingKey(sites) {
+  const names = boundSiteNames(sites);
+  return names.length ? names.slice().sort().join("\0") : "";
+}
+
 /** Startup refusals: configuration that must not become a listener. */
 export class EdgeStartupError extends Error {
   constructor(message) {
@@ -506,6 +517,11 @@ export async function startEdge({
     const record = channelCredentials.lookup(selected.session.token);
     if (!record || record.revoked) {
       jsonResponse(res, 403, { error: "revoked", bound: EDGE_REVOCATION_BOUND.name });
+      return;
+    }
+    if (siteBindingKey(record.sites) !== siteBindingKey(selected.session.sites)) {
+      selected.session.socket.destroy();
+      jsonResponse(res, 503, { error: "no_agent" });
       return;
     }
 

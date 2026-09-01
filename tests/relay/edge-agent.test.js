@@ -948,6 +948,32 @@ describe("tenant isolation (#242 / DEV-122)", () => {
     expect(rawB.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
   });
 
+  it("fails closed when a connected agent's sites bind is hot-reloaded", async () => {
+    const harness = await startTwoTenantHarness();
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const jwtB = await issuer.signToken({ clientId: "client-b" });
+
+    harness.channel.write({
+      "tenant-a": { tokenSha256: sha256hex(harness.tokenA), sites: ["tenant-beta"] },
+      "tenant-b": { tokenSha256: sha256hex(harness.tokenB), sites: ["tenant-beta"] },
+    });
+    const stale = await modernCall(harness.edge.northboundUrl, jwtA, {
+      args: { site: "tenant-alpha" },
+    });
+    expect(stale.status).toBe(503);
+    expect(JSON.parse(stale.body)).toEqual({ error: "no_agent" });
+    await expect.poll(() => [...harness.edge.agentIds]).toEqual(["tenant-b"]);
+
+    const stillB = await modernCall(harness.edge.northboundUrl, jwtB, {
+      args: { site: "tenant-beta" },
+    });
+    expect(stillB.status).toBe(200);
+    await settle();
+    expect(rawB.frames.filter((frame) => frame.type === "mcp-request")).toHaveLength(1);
+  });
+
   it("destroys a socket that sends mcp-response before hello", async () => {
     const harness = await startTwoTenantHarness();
     const { tenant } = await startRealAgent(harness, { token: harness.tokenA });

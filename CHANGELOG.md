@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hints still fail closed before any frame reaches the wrong process. A
   tenant disconnect rejects only that tenant's in-flight requests. A
   spoofed `mcp-response` from another agent cannot complete the wait.
+  A hot-reload that changes a connected agent's `sites` bind drops that
+  tunnel on the next request (`no_agent`) instead of routing on the stale
+  hello snapshot.
   Fan-down frames carry `{ requestId, tenant }` correlation and still never
   carry site secrets, the channel token, or the northbound JWT. A single
   unscoped agent remains the previous compatibility path. Lab/loopback

@@ -10,6 +10,7 @@ import {
   acceptAgentHello,
   boundSiteNames,
   selectTenantSession,
+  siteBindingKey,
 } from "../../src/lib/relay/edge.js";
 
 const CATALOG = ["tenant-alpha", "tenant-beta"];
@@ -19,6 +20,9 @@ describe("boundSiteNames", () => {
     expect(boundSiteNames(null)).toEqual([]);
     expect(boundSiteNames(undefined)).toEqual([]);
     expect(boundSiteNames(["tenant-alpha", "_comment", ""])).toEqual(["tenant-alpha"]);
+    expect(siteBindingKey(null)).toBe(siteBindingKey([]));
+    expect(siteBindingKey(["tenant-beta", "tenant-alpha"]))
+      .toBe(siteBindingKey(["tenant-alpha", "tenant-beta"]));
   });
 });
 
