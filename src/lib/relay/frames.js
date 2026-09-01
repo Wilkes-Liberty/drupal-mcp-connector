@@ -177,8 +177,7 @@ export function createRequestBroker({ timeoutMs = 10_000 } = {}) {
       if (typeof frame?.id !== "string") return false;
       const waiter = pending.get(frame.id);
       if (!waiter) return false;
-      if (typeof waiter.owner === "string" && typeof owner === "string"
-        && waiter.owner !== owner) {
+      if (typeof waiter.owner === "string" && waiter.owner !== owner) {
         return false;
       }
       return drop(frame.id, (entry) => entry.resolve(frame));

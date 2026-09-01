@@ -948,6 +948,39 @@ describe("tenant isolation (#242 / DEV-122)", () => {
     expect(rawB.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
   });
 
+  it("destroys a socket that sends mcp-response before hello", async () => {
+    const harness = await startTwoTenantHarness();
+    const { tenant } = await startRealAgent(harness, { token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const hold = tenant.armHold();
+    const client = await connectModernClient(harness.edge.northboundUrl, jwtA, []);
+    const inFlight = client.callTool({
+      name: "drupal_relay_echo",
+      arguments: { hold: true, site: "tenant-alpha" },
+    });
+    await hold.started;
+
+    const rogue = netConnect({ host: "127.0.0.1", port: harness.edge.agentPort });
+    closers.push(() => { rogue.destroy(); });
+    await new Promise((resolve, reject) => {
+      rogue.once("connect", resolve);
+      rogue.once("error", reject);
+    });
+    writeFrame(rogue, {
+      type: "mcp-response",
+      id: "guessed-id",
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ injected: true }),
+    });
+    await expect.poll(() => rogue.destroyed || rogue.readableEnded).toBeTruthy();
+
+    hold.release();
+    const finished = echoPayload(await inFlight);
+    expect(finished.tenant).toBe(true);
+    expect(finished).not.toHaveProperty("injected");
+  });
+
   it("reconnects one tenant without dropping the other", async () => {
     const harness = await startTwoTenantHarness();
     const { agent: agentA } = await startRealAgent(harness, { token: harness.tokenA });

@@ -131,8 +131,9 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
   entry may name `sites`: catalog names that agent is allowed to serve.
   That bind is the tenant boundary. Two agents may stay connected when their
   `sites` lists are disjoint; a second agent without `sites`, or one that
-  claims a site already bound, is denied at hello. Omitting `sites` remains
-  valid only for a single-agent install;
+  claims a site already bound, is denied at hello. Omitting `sites`, or
+  supplying an empty / comment-only list, is unscoped and remains valid
+  only for a single-agent install;
 - TLS material, or the explicit loopback-only `MCP_ALLOW_HTTP=1` opt-in;
 - a site catalog with **no credential material** — an entry carrying a token,
   password, or OAuth block refuses startup. The edge cannot leak what it does

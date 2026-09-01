@@ -446,6 +446,10 @@ export async function startEdge({
         return;
       }
       if (frame.type === "mcp-response") {
+        if (!agentId) {
+          socket.destroy();
+          return;
+        }
         broker.settle(frame, { owner: agentId });
         return;
       }

@@ -182,6 +182,7 @@ describe("createRequestBroker", () => {
       { type: "mcp-response", id: "req-1", status: 200 },
       { owner: "tenant-b" },
     )).toBe(false);
+    expect(broker.settle({ type: "mcp-response", id: "req-1", status: 200 })).toBe(false);
     expect(broker.size).toBe(1);
     expect(broker.settle(
       { type: "mcp-response", id: "req-1", status: 201 },
