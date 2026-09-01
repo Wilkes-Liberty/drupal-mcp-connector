@@ -118,12 +118,24 @@ export function writeFrame(socket, frame) {
 /**
  * Correlate mcp-request ids with their mcp-response frames.
  *
+ * Optional `owner` binds a tracked id to one tenant agent. A response from a
+ * different owner is ignored (cross-tenant injection cannot complete the
+ * wait). Disconnecting one owner rejects only that owner's pending ids.
+ *
  * @param {object} [options]
  * @param {number} [options.timeoutMs] Per-request wait bound.
- * @returns {{size: number, track: (id: string) => Promise<object>, settle: (frame: {id?: string}) => boolean, rejectAll: (error: Error) => void}}
+ * @returns {object}
  */
 export function createRequestBroker({ timeoutMs = 10_000 } = {}) {
   const pending = new Map();
+
+  function drop(id, apply) {
+    const waiter = pending.get(id);
+    if (!waiter) return false;
+    pending.delete(id);
+    apply(waiter);
+    return true;
+  }
 
   return {
     get size() {
@@ -132,9 +144,10 @@ export function createRequestBroker({ timeoutMs = 10_000 } = {}) {
 
     /**
      * @param {string} id
+     * @param {{owner?: string|null}} [options]
      * @returns {Promise<object>} Resolves with the matching response frame.
      */
-    track(id) {
+    track(id, { owner = null } = {}) {
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.delete(id);
@@ -142,6 +155,7 @@ export function createRequestBroker({ timeoutMs = 10_000 } = {}) {
         }, timeoutMs);
         timer.unref?.();
         pending.set(id, {
+          owner,
           resolve(frame) {
             clearTimeout(timer);
             resolve(frame);
@@ -156,24 +170,37 @@ export function createRequestBroker({ timeoutMs = 10_000 } = {}) {
 
     /**
      * @param {{id?: string}} frame
+     * @param {{owner?: string|null}} [options]
      * @returns {boolean} True when a tracked request was resolved.
      */
-    settle(frame) {
+    settle(frame, { owner = null } = {}) {
       if (typeof frame?.id !== "string") return false;
       const waiter = pending.get(frame.id);
       if (!waiter) return false;
-      pending.delete(frame.id);
-      waiter.resolve(frame);
-      return true;
+      if (typeof waiter.owner === "string" && typeof owner === "string"
+        && waiter.owner !== owner) {
+        return false;
+      }
+      return drop(frame.id, (entry) => entry.resolve(frame));
+    },
+
+    /**
+     * @param {string} owner
+     * @param {Error} error
+     */
+    rejectByOwner(owner, error) {
+      for (const [id, waiter] of [...pending]) {
+        if (waiter.owner !== owner) continue;
+        drop(id, (entry) => entry.reject(error));
+      }
     },
 
     /**
      * @param {Error} error
      */
     rejectAll(error) {
-      for (const [id, waiter] of pending) {
-        pending.delete(id);
-        waiter.reject(error);
+      for (const [id] of [...pending]) {
+        drop(id, (entry) => entry.reject(error));
       }
     },
   };

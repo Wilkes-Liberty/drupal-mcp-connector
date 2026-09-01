@@ -174,6 +174,36 @@ describe("createRequestBroker", () => {
     await expect(two).rejects.toThrow(/channel closed/);
     expect(broker.size).toBe(0);
   });
+
+  it("ignores a response whose owner is not the tracked tenant", async () => {
+    const broker = createRequestBroker({ timeoutMs: 1000 });
+    const waited = broker.track("req-1", { owner: "tenant-a" });
+    expect(broker.settle(
+      { type: "mcp-response", id: "req-1", status: 200 },
+      { owner: "tenant-b" },
+    )).toBe(false);
+    expect(broker.size).toBe(1);
+    expect(broker.settle(
+      { type: "mcp-response", id: "req-1", status: 201 },
+      { owner: "tenant-a" },
+    )).toBe(true);
+    await expect(waited).resolves.toMatchObject({ id: "req-1", status: 201 });
+    expect(broker.size).toBe(0);
+  });
+
+  it("rejects only one owner's pending ids when that tenant disconnects", async () => {
+    const broker = createRequestBroker({ timeoutMs: 1000 });
+    const a = broker.track("req-a", { owner: "tenant-a" });
+    const b = broker.track("req-b", { owner: "tenant-b" });
+    broker.rejectByOwner("tenant-a", new Error("tenant-a channel closed"));
+    await expect(a).rejects.toThrow(/tenant-a channel closed/);
+    expect(broker.size).toBe(1);
+    expect(broker.settle(
+      { type: "mcp-response", id: "req-b", status: 200 },
+      { owner: "tenant-b" },
+    )).toBe(true);
+    await expect(b).resolves.toMatchObject({ id: "req-b", status: 200 });
+  });
 });
 
 describe("forwardHeaders", () => {

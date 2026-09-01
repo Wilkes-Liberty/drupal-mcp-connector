@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Two-tenant isolation on the relay edge (#242).** The edge keeps one
+  agent-channel session per `agentId` instead of replacing the previous
+  tenant. Channel records may bind `sites` (catalog names); that bind is
+  the tenant boundary. A second unscoped agent is denied `unbound_tenant`,
+  overlapping site claims are denied `overlapping_tenant`, and fan-down
+  selects the unique agent granted to the northbound principal. Cross-tenant
+  hints still fail closed before any frame reaches the wrong process. A
+  tenant disconnect rejects only that tenant's in-flight requests. A
+  spoofed `mcp-response` from another agent cannot complete the wait.
+  Fan-down frames carry `{ requestId, tenant }` correlation and still never
+  carry site secrets, the channel token, or the northbound JWT. A single
+  unscoped agent remains the previous compatibility path. Lab/loopback
+  proof only — not a hosted-service or public-URL claim.
+
 ## [2.10.1] - 2026-08-28
 
 ### Fixed
