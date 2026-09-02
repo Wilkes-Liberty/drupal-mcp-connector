@@ -164,7 +164,11 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
   `denials` post-authentication refusals inside `windowSec` is
   `429 abuse_locked` for `lockSec`. Every refusal is zero frames on any
   tunnel. Windows are per process and count every request that reaches the
-  quota boundary, allowed or not. Only refusals that describe the caller's
+  window checks, allowed or not; the abuse lock is checked first, so a
+  locked principal is refused before the windows and cannot drain the
+  tenant's shared one. Identity values are matched exactly as the issuer
+  minted them (config keys are trimmed, claims are not), the same rule as
+  `auth.actors` and `auth.tenantGrants`. Only refusals that describe the caller's
   own behaviour feed its abuse lock: a shared tenant window running out, or
   a misconfigured table, never locks an individual principal. A table the
   edge cannot read — an unknown key, a sub-table that is not an object, a

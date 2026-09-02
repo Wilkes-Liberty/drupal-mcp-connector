@@ -55,10 +55,14 @@ function receipt(overrides = {}) {
 }
 
 describe("usagePrincipalKey / attributedTenant", () => {
-  it("keys the principal by sub, then azp, and never by a caller field", () => {
+  it("keys the principal by sub, then azp, raw as issued, and never by a caller field", () => {
     expect(usagePrincipalKey({ sub: "sub-a", clientId: "client-a" })).toBe("sub-a");
     expect(usagePrincipalKey({ sub: null, clientId: "client-a" })).toBe("client-a");
-    expect(usagePrincipalKey({ sub: "  ", clientId: " client-a " })).toBe("client-a");
+    expect(usagePrincipalKey({ sub: "", clientId: "client-a" })).toBe("client-a");
+    // Identity values are used exactly as the issuer minted them, like
+    // resolveTenantRoute / resolveActor; only config keys are trimmed.
+    expect(usagePrincipalKey({ sub: " sub-a ", clientId: "client-a" })).toBe(" sub-a ");
+    expect(usagePrincipalKey({ sub: null, clientId: " client-a " })).toBe(" client-a ");
     expect(usagePrincipalKey({ actor: "spoof" })).toBeNull();
     expect(usagePrincipalKey(null)).toBeNull();
   });
@@ -172,6 +176,19 @@ describe("createQuotaGate", () => {
       allowed: false, reason: "not_entitled", scope: "tenant", retryAfterSec: 0,
     });
     expect(gate.check({ tenant: "tenant-b", principalKey: "sub-a" })).toEqual({ allowed: true });
+  });
+
+  it("looks principals up raw, so a padded identity never matches a trimmed row", () => {
+    const gate = createQuotaGate({
+      quotas: { principals: { " sub-a ": { requests: 5 } }, abuse: { denials: 5 } },
+    });
+    expect(gate.check({ tenant: "tenant-a", principalKey: "sub-a" })).toEqual({ allowed: true });
+    expect(gate.check({ tenant: "tenant-a", principalKey: " sub-a " })).toEqual({
+      allowed: false, reason: "not_entitled", scope: "principal", retryAfterSec: 0,
+    });
+    gate.noteDenial(" sub-a ");
+    expect(gate.state(" sub-a ").denials).toBe(1);
+    expect(gate.state("sub-a").denials).toBe(0);
   });
 
   it("denies a principal without a row when the principals table is present", () => {

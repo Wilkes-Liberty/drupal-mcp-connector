@@ -68,19 +68,23 @@ function grantIds(values) {
   return [...new Set(values.map((value) => cleanKey(value)).filter(Boolean))];
 }
 
+function identityValue(value) {
+  return typeof value === "string" && value ? value : null;
+}
+
 /**
- * Principal partition key: inbound `sub`, then `azp` / client id. Matches
- * the precedence of `auth.actors` and `auth.policies`. Never a caller field.
+ * Principal partition key: inbound `sub`, then `azp` / client id, exactly
+ * as the issuer minted them. Matches the precedence and the raw-value
+ * convention of `auth.actors` / `auth.policies` / `resolveTenantRoute`:
+ * config keys are trimmed, identity values are not, so a padded claim never
+ * matches a row and fails closed. Never a caller field.
  *
  * @param {object|null} identity
  * @returns {string|null}
  */
 export function usagePrincipalKey(identity) {
   if (!isRecord(identity)) return null;
-  const sub = typeof identity.sub === "string" ? identity.sub.trim() : "";
-  if (sub) return sub;
-  const clientId = typeof identity.clientId === "string" ? identity.clientId.trim() : "";
-  return clientId || null;
+  return identityValue(identity.sub) ?? identityValue(identity.clientId);
 }
 
 /**
@@ -195,9 +199,10 @@ export function quotasRequired(raw) {
 
 /**
  * Quota and abuse gate. Fixed windows per tenant and per principal, plus a
- * denial counter that locks a principal. Every request reaching `check`
- * counts against the applicable windows whether or not it is then allowed,
- * so a flood of refused requests cannot probe for free.
+ * denial counter that locks a principal. Every request reaching the window
+ * checks counts whether or not it is then allowed, so a flood of refused
+ * requests cannot probe for free; a request refused by the abuse lock is
+ * refused before the windows and does not drain the tenant's shared one.
  *
  * @param {object} [options]
  * @param {object|null} [options.quotas] Raw `auth.quotas`.
@@ -299,15 +304,19 @@ export function createQuotaGate({
     reason: null,
 
     /**
+     * The abuse lock is checked first: a locked principal is refused before
+     * the windows and does not consume the tenant's shared window. Every
+     * request that reaches the window checks counts, allowed or not.
+     *
      * @param {{tenant?: string|null, principalKey?: string|null}} params
      * @returns {{allowed: true}|{allowed: false, reason: string, scope: string, retryAfterSec: number}}
      */
     check({ tenant = null, principalKey = null } = {}) {
-      const key = cleanKey(principalKey);
+      const key = identityValue(principalKey);
       const lock = lockState(key);
       if (lock.locked) return deny("abuse_locked", "abuse", lock.retryAfterSec);
       if (table.tenantsRequired) {
-        const tenantId = cleanKey(tenant);
+        const tenantId = identityValue(tenant);
         const limiter = tenantId ? tenantLimiters.get(tenantId) : undefined;
         if (!limiter) return deny("not_entitled", "tenant");
         const verdict = limiter.check(tenantId);
@@ -329,7 +338,7 @@ export function createQuotaGate({
      */
     noteDenial(principalKey) {
       if (!abuse) return { locked: false };
-      const key = cleanKey(principalKey);
+      const key = identityValue(principalKey);
       if (!key) return { locked: false };
       const current = lockState(key);
       if (current.locked) return { locked: true, retryAfterSec: current.retryAfterSec };
@@ -349,7 +358,7 @@ export function createQuotaGate({
      * @returns {{locked: boolean, retryAfterSec: number, denials: number}}
      */
     state(principalKey) {
-      return lockState(cleanKey(principalKey));
+      return lockState(identityValue(principalKey));
     },
 
     /** @returns {{trackedPrincipals: number, maxKeys: number}} */
