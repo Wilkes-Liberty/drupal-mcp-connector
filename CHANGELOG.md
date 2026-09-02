@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-09-02
+
 ### Security
 - **Expected policy digest on the relay edge (#250).** Optional
   `auth.policies` maps inbound `sub` (then `azp`) to a SHA-256 digest.
@@ -1378,6 +1380,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[2.11.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.11.0
 [2.10.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.10.1
 [1.0.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v1.0.0
 [0.10.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v0.10.0
