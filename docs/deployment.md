@@ -146,6 +146,16 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
   `not_entitled` with no fan-down. Diagnostic tools stay callable. Omit
   to keep the prior path (no digest required at the edge). Local
   verify/activate/attest stays on Sentinel;
+- optional `auth.promotions` (digest → `{ document, approvals }`). W&L-operated
+  dual-control of an already-sealed portable bundle: two distinct operator
+  ids, document digest matching the map key, seal prefixed `hmac-sha256:`.
+  When the table is present, the edge fans each eligible document down the
+  agent channel as a `policy-bundle` frame after hello. Non-diagnostic
+  `tools/call` then requires the bound `auth.policies` digest **and** a
+  matching agent attestation (`policy-bundle-ack`). Missing promotion,
+  missing attestation, or a digest mismatch is `not_entitled` with no
+  fan-down. The edge never mints a Sentinel HMAC key. Omit to keep the
+  digest-only path. Tenant self-service is not this table;
 - an agent channel credential store (`MCP_CHANNEL_CREDENTIALS_FILE`, SHA-256
   digests only, hot-reloaded so revocation needs no restart). Each agent
   entry may name `sites`: catalog names that agent is allowed to serve.

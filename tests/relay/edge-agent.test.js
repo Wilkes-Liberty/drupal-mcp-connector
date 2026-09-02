@@ -26,6 +26,7 @@ import {
   createChannelCredentialStore,
   startEdge,
 } from "../../src/lib/relay/edge.js";
+import { createLocalPolicyEnforcement } from "../../src/lib/policy-enforcement.js";
 import { createRelayAgent } from "../../src/lib/relay/agent.js";
 import {
   AUDIENCE,
@@ -144,7 +145,12 @@ function tenantSurface({ stub = null, siteCredential = "site-credential-tenant-o
   };
 }
 
-async function startRealAgent(harness, { stub = null, token = harness.token, siteCredential } = {}) {
+async function startRealAgent(harness, {
+  stub = null,
+  token = harness.token,
+  siteCredential,
+  policyEnforcement = null,
+} = {}) {
   const tenant = tenantSurface({ stub, ...(siteCredential ? { siteCredential } : {}) });
   const agent = createRelayAgent({
     host: "127.0.0.1",
@@ -152,6 +158,7 @@ async function startRealAgent(harness, { stub = null, token = harness.token, sit
     token,
     surface: tenant.surface,
     ledger: harness.ledger,
+    ...(policyEnforcement ? { policyEnforcement } : {}),
   });
   closers.push(() => agent.close());
   const hello = await agent.dial();
@@ -159,7 +166,7 @@ async function startRealAgent(harness, { stub = null, token = harness.token, sit
   return { agent, tenant };
 }
 
-async function startTwoTenantHarness({ tenantGrants, grants, actors, policies } = {}) {
+async function startTwoTenantHarness({ tenantGrants, grants, actors, policies, promotions } = {}) {
   const channel = createChannelFile();
   const tokenA = `channel-a-${randomBytes(24).toString("hex")}`;
   const tokenB = `channel-b-${randomBytes(24).toString("hex")}`;
@@ -175,9 +182,45 @@ async function startTwoTenantHarness({ tenantGrants, grants, actors, policies } 
     ...(tenantGrants ? { tenantGrants } : {}),
     ...(actors ? { actors } : {}),
     ...(policies ? { policies } : {}),
+    ...(promotions ? { promotions } : {}),
   }));
   closers.push(() => edge.close());
   return { edge, channel, tokenA, tokenB, ledger };
+}
+
+/** Raw framed channel that verifies/activates policy-bundle frames locally. */
+function connectAttestingAgent({ port, token, enforcement }) {
+  return new Promise((resolve, reject) => {
+    const frames = [];
+    const socket = netConnect({ host: "127.0.0.1", port }, () => {
+      writeFrame(socket, { type: "hello", token });
+    });
+    closers.push(() => { socket.destroy(); });
+    attachFramer(socket, (frame) => {
+      frames.push(frame);
+      if (frame.type === "hello-ok") {
+        resolve({ socket, frames, denied: null });
+      } else if (frame.type === "denied") {
+        resolve({ socket, frames, denied: frame.reason });
+      } else if (frame.type === "policy-bundle") {
+        const result = enforcement.activate(frame.document);
+        writeFrame(socket, {
+          type: "policy-bundle-ack",
+          ok: result?.ok === true,
+          digest: typeof result?.digest === "string" ? result.digest : "",
+        });
+      } else if (frame.type === "mcp-request") {
+        writeFrame(socket, {
+          type: "mcp-response",
+          id: frame.id,
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 0, result: {} }),
+        });
+      }
+    });
+    socket.on("error", reject);
+  });
 }
 
 /** Raw framed channel: captures every frame the edge sends, answers 200. */
@@ -1380,6 +1423,187 @@ describe("principal policy digest (#250 / DEV-125)", () => {
     const request = rawA.frames.find((frame) => frame.type === "mcp-request");
     expect(request.identity.policy).toBeUndefined();
     expect(request.correlation.policyDigest).toBeUndefined();
+  });
+});
+
+describe("W&L-operated bundle promotion (#253 / DEV-125)", () => {
+  function sealedLab() {
+    const enforcement = createLocalPolicyEnforcement({ signingKey: "lab-sentinel-key" });
+    const bundle = enforcement.mint(["delete"], 3600);
+    const digest = bundle.digest;
+    return {
+      enforcement,
+      digest,
+      document: bundle.toArray(),
+      policies: { "client-a": digest },
+      promotions: {
+        [digest]: {
+          document: bundle.toArray(),
+          approvals: ["operator-a", "operator-b"],
+        },
+      },
+    };
+  }
+
+  it("fans a dual-controlled bundle, attests locally, and stamps the digest", async () => {
+    const lab = sealedLab();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: lab.policies,
+      promotions: lab.promotions,
+    });
+    const rawA = await connectAttestingAgent({
+      port: harness.edge.agentPort,
+      token: harness.tokenA,
+      enforcement: lab.enforcement,
+    });
+    await settle();
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha", policy: "ff".repeat(32) },
+    });
+    expect(res.status).toBe(200);
+    await settle();
+    const request = rawA.frames.find((frame) => frame.type === "mcp-request");
+    expect(request.identity.policy).toBe(lab.digest);
+    expect(request.correlation.policyDigest).toBe(lab.digest);
+    expect(request.body?.params?.arguments?.policy).toBeUndefined();
+    expect(lab.enforcement.activeDigest()).toBe(lab.digest);
+  });
+
+  it("refuses a single-approval promotion with zero frames", async () => {
+    const lab = sealedLab();
+    lab.promotions[lab.digest].approvals = ["operator-a"];
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: lab.policies,
+      promotions: lab.promotions,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    expect(rawA.frames.filter((frame) => frame.type === "policy-bundle")).toEqual([]);
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(denied.status).toBe(403);
+    expect(JSON.parse(denied.body)).toEqual({ error: "not_entitled" });
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+  });
+
+  it("refuses when the attested digest does not match the grant", async () => {
+    const lab = sealedLab();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: lab.policies,
+      promotions: lab.promotions,
+    });
+    const rawA = await connectAttestingAgent({
+      port: harness.edge.agentPort,
+      token: harness.tokenA,
+      enforcement: {
+        activate: () => ({ ok: true, digest: "ff".repeat(32), attested: true }),
+      },
+    });
+    await settle();
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(denied.status).toBe(403);
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+  });
+
+  it("fans the document but refuses when local verify fails", async () => {
+    const lab = sealedLab();
+    const tampered = { ...lab.document, denials: { operations: [] } };
+    lab.promotions[lab.digest].document = tampered;
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: lab.policies,
+      promotions: lab.promotions,
+    });
+    await startRealAgent(harness, {
+      token: harness.tokenA,
+      policyEnforcement: lab.enforcement,
+    });
+    await settle();
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_relay_echo",
+      args: { site: "tenant-alpha" },
+    });
+    expect(denied.status).toBe(403);
+    expect(lab.enforcement.activeDigest()).toBeNull();
+  });
+
+  it("refuses a raw agent that never attests, including with no agent", async () => {
+    const lab = sealedLab();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: lab.policies,
+      promotions: lab.promotions,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    expect(rawA.frames.some((frame) => frame.type === "policy-bundle")).toBe(true);
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(denied.status).toBe(403);
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+
+    const down = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: lab.policies,
+      promotions: lab.promotions,
+    });
+    const ghost = await issuer.signToken({ clientId: "client-a" });
+    const none = await modernCall(down.edge.northboundUrl, ghost, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(none.status).toBe(403);
+    expect(JSON.parse(none.body)).toEqual({ error: "not_entitled" });
+  });
+
+  it("still serves diagnostic tools without an attestation", async () => {
+    const lab = sealedLab();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: lab.policies,
+      promotions: lab.promotions,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_sites",
+      args: { site: "tenant-alpha" },
+    });
+    expect(res.status).toBe(200);
+    await settle();
+    expect(rawA.frames.some((frame) => frame.type === "mcp-request")).toBe(true);
+  });
+
+  it("does not require attestation when auth.promotions is omitted", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: POLICIES,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    expect(rawA.frames.filter((frame) => frame.type === "policy-bundle")).toEqual([]);
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(res.status).toBe(200);
   });
 });
 

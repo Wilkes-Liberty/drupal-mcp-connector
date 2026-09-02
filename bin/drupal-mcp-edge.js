@@ -39,11 +39,14 @@
  * auth.actors (sub / azp -> Drupal user UUID) maps the inbound principal
  * to a Drupal actor for write-like tools. Optional auth.policies
  * (sub / azp -> SHA-256 digest) is the expected signed policy on the edge.
+ * Optional auth.promotions (digest -> sealed document + two operator ids)
+ * is the W&L-operated dual-control ledger; the edge fans eligible bundles
+ * to the tenant agent and requires a matching local attestation.
  */
 
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { getInboundActors, getInboundGrants, getInboundPolicies, getInboundTenantGrants, getTlsConfig, loadConfig } from "../src/lib/config.js";
+import { getInboundActors, getInboundGrants, getInboundPolicies, getInboundPromotions, getInboundTenantGrants, getTlsConfig, loadConfig } from "../src/lib/config.js";
 import { resolveInboundAuthConfig } from "../src/lib/http-auth.js";
 import { createRateLimiter } from "../src/lib/rate-limit.js";
 import {
@@ -131,6 +134,7 @@ try {
     tenantGrants: getInboundTenantGrants(),
     actors: getInboundActors(),
     policies: getInboundPolicies(),
+    promotions: getInboundPromotions(),
     sites,
     defaultSite: config.defaultSite,
     channelCredentials: createChannelCredentialStore({ filePath: channelFile }),

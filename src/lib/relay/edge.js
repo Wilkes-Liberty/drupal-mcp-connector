@@ -1,6 +1,7 @@
 /**
- * Relay northbound edge (#232, #242, #244, #247, #250) — DEV-294 AC4, DEV-122
- * isolation, DEV-124 tenant routing, DEV-123 actor mapping, DEV-125 policy digest.
+ * Relay northbound edge (#232, #242, #244, #247, #250, #253) — DEV-294 AC4,
+ * DEV-122 isolation, DEV-124 tenant routing, DEV-123 actor mapping, DEV-125
+ * policy digest and W&L-operated bundle promotion.
  *
  * Terminates northbound MCP over the OAuth resource server and fans requests
  * down outbound tenant-agent channels. The edge proposes; the tenant-side
@@ -38,6 +39,11 @@ import { createLocalRelay } from "../contracts/relay.js";
 import { createInboundHttpsAuth, SPOOFABLE_IDENTITY_HEADERS } from "../http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../http-handler.js";
 import { isWriteLikeCall } from "../operations.js";
+import {
+  eligiblePromotions,
+  POLICY_DIGEST,
+  promotionsRequired,
+} from "../policy-promotion.js";
 import { DIAGNOSTIC_TOOLS, resolveActor, resolveGrantedSites, resolvePolicy } from "../principal.js";
 import {
   attachFramer,
@@ -469,6 +475,10 @@ function jsonResponse(res, status, body) {
  * @param {object|null} [options.actors] Optional principal → Drupal actor
  *   table (`sub` / `azp` → `{ uuid, delegators? }`). When present, write-like
  *   tools/call require a mapping.
+ * @param {object|null} [options.policies] Optional principal → SHA-256 digest.
+ * @param {object|null} [options.promotions] Optional W&L-operated dual-control
+ *   ledger (digest → sealed document + two operator ids). When present,
+ *   non-diagnostic tools/call require a matching agent attestation.
  * @param {Array<{_name: string}>} options.sites Credential-free catalog.
  * @param {string} [options.defaultSite]
  * @param {{lookup: Function}} options.channelCredentials Agent channel store.
@@ -490,6 +500,7 @@ export async function startEdge({
   tenantGrants = null,
   actors = null,
   policies = null,
+  promotions = null,
   sites,
   defaultSite,
   channelCredentials,
@@ -525,6 +536,10 @@ export async function startEdge({
   const policyTable = policies && typeof policies === "object" && !Array.isArray(policies)
     ? policies
     : null;
+  const promotionTable = promotions && typeof promotions === "object" && !Array.isArray(promotions)
+    ? promotions
+    : null;
+  const promoRequired = promotionsRequired(promotionTable);
   if (typeof channelCredentials?.lookup !== "function") {
     throw new EdgeStartupError(
       "Relay edge requires an agent channel credential store; without one no "
@@ -550,7 +565,7 @@ export async function startEdge({
   const targetRelay = createLocalRelay({ sites: catalog, grants: grantTable, defaultSite });
   const broker = createRequestBroker({ timeoutMs: fanDownTimeoutMs });
 
-  /** @type {Map<string, {socket: object, token: string, agentId: string, sites: string[]|null}>} */
+  /** @type {Map<string, {socket: object, token: string, agentId: string, sites: string[]|null, attestedDigests: Set<string>}>} */
   const sessions = new Map();
   const catalogNames = catalog.map((site) => site._name);
 
@@ -585,15 +600,29 @@ export async function startEdge({
           token: frame.token,
           agentId,
           sites: decision.sites,
+          attestedDigests: new Set(),
         });
+        for (const row of eligiblePromotions(promotionTable)) {
+          writeFrame(socket, { type: "policy-bundle", document: row.document });
+        }
         writeFrame(socket, { type: "hello-ok", agent: { agentId } });
         return;
       }
-      if (frame.type === "mcp-response") {
-        if (!agentId) {
-          socket.destroy();
-          return;
+      if (!agentId) {
+        socket.destroy();
+        return;
+      }
+      if (frame.type === "policy-bundle-ack") {
+        const session = sessions.get(agentId);
+        const digest = typeof frame.digest === "string"
+          ? frame.digest.trim().toLowerCase()
+          : "";
+        if (session && frame.ok === true && POLICY_DIGEST.test(digest)) {
+          session.attestedDigests.add(digest);
         }
+        return;
+      }
+      if (frame.type === "mcp-response") {
         broker.settle(frame, { owner: agentId });
         return;
       }
@@ -649,10 +678,14 @@ export async function startEdge({
       jsonResponse(res, 403, { error: "not_entitled" });
       return;
     }
+    const policyCall = isCall && (!toolName || !DIAGNOSTIC_TOOLS.has(toolName));
     if (
-      boundPolicy.required && boundPolicy.reason && isCall
-      && (!toolName || !DIAGNOSTIC_TOOLS.has(toolName))
+      boundPolicy.required && boundPolicy.reason && policyCall
     ) {
+      jsonResponse(res, 403, { error: "not_entitled" });
+      return;
+    }
+    if (promoRequired && policyCall && !boundPolicy.policy) {
       jsonResponse(res, 403, { error: "not_entitled" });
       return;
     }
@@ -665,6 +698,13 @@ export async function startEdge({
       targetName,
       sessions: [...sessions.values()],
     });
+    if (promoRequired && policyCall) {
+      const attested = selected.session?.attestedDigests;
+      if (!attested || !attested.has(boundPolicy.policy)) {
+        jsonResponse(res, 403, { error: "not_entitled" });
+        return;
+      }
+    }
     if (!selected.session) {
       const entitled = selected.reason === "not_entitled";
       jsonResponse(res, entitled ? 403 : 503, {

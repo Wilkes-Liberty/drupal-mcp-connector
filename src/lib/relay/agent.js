@@ -35,6 +35,9 @@ import { attachFramer, forwardHeaders, writeFrame } from "./frames.js";
  * @param {?() => void} [options.onChannelClose] Called when an established
  *   channel is lost (not on deliberate `drop`/`close`), so an entry point
  *   can fail loudly instead of idling disconnected.
+ * @param {?{activate: Function}} [options.policyEnforcement] Local Sentinel
+ *   hook. `activate(document)` verifies, activates, and attests. Missing
+ *   hook fail-closes a `policy-bundle` frame (no mint on this process).
  * @param {?{recordConnect: Function}} [options.ledger]
  * @returns {object}
  */
@@ -45,6 +48,7 @@ export function createRelayAgent({
   surface,
   connectFn = netConnect,
   onChannelClose = null,
+  policyEnforcement = null,
   ledger = null,
 }) {
   if (!host || !port) {
@@ -62,6 +66,36 @@ export function createRelayAgent({
   });
   let socket = null;
   let agentInfo = null;
+
+  async function presentBundle(activeSocket, frame) {
+    const document = frame.document;
+    if (!policyEnforcement || typeof policyEnforcement.activate !== "function") {
+      writeFrame(activeSocket, {
+        type: "policy-bundle-ack",
+        ok: false,
+        reason: "no_enforcement",
+        digest: "",
+      });
+      return;
+    }
+    try {
+      const result = await policyEnforcement.activate(document);
+      const digest = typeof result?.digest === "string" ? result.digest : "";
+      writeFrame(activeSocket, {
+        type: "policy-bundle-ack",
+        ok: result?.ok === true,
+        digest,
+        ...(result?.ok === true ? {} : { reason: result?.reason || "unverified" }),
+      });
+    } catch {
+      writeFrame(activeSocket, {
+        type: "policy-bundle-ack",
+        ok: false,
+        reason: "activate_failed",
+        digest: "",
+      });
+    }
+  }
 
   async function serveFrame(activeSocket, frame) {
     if (frame.type !== "mcp-request") return;
@@ -136,6 +170,10 @@ export function createRelayAgent({
           if (frame.type === "denied") {
             next.end();
             resolve({ ok: false, reason: frame.reason });
+            return;
+          }
+          if (frame.type === "policy-bundle") {
+            void presentBundle(next, frame);
             return;
           }
           void serveFrame(next, frame);
