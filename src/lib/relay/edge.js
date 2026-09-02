@@ -565,7 +565,7 @@ export async function startEdge({
   const targetRelay = createLocalRelay({ sites: catalog, grants: grantTable, defaultSite });
   const broker = createRequestBroker({ timeoutMs: fanDownTimeoutMs });
 
-  /** @type {Map<string, {socket: object, token: string, agentId: string, sites: string[]|null, attestedDigests: Set<string>}>} */
+  /** @type {Map<string, {socket: object, token: string, agentId: string, sites: string[]|null, attestedDigests: Set<string>, offeredDigests: Set<string>}>} */
   const sessions = new Map();
   const catalogNames = catalog.map((site) => site._name);
 
@@ -595,14 +595,17 @@ export async function startEdge({
         const existing = sessions.get(record.agentId);
         if (existing && existing.socket !== socket) existing.socket.destroy();
         agentId = record.agentId;
+        const offeredDigests = new Set();
         sessions.set(agentId, {
           socket,
           token: frame.token,
           agentId,
           sites: decision.sites,
           attestedDigests: new Set(),
+          offeredDigests,
         });
         for (const row of eligiblePromotions(promotionTable)) {
+          offeredDigests.add(row.digest);
           writeFrame(socket, { type: "policy-bundle", document: row.document });
         }
         writeFrame(socket, { type: "hello-ok", agent: { agentId } });
@@ -617,7 +620,10 @@ export async function startEdge({
         const digest = typeof frame.digest === "string"
           ? frame.digest.trim().toLowerCase()
           : "";
-        if (session && frame.ok === true && POLICY_DIGEST.test(digest)) {
+        if (
+          session && frame.ok === true && POLICY_DIGEST.test(digest)
+          && session.offeredDigests.has(digest)
+        ) {
           session.attestedDigests.add(digest);
         }
         return;

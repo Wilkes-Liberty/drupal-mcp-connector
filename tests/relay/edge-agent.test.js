@@ -1493,7 +1493,7 @@ describe("W&L-operated bundle promotion (#253 / DEV-125)", () => {
     expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
   });
 
-  it("refuses when the attested digest does not match the grant", async () => {
+  it("ignores an attestation for a digest the edge did not offer", async () => {
     const lab = sealedLab();
     const harness = await startTwoTenantHarness({
       tenantGrants: TENANT_GRANTS,
@@ -1505,6 +1505,37 @@ describe("W&L-operated bundle promotion (#253 / DEV-125)", () => {
       token: harness.tokenA,
       enforcement: {
         activate: () => ({ ok: true, digest: "ff".repeat(32), attested: true }),
+      },
+    });
+    await settle();
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(denied.status).toBe(403);
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+  });
+
+  it("refuses when the attested digest does not match the grant", async () => {
+    const lab = sealedLab();
+    const other = createLocalPolicyEnforcement({ signingKey: "other-sentinel-key" });
+    const otherBundle = other.mint(["view"], 3600);
+    lab.promotions[otherBundle.digest] = {
+      document: otherBundle.toArray(),
+      approvals: ["operator-a", "operator-b"],
+    };
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: lab.policies,
+      promotions: lab.promotions,
+    });
+    const rawA = await connectAttestingAgent({
+      port: harness.edge.agentPort,
+      token: harness.tokenA,
+      enforcement: {
+        activate: () => ({ ok: true, digest: otherBundle.digest, attested: true }),
       },
     });
     await settle();
