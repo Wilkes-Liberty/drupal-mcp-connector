@@ -154,8 +154,11 @@ export function grantActorUid(entityType, relationships) {
   } catch {
     return relationships;
   }
+  const base = relationships && typeof relationships === "object" && !Array.isArray(relationships)
+    ? relationships
+    : {};
   return {
-    ...(relationships && typeof relationships === "object" ? relationships : {}),
+    ...base,
     uid: { data: { type: "user--user", id: uuid } },
   };
 }

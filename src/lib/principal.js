@@ -124,8 +124,9 @@ function grantNameList(values) {
 export function normalizeActors(actors) {
   if (!actors || typeof actors !== "object" || Array.isArray(actors)) return null;
   const entries = [];
-  for (const [key, value] of Object.entries(actors)) {
-    if (key.startsWith("_")) continue;
+  for (const [rawKey, value] of Object.entries(actors)) {
+    const key = rawKey.trim();
+    if (!key || key.startsWith("_")) continue;
     let uuid = "";
     let revoked = false;
     let delegators = [];

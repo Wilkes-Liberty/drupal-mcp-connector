@@ -374,6 +374,17 @@ describe("resolveActor (#247 / DEV-123)", () => {
       actor: uuid, delegator: "operator-1", required: true, reason: null,
     });
   });
+
+  it("trims actor keys and fail-closes a table with keys but no valid UUID", () => {
+    expect(resolveActor({
+      identity: identity({ sub: "other", clientId: "client-b" }),
+      actors: { " client-b ": uuid },
+    })).toMatchObject({ actor: uuid, required: true, reason: null });
+    expect(resolveActor({
+      identity: identity(),
+      actors: { "agent-1": "not-a-uuid" },
+    })).toMatchObject({ actor: null, required: true, reason: "not_entitled" });
+  });
 });
 
 describe("runWithIdentity", () => {

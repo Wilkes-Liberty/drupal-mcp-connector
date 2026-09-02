@@ -5,7 +5,7 @@ vi.mock("../../src/lib/drupal-fetch.js", () => ({
 }));
 import { drupalFetch, drupalUploadFile } from "../../src/lib/drupal-fetch.js";
 import { describe, it, expect } from "vitest";
-import { JsonApiBackend, isModeratedStatusError } from "../../src/lib/backends/jsonapi.js";
+import { JsonApiBackend, grantActorUid, isModeratedStatusError } from "../../src/lib/backends/jsonapi.js";
 import { runWithIdentity } from "../../src/lib/principal.js";
 
 function paramsOf(descriptor) {
@@ -231,6 +231,21 @@ describe("JsonApiBackend fetch methods", () => {
     }));
     const body = JSON.parse(vi.mocked(drupalFetch).mock.calls[0][2].body);
     expect(body.data.relationships.uid).toEqual({ data: { type: "user--user", id: actor } });
+  });
+
+  it("grantActorUid ignores invalid actors and array relationships", async () => {
+    expect(grantActorUid("node")).toBeUndefined();
+    await runWithIdentity({ actor: "not-a-uuid" }, () => {
+      expect(grantActorUid("node", { field_tags: { data: [] } })).toEqual({ field_tags: { data: [] } });
+    });
+    const actor = "11111111-1111-4111-8111-111111111111";
+    await runWithIdentity({ actor }, () => {
+      expect(grantActorUid("node", [])).toEqual({
+        uid: { data: { type: "user--user", id: actor } },
+      });
+      expect(grantActorUid("user", { uid: { data: { type: "user--user", id: actor } } }))
+        .toEqual({ uid: { data: { type: "user--user", id: actor } } });
+    });
   });
 
   it("updateEntity PATCHes a JSON:API payload with id in the body", async () => {
