@@ -385,6 +385,13 @@ describe("resolveActor (#247 / DEV-123)", () => {
       actors: { "agent-1": "not-a-uuid" },
     })).toMatchObject({ actor: null, required: true, reason: "not_entitled" });
   });
+
+  it("treats whitespace-prefixed comment keys as an omitted table", () => {
+    expect(resolveActor({
+      identity: identity(),
+      actors: { " _comment": "lab" },
+    })).toEqual({ actor: null, delegator: null, required: false, reason: null });
+  });
 });
 
 describe("runWithIdentity", () => {

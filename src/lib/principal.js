@@ -159,7 +159,10 @@ export function resolveActor({ identity = null, actors = null } = {}) {
   if (!actors || typeof actors !== "object" || Array.isArray(actors)) {
     return { actor: null, delegator: null, required: false, reason: null };
   }
-  const hasKeys = Object.keys(actors).some((key) => !key.startsWith("_"));
+  const hasKeys = Object.keys(actors).some((key) => {
+    const id = key.trim();
+    return id && !id.startsWith("_");
+  });
   const table = normalizeActors(actors);
   if (!table) {
     return {
