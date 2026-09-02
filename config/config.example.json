@@ -32,6 +32,9 @@
     "grants": {
       "_comment": "Optional. Map inbound OAuth client_id (azp) to site names, e.g. \"content-agent\": [\"production\", \"staging\"]. When the map names any client, unknown clients receive no sites. Omit this object (or leave only this comment) to let every resolvable site stay visible; inbound scopes still gate the tool surface."
     },
+    "tenantGrants": {
+      "_comment": "Optional on the library path; used by drupal-mcp-edge for token-resolved tenancy. Map inbound client_id (azp) to tenant agent ids, e.g. \"content-agent\": [\"tenant-a\"]. Caller tenant/site arguments are hints checked against this grant, never authority. Omit to derive the tenant from the unique agent covering the site grant."
+    },
     "revocationFile": "",
     "introspectionUrl": "",
     "introspectionClientIdEnv": "",

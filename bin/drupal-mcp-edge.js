@@ -34,12 +34,13 @@
  *                     primary entry point).
  *
  * Config: auth.grants (client id -> [site names]) is mandatory; the edge
- * refuses to start without it.
+ * refuses to start without it. Optional auth.tenantGrants (client id ->
+ * [tenant agent ids]) makes tenant routing grant-authoritative.
  */
 
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { getInboundGrants, getTlsConfig, loadConfig } from "../src/lib/config.js";
+import { getInboundGrants, getInboundTenantGrants, getTlsConfig, loadConfig } from "../src/lib/config.js";
 import { resolveInboundAuthConfig } from "../src/lib/http-auth.js";
 import { createRateLimiter } from "../src/lib/rate-limit.js";
 import {
@@ -124,6 +125,7 @@ try {
   edge = await startEdge({
     auth: inboundCfg,
     grants,
+    tenantGrants: getInboundTenantGrants(),
     sites,
     defaultSite: config.defaultSite,
     channelCredentials: createChannelCredentialStore({ filePath: channelFile }),

@@ -39,6 +39,7 @@ import {
 
 const SITES = [{ _name: "tenant-alpha" }, { _name: "tenant-beta" }];
 const GRANTS = { "client-a": ["tenant-alpha"], "client-b": ["tenant-beta"] };
+const TENANT_GRANTS = { "client-a": ["tenant-a"], "client-b": ["tenant-b"] };
 
 let issuer;
 beforeAll(async () => {
@@ -158,7 +159,7 @@ async function startRealAgent(harness, { stub = null, token = harness.token, sit
   return { agent, tenant };
 }
 
-async function startTwoTenantHarness() {
+async function startTwoTenantHarness({ tenantGrants, grants } = {}) {
   const channel = createChannelFile();
   const tokenA = `channel-a-${randomBytes(24).toString("hex")}`;
   const tokenB = `channel-b-${randomBytes(24).toString("hex")}`;
@@ -170,6 +171,8 @@ async function startTwoTenantHarness() {
   const edge = await startEdge(baseEdgeOptions({
     channelCredentials: createChannelCredentialStore({ filePath: channel.filePath }),
     ledger,
+    ...(grants ? { grants } : {}),
+    ...(tenantGrants ? { tenantGrants } : {}),
   }));
   closers.push(() => edge.close());
   return { edge, channel, tokenA, tokenB, ledger };
@@ -921,6 +924,8 @@ describe("tenant isolation (#242 / DEV-122)", () => {
     expect(request.correlation).toEqual({
       requestId: request.id,
       tenant: "tenant-a",
+      target: "tenant-alpha",
+      source: "grant",
     });
     expect(JSON.stringify(request)).not.toContain(harness.tokenA);
     expect(JSON.stringify(request)).not.toContain(harness.tokenB);
@@ -1022,3 +1027,121 @@ describe("tenant isolation (#242 / DEV-122)", () => {
     expect([...harness.edge.agentIds].sort()).toEqual(["tenant-a", "tenant-b"]);
   });
 });
+
+describe("authoritative tenant routing (#244 / DEV-124)", () => {
+  it("routes by tenantGrants without a caller tenant hint and stamps identity.tenant", async () => {
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS });
+    const { tenant } = await startRealAgent(harness, { token: harness.tokenA });
+    await startRealAgent(harness, { token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const client = await connectModernClient(harness.edge.northboundUrl, jwtA, []);
+    const echoed = echoPayload(await client.callTool({
+      name: "drupal_relay_echo",
+      arguments: { site: "tenant-alpha" },
+    }));
+    expect(echoed.identity.tenant).toBe("tenant-a");
+    expect(echoed.identity.clientId).toBe("client-a");
+    expect(tenant.calls[0].identity.tenant).toBe("tenant-a");
+  });
+
+  it("rejects a caller tenant hint for another tenant with zero frames on either tunnel", async () => {
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const crossed = await modernCall(harness.edge.northboundUrl, jwtA, {
+      args: { tenant: "tenant-b", site: "tenant-alpha" },
+    });
+    expect(crossed.status).toBe(403);
+    expect(JSON.parse(crossed.body)).toEqual({ error: "not_entitled" });
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+    expect(rawB.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+  });
+
+  it("strips the tenant hint from the framed body and records grant correlation", async () => {
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtA, {
+      args: { tenant: "tenant-a", site: "tenant-alpha" },
+    });
+    expect(res.status).toBe(200);
+    await settle();
+    const request = rawA.frames.find((frame) => frame.type === "mcp-request");
+    expect(request.correlation).toEqual({
+      requestId: request.id,
+      tenant: "tenant-a",
+      target: "tenant-alpha",
+      source: "grant",
+    });
+    expect(request.body?.params?.arguments?.tenant).toBeUndefined();
+    expect(request.body?.params?.arguments?.site).toBe("tenant-alpha");
+    expect(request.identity.tenant).toBe("tenant-a");
+  });
+
+  it("does not treat a caller tenant name as a site", async () => {
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const asSite = await modernCall(harness.edge.northboundUrl, jwtA, {
+      args: { site: "tenant-a" },
+    });
+    expect(asSite.status).toBe(403);
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+  });
+
+  it("refuses a client missing from tenantGrants even when site grants would match", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: { "client-b": ["tenant-b"] },
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtA, {
+      args: { site: "tenant-alpha" },
+    });
+    expect(denied.status).toBe(403);
+    expect(JSON.parse(denied.body)).toEqual({ error: "not_entitled" });
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+    expect(rawB.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+  });
+
+  it("does not let a matching tenant hint reach a site bound to another tenant", async () => {
+    const harness = await startTwoTenantHarness({
+      grants: {
+        "client-a": ["tenant-alpha", "tenant-beta"],
+        "client-b": ["tenant-beta"],
+      },
+      tenantGrants: TENANT_GRANTS,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const expanded = await modernCall(harness.edge.northboundUrl, jwtA, {
+      args: { tenant: "tenant-a", site: "tenant-beta" },
+    });
+    expect(expanded.status).toBe(403);
+    expect(JSON.parse(expanded.body)).toEqual({ error: "not_entitled" });
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+    expect(rawB.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+  });
+
+  it("fans tools/list only to the grant-selected tenant", async () => {
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const listed = await modernCall(harness.edge.northboundUrl, jwtA, { method: "tools/list" });
+    expect(listed.status).toBe(200);
+    await settle();
+    const request = rawA.frames.find((frame) => frame.type === "mcp-request");
+    expect(request?.identity?.tenant).toBe("tenant-a");
+    expect(rawB.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+  });
+});
+

@@ -244,6 +244,26 @@ export function getInboundGrants() {
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
+/**
+ * Server-resolved inbound tenant grants keyed by OAuth client id.
+ * When present, the edge routes by tenant agent id, never by caller input.
+ * A missing or empty map means tenant is derived from site grants (compat).
+ * @returns {object|null}
+ */
+export function getInboundTenantGrants() {
+  const grants = loadConfig().auth?.tenantGrants;
+  if (!grants || typeof grants !== "object" || Array.isArray(grants)) return null;
+  const entries = Object.entries(grants)
+    .filter(([clientId, tenants]) => !clientId.startsWith("_") && Array.isArray(tenants))
+    .map(([clientId, tenants]) => [
+      clientId,
+      [...new Set(
+        tenants.map((id) => String(id).trim()).filter((id) => id && !id.startsWith("_")),
+      )],
+    ]);
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Auth headers — never logged, never exposed in tool responses
 // ---------------------------------------------------------------------------
