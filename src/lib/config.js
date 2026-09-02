@@ -311,13 +311,18 @@ export function getInboundPromotions() {
 /**
  * Tenant / principal quota table plus abuse lock (`auth.quotas`).
  * When present, the relay edge fails closed: a tenant or principal without
- * a row is refused, exhausted windows and locked principals are refused.
- * Row validation lives in usage.js (`normalizeQuotas`).
+ * a row is refused, exhausted windows and locked principals are refused,
+ * and a table the edge cannot read refuses startup. Validation lives in
+ * usage.js (`normalizeQuotas`).
  * @returns {object|null}
  */
 export function getInboundQuotas() {
   const quotas = loadConfig().auth?.quotas;
-  if (!quotas || typeof quotas !== "object" || Array.isArray(quotas)) return null;
+  if (quotas === undefined || quotas === null) return null;
+  // A present value that is not an object is passed through unchanged so
+  // the edge refuses to start on it (usage.js normalizeQuotas names it);
+  // returning null here would silently run without quotas.
+  if (typeof quotas !== "object" || Array.isArray(quotas)) return quotas;
   const entries = Object.entries(quotas)
     .map(([key, value]) => [key.trim(), value])
     .filter(([key]) => key && !key.startsWith("_"));

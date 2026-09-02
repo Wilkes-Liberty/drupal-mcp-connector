@@ -79,7 +79,7 @@ describe("usagePrincipalKey / attributedTenant", () => {
 describe("normalizeQuotas / quotasRequired", () => {
   it("treats a missing or comment-only table as omitted", () => {
     expect(normalizeQuotas(null)).toBeNull();
-    expect(normalizeQuotas([])).toBeNull();
+    expect(normalizeQuotas(undefined)).toBeNull();
     expect(normalizeQuotas({ _comment: "x" })).toBeNull();
     expect(normalizeQuotas({ tenants: { _comment: "x" } })).toBeNull();
     expect(quotasRequired(null)).toBe(false);
@@ -120,6 +120,13 @@ describe("normalizeQuotas / quotasRequired", () => {
     expect(normalizeQuotas({ principals: { "sub-a": { requests: 1, windowSec: 0 } } }))
       .toEqual({ invalid: true, reason: "principals.sub-a.windowSec" });
     expect(quotasRequired({ tenants: { "tenant-bad": { requests: 0 } } })).toBe(true);
+  });
+
+  it("flags a present table that is not an object as invalid, never as omitted", () => {
+    for (const raw of ["oops", [], [{ tenants: {} }], 5, true, false]) {
+      expect(normalizeQuotas(raw)).toEqual({ invalid: true, reason: "quotas" });
+      expect(quotasRequired(raw)).toBe(true);
+    }
   });
 
   it("flags an unknown key or a non-object sub-table as invalid, never as omitted", () => {

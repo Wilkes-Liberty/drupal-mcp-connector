@@ -2039,6 +2039,8 @@ describe("attributable usage, quotas, and abuse signals (#256 / DEV-126)", () =>
 
   it("refuses to start on a quota table it cannot read, naming the defect", async () => {
     for (const [quotas, reason] of [
+      ["oops", "quotas"],
+      [[{ tenants: { "tenant-a": { requests: 10 } } }], "quotas"],
       [{ tenant: { "tenant-a": { requests: 10 } } }, "tenant"],
       [{ tenants: "oops" }, "tenants"],
       [{ tenants: { "tenant-a": { requests: "10" } } }, "tenants.tenant-a.requests"],

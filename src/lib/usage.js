@@ -146,11 +146,12 @@ function abuseBlock(raw) {
  * Shape: `{ tenants: { "<agentId>": { requests, windowSec? } },
  * principals: { "<sub|azp>": { requests, windowSec? } },
  * abuse: { denials, windowSec?, lockSec? } }`. Comment keys are ignored.
- * Anything else that is not exactly that shape — an unknown key, a
- * sub-table that is not an object, a row with a non-positive-integer
- * `requests` / `windowSec`, a malformed `abuse` block — makes the whole
- * table **invalid**, never "omitted": the gate then refuses everything and
- * the edge refuses to start. A sub-table that names any id is *required*,
+ * Anything else that is not exactly that shape — a table that is not an
+ * object, an unknown key, a sub-table that is not an object, a row with a
+ * non-positive-integer `requests` / `windowSec`, a malformed `abuse` block
+ * — makes the whole table **invalid**, never "omitted": the gate then
+ * refuses everything and the edge refuses to start. Only `null` /
+ * `undefined` (absent) and a comment-only object mean "omitted". A sub-table that names any id is *required*,
  * so an id without a row fails closed.
  *
  * @param {object|null} raw
@@ -158,7 +159,8 @@ function abuseBlock(raw) {
  *   `{ invalid: true, reason }` naming the offending path; else the table.
  */
 export function normalizeQuotas(raw) {
-  if (!isRecord(raw)) return null;
+  if (raw === null || raw === undefined) return null;
+  if (!isRecord(raw)) return invalid("quotas");
   for (const rawKey of Object.keys(raw)) {
     const key = cleanKey(rawKey);
     if (key && !QUOTA_KEYS.has(key)) return invalid(key);
