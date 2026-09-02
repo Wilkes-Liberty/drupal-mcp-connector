@@ -43,6 +43,7 @@ import {
   eligiblePromotions,
   POLICY_DIGEST,
   promotionsRequired,
+  resolveEligiblePromotion,
 } from "../policy-promotion.js";
 import { DIAGNOSTIC_TOOLS, resolveActor, resolveGrantedSites, resolvePolicy } from "../principal.js";
 import {
@@ -705,8 +706,12 @@ export async function startEdge({
       sessions: [...sessions.values()],
     });
     if (promoRequired && policyCall) {
+      const promo = resolveEligiblePromotion({
+        digest: boundPolicy.policy,
+        promotions: promotionTable,
+      });
       const attested = selected.session?.attestedDigests;
-      if (!attested || !attested.has(boundPolicy.policy)) {
+      if (!promo.eligible || !attested || !attested.has(boundPolicy.policy)) {
         jsonResponse(res, 403, { error: "not_entitled" });
         return;
       }
