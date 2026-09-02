@@ -290,11 +290,13 @@ function stripCallerHints(body) {
 }
 
 function identityWithGrant(identity, { tenant, actor = null, delegator = null, policy = null }) {
-  const next = { ...identity, tenant };
-  if (actor) next.actor = actor;
-  if (delegator) next.delegator = delegator;
-  if (policy) next.policy = policy;
-  return Object.freeze(next);
+  const bag = new Map(Object.entries(identity ?? {}));
+  for (const key of ["actor", "delegator", "policy", "digest"]) bag.delete(key);
+  bag.set("tenant", tenant);
+  if (actor) bag.set("actor", actor);
+  if (delegator) bag.set("delegator", delegator);
+  if (policy) bag.set("policy", policy);
+  return Object.freeze(Object.fromEntries(bag));
 }
 
 /**
