@@ -126,6 +126,11 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
   host including loopback;
 - a non-empty `auth.grants` table (client id → site names) — the library's
   all-sites fallback does not apply here;
+- optional `auth.tenantGrants` (client id → tenant agent ids). When present,
+  tenant routing is token-resolved: the JWT `azp` selects the tenant, caller
+  `tenant` / `site` arguments are hints inside that grant, and a hint for
+  another tenant is `not_entitled` with no fan-down. Omit the table to keep
+  the single-agent site-derived path;
 - an agent channel credential store (`MCP_CHANNEL_CREDENTIALS_FILE`, SHA-256
   digests only, hot-reloaded so revocation needs no restart). Each agent
   entry may name `sites`: catalog names that agent is allowed to serve.
@@ -141,10 +146,13 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
 
 Caller credential headers (`Authorization`, `Cookie`, `Proxy-Authorization`)
 and identity-assertion headers are stripped before a request is framed down the
-tunnel; the frame carries the validated identity object only, plus a
-`correlation` object `{ requestId, tenant }` naming the request id and the
-agent id. Entitlement is decided before anything about the tenant is
-disclosed. Fan-down selects the unique agent bound to the principal's granted
+tunnel; the frame carries the validated identity object only (with `tenant` stamped
+from the grant, never from a caller argument), plus a `correlation` object
+`{ requestId, tenant, target, source }` naming the request id, granted
+tenant, resolved site, and `grant`. Caller `tenant` is stripped from the
+framed body so it cannot be treated as a site name. Entitlement is decided
+before anything about the tenant is disclosed. Fan-down selects the unique
+agent bound to the principal's granted
 sites; a cross-tenant hint is `not_entitled` with no frame on the other
 tunnel, and a missing tenant agent is `no_agent` without naming other
 tenants. A response frame from the wrong agent cannot complete another

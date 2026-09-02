@@ -314,8 +314,19 @@ describe("visibleSiteTargets", () => {
         baseUrl: "https://drupal.example.com",
         source: "grant",
       }],
+      tenants: [],
     });
     expect(JSON.stringify(payload)).not.toContain("secret");
+  });
+
+  it("lists the grant-stamped tenant and never a caller-supplied one", () => {
+    const payload = visibleSiteTargets(
+      identity({ scopes: ["mcp_read"], tenant: "tenant-a" }),
+      [prod],
+      ["production"],
+      { "content-agent": ["production"] },
+    );
+    expect(payload.tenants).toEqual([{ id: "tenant-a", source: "grant" }]);
   });
 });
 

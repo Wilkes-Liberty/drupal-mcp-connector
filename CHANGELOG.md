@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **Authoritative tenant routing on the relay edge (#244).** Optional
+  `auth.tenantGrants` maps inbound client id to tenant agent ids. When that
+  table is present, the edge selects the tenant from the grant (JWT `azp`),
+  not from caller `tenant` / `site` input. A hint for another tenant is
+  `not_entitled` with no frames on any tunnel. The granted tenant is stamped
+  on `identity.tenant` and on `correlation: { requestId, tenant, target,
+  source }`; the caller `tenant` argument is stripped from the framed body.
+  `drupal_list_sites` reports grant-sourced `tenants`. Installs without
+  `tenantGrants` keep the site-derived unique-agent path. Lab/loopback
+  token-resolved tenancy only — not a public hostname or path-prefix claim.
 - **Two-tenant isolation on the relay edge (#242).** The edge keeps one
   agent-channel session per `agentId` instead of replacing the previous
   tenant. Channel records may bind `sites` (catalog names); that bind is
@@ -20,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A hot-reload that changes a connected agent's `sites` bind drops that
   tunnel on the next request (`no_agent`) instead of routing on the stale
   hello snapshot.
-  Fan-down frames carry `{ requestId, tenant }` correlation and still never
-  carry site secrets, the channel token, or the northbound JWT. A single
+  Fan-down frames carry `{ requestId, tenant, target, source }` correlation
+  and still never carry site secrets, the channel token, or the northbound JWT. A single
   unscoped agent remains the previous compatibility path. Lab/loopback
   proof only — not a hosted-service or public-URL claim.
 
