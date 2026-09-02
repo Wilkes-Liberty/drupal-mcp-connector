@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-09-02
+
 ### Security
 - **W&L-operated policy-bundle promotion on the relay edge (#253).** Optional
   `auth.promotions` maps a SHA-256 digest to a sealed portable document plus
@@ -16,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tools/call` requires the bound `auth.policies` digest **and** a matching
   agent attestation. The edge never mints a Sentinel HMAC key. Omitting
   `auth.promotions` keeps the digest-only path. Lab/loopback only — not
-  tenant self-service (DEV-308) or a hosted-service claim.
+  tenant self-service or a hosted-service claim.
 
 ## [2.11.0] - 2026-09-02
 
@@ -1391,6 +1393,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[2.12.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.12.0
 [2.11.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.11.0
 [2.10.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.10.1
 [1.0.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v1.0.0
