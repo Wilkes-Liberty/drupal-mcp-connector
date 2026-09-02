@@ -136,7 +136,13 @@ function applyFilter(params, { field, op = "eq", value }) {
 
 /**
  * Bind JSON:API `uid` from the grant-stamped identity. Caller uid is overwritten.
- * User entities are left unchanged. Missing/invalid actor leaves relationships as-is.
+ * User entities are left unchanged. No actor claim (auth.actors not in effect
+ * for this principal) leaves relationships as-is — the prior, pre-DEV-123 path.
+ * A *present* actor claim that fails UUID validation fails closed (throws)
+ * rather than silently keeping a caller-supplied uid: resolveActor()/
+ * normalizeActors() already validate the shape before stamping identity.actor,
+ * so this should be unreachable in the normal path — it exists so a future
+ * bug upstream of this call can never downgrade into "trust the caller".
  *
  * @param {string} entityType
  * @param {object|undefined} relationships
@@ -146,11 +152,7 @@ export function grantActorUid(entityType, relationships) {
   if (entityType === "user") return relationships;
   const uuid = getRequestIdentity()?.actor;
   if (typeof uuid !== "string") return relationships;
-  try {
-    validateUuid(uuid, "actor");
-  } catch {
-    return relationships;
-  }
+  validateUuid(uuid, "actor");
   const base = relationships && typeof relationships === "object" && !Array.isArray(relationships)
     ? relationships
     : {};

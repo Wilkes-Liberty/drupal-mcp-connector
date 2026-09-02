@@ -233,11 +233,8 @@ describe("JsonApiBackend fetch methods", () => {
     expect(body.data.relationships.uid).toEqual({ data: { type: "user--user", id: actor } });
   });
 
-  it("grantActorUid ignores invalid actors and array relationships", async () => {
+  it("grantActorUid ignores a missing actor but fails closed on an array relationships spread", async () => {
     expect(grantActorUid("node")).toBeUndefined();
-    await runWithIdentity({ actor: "not-a-uuid" }, () => {
-      expect(grantActorUid("node", { field_tags: { data: [] } })).toEqual({ field_tags: { data: [] } });
-    });
     const actor = "11111111-1111-4111-8111-111111111111";
     await runWithIdentity({ actor }, () => {
       expect(grantActorUid("node", [])).toEqual({
@@ -245,6 +242,16 @@ describe("JsonApiBackend fetch methods", () => {
       });
       expect(grantActorUid("user", { uid: { data: { type: "user--user", id: actor } } }))
         .toEqual({ uid: { data: { type: "user--user", id: actor } } });
+    });
+  });
+
+  it("grantActorUid throws rather than keep a caller uid when the stamped actor is not a valid UUID", async () => {
+    // resolveActor()/normalizeActors() already validate this shape before
+    // stamping identity.actor, so this path should be unreachable in the
+    // normal flow — it exists so a future bug upstream can never silently
+    // fall back to trusting the caller-supplied uid.
+    await runWithIdentity({ actor: "not-a-uuid" }, () => {
+      expect(() => grantActorUid("node", { field_tags: { data: [] } })).toThrow();
     });
   });
 
