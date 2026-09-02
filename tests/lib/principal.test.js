@@ -10,6 +10,7 @@ import {
   requiredScopeForTool,
   resolveAuthoritativeTarget,
   resolveGrantedSiteNames,
+  resolveActor,
   runWithIdentity,
   getRequestIdentity,
   visibleSiteTargets,
@@ -327,6 +328,69 @@ describe("visibleSiteTargets", () => {
       { "content-agent": ["production"] },
     );
     expect(payload.tenants).toEqual([{ id: "tenant-a", source: "grant" }]);
+  });
+});
+
+describe("resolveActor (#247 / DEV-123)", () => {
+  const uuid = "11111111-1111-4111-8111-111111111111";
+  const actors = {
+    "agent-1": { uuid, delegators: ["operator-1"] },
+    "client-b": uuid,
+  };
+
+  it("is not required when the actors table is omitted", () => {
+    expect(resolveActor({ identity: identity() })).toEqual({
+      actor: null, delegator: null, required: false, reason: null,
+    });
+  });
+
+  it("maps sub then clientId and ignores a caller-supplied actor", () => {
+    expect(resolveActor({
+      identity: identity({ actor: "99999999-9999-4999-8999-999999999999" }),
+      actors,
+    })).toMatchObject({ actor: uuid, reason: null, required: true });
+    expect(resolveActor({
+      identity: identity({ sub: "other", clientId: "client-b" }),
+      actors,
+    })).toMatchObject({ actor: uuid, required: true });
+  });
+
+  it("refuses an unmapped principal and a disallowed act.sub", () => {
+    expect(resolveActor({
+      identity: identity({ sub: "ghost", clientId: "ghost" }),
+      actors,
+    })).toMatchObject({ actor: null, reason: "not_entitled", required: true });
+    expect(resolveActor({
+      identity: identity({ actSub: "stranger" }),
+      actors,
+    })).toMatchObject({ actor: null, reason: "not_entitled" });
+  });
+
+  it("stamps an allowlisted delegator from act.sub", () => {
+    expect(resolveActor({
+      identity: identity({ actSub: "operator-1" }),
+      actors,
+    })).toEqual({
+      actor: uuid, delegator: "operator-1", required: true, reason: null,
+    });
+  });
+
+  it("trims actor keys and fail-closes a table with keys but no valid UUID", () => {
+    expect(resolveActor({
+      identity: identity({ sub: "other", clientId: "client-b" }),
+      actors: { " client-b ": uuid },
+    })).toMatchObject({ actor: uuid, required: true, reason: null });
+    expect(resolveActor({
+      identity: identity(),
+      actors: { "agent-1": "not-a-uuid" },
+    })).toMatchObject({ actor: null, required: true, reason: "not_entitled" });
+  });
+
+  it("treats whitespace-prefixed comment keys as an omitted table", () => {
+    expect(resolveActor({
+      identity: identity(),
+      actors: { " _comment": "lab" },
+    })).toEqual({ actor: null, delegator: null, required: false, reason: null });
   });
 });
 

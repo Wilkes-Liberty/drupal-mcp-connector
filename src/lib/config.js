@@ -264,6 +264,20 @@ export function getInboundTenantGrants() {
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
+/**
+ * Server-resolved inbound actor map keyed by OAuth `sub` or client id.
+ * When present, write-like tools require a mapped Drupal user UUID.
+ * @returns {object|null}
+ */
+export function getInboundActors() {
+  const actors = loadConfig().auth?.actors;
+  if (!actors || typeof actors !== "object" || Array.isArray(actors)) return null;
+  const entries = Object.entries(actors)
+    .map(([key, value]) => [key.trim(), value])
+    .filter(([key]) => key && !key.startsWith("_"));
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Auth headers — never logged, never exposed in tool responses
 // ---------------------------------------------------------------------------

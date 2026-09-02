@@ -5,7 +5,8 @@ vi.mock("../../src/lib/drupal-fetch.js", () => ({
 }));
 import { drupalFetch, drupalUploadFile } from "../../src/lib/drupal-fetch.js";
 import { describe, it, expect } from "vitest";
-import { JsonApiBackend, isModeratedStatusError } from "../../src/lib/backends/jsonapi.js";
+import { JsonApiBackend, grantActorUid, isModeratedStatusError } from "../../src/lib/backends/jsonapi.js";
+import { runWithIdentity } from "../../src/lib/principal.js";
 
 function paramsOf(descriptor) {
   const b = new JsonApiBackend({ _name: "t", baseUrl: "https://x" });
@@ -219,6 +220,41 @@ describe("JsonApiBackend fetch methods", () => {
     expect(JSON.parse(opts.body)).toEqual({ data: { type: "node--article", attributes: { title: "N", status: false } } });
   });
 
+  it("createEntity binds uid from the grant-stamped actor and overwrites a caller uid", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({ data: { type: "node--article", id: "new", attributes: { title: "N" } } });
+    const actor = "11111111-1111-4111-8111-111111111111";
+    await runWithIdentity({ actor }, () => backend.createEntity({
+      entityType: "node",
+      bundle: "article",
+      attributes: { title: "N", status: false },
+      relationships: { uid: { data: { type: "user--user", id: "99999999-9999-4999-8999-999999999999" } } },
+    }));
+    const body = JSON.parse(vi.mocked(drupalFetch).mock.calls[0][2].body);
+    expect(body.data.relationships.uid).toEqual({ data: { type: "user--user", id: actor } });
+  });
+
+  it("grantActorUid ignores a missing actor but fails closed on an array relationships spread", async () => {
+    expect(grantActorUid("node")).toBeUndefined();
+    const actor = "11111111-1111-4111-8111-111111111111";
+    await runWithIdentity({ actor }, () => {
+      expect(grantActorUid("node", [])).toEqual({
+        uid: { data: { type: "user--user", id: actor } },
+      });
+      expect(grantActorUid("user", { uid: { data: { type: "user--user", id: actor } } }))
+        .toEqual({ uid: { data: { type: "user--user", id: actor } } });
+    });
+  });
+
+  it("grantActorUid throws rather than keep a caller uid when the stamped actor is not a valid UUID", async () => {
+    // resolveActor()/normalizeActors() already validate this shape before
+    // stamping identity.actor, so this path should be unreachable in the
+    // normal flow — it exists so a future bug upstream can never silently
+    // fall back to trusting the caller-supplied uid.
+    await runWithIdentity({ actor: "not-a-uuid" }, () => {
+      expect(() => grantActorUid("node", { field_tags: { data: [] } })).toThrow();
+    });
+  });
+
   it("updateEntity PATCHes a JSON:API payload with id in the body", async () => {
     vi.mocked(drupalFetch).mockResolvedValue({ data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Updated" } } });
     const c = await backend.updateEntity({ entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Updated" } });
@@ -227,6 +263,22 @@ describe("JsonApiBackend fetch methods", () => {
     expect(path).toBe("/jsonapi/node/article/11111111-1111-4111-8111-111111111111");
     expect(opts.method).toBe("PATCH");
     expect(JSON.parse(opts.body)).toEqual({ data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Updated" } } });
+  });
+
+  it("updateEntity binds uid from the grant-stamped actor and overwrites a caller uid", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({
+      data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Updated" } },
+    });
+    const actor = "11111111-1111-4111-8111-111111111111";
+    await runWithIdentity({ actor }, () => backend.updateEntity({
+      entityType: "node",
+      bundle: "article",
+      id: "11111111-1111-4111-8111-111111111111",
+      attributes: { title: "Updated" },
+      relationships: { uid: { data: { type: "user--user", id: "99999999-9999-4999-8999-999999999999" } } },
+    }));
+    const body = JSON.parse(vi.mocked(drupalFetch).mock.calls[0][2].body);
+    expect(body.data.relationships.uid).toEqual({ data: { type: "user--user", id: actor } });
   });
 
   it("updateEntity appends resourceVersion when requested (#166)", async () => {

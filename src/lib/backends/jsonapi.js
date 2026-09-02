@@ -8,6 +8,7 @@
  */
 
 import { drupalFetch, drupalUploadFile } from "../drupal-fetch.js";
+import { getRequestIdentity } from "../principal.js";
 import { validateUuid, validateMachineName } from "../validate.js";
 import { parseFieldConfigObject } from "../field-definition.js";
 import { Backend } from "./backend-interface.js";
@@ -134,8 +135,34 @@ function applyFilter(params, { field, op = "eq", value }) {
 }
 
 /**
- * Read/write Backend adapter backed by Drupal core JSON:API.
+ * Bind JSON:API `uid` from the grant-stamped identity. Caller uid is overwritten.
+ * User entities are left unchanged. No actor claim (auth.actors not in effect
+ * for this principal) leaves relationships as-is — the prior, pre-DEV-123 path.
+ * A *present* actor claim that fails UUID validation fails closed (throws)
+ * rather than silently keeping a caller-supplied uid: resolveActor()/
+ * normalizeActors() already validate the shape before stamping identity.actor,
+ * so this should be unreachable in the normal path — it exists so a future
+ * bug upstream of this call can never downgrade into "trust the caller".
+ *
+ * @param {string} entityType
+ * @param {object|undefined} relationships
+ * @returns {object|undefined}
  */
+export function grantActorUid(entityType, relationships) {
+  if (entityType === "user") return relationships;
+  const uuid = getRequestIdentity()?.actor;
+  if (typeof uuid !== "string") return relationships;
+  validateUuid(uuid, "actor");
+  const base = relationships && typeof relationships === "object" && !Array.isArray(relationships)
+    ? relationships
+    : {};
+  return {
+    ...base,
+    uid: { data: { type: "user--user", id: uuid } },
+  };
+}
+
+/** Read/write Backend adapter backed by Drupal core JSON:API. */
 export class JsonApiBackend extends Backend {
   /** @param {object} site Site config (must include `_name`). */
   constructor(site) {
@@ -337,7 +364,8 @@ export class JsonApiBackend extends Backend {
   async createEntity({ entityType, bundle, attributes = {}, relationships }) {
     const buildPayload = (attrs) => {
       const payload = { data: { type: `${entityType}--${bundle}`, attributes: attrs } };
-      if (relationships) payload.data.relationships = relationships;
+      const rels = grantActorUid(entityType, relationships);
+      if (rels) payload.data.relationships = rels;
       return payload;
     };
     const data = await this.writeWithModerationFallback(this.resourcePath(entityType, bundle), "POST", buildPayload, attributes);
@@ -357,7 +385,8 @@ export class JsonApiBackend extends Backend {
     validateUuid(id);
     const buildPayload = (attrs) => {
       const payload = { data: { type: `${entityType}--${bundle}`, id, attributes: attrs } };
-      if (relationships) payload.data.relationships = relationships;
+      const rels = grantActorUid(entityType, relationships);
+      if (rels) payload.data.relationships = rels;
       return payload;
     };
     let path = `${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`;

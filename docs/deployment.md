@@ -131,6 +131,13 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
   `tenant` / `site` arguments are hints inside that grant, and a hint for
   another tenant is `not_entitled` with no fan-down. Omit the table to keep
   the single-agent site-derived path;
+- optional `auth.actors` (`sub` or client id → `{ uuid, delegators? }`). When
+  present, write-like `tools/call` requires a mapped Drupal user UUID. The
+  granted actor is stamped on `identity.actor`; JWT `act.sub` is a confirming
+  hint inside `delegators` and becomes `identity.delegator`. Caller `actor` /
+  `delegator` arguments and spoofable identity headers are never authority.
+  Unmapped or disallowed-delegation writes are `not_entitled` with no
+  fan-down. Omit to keep writes on the site OAuth consumer's owner account;
 - an agent channel credential store (`MCP_CHANNEL_CREDENTIALS_FILE`, SHA-256
   digests only, hot-reloaded so revocation needs no restart). Each agent
   entry may name `sites`: catalog names that agent is allowed to serve.
@@ -146,11 +153,13 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
 
 Caller credential headers (`Authorization`, `Cookie`, `Proxy-Authorization`)
 and identity-assertion headers are stripped before a request is framed down the
-tunnel; the frame carries the validated identity object only (with `tenant` stamped
-from the grant, never from a caller argument), plus a `correlation` object
-`{ requestId, tenant, target, source }` naming the request id, granted
-tenant, resolved site, and `grant`. Caller `tenant` is stripped from the
-framed body so it cannot be treated as a site name. Entitlement is decided
+tunnel; the frame carries the validated identity object only (with `tenant` and,
+when mapped, `actor` / `delegator` stamped from the grant, never from a
+caller argument), plus a `correlation` object `{ requestId, tenant, target,
+source, actor?, delegator? }`. Caller `tenant` / `actor` / `delegator` are
+stripped from the framed body. JSON:API writes attach `relationships.uid`
+from the grant-stamped actor. The southbound Authorization header is the
+tenant site credential, never the northbound JWT. Entitlement is decided
 before anything about the tenant is disclosed. Fan-down selects the unique
 agent bound to the principal's granted
 sites; a cross-tenant hint is `not_entitled` with no frame on the other

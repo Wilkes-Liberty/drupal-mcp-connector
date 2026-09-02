@@ -71,6 +71,12 @@ describe("parseBearerToken / scopes / identity", () => {
     expect(identityHasScopes(identity, ["mcp_read"])).toBe(true);
     expect(identityHasScopes(identity, ["mcp_admin"])).toBe(false);
     expect(identity.sites).toBeNull();
+    expect(identity.actSub).toBeNull();
+  });
+
+  it("captures JWT act.sub as a delegator hint and ignores a missing act", () => {
+    expect(buildIdentity({ act: { sub: "operator-1" } }).actSub).toBe("operator-1");
+    expect(buildIdentity({ act: "operator-1" }).actSub).toBeNull();
   });
 
   it("captures a server-issued sites claim and ignores a missing one", () => {
