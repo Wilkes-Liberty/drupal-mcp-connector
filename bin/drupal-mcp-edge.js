@@ -16,7 +16,10 @@
  *   MCP_CHANNEL_CREDENTIALS_FILE
  *                     Agent channel credential store (or config
  *                     relay.channelCredentialsFile). Required. JSON:
- *                     {"agents": {"<id>": {"tokenSha256": "<hex>"}}}
+ *                     {"agents": {"<id>": {"tokenSha256": "<hex>",
+ *                     "sites": ["site-name"]}}}. `sites` binds the tunnel
+ *                     to catalog names (the tenant boundary). Omit `sites`
+ *                     only for a single-agent install.
  *   MCP_EDGE_PORT     Northbound port (default: MCP_PORT / config tls.port).
  *   MCP_EDGE_AGENT_PORT
  *                     Agent channel port (default: northbound port + 1).

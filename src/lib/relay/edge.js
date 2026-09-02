@@ -1,8 +1,8 @@
 /**
- * Relay northbound edge (#232) — the DEV-294 AC4 slice.
+ * Relay northbound edge (#232, #242) — DEV-294 AC4 plus DEV-122 isolation.
  *
  * Terminates northbound MCP over the OAuth resource server and fans requests
- * down an outbound tenant-agent channel. The edge proposes; the tenant-side
+ * down outbound tenant-agent channels. The edge proposes; the tenant-side
  * connector disposes. Policy at this seam, fail-closed from birth:
  *
  *   - `createInboundHttpsAuth` is the ONLY authentication arm. There is no
@@ -16,6 +16,11 @@
  *     before framing. The frame carries the validated identity object only.
  *   - The edge holds no site credentials: a catalog entry carrying credential
  *     material refuses startup. It cannot leak what it does not hold.
+ *   - Tunnel identity is the tenant boundary. Agent sessions are keyed by
+ *     `agentId`; channel records may bind `sites`. A second unscoped agent
+ *     or overlapping site claim is denied at hello. Fan-down selects the
+ *     unique bound agent from server-owned grants. Single unscoped agent
+ *     remains the DEV-294 compatibility path.
  *   - Stateless MCP 2026-07-28 northbound: sessionful traffic is refused and
  *     no `Mcp-Session-Id` crosses in either direction.
  *   - Revocation is per-request with no grace window, for both credential
@@ -79,6 +84,121 @@ const SITE_CREDENTIAL_KEYS = Object.freeze([
 
 const DEFAULT_FAN_DOWN_TIMEOUT_MS = 10_000;
 
+/**
+ * Normalize a channel-record `sites` list. Empty / missing means unscoped
+ * (legal only as the sole connected agent — the DEV-294 compatibility path).
+ *
+ * @param {unknown} sites
+ * @returns {string[]}
+ */
+export function boundSiteNames(sites) {
+  if (!Array.isArray(sites)) return [];
+  return sites.map(String).filter((name) => name && !name.startsWith("_"));
+}
+
+/**
+ * Decide whether a hello may join the agent-channel session table.
+ *
+ * @param {object} params
+ * @param {{agentId: string, revoked?: boolean, sites?: string[]|null}|null} params.record
+ * @param {Array<{agentId: string, sites: string[]|null}>} [params.sessions]
+ *   Currently connected agents, excluding a reconnect of the same agentId.
+ * @param {Iterable<string>} [params.catalogNames]
+ * @returns {{ok: true, sites: string[]|null}|{ok: false, reason: string}}
+ */
+export function acceptAgentHello({ record, sessions = [], catalogNames = [] } = {}) {
+  if (!record || typeof record.agentId !== "string" || !record.agentId) {
+    return { ok: false, reason: "unauthenticated" };
+  }
+  if (record.revoked) return { ok: false, reason: "revoked" };
+
+  const known = new Set([...catalogNames].map(String));
+  let incoming = boundSiteNames(record.sites);
+  if (incoming.length && known.size) {
+    incoming = incoming.filter((name) => known.has(name));
+    if (!incoming.length) return { ok: false, reason: "unbound_tenant" };
+  }
+  const incomingScoped = incoming.length > 0;
+  const others = sessions.filter((session) => session.agentId !== record.agentId);
+
+  if (others.length === 0) {
+    return { ok: true, sites: incomingScoped ? incoming : null };
+  }
+  if (!incomingScoped) return { ok: false, reason: "unbound_tenant" };
+  if (others.some((session) => !boundSiteNames(session.sites).length)) {
+    return { ok: false, reason: "unbound_tenant" };
+  }
+  const claimed = new Set(others.flatMap((session) => boundSiteNames(session.sites)));
+  if (incoming.some((name) => claimed.has(name))) {
+    return { ok: false, reason: "overlapping_tenant" };
+  }
+  return { ok: true, sites: incoming };
+}
+
+/**
+ * Pick the unique tenant agent this principal may use.
+ *
+ * @param {object} params
+ * @param {string[]} params.grantedSiteNames
+ * @param {string|null} [params.targetName]
+ * @param {Array<{agentId: string, sites: string[]|null}>} params.sessions
+ * @returns {{session: object|null, reason: "not_entitled"|"no_agent"|null}}
+ */
+export function selectTenantSession({
+  grantedSiteNames = [],
+  targetName = null,
+  sessions = [],
+} = {}) {
+  if (!grantedSiteNames.length) return { session: null, reason: "not_entitled" };
+  if (targetName && !grantedSiteNames.includes(targetName)) {
+    return { session: null, reason: "not_entitled" };
+  }
+  const needed = targetName ? [targetName] : [...grantedSiteNames];
+  if (!sessions.length) return { session: null, reason: "no_agent" };
+
+  const scoped = [];
+  const unscoped = [];
+  for (const session of sessions) {
+    if (boundSiteNames(session.sites).length) scoped.push(session);
+    else unscoped.push(session);
+  }
+
+  if (unscoped.length && scoped.length) {
+    return { session: null, reason: "no_agent" };
+  }
+  if (unscoped.length === 1 && sessions.length === 1) {
+    return { session: unscoped[0], reason: null };
+  }
+  if (unscoped.length > 1) return { session: null, reason: "no_agent" };
+
+  const matches = scoped.filter((session) => {
+    const names = new Set(boundSiteNames(session.sites));
+    return needed.every((name) => names.has(name));
+  });
+  if (matches.length === 1) return { session: matches[0], reason: null };
+  if (matches.length > 1) return { session: null, reason: "not_entitled" };
+
+  const partial = scoped.filter((session) => {
+    const names = new Set(boundSiteNames(session.sites));
+    return needed.some((name) => names.has(name));
+  });
+  if (partial.length > 0 && needed.length > 1) {
+    return { session: null, reason: "not_entitled" };
+  }
+  return { session: null, reason: "no_agent" };
+}
+
+/**
+ * Canonical form of a tenant site bind. Null and empty both mean unscoped.
+ *
+ * @param {unknown} sites
+ * @returns {string}
+ */
+export function siteBindingKey(sites) {
+  const names = boundSiteNames(sites);
+  return names.length ? names.slice().sort().join("\0") : "";
+}
+
 /** Startup refusals: configuration that must not become a listener. */
 export class EdgeStartupError extends Error {
   constructor(message) {
@@ -110,14 +230,17 @@ export function fanDownHeaders(headers = {}) {
  * Hot-reloaded agent channel credential store.
  *
  * File shape: `{ "agents": { "<agentId>": { "tokenSha256": "<hex>",
- * "revoked": false } } }`. The edge stores only SHA-256 digests — never a raw
- * channel token. A missing or unreadable file denies every lookup (a
- * credential table that cannot be read authorizes nobody), and the file is
- * re-read when its mtime changes so a revoke needs no restart.
+ * "sites": ["site-name"], "revoked": false } } }`. The edge stores only
+ * SHA-256 digests — never a raw channel token. `sites` binds the tunnel to
+ * catalog names (the tenant boundary). Omitted `sites` is unscoped and is
+ * only accepted as the sole connected agent. A missing or unreadable file
+ * denies every lookup (a credential table that cannot be read authorizes
+ * nobody), and the file is re-read when its mtime changes so a revoke needs
+ * no restart.
  *
  * @param {object} options
  * @param {string} options.filePath
- * @returns {{lookup: (token: string) => {agentId: string, revoked: boolean}|null}}
+ * @returns {{lookup: (token: string) => {agentId: string, revoked: boolean, sites: string[]|null}|null}}
  */
 export function createChannelCredentialStore({
   filePath,
@@ -146,6 +269,7 @@ export function createChannelCredentialStore({
           agentId,
           tokenSha256: entry.tokenSha256.toLowerCase(),
           revoked: entry.revoked === true,
+          sites: Array.isArray(entry.sites) ? boundSiteNames(entry.sites) : null,
         }));
       cache = { mtimeMs: info.mtimeMs, agents, denyAll: false };
     } catch {
@@ -166,7 +290,7 @@ export function createChannelCredentialStore({
       for (const agent of agents) {
         const expected = Buffer.from(agent.tokenSha256, "utf8");
         if (digest.length === expected.length && timingSafeEqual(digest, expected)) {
-          return { agentId: agent.agentId, revoked: agent.revoked };
+          return { agentId: agent.agentId, revoked: agent.revoked, sites: agent.sites };
         }
       }
       return null;
@@ -293,7 +417,9 @@ export async function startEdge({
   const targetRelay = createLocalRelay({ sites: catalog, grants: grantTable, defaultSite });
   const broker = createRequestBroker({ timeoutMs: fanDownTimeoutMs });
 
-  let session = null;
+  /** @type {Map<string, {socket: object, token: string, agentId: string, sites: string[]|null}>} */
+  const sessions = new Map();
+  const catalogNames = catalog.map((site) => site._name);
 
   const channelServer = (hasTls ? createTlsServer(tls) : createNetServer())
     .on("connection", handleChannelSocket)
@@ -303,35 +429,49 @@ export async function startEdge({
     // Plain server emits "connection"; the TLS server emits both "connection"
     // (raw) and "secureConnection" (cleartext). Attach once, post-handshake.
     if (hasTls && !socket.encrypted) return;
+    let agentId = null;
     attachFramer(socket, (frame) => {
       if (frame.type === "hello") {
         const record = channelCredentials.lookup(frame.token);
-        if (!record) {
-          writeFrame(socket, { type: "denied", reason: "unauthenticated" });
+        const others = [...sessions.values()].filter((entry) => entry.socket !== socket);
+        const decision = acceptAgentHello({
+          record,
+          sessions: others,
+          catalogNames,
+        });
+        if (!decision.ok) {
+          writeFrame(socket, { type: "denied", reason: decision.reason });
           socket.end();
           return;
         }
-        if (record.revoked) {
-          writeFrame(socket, { type: "denied", reason: "revoked" });
-          socket.end();
-          return;
-        }
-        if (session && session.socket !== socket) session.socket.destroy();
-        session = { socket, token: frame.token, agentId: record.agentId };
-        writeFrame(socket, { type: "hello-ok", agent: { agentId: record.agentId } });
+        const existing = sessions.get(record.agentId);
+        if (existing && existing.socket !== socket) existing.socket.destroy();
+        agentId = record.agentId;
+        sessions.set(agentId, {
+          socket,
+          token: frame.token,
+          agentId,
+          sites: decision.sites,
+        });
+        writeFrame(socket, { type: "hello-ok", agent: { agentId } });
         return;
       }
       if (frame.type === "mcp-response") {
-        broker.settle(frame);
+        if (!agentId) {
+          socket.destroy();
+          return;
+        }
+        broker.settle(frame, { owner: agentId });
         return;
       }
       // Any other frame type on the agent channel is a protocol violation.
       socket.destroy();
     });
     socket.on("close", () => {
-      if (session?.socket === socket) {
-        session = null;
-        broker.rejectAll(new Error("Relay agent channel closed."));
+      const current = agentId ? sessions.get(agentId) : null;
+      if (current?.socket === socket) {
+        sessions.delete(agentId);
+        broker.rejectByOwner(agentId, new Error("Relay agent channel closed."));
       }
     });
   }
@@ -352,28 +492,42 @@ export async function startEdge({
       jsonResponse(res, 403, { error: "not_entitled" });
       return;
     }
+    let targetName = null;
     if (body?.method === "tools/call") {
       try {
-        targetRelay.resolve(identity, body?.params?.arguments ?? {});
+        targetName = targetRelay.resolve(identity, body?.params?.arguments ?? {}).name;
       } catch {
         jsonResponse(res, 403, { error: "not_entitled" });
         return;
       }
     }
 
-    if (!session) {
-      jsonResponse(res, 503, { error: "no_agent" });
+    const selected = selectTenantSession({
+      grantedSiteNames: granted.map((site) => site._name),
+      targetName,
+      sessions: [...sessions.values()],
+    });
+    if (!selected.session) {
+      const entitled = selected.reason === "not_entitled";
+      jsonResponse(res, entitled ? 403 : 503, {
+        error: entitled ? "not_entitled" : "no_agent",
+      });
       return;
     }
-    const record = channelCredentials.lookup(session.token);
+    const record = channelCredentials.lookup(selected.session.token);
     if (!record || record.revoked) {
       jsonResponse(res, 403, { error: "revoked", bound: EDGE_REVOCATION_BOUND.name });
       return;
     }
+    if (siteBindingKey(record.sites) !== siteBindingKey(selected.session.sites)) {
+      selected.session.socket.destroy();
+      jsonResponse(res, 503, { error: "no_agent" });
+      return;
+    }
 
     const id = randomUUID();
-    const waited = broker.track(id);
-    const wrote = writeFrame(session.socket, {
+    const waited = broker.track(id, { owner: selected.session.agentId });
+    const wrote = writeFrame(selected.session.socket, {
       type: "mcp-request",
       id,
       method: req.method,
@@ -381,9 +535,10 @@ export async function startEdge({
       headers: fanDownHeaders(req.headers),
       identity,
       body,
+      correlation: { requestId: id, tenant: selected.session.agentId },
     });
     if (!wrote) {
-      broker.settle({ id, status: 503 });
+      broker.settle({ id, status: 503 }, { owner: selected.session.agentId });
       jsonResponse(res, 503, { error: "no_agent" });
       return;
     }
@@ -446,16 +601,20 @@ export async function startEdge({
     agentPort: channelAddr.port,
     resourceMetadataUrl: inbound.resourceMetadataUrl,
     get hasAgent() {
-      return Boolean(session);
+      return sessions.size > 0;
     },
     get agentId() {
-      return session?.agentId ?? null;
+      if (sessions.size !== 1) return null;
+      return sessions.keys().next().value;
+    },
+    get agentIds() {
+      return [...sessions.keys()];
     },
     async close() {
       if (closed) return;
       closed = true;
-      session?.socket.destroy();
-      session = null;
+      for (const entry of sessions.values()) entry.socket.destroy();
+      sessions.clear();
       broker.rejectAll(new Error("Relay edge closed."));
       await closeServer(channelServer);
       await closeServer(northServer);

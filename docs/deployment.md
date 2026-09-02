@@ -127,7 +127,13 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
 - a non-empty `auth.grants` table (client id → site names) — the library's
   all-sites fallback does not apply here;
 - an agent channel credential store (`MCP_CHANNEL_CREDENTIALS_FILE`, SHA-256
-  digests only, hot-reloaded so revocation needs no restart);
+  digests only, hot-reloaded so revocation needs no restart). Each agent
+  entry may name `sites`: catalog names that agent is allowed to serve.
+  That bind is the tenant boundary. Two agents may stay connected when their
+  `sites` lists are disjoint; a second agent without `sites`, or one that
+  claims a site already bound, is denied at hello. Omitting `sites`, or
+  supplying an empty / comment-only list, is unscoped and remains valid
+  only for a single-agent install;
 - TLS material, or the explicit loopback-only `MCP_ALLOW_HTTP=1` opt-in;
 - a site catalog with **no credential material** — an entry carrying a token,
   password, or OAuth block refuses startup. The edge cannot leak what it does
@@ -135,10 +141,17 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
 
 Caller credential headers (`Authorization`, `Cookie`, `Proxy-Authorization`)
 and identity-assertion headers are stripped before a request is framed down the
-tunnel; the frame carries the validated identity object only. Entitlement is
-decided before anything about the tenant is disclosed. Revocation of both the
-northbound principal and the agent channel is per-request with no grace window.
-Northbound is stateless MCP 2026-07-28; sessionful traffic is refused.
+tunnel; the frame carries the validated identity object only, plus a
+`correlation` object `{ requestId, tenant }` naming the request id and the
+agent id. Entitlement is decided before anything about the tenant is
+disclosed. Fan-down selects the unique agent bound to the principal's granted
+sites; a cross-tenant hint is `not_entitled` with no frame on the other
+tunnel, and a missing tenant agent is `no_agent` without naming other
+tenants. A response frame from the wrong agent cannot complete another
+tenant's in-flight request. Revocation of both the northbound principal and
+the agent channel is per-request with no grace window. Northbound is
+stateless MCP 2026-07-28; sessionful traffic is refused. This is still not a
+hosted-service claim and names no public hostname.
 
 **The agent** dials out to the edge's channel port and never listens. It
 authenticates the channel with its own issued credential (`MCP_CHANNEL_TOKEN`
