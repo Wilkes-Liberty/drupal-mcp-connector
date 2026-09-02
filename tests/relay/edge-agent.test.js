@@ -1493,6 +1493,28 @@ describe("W&L-operated bundle promotion (#253 / DEV-125)", () => {
     expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
   });
 
+  it("ignores a hook attestation whose digest is not a SHA-256 hex", async () => {
+    const lab = sealedLab();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: lab.policies,
+      promotions: lab.promotions,
+    });
+    await startRealAgent(harness, {
+      token: harness.tokenA,
+      policyEnforcement: {
+        activate: () => ({ ok: true, digest: "not-a-digest".repeat(200), reason: "x".repeat(200) }),
+      },
+    });
+    await settle();
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(denied.status).toBe(403);
+  });
+
   it("ignores an attestation for a digest the edge did not offer", async () => {
     const lab = sealedLab();
     const harness = await startTwoTenantHarness({

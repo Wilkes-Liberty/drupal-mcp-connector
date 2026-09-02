@@ -16,6 +16,7 @@
 import { connect as netConnect } from "node:net";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { createConnectorServerFactory } from "../mcp-server.js";
+import { POLICY_DIGEST } from "../policy-promotion.js";
 import { runWithIdentity } from "../principal.js";
 import { attachFramer, forwardHeaders, writeFrame } from "./frames.js";
 
@@ -68,32 +69,37 @@ export function createRelayAgent({
   let agentInfo = null;
 
   async function presentBundle(activeSocket, frame) {
-    const document = frame.document;
-    if (!policyEnforcement || typeof policyEnforcement.activate !== "function") {
-      writeFrame(activeSocket, {
-        type: "policy-bundle-ack",
-        ok: false,
-        reason: "no_enforcement",
-        digest: "",
-      });
-      return;
+    let ok = false;
+    let digest = "";
+    let reason = "no_enforcement";
+    try {
+      if (policyEnforcement && typeof policyEnforcement.activate === "function") {
+        const result = await policyEnforcement.activate(frame.document);
+        const claimed = typeof result?.digest === "string"
+          ? result.digest.trim().toLowerCase()
+          : "";
+        ok = result?.ok === true && POLICY_DIGEST.test(claimed);
+        digest = ok ? claimed : "";
+        reason = ok
+          ? ""
+          : (typeof result?.reason === "string" && result.reason.trim()
+            ? result.reason.trim().slice(0, 64)
+            : "unverified");
+      }
+    } catch {
+      ok = false;
+      digest = "";
+      reason = "activate_failed";
     }
     try {
-      const result = await policyEnforcement.activate(document);
-      const digest = typeof result?.digest === "string" ? result.digest : "";
       writeFrame(activeSocket, {
         type: "policy-bundle-ack",
-        ok: result?.ok === true,
+        ok,
         digest,
-        ...(result?.ok === true ? {} : { reason: result?.reason || "unverified" }),
+        ...(ok ? {} : { reason }),
       });
     } catch {
-      writeFrame(activeSocket, {
-        type: "policy-bundle-ack",
-        ok: false,
-        reason: "activate_failed",
-        digest: "",
-      });
+      activeSocket.destroy();
     }
   }
 

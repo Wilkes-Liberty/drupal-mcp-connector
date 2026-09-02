@@ -605,11 +605,18 @@ export async function startEdge({
           attestedDigests: new Set(),
           offeredDigests,
         });
-        for (const row of eligiblePromotions(promotionTable)) {
-          offeredDigests.add(row.digest);
-          writeFrame(socket, { type: "policy-bundle", document: row.document });
+        try {
+          for (const row of eligiblePromotions(promotionTable)) {
+            const wrote = writeFrame(socket, { type: "policy-bundle", document: row.document });
+            if (!wrote) throw new Error("policy-bundle write failed");
+            offeredDigests.add(row.digest);
+          }
+          writeFrame(socket, { type: "hello-ok", agent: { agentId } });
+        } catch {
+          sessions.delete(agentId);
+          agentId = null;
+          socket.destroy();
         }
-        writeFrame(socket, { type: "hello-ok", agent: { agentId } });
         return;
       }
       if (!agentId) {
