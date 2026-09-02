@@ -314,7 +314,10 @@ export function getInboundPromotions() {
  * a row is refused, exhausted windows and locked principals are refused,
  * and a table the edge cannot read refuses startup. Validation lives in
  * usage.js (`normalizeQuotas`).
- * @returns {object|null}
+ * @returns {object|null|unknown} Null when omitted or comment-only; the
+ *   comment-stripped table when it is an object; otherwise the configured
+ *   value unchanged (a string, array, number, ...) so `startEdge()` refuses
+ *   to start on it instead of running unmetered.
  */
 export function getInboundQuotas() {
   const quotas = loadConfig().auth?.quotas;
