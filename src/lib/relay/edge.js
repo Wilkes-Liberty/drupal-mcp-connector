@@ -1,5 +1,6 @@
 /**
- * Relay northbound edge (#232, #242) — DEV-294 AC4 plus DEV-122 isolation.
+ * Relay northbound edge (#232, #242, #244) — DEV-294 AC4, DEV-122 isolation,
+ * DEV-124 tenant routing.
  *
  * Terminates northbound MCP over the OAuth resource server and fans requests
  * down outbound tenant-agent channels. The edge proposes; the tenant-side
@@ -189,6 +190,101 @@ export function selectTenantSession({
 }
 
 /**
+ * Resolve tenant and target from server-owned grants. Caller `tenant` is a
+ * confirming hint inside the grant, never authority. When `tenantGrants` is
+ * omitted, tenant is derived from the unique agent covering the site grant
+ * (DEV-122 / DEV-294 compatibility).
+ *
+ * @param {object} params
+ * @param {object|null} params.identity
+ * @param {string|null} [params.callerTenant]
+ * @param {object|null} [params.tenantGrants]
+ * @param {string[]} params.grantedSiteNames
+ * @param {string|null} [params.targetName]
+ * @param {Array<{agentId: string, sites: string[]|null}>} params.sessions
+ * @returns {{session: object|null, tenant: string|null, target: string|null, source: string, reason: "not_entitled"|"no_agent"|null}}
+ */
+export function resolveTenantRoute({
+  identity,
+  callerTenant = null,
+  tenantGrants = null,
+  grantedSiteNames = [],
+  targetName = null,
+  sessions = [],
+} = {}) {
+  if (tenantGrants) {
+    const listed = identity?.clientId
+      ? new Map(Object.entries(tenantGrants)).get(identity.clientId)
+      : undefined;
+    const grantedTenants = Array.isArray(listed) ? listed.map(String) : [];
+    if (!grantedTenants.length) {
+      return {
+        session: null, tenant: null, target: targetName, source: "grant", reason: "not_entitled",
+      };
+    }
+    if (callerTenant && !grantedTenants.includes(callerTenant)) {
+      return {
+        session: null, tenant: null, target: targetName, source: "grant", reason: "not_entitled",
+      };
+    }
+    if (!callerTenant && grantedTenants.length > 1) {
+      return {
+        session: null, tenant: null, target: targetName, source: "grant", reason: "not_entitled",
+      };
+    }
+    const tenant = callerTenant || grantedTenants[0];
+    const session = sessions.find((entry) => entry.agentId === tenant) ?? null;
+    if (!session) {
+      return {
+        session: null, tenant, target: targetName, source: "grant", reason: "no_agent",
+      };
+    }
+    const tenantSites = boundSiteNames(session.sites);
+    const allowed = tenantSites.length
+      ? grantedSiteNames.filter((name) => tenantSites.includes(name))
+      : grantedSiteNames;
+    if (targetName && !allowed.includes(targetName)) {
+      return {
+        session: null, tenant, target: targetName, source: "grant", reason: "not_entitled",
+      };
+    }
+    if (!targetName && grantedSiteNames.length && allowed.length === 0) {
+      return {
+        session: null, tenant, target: targetName, source: "grant", reason: "not_entitled",
+      };
+    }
+    return { session, tenant, target: targetName, source: "grant", reason: null };
+  }
+
+  const selected = selectTenantSession({ grantedSiteNames, targetName, sessions });
+  return {
+    session: selected.session,
+    tenant: selected.session?.agentId ?? null,
+    target: targetName,
+    source: "grant",
+    reason: selected.reason,
+  };
+}
+
+function callerTenantHint(args = {}) {
+  const value = new Map(Object.entries(args ?? {})).get("tenant");
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function stripTenantHint(body) {
+  const args = body?.params?.arguments;
+  if (!args || typeof args !== "object" || Array.isArray(args)) return body;
+  if (!Object.prototype.hasOwnProperty.call(args, "tenant")) return body;
+  const nextArgs = { ...args };
+  delete nextArgs.tenant;
+  return { ...body, params: { ...body.params, arguments: nextArgs } };
+}
+
+function identityWithTenant(identity, tenant) {
+  return Object.freeze({ ...identity, tenant });
+}
+
+/**
  * Canonical form of a tenant site bind. Null and empty both mean unscoped.
  *
  * @param {unknown} sites
@@ -346,6 +442,8 @@ function jsonResponse(res, status, body) {
  * @param {{issuer: string, audience: string}} options.auth Inbound
  *   resource-server config (`resolveInboundAuthConfig` shape). Mandatory.
  * @param {object} options.grants Non-empty client-id → site-name grant table.
+ * @param {object|null} [options.tenantGrants] Optional client-id → tenant
+ *   agent-id table. When present, tenant routing is grant-authoritative.
  * @param {Array<{_name: string}>} options.sites Credential-free catalog.
  * @param {string} [options.defaultSite]
  * @param {{lookup: Function}} options.channelCredentials Agent channel store.
@@ -364,6 +462,7 @@ function jsonResponse(res, status, body) {
 export async function startEdge({
   auth,
   grants,
+  tenantGrants = null,
   sites,
   defaultSite,
   channelCredentials,
@@ -392,6 +491,7 @@ export async function startEdge({
       + "The library's all-sites fallback does not apply to this entry point.",
     );
   }
+  const tenantGrantTable = normalizeGrants(tenantGrants);
   if (typeof channelCredentials?.lookup !== "function") {
     throw new EdgeStartupError(
       "Relay edge requires an agent channel credential store; without one no "
@@ -492,17 +592,24 @@ export async function startEdge({
       jsonResponse(res, 403, { error: "not_entitled" });
       return;
     }
+    const args = body?.params?.arguments ?? {};
+    const callerTenant = callerTenantHint(args);
+    const siteArgs = { ...args };
+    delete siteArgs.tenant;
     let targetName = null;
     if (body?.method === "tools/call") {
       try {
-        targetName = targetRelay.resolve(identity, body?.params?.arguments ?? {}).name;
+        targetName = targetRelay.resolve(identity, siteArgs).name;
       } catch {
         jsonResponse(res, 403, { error: "not_entitled" });
         return;
       }
     }
 
-    const selected = selectTenantSession({
+    const selected = resolveTenantRoute({
+      identity,
+      callerTenant,
+      tenantGrants: tenantGrantTable,
       grantedSiteNames: granted.map((site) => site._name),
       targetName,
       sessions: [...sessions.values()],
@@ -527,15 +634,21 @@ export async function startEdge({
 
     const id = randomUUID();
     const waited = broker.track(id, { owner: selected.session.agentId });
+    const routedIdentity = identityWithTenant(identity, selected.tenant);
     const wrote = writeFrame(selected.session.socket, {
       type: "mcp-request",
       id,
       method: req.method,
       url: "/mcp",
       headers: fanDownHeaders(req.headers),
-      identity,
-      body,
-      correlation: { requestId: id, tenant: selected.session.agentId },
+      identity: routedIdentity,
+      body: stripTenantHint(body),
+      correlation: {
+        requestId: id,
+        tenant: selected.tenant,
+        target: selected.target,
+        source: selected.source,
+      },
     });
     if (!wrote) {
       broker.settle({ id, status: 503 }, { owner: selected.session.agentId });

@@ -240,7 +240,7 @@ export function describeTarget(site, source) {
  * @param {Array<object>} resolvable
  * @param {string[]} configuredNames
  * @param {object|null} [grants]
- * @returns {{sites: string[], targets: Array<{name: string, baseUrl?: string, source: string}>}}
+ * @returns {{sites: string[], targets: Array<{name: string, baseUrl?: string, source: string}>, tenants: Array<{id: string, source: string}>}}
  */
 export function visibleSiteTargets(identity, resolvable, configuredNames, grants) {
   const granted = identity ? resolveGrantedSites(identity, resolvable, grants) : resolvable;
@@ -249,12 +249,16 @@ export function visibleSiteTargets(identity, resolvable, configuredNames, grants
     : [...configuredNames];
   const byName = new Map(granted.map((site) => [site._name, site]));
   const source = identity ? "grant" : "config";
+  const tenantId = identity && typeof identity.tenant === "string" && identity.tenant
+    ? identity.tenant
+    : null;
   return {
     sites: names,
     targets: names.map((name) => {
       const site = byName.get(name);
       return site ? describeTarget(site, source) : { name, source };
     }),
+    tenants: tenantId ? [{ id: tenantId, source: "grant" }] : [],
   };
 }
 

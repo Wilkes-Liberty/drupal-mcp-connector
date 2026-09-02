@@ -47,7 +47,7 @@ async function listContentTypes({ site: siteName }) {
  * List named sites this principal may address. No backend call and no credentials.
  * `sites` stays a name list for compatibility; `targets` is the authoritative
  * resolved-target record.
- * @returns {Promise<{sites: string[], targets: Array<object>}>}
+ * @returns {Promise<{sites: string[], targets: Array<object>, tenants: Array<object>}>}
  */
 async function listConfiguredSites() {
   const names = listSiteNames();
