@@ -2044,9 +2044,10 @@ describe("attributable usage, quotas, and abuse signals (#256 / DEV-126)", () =>
       [{ tenants: { "tenant-a": { requests: "10" } } }, "tenants.tenant-a.requests"],
       [{ abuse: {} }, "abuse.denials"],
     ]) {
-      await expect(startEdge(baseEdgeOptions({ quotas })))
-        .rejects.toThrow(new RegExp(`auth\\.quotas.*${reason.replace(/\./g, "\\.")}`));
-      await expect(startEdge(baseEdgeOptions({ quotas }))).rejects.toBeInstanceOf(EdgeStartupError);
+      const failure = await startEdge(baseEdgeOptions({ quotas })).then(() => null, (error) => error);
+      expect(failure).toBeInstanceOf(EdgeStartupError);
+      expect(failure.message).toContain("auth.quotas");
+      expect(failure.message).toContain(`"${reason}"`);
     }
   });
 
