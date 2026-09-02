@@ -44,6 +44,9 @@
     "promotions": {
       "_comment": "Optional W&L-operated dual-control ledger. Map a SHA-256 digest to { document, approvals } where document is the sealed portable Sentinel bundle (claims + digest + hmac-sha256 seal) and approvals is two distinct operator ids. When present, the edge fans eligible documents to the tenant agent; non-diagnostic tools/call require a matching local attestation. The edge never mints a seal. Omit to keep the digest-only path. Tenant self-service is not this table."
     },
+    "quotas": {
+      "_comment": "Optional, drupal-mcp-edge only. { tenants: { \"<agent id>\": { requests, windowSec } }, principals: { \"<sub or client_id>\": { requests, windowSec } }, abuse: { denials, windowSec, lockSec } }. When a tenants or principals table names any id, an id without a row is not_entitled; an exhausted window is 429 quota_exceeded with Retry-After; a principal that earns `denials` refusals inside windowSec is 429 abuse_locked for lockSec. Every refusal is zero frames on any tunnel. A shared tenant window running out never feeds an individual principal's abuse lock. A table the edge cannot read refuses startup and names the offending path. Omit to keep the prior path (no quota at the edge). Counting is measured usage, not pricing."
+    },
     "revocationFile": "",
     "introspectionUrl": "",
     "introspectionClientIdEnv": "",

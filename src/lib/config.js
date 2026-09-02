@@ -308,6 +308,30 @@ export function getInboundPromotions() {
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
+/**
+ * Tenant / principal quota table plus abuse lock (`auth.quotas`).
+ * When present, the relay edge fails closed: a tenant or principal without
+ * a row is refused, exhausted windows and locked principals are refused,
+ * and a table the edge cannot read refuses startup. Validation lives in
+ * usage.js (`normalizeQuotas`).
+ * @returns {object|null|unknown} Null when omitted or comment-only; the
+ *   comment-stripped table when it is an object; otherwise the configured
+ *   value unchanged (a string, array, number, ...) so `startEdge()` refuses
+ *   to start on it instead of running unmetered.
+ */
+export function getInboundQuotas() {
+  const quotas = loadConfig().auth?.quotas;
+  if (quotas === undefined || quotas === null) return null;
+  // A present value that is not an object is passed through unchanged so
+  // the edge refuses to start on it (usage.js normalizeQuotas names it);
+  // returning null here would silently run without quotas.
+  if (typeof quotas !== "object" || Array.isArray(quotas)) return quotas;
+  const entries = Object.entries(quotas)
+    .map(([key, value]) => [key.trim(), value])
+    .filter(([key]) => key && !key.startsWith("_"));
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Auth headers — never logged, never exposed in tool responses
 // ---------------------------------------------------------------------------

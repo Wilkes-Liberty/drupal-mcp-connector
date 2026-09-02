@@ -32,6 +32,13 @@
  *   MCP_RATE_LIMIT / MCP_RATE_WINDOW_SEC
  *                     Northbound /mcp rate limit (same defaults as the
  *                     primary entry point).
+ *   MCP_EDGE_USAGE_MAX_RECORDS
+ *                     Positive integer enables the in-process usage ledger
+ *                     (or config relay.usage.maxRecords). Every decision and
+ *                     receipt is recorded per tenant and principal, and
+ *                     GET /usage serves the caller's own tenant partition.
+ *                     Unset: nothing is recorded and /usage is 404. Set but
+ *                     unreadable: fatal.
  *
  * Config: auth.grants (client id -> [site names]) is mandatory; the edge
  * refuses to start without it. Optional auth.tenantGrants (client id ->
@@ -41,14 +48,27 @@
  * (sub / azp -> SHA-256 digest) is the expected signed policy on the edge.
  * Optional auth.promotions (digest -> sealed document + two operator ids)
  * is the W&L-operated dual-control ledger; the edge fans eligible bundles
- * to the tenant agent and requires a matching local attestation.
+ * to the tenant agent and requires a matching local attestation. Optional
+ * auth.quotas (tenant / principal request windows plus an abuse lock)
+ * fails closed at the edge with zero frames on any refusal; a table the
+ * edge cannot read refuses startup.
  */
 
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { getInboundActors, getInboundGrants, getInboundPolicies, getInboundPromotions, getInboundTenantGrants, getTlsConfig, loadConfig } from "../src/lib/config.js";
+import {
+  getInboundActors,
+  getInboundGrants,
+  getInboundPolicies,
+  getInboundPromotions,
+  getInboundQuotas,
+  getInboundTenantGrants,
+  getTlsConfig,
+  loadConfig,
+} from "../src/lib/config.js";
 import { resolveInboundAuthConfig } from "../src/lib/http-auth.js";
 import { createRateLimiter } from "../src/lib/rate-limit.js";
+import { createUsageLedger } from "../src/lib/usage.js";
 import {
   createChannelCredentialStore,
   startEdge,
@@ -126,6 +146,29 @@ const rateLimit = rateLimitEnv === undefined || rateLimitEnv === ""
   ? rateLimitDefault
   : Number(rateLimitEnv);
 
+// Usage ledger (#256): opt-in, in-process, bounded. A restart clears it.
+// A value that is set but unreadable is fatal: the operator asked for
+// metering, and silently running without it would be a lie.
+const usageEnv = process.env.MCP_EDGE_USAGE_MAX_RECORDS;
+const usageRaw = usageEnv !== undefined && usageEnv !== ""
+  ? usageEnv
+  : config.relay?.usage?.maxRecords;
+let usageMaxRecords = 0;
+if (usageRaw !== undefined && usageRaw !== null) {
+  const parsed = typeof usageRaw === "string" && /^[0-9]+$/.test(usageRaw.trim())
+    ? Number(usageRaw.trim())
+    : usageRaw;
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    fatal(
+      "MCP_EDGE_USAGE_MAX_RECORDS (or relay.usage.maxRecords) must be a positive "
+      + `integer; got ${JSON.stringify(usageRaw)}. Unset it to run without the usage ledger.`,
+    );
+  }
+  usageMaxRecords = parsed;
+}
+const usage = usageMaxRecords > 0 ? createUsageLedger({ maxRecords: usageMaxRecords }) : null;
+const quotas = getInboundQuotas();
+
 let edge;
 try {
   edge = await startEdge({
@@ -135,6 +178,8 @@ try {
     actors: getInboundActors(),
     policies: getInboundPolicies(),
     promotions: getInboundPromotions(),
+    quotas,
+    usage,
     sites,
     defaultSite: config.defaultSite,
     channelCredentials: createChannelCredentialStore({ filePath: channelFile }),
@@ -161,4 +206,12 @@ if (rateLimit > 0) {
   console.error(
     `[drupal-mcp-edge] Rate limiting: ${rateLimit} req / ${rateWindowSec}s per client IP on /mcp.`,
   );
+}
+if (usage) {
+  console.error(
+    `[drupal-mcp-edge] Usage ledger: in-process, ${usageMaxRecords} records max; GET /usage serves one tenant partition.`,
+  );
+}
+if (quotas) {
+  console.error("[drupal-mcp-edge] Quotas: auth.quotas in force; unlisted tenants / principals are refused.");
 }
