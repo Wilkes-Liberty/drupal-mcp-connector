@@ -148,7 +148,12 @@ function applyFilter(params, { field, op = "eq", value }) {
 export function grantActorUid(entityType, relationships) {
   if (entityType === "user") return relationships;
   const uuid = getRequestIdentity()?.actor;
-  if (typeof uuid !== "string" || !/^[0-9a-f-]{36}$/i.test(uuid)) return relationships;
+  if (typeof uuid !== "string") return relationships;
+  try {
+    validateUuid(uuid, "actor");
+  } catch {
+    return relationships;
+  }
   return {
     ...(relationships && typeof relationships === "object" ? relationships : {}),
     uid: { data: { type: "user--user", id: uuid } },

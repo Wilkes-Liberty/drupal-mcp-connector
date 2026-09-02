@@ -37,7 +37,7 @@ import { createServer as createTlsServer } from "node:tls";
 import { createLocalRelay } from "../contracts/relay.js";
 import { createInboundHttpsAuth, SPOOFABLE_IDENTITY_HEADERS } from "../http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../http-handler.js";
-import { isWriteLikeTool } from "../operations.js";
+import { isWriteLikeCall } from "../operations.js";
 import { resolveActor, resolveGrantedSites } from "../principal.js";
 import {
   attachFramer,
@@ -660,7 +660,7 @@ export async function startEdge({
 
     const mapped = resolveActor({ identity, actors: actorTable });
     const toolName = body?.method === "tools/call" ? body?.params?.name : null;
-    if (mapped.required && mapped.reason && toolName && isWriteLikeTool(toolName)) {
+    if (mapped.required && mapped.reason && toolName && isWriteLikeCall(toolName, args)) {
       jsonResponse(res, 403, { error: "not_entitled" });
       return;
     }

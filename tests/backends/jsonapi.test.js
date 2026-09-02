@@ -243,6 +243,22 @@ describe("JsonApiBackend fetch methods", () => {
     expect(JSON.parse(opts.body)).toEqual({ data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Updated" } } });
   });
 
+  it("updateEntity binds uid from the grant-stamped actor and overwrites a caller uid", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({
+      data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Updated" } },
+    });
+    const actor = "11111111-1111-4111-8111-111111111111";
+    await runWithIdentity({ actor }, () => backend.updateEntity({
+      entityType: "node",
+      bundle: "article",
+      id: "11111111-1111-4111-8111-111111111111",
+      attributes: { title: "Updated" },
+      relationships: { uid: { data: { type: "user--user", id: "99999999-9999-4999-8999-999999999999" } } },
+    }));
+    const body = JSON.parse(vi.mocked(drupalFetch).mock.calls[0][2].body);
+    expect(body.data.relationships.uid).toEqual({ data: { type: "user--user", id: actor } });
+  });
+
   it("updateEntity appends resourceVersion when requested (#166)", async () => {
     vi.mocked(drupalFetch).mockResolvedValue({
       data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Draft" } },

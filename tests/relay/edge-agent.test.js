@@ -1192,6 +1192,33 @@ describe("principal actor mapping (#247 / DEV-123)", () => {
     expect(rawB.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
   });
 
+  it("refuses an unmapped GraphQL mutation with zero frames but allows an unmapped GraphQL query", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      actors: ACTORS,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtB = await issuer.signToken({ clientId: "client-b" });
+    const deniedMutation = await modernCall(harness.edge.northboundUrl, jwtB, {
+      name: "drupal_graphql",
+      args: { site: "tenant-beta", query: "mutation { createNode { id } }" },
+    });
+    expect(deniedMutation.status).toBe(403);
+    expect(JSON.parse(deniedMutation.body)).toEqual({ error: "not_entitled" });
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+    expect(rawB.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+
+    const allowedQuery = await modernCall(harness.edge.northboundUrl, jwtB, {
+      name: "drupal_graphql",
+      args: { site: "tenant-beta", query: "query { node(id: 1) { id } }" },
+    });
+    expect(allowedQuery.status).toBe(200);
+    await settle();
+    expect(rawB.frames.some((frame) => frame.type === "mcp-request")).toBe(true);
+  });
+
   it("refuses a disallowed act.sub on writes and stamps an allowlisted delegator", async () => {
     const harness = await startTwoTenantHarness({
       tenantGrants: TENANT_GRANTS,
