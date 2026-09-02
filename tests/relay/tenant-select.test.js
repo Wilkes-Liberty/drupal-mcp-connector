@@ -213,6 +213,25 @@ describe("resolveTenantRoute (#244 / DEV-124)", () => {
     })).toMatchObject({ session: null, reason: "not_entitled" });
   });
 
+  it("trims tenant grant ids and drops empty entries", () => {
+    const routed = resolveTenantRoute({
+      identity: identityA,
+      tenantGrants: { "client-a": [" tenant-a ", "", "  ", "_comment"] },
+      grantedSiteNames: ["tenant-alpha"],
+      targetName: "tenant-alpha",
+      sessions: [a, b],
+    });
+    expect(routed.session).toBe(a);
+    expect(routed.tenant).toBe("tenant-a");
+    expect(resolveTenantRoute({
+      identity: identityA,
+      tenantGrants: { "client-a": ["", "  "] },
+      grantedSiteNames: ["tenant-alpha"],
+      targetName: "tenant-alpha",
+      sessions: [a, b],
+    })).toMatchObject({ session: null, reason: "not_entitled" });
+  });
+
   it("requires a confirming hint when the grant lists more than one tenant", () => {
     const multi = { "client-a": ["tenant-a", "tenant-b"] };
     expect(resolveTenantRoute({

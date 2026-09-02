@@ -216,7 +216,7 @@ export function resolveTenantRoute({
     const listed = identity?.clientId
       ? new Map(Object.entries(tenantGrants)).get(identity.clientId)
       : undefined;
-    const grantedTenants = Array.isArray(listed) ? listed.map(String) : [];
+    const grantedTenants = grantIds(listed);
     if (!grantedTenants.length) {
       return {
         session: null, tenant: null, target: targetName, source: "grant", reason: "not_entitled",
@@ -398,11 +398,18 @@ function isLoopback(host) {
   return host === "127.0.0.1" || host === "::1" || host === "localhost";
 }
 
+function grantIds(values) {
+  if (!Array.isArray(values)) return [];
+  return [...new Set(
+    values.map((value) => String(value).trim()).filter((value) => value && !value.startsWith("_")),
+  )];
+}
+
 function normalizeGrants(grants) {
   if (!grants || typeof grants !== "object" || Array.isArray(grants)) return null;
   const entries = Object.entries(grants)
     .filter(([clientId, sites]) => !clientId.startsWith("_") && Array.isArray(sites))
-    .map(([clientId, sites]) => [clientId, sites.map(String)]);
+    .map(([clientId, sites]) => [clientId, grantIds(sites)]);
   return entries.length ? Object.fromEntries(entries) : null;
 }
 

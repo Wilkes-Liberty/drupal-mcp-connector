@@ -255,7 +255,12 @@ export function getInboundTenantGrants() {
   if (!grants || typeof grants !== "object" || Array.isArray(grants)) return null;
   const entries = Object.entries(grants)
     .filter(([clientId, tenants]) => !clientId.startsWith("_") && Array.isArray(tenants))
-    .map(([clientId, tenants]) => [clientId, tenants.map(String)]);
+    .map(([clientId, tenants]) => [
+      clientId,
+      [...new Set(
+        tenants.map((id) => String(id).trim()).filter((id) => id && !id.startsWith("_")),
+      )],
+    ]);
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
