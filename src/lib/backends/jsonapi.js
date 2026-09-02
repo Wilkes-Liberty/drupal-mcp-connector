@@ -135,9 +135,6 @@ function applyFilter(params, { field, op = "eq", value }) {
 }
 
 /**
- * Read/write Backend adapter backed by Drupal core JSON:API.
- */
-/**
  * Bind JSON:API `uid` from the grant-stamped identity. Caller uid is overwritten.
  * User entities are left unchanged. Missing/invalid actor leaves relationships as-is.
  *
@@ -163,6 +160,7 @@ export function grantActorUid(entityType, relationships) {
   };
 }
 
+/** Read/write Backend adapter backed by Drupal core JSON:API. */
 export class JsonApiBackend extends Backend {
   /** @param {object} site Site config (must include `_name`). */
   constructor(site) {

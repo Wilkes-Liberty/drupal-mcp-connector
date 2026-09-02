@@ -632,6 +632,13 @@ export async function startEdge({
       }
     }
 
+    const mapped = resolveActor({ identity, actors: actorTable });
+    const toolName = body?.method === "tools/call" ? body?.params?.name : null;
+    if (mapped.required && mapped.reason && toolName && isWriteLikeCall(toolName, args)) {
+      jsonResponse(res, 403, { error: "not_entitled" });
+      return;
+    }
+
     const selected = resolveTenantRoute({
       identity,
       callerTenant,
@@ -655,13 +662,6 @@ export async function startEdge({
     if (siteBindingKey(record.sites) !== siteBindingKey(selected.session.sites)) {
       selected.session.socket.destroy();
       jsonResponse(res, 503, { error: "no_agent" });
-      return;
-    }
-
-    const mapped = resolveActor({ identity, actors: actorTable });
-    const toolName = body?.method === "tools/call" ? body?.params?.name : null;
-    if (mapped.required && mapped.reason && toolName && isWriteLikeCall(toolName, args)) {
-      jsonResponse(res, 403, { error: "not_entitled" });
       return;
     }
 

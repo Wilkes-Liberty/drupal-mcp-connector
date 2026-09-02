@@ -1173,6 +1173,28 @@ describe("principal actor mapping (#247 / DEV-123)", () => {
     expect(JSON.stringify(request)).not.toContain(jwtA);
   });
 
+  it("refuses an unmapped write with 403 even when no agent is connected", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      actors: ACTORS,
+    });
+    const jwtB = await issuer.signToken({ clientId: "client-b" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtB, {
+      name: "drupal_create_node",
+      args: { site: "tenant-beta" },
+    });
+    expect(denied.status).toBe(403);
+    expect(JSON.parse(denied.body)).toEqual({ error: "not_entitled" });
+
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const down = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_create_node",
+      args: { site: "tenant-alpha" },
+    });
+    expect(down.status).toBe(503);
+    expect(JSON.parse(down.body)).toEqual({ error: "no_agent" });
+  });
+
   it("refuses an unmapped write with zero frames", async () => {
     const harness = await startTwoTenantHarness({
       tenantGrants: TENANT_GRANTS,
