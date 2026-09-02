@@ -87,40 +87,60 @@ describe("normalizeQuotas / quotasRequired", () => {
     expect(quotasRequired({ tenants: { _comment: "x" } })).toBe(false);
   });
 
-  it("keeps well-formed rows, defaults the window, and drops malformed rows", () => {
+  it("keeps well-formed rows and defaults the window", () => {
     const table = normalizeQuotas({
       tenants: {
         "tenant-a": { requests: 5 },
         " tenant-b ": { requests: 2, windowSec: 30 },
-        "tenant-bad": { requests: 0 },
-        "tenant-neg": { requests: -1, windowSec: 60 },
-        "tenant-str": { requests: "5" },
-        "tenant-obj": "5",
         _comment: "ignored",
       },
-      principals: { "sub-a": { requests: 1, windowSec: 0 } },
+      principals: { "sub-a": { requests: 1, windowSec: 10 } },
       abuse: { denials: 3 },
     });
+    expect(table.invalid).toBeUndefined();
     expect(table.tenants).toEqual({
       "tenant-a": { requests: 5, windowSec: 60 },
       "tenant-b": { requests: 2, windowSec: 30 },
     });
-    expect(table.principals).toEqual({});
+    expect(table.tenantsRequired).toBe(true);
+    expect(table.principals).toEqual({ "sub-a": { requests: 1, windowSec: 10 } });
+    expect(table.principalsRequired).toBe(true);
     expect(table.abuse).toEqual({ denials: 3, windowSec: 60, lockSec: 300 });
   });
 
-  it("marks a present-but-empty sub-table as required so unlisted ids fail closed", () => {
-    const table = normalizeQuotas({ tenants: { "tenant-bad": { requests: 0 } } });
-    expect(table.tenants).toEqual({});
-    expect(table.tenantsRequired).toBe(true);
-    expect(table.principalsRequired).toBe(false);
+  it("flags a malformed row as invalid and names it, instead of dropping it", () => {
+    expect(normalizeQuotas({ tenants: { "tenant-bad": { requests: 0 } } }))
+      .toEqual({ invalid: true, reason: "tenants.tenant-bad.requests" });
+    expect(normalizeQuotas({ tenants: { "tenant-neg": { requests: -1, windowSec: 60 } } }))
+      .toEqual({ invalid: true, reason: "tenants.tenant-neg.requests" });
+    expect(normalizeQuotas({ tenants: { "tenant-str": { requests: "5" } } }))
+      .toEqual({ invalid: true, reason: "tenants.tenant-str.requests" });
+    expect(normalizeQuotas({ tenants: { "tenant-obj": "5" } }))
+      .toEqual({ invalid: true, reason: "tenants.tenant-obj" });
+    expect(normalizeQuotas({ principals: { "sub-a": { requests: 1, windowSec: 0 } } }))
+      .toEqual({ invalid: true, reason: "principals.sub-a.windowSec" });
     expect(quotasRequired({ tenants: { "tenant-bad": { requests: 0 } } })).toBe(true);
   });
 
+  it("flags an unknown key or a non-object sub-table as invalid, never as omitted", () => {
+    expect(normalizeQuotas({ tenants: "oops" })).toEqual({ invalid: true, reason: "tenants" });
+    expect(normalizeQuotas({ tenants: [{ id: "tenant-a", requests: 5 }] }))
+      .toEqual({ invalid: true, reason: "tenants" });
+    expect(normalizeQuotas({ tenant: { "tenant-a": { requests: 10 } } }))
+      .toEqual({ invalid: true, reason: "tenant" });
+    expect(normalizeQuotas({ principal: { "sub-a": { requests: 10 } } }))
+      .toEqual({ invalid: true, reason: "principal" });
+    expect(normalizeQuotas({ abuseLock: { denials: 3 } }))
+      .toEqual({ invalid: true, reason: "abuseLock" });
+    expect(quotasRequired({ tenants: "oops" })).toBe(true);
+  });
+
   it("flags a malformed abuse block instead of inventing defaults", () => {
-    expect(normalizeQuotas({ abuse: { denials: 0 } }).abuse).toEqual({ invalid: true });
-    expect(normalizeQuotas({ abuse: "3" }).abuse).toEqual({ invalid: true });
-    expect(normalizeQuotas({ abuse: { denials: 2, lockSec: -1 } }).abuse).toEqual({ invalid: true });
+    expect(normalizeQuotas({ abuse: { denials: 0 } })).toEqual({ invalid: true, reason: "abuse.denials" });
+    expect(normalizeQuotas({ abuse: "3" })).toEqual({ invalid: true, reason: "abuse" });
+    expect(normalizeQuotas({ abuse: { denials: 2, lockSec: -1 } }))
+      .toEqual({ invalid: true, reason: "abuse.lockSec" });
+    expect(normalizeQuotas({ abuse: {} })).toEqual({ invalid: true, reason: "abuse.denials" });
   });
 });
 
@@ -218,11 +238,39 @@ describe("createQuotaGate", () => {
     expect(gate.check(principal)).toEqual({ allowed: true });
   });
 
-  it("refuses every request when the abuse block is malformed", () => {
-    const gate = createQuotaGate({ quotas: { abuse: { denials: 0 } } });
-    expect(gate.check(principal)).toEqual({
-      allowed: false, reason: "not_entitled", scope: "abuse", retryAfterSec: 0,
+  it("refuses every request when the table is invalid, whatever the defect", () => {
+    for (const quotas of [
+      { abuse: { denials: 0 } },
+      { tenants: "oops" },
+      { tenant: { "tenant-a": { requests: 10 } } },
+      { tenants: { "tenant-a": { requests: "10" } } },
+    ]) {
+      const gate = createQuotaGate({ quotas });
+      expect(gate.enabled).toBe(true);
+      expect(gate.invalid).toBe(true);
+      expect(gate.check(principal)).toEqual({
+        allowed: false, reason: "not_entitled", scope: "config", retryAfterSec: 0,
+      });
+    }
+  });
+
+  it("bounds the denial table and prunes principals whose denials expired", () => {
+    let t = 0;
+    const gate = createQuotaGate({
+      quotas: { abuse: { denials: 5, windowSec: 10, lockSec: 30 } },
+      now: () => t,
+      maxKeys: 2,
     });
+    gate.noteDenial("sub-a");
+    gate.noteDenial("sub-b");
+    expect(gate.stats()).toEqual({ trackedPrincipals: 2, maxKeys: 2 });
+    t = 11_000;
+    gate.noteDenial("sub-c");
+    expect(gate.stats().trackedPrincipals).toBe(1);
+    gate.noteDenial("sub-d");
+    gate.noteDenial("sub-e");
+    expect(gate.stats().trackedPrincipals).toBeLessThanOrEqual(2);
+    expect(gate.state("sub-c").denials).toBe(0);
   });
 
   it("ignores a denial note for an unkeyed principal", () => {
@@ -270,6 +318,13 @@ describe("createUsageLedger", () => {
     expect(ledger.query({ tenant: null })).toEqual([]);
     expect(ledger.query({})).toEqual([]);
     expect(ledger.records()).toHaveLength(4);
+  });
+
+  it("refuses a bound that is not a positive integer instead of substituting a default", () => {
+    for (const maxRecords of [0, -1, 1.5, "100", Number.NaN]) {
+      expect(() => createUsageLedger({ maxRecords })).toThrow(TypeError);
+    }
+    expect(createUsageLedger().stats().maxRecords).toBe(10_000);
   });
 
   it("bounds the ledger and counts what it dropped", () => {

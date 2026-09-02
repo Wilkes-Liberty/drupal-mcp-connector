@@ -114,6 +114,13 @@ const DEFAULT_FAN_DOWN_TIMEOUT_MS = 10_000;
 const ABUSE_SIGNAL_ERRORS = new Set(["not_entitled", "quota_exceeded"]);
 
 /**
+ * Refusal scopes that describe something other than the caller's own
+ * behaviour — a shared tenant window, or a table the operator misconfigured.
+ * They never feed a principal's abuse lock.
+ */
+const SHARED_SCOPES = new Set(["tenant", "config"]);
+
+/**
  * Normalize a channel-record `sites` list. Empty / missing means unscoped
  * (legal only as the sole connected agent — the DEV-294 compatibility path).
  *
@@ -578,7 +585,38 @@ export async function startEdge({
     : null;
   const promoRequired = promotionsRequired(promotionTable);
   const quotaGate = createQuotaGate({ quotas, now });
-  const usageLedger = usage && typeof usage.record === "function" ? usage : null;
+  if (quotaGate.invalid) {
+    throw new EdgeStartupError(
+      `Relay edge refuses to start: auth.quotas is not readable at "${quotaGate.reason}". `
+      + "A quota table that cannot be read authorizes nobody; fix the row or remove the table.",
+    );
+  }
+  const usageLedger = usage === null || usage === undefined ? null : usage;
+  if (usageLedger !== null && (
+    typeof usageLedger !== "object"
+    || typeof usageLedger.record !== "function"
+    || typeof usageLedger.query !== "function"
+    || typeof usageLedger.stats !== "function"
+  )) {
+    throw new EdgeStartupError(
+      "Relay edge usage ledger must expose record(), query(), and stats() "
+      + "(see createUsageLedger in usage.js), or be omitted.",
+    );
+  }
+
+  /**
+   * Record without ever changing the verdict: a metering failure is logged
+   * (without the error detail) and the request proceeds as decided.
+   */
+  function meter(entry) {
+    if (!usageLedger) return null;
+    try {
+      return usageLedger.record(entry) ?? null;
+    } catch {
+      console.error("[drupal-mcp-edge] usage record failed; the decision stands and is unmetered.");
+      return null;
+    }
+  }
   if (typeof channelCredentials?.lookup !== "function") {
     throw new EdgeStartupError(
       "Relay edge requires an agent channel credential store; without one no "
@@ -680,7 +718,7 @@ export async function startEdge({
           // A response nobody is waiting for: late, repeated, fabricated, or
           // injected from another tenant's tunnel. Recorded against the
           // sending tunnel so reconciliation and abuse signals can see it.
-          usageLedger.record({
+          meter({
             phase: "receipt",
             requestId: typeof frame.id === "string" && frame.id ? frame.id : null,
             decisionId: null,
@@ -733,12 +771,17 @@ export async function startEdge({
     let usageTenant = attributedTenant(identity, tenantGrantTable);
     let policyDigest = null;
 
-    function refuse(status, error, { scope = null, retryAfterSec = 0, extra = {} } = {}) {
-      if (ABUSE_SIGNAL_ERRORS.has(error)) quotaGate.noteDenial(principalKey);
-      usageLedger?.record({
+    function refuse(status, error, {
+      scope = null, exposeScope = true, retryAfterSec = 0, extra = {},
+    } = {}) {
+      if (ABUSE_SIGNAL_ERRORS.has(error) && !SHARED_SCOPES.has(scope)) {
+        quotaGate.noteDenial(principalKey);
+      }
+      meter({
         phase: "decision",
         decision: "deny",
         reason: error,
+        scope,
         requestId: null,
         tenant: usageTenant,
         principal,
@@ -752,7 +795,7 @@ export async function startEdge({
       jsonResponse(
         res,
         status,
-        { error, ...(scope ? { scope } : {}), ...extra },
+        { error, ...(scope && exposeScope ? { scope } : {}), ...extra },
         retryAfterSec > 0 ? { "Retry-After": String(retryAfterSec) } : {},
       );
     }
@@ -810,6 +853,12 @@ export async function startEdge({
       refuse(403, "not_entitled");
       return;
     }
+    if (!selected.session && !selected.tenant) {
+      // Site-derived path with no agent: there is no tenant to meter against,
+      // so this is an outage answer, not a quota or abuse signal.
+      refuse(503, "no_agent");
+      return;
+    }
     // Quota boundary (#256): the tenant is now grant-resolved. Every request
     // reaching this line counts; a tenant or principal without a row, an
     // exhausted window, or a locked principal is refused with zero frames.
@@ -817,7 +866,8 @@ export async function startEdge({
     if (!verdict.allowed) {
       const unassigned = verdict.reason === "not_entitled";
       refuse(unassigned ? 403 : 429, verdict.reason, {
-        scope: unassigned ? null : verdict.scope,
+        scope: verdict.scope,
+        exposeScope: !unassigned,
         retryAfterSec: verdict.retryAfterSec,
       });
       return;
@@ -879,7 +929,7 @@ export async function startEdge({
       refuse(503, "no_agent");
       return;
     }
-    const decisionRecord = usageLedger?.record({
+    const decisionRecord = meter({
       phase: "decision",
       decision: "allow",
       reason: null,
@@ -894,10 +944,10 @@ export async function startEdge({
       policyDigest,
       units: 1,
       bytesIn,
-    }) ?? null;
+    });
 
     function receipt(fields) {
-      usageLedger?.record({
+      meter({
         phase: "receipt",
         requestId: id,
         decisionId: decisionRecord?.decisionId ?? null,
@@ -918,19 +968,34 @@ export async function startEdge({
       jsonResponse(res, 502, { error: "fan_down_failed" });
       return;
     }
-    const status = result.status || 200;
-    receipt({
-      outcome: status >= 500 ? "failed" : "ok",
-      reason: null,
-      status,
-      bytesOut: byteLength(result.body),
-    });
+    // The agent frame is unvalidated input. A status the northbound
+    // listener cannot emit, or a header it refuses, is a failed receipt and
+    // a 502 — never an "ok" receipt for a response nobody received.
+    const status = result.status;
+    const bytesOut = byteLength(result.body);
+    if (!Number.isInteger(status) || status < 100 || status > 999) {
+      receipt({ outcome: "failed", reason: "invalid_status", status: null, bytesOut });
+      jsonResponse(res, 502, { error: "fan_down_failed" });
+      return;
+    }
     const headers = Object.fromEntries(
       Object.entries(forwardHeaders(result.headers ?? {}))
         .filter(([name]) => String(name).toLowerCase() !== "mcp-session-id"),
     );
-    res.writeHead(status, headers);
+    try {
+      res.writeHead(status, headers);
+    } catch {
+      receipt({ outcome: "failed", reason: "relay_write_failed", status, bytesOut });
+      if (!res.headersSent) {
+        for (const name of res.getHeaderNames()) res.removeHeader(name);
+        jsonResponse(res, 502, { error: "fan_down_failed" });
+      } else {
+        res.destroy();
+      }
+      return;
+    }
     res.end(result.body ?? "");
+    receipt({ outcome: status >= 500 ? "failed" : "ok", reason: null, status, bytesOut });
   }
 
   /**
@@ -971,23 +1036,32 @@ export async function startEdge({
       res.writeHead(auth.status, auth.headers).end(auth.body);
       return;
     }
-    const query = new URL(String(req.url || "/usage"), "http://edge.invalid").searchParams;
-    const read = readUsage({
-      identity: auth.identity,
-      tenantGrants: tenantGrantTable,
-      tenant: query.get("tenant"),
-      principalKey: query.get("principal"),
-      ledger: usageLedger,
-    });
-    if (!read.ok) {
-      jsonResponse(res, 403, { error: "not_entitled" });
-      return;
+    try {
+      const query = new URL(String(req.url || "/usage"), "http://edge.invalid").searchParams;
+      const read = readUsage({
+        identity: auth.identity,
+        tenantGrants: tenantGrantTable,
+        tenant: query.get("tenant"),
+        principalKey: query.get("principal"),
+        ledger: usageLedger,
+      });
+      if (!read.ok) {
+        jsonResponse(res, 403, { error: "not_entitled" });
+        return;
+      }
+      jsonResponse(res, 200, {
+        tenant: read.tenant,
+        records: read.records,
+        reconciliation: reconcileUsage(read.records, { dropped: usageLedger.stats().dropped }),
+      });
+    } catch {
+      console.error("[drupal-mcp-edge] usage read failed.");
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
+      res.writeHead(500).end("Internal Server Error");
     }
-    jsonResponse(res, 200, {
-      tenant: read.tenant,
-      records: read.records,
-      reconciliation: reconcileUsage(read.records, { dropped: usageLedger.stats().dropped }),
-    });
   }
 
   const requestHandler = createMcpRequestHandler({

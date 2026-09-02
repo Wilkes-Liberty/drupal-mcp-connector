@@ -18,7 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the edge: an unlisted tenant or principal is `not_entitled`, an exhausted
   window is `429 quota_exceeded` with `Retry-After`, and a principal that
   keeps earning refusals is `429 abuse_locked` — all with zero frames on any
-  tunnel. `GET /usage` serves the caller's own tenant partition (tenant from
+  tunnel. A shared tenant window running out never feeds an individual
+  principal's lock; a quota table the edge cannot read refuses startup and
+  names the offending path. A response the listener cannot relay is
+  `502 fan_down_failed` with a `failed` receipt, and a metering failure
+  never changes a verdict. `GET /usage` serves the caller's own tenant partition (tenant from
   `auth.tenantGrants`; any other tenant is `not_entitled` with no records)
   with a reconciliation naming `missing`, `duplicate`, and `uncertain`
   chains; unmatched response frames are recorded against the sending

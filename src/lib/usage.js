@@ -48,6 +48,7 @@ const OUTCOME_SET = new Set(RECEIPT_OUTCOMES);
 const DEFAULT_WINDOW_SEC = 60;
 const DEFAULT_LOCK_SEC = 300;
 const DEFAULT_MAX_RECORDS = 10_000;
+const DEFAULT_MAX_KEYS = 10_000;
 
 function cleanKey(value) {
   const key = typeof value === "string" ? value.trim() : "";
@@ -60,10 +61,6 @@ function positiveInt(value) {
 
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function tableHasKeys(table) {
-  return isRecord(table) && Object.keys(table).some((key) => cleanKey(key));
 }
 
 function grantIds(values) {
@@ -103,33 +100,43 @@ export function attributedTenant(identity, tenantGrants) {
   return granted.length === 1 ? granted[0] : null;
 }
 
-function quotaRows(raw) {
-  if (!isRecord(raw)) return { rows: {}, required: false };
-  const rows = {};
+const QUOTA_KEYS = new Set(["tenants", "principals", "abuse"]);
+
+function invalid(reason) {
+  return Object.freeze({ invalid: true, reason });
+}
+
+/**
+ * @returns {{rows: object, required: boolean}|{invalid: true, reason: string}}
+ */
+function quotaRows(raw, name) {
+  if (raw === undefined || raw === null) return { rows: Object.freeze({}), required: false };
+  if (!isRecord(raw)) return invalid(name);
   const entries = [];
   for (const [rawKey, value] of Object.entries(raw)) {
     const key = cleanKey(rawKey);
-    if (!key || !isRecord(value)) continue;
+    if (!key) continue;
+    if (!isRecord(value)) return invalid(`${name}.${key}`);
     const requests = positiveInt(value.requests);
+    if (requests === null) return invalid(`${name}.${key}.requests`);
     const windowSec = value.windowSec === undefined
       ? DEFAULT_WINDOW_SEC
       : positiveInt(value.windowSec);
-    if (requests === null || windowSec === null) continue;
+    if (windowSec === null) return invalid(`${name}.${key}.windowSec`);
     entries.push([key, Object.freeze({ requests, windowSec })]);
   }
-  Object.assign(rows, Object.fromEntries(entries));
-  return { rows: Object.freeze(rows), required: tableHasKeys(raw) };
+  return { rows: Object.freeze(Object.fromEntries(entries)), required: entries.length > 0 };
 }
 
 function abuseBlock(raw) {
   if (raw === undefined || raw === null) return null;
-  if (!isRecord(raw)) return Object.freeze({ invalid: true });
+  if (!isRecord(raw)) return invalid("abuse");
   const denials = positiveInt(raw.denials);
+  if (denials === null) return invalid("abuse.denials");
   const windowSec = raw.windowSec === undefined ? DEFAULT_WINDOW_SEC : positiveInt(raw.windowSec);
+  if (windowSec === null) return invalid("abuse.windowSec");
   const lockSec = raw.lockSec === undefined ? DEFAULT_LOCK_SEC : positiveInt(raw.lockSec);
-  if (denials === null || windowSec === null || lockSec === null) {
-    return Object.freeze({ invalid: true });
-  }
+  if (lockSec === null) return invalid("abuse.lockSec");
   return Object.freeze({ denials, windowSec, lockSec });
 }
 
@@ -138,20 +145,31 @@ function abuseBlock(raw) {
  *
  * Shape: `{ tenants: { "<agentId>": { requests, windowSec? } },
  * principals: { "<sub|azp>": { requests, windowSec? } },
- * abuse: { denials, windowSec?, lockSec? } }`. Comment keys and malformed
- * rows are dropped; a sub-table that names any id is *required*, so an id
- * without a surviving row fails closed. A malformed `abuse` block is
- * flagged, not defaulted.
+ * abuse: { denials, windowSec?, lockSec? } }`. Comment keys are ignored.
+ * Anything else that is not exactly that shape — an unknown key, a
+ * sub-table that is not an object, a row with a non-positive-integer
+ * `requests` / `windowSec`, a malformed `abuse` block — makes the whole
+ * table **invalid**, never "omitted": the gate then refuses everything and
+ * the edge refuses to start. A sub-table that names any id is *required*,
+ * so an id without a row fails closed.
  *
  * @param {object|null} raw
- * @returns {object|null} Null when the table is omitted or comment-only.
+ * @returns {object|null} Null when the table is omitted or comment-only;
+ *   `{ invalid: true, reason }` naming the offending path; else the table.
  */
 export function normalizeQuotas(raw) {
   if (!isRecord(raw)) return null;
+  for (const rawKey of Object.keys(raw)) {
+    const key = cleanKey(rawKey);
+    if (key && !QUOTA_KEYS.has(key)) return invalid(key);
+  }
   const bag = new Map(Object.entries(raw));
-  const tenants = quotaRows(bag.get("tenants"));
-  const principals = quotaRows(bag.get("principals"));
+  const tenants = quotaRows(bag.get("tenants"), "tenants");
+  if (tenants.invalid) return tenants;
+  const principals = quotaRows(bag.get("principals"), "principals");
+  if (principals.invalid) return principals;
   const abuse = abuseBlock(bag.get("abuse"));
+  if (abuse?.invalid) return abuse;
   if (!tenants.required && !principals.required && abuse === null) return null;
   return Object.freeze({
     tenants: tenants.rows,
@@ -182,16 +200,38 @@ export function quotasRequired(raw) {
  * @param {object} [options]
  * @param {object|null} [options.quotas] Raw `auth.quotas`.
  * @param {() => number} [options.now]
- * @returns {{enabled: boolean, check: Function, noteDenial: Function, state: Function}}
+ * @param {number} [options.maxKeys] Soft cap on tracked principals in the
+ *   abuse table; expired entries are pruned first, then the oldest.
+ * @returns {{enabled: boolean, check: Function, noteDenial: Function, state: Function, stats: Function}}
  */
-export function createQuotaGate({ quotas = null, now = () => Date.now() } = {}) {
+export function createQuotaGate({
+  quotas = null,
+  now = () => Date.now(),
+  maxKeys = DEFAULT_MAX_KEYS,
+} = {}) {
   const table = normalizeQuotas(quotas);
   if (!table) {
     return Object.freeze({
       enabled: false,
+      invalid: false,
+      reason: null,
       check: () => ({ allowed: true }),
       noteDenial: () => ({ locked: false }),
       state: () => ({ locked: false, retryAfterSec: 0, denials: 0 }),
+      stats: () => ({ trackedPrincipals: 0, maxKeys: 0 }),
+    });
+  }
+  if (table.invalid) {
+    // A quota table that cannot be read authorizes nobody. The edge refuses
+    // to start on this; the gate refuses every request as defense in depth.
+    return Object.freeze({
+      enabled: true,
+      invalid: true,
+      reason: table.reason,
+      check: () => ({ allowed: false, reason: "not_entitled", scope: "config", retryAfterSec: 0 }),
+      noteDenial: () => ({ locked: false }),
+      state: () => ({ locked: false, retryAfterSec: 0, denials: 0 }),
+      stats: () => ({ trackedPrincipals: 0, maxKeys: 0 }),
     });
   }
 
@@ -204,15 +244,34 @@ export function createQuotaGate({ quotas = null, now = () => Date.now() } = {}) 
   const tenantLimiters = limiters(table.tenants);
   const principalLimiters = limiters(table.principals);
   const abuse = table.abuse;
+  const keyBound = positiveInt(maxKeys) ?? DEFAULT_MAX_KEYS;
   /** @type {Map<string, {times: number[], lockedUntil: number}>} */
   const denials = new Map();
+
+  function live(entry, t) {
+    if (entry.lockedUntil > t) return true;
+    if (entry.lockedUntil) return false;
+    return entry.times.some((ts) => t - ts < abuse.windowSec * 1000);
+  }
+
+  /** Drop expired principals; if still at the bound, drop the oldest. */
+  function prune(t) {
+    for (const [key, entry] of denials) {
+      if (!live(entry, t)) denials.delete(key);
+    }
+    while (denials.size >= keyBound) {
+      const oldest = denials.keys().next().value;
+      if (oldest === undefined) break;
+      denials.delete(oldest);
+    }
+  }
 
   function deny(reason, scope, retryAfterSec = 0) {
     return { allowed: false, reason, scope, retryAfterSec };
   }
 
   function lockState(key) {
-    if (!abuse || abuse.invalid || !key) return { locked: false, retryAfterSec: 0, denials: 0 };
+    if (!abuse || !key) return { locked: false, retryAfterSec: 0, denials: 0 };
     const entry = denials.get(key);
     if (!entry) return { locked: false, retryAfterSec: 0, denials: 0 };
     const t = now();
@@ -234,13 +293,14 @@ export function createQuotaGate({ quotas = null, now = () => Date.now() } = {}) 
 
   return Object.freeze({
     enabled: true,
+    invalid: false,
+    reason: null,
 
     /**
      * @param {{tenant?: string|null, principalKey?: string|null}} params
      * @returns {{allowed: true}|{allowed: false, reason: string, scope: string, retryAfterSec: number}}
      */
     check({ tenant = null, principalKey = null } = {}) {
-      if (abuse?.invalid) return deny("not_entitled", "abuse");
       const key = cleanKey(principalKey);
       const lock = lockState(key);
       if (lock.locked) return deny("abuse_locked", "abuse", lock.retryAfterSec);
@@ -266,12 +326,13 @@ export function createQuotaGate({ quotas = null, now = () => Date.now() } = {}) 
      * @returns {{locked: boolean, retryAfterSec?: number}}
      */
     noteDenial(principalKey) {
-      if (!abuse || abuse.invalid) return { locked: false };
+      if (!abuse) return { locked: false };
       const key = cleanKey(principalKey);
       if (!key) return { locked: false };
       const current = lockState(key);
       if (current.locked) return { locked: true, retryAfterSec: current.retryAfterSec };
       const entry = denials.get(key) ?? { times: [], lockedUntil: 0 };
+      if (!denials.has(key) && denials.size >= keyBound) prune(now());
       entry.times.push(now());
       denials.set(key, entry);
       if (entry.times.length >= abuse.denials) {
@@ -287,6 +348,11 @@ export function createQuotaGate({ quotas = null, now = () => Date.now() } = {}) 
      */
     state(principalKey) {
       return lockState(cleanKey(principalKey));
+    },
+
+    /** @returns {{trackedPrincipals: number, maxKeys: number}} */
+    stats() {
+      return { trackedPrincipals: denials.size, maxKeys: keyBound };
     },
   });
 }
@@ -308,7 +374,10 @@ export function createUsageLedger({
   now = () => Date.now(),
   maxRecords = DEFAULT_MAX_RECORDS,
 } = {}) {
-  const bound = positiveInt(maxRecords) ?? DEFAULT_MAX_RECORDS;
+  const bound = positiveInt(maxRecords);
+  if (bound === null) {
+    throw new TypeError("createUsageLedger requires maxRecords to be a positive integer.");
+  }
   const rows = [];
   let seq = 0;
   let dropped = 0;

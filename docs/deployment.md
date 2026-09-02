@@ -164,16 +164,29 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
   `denials` post-authentication refusals inside `windowSec` is
   `429 abuse_locked` for `lockSec`. Every refusal is zero frames on any
   tunnel. Windows are per process and count every request that reaches the
-  quota boundary, allowed or not. Omit to keep the prior path;
+  quota boundary, allowed or not. Only refusals that describe the caller's
+  own behaviour feed its abuse lock: a shared tenant window running out, or
+  a misconfigured table, never locks an individual principal. A table the
+  edge cannot read — an unknown key, a sub-table that is not an object, a
+  row whose `requests` / `windowSec` is not a positive integer, a malformed
+  `abuse` block — **refuses startup** and names the offending path; it is
+  never treated as "no quotas". An agent outage on the site-derived path
+  is still `503 no_agent`, answered before the quota boundary. Omit the
+  table to keep the prior path;
 - optional usage ledger (`MCP_EDGE_USAGE_MAX_RECORDS` or
-  `relay.usage.maxRecords`, a positive integer). When set, every edge
-  decision (allow or deny) and every fan-down receipt is recorded against
-  the grant-resolved tenant and the validated principal (`sub`, then `azp`)
-  with the `requestId` the frame carries, a `decisionId`, the bound
-  `policyDigest`, and measured cost signals (units, bytes in / out,
-  duration). The ledger is in-process and bounded; a restart clears it and
-  reconciliation reports truncation. Unset, nothing is recorded and
-  `/usage` is 404;
+  `relay.usage.maxRecords`, a positive integer; a value that is set but
+  unreadable is fatal). When set, every edge decision (allow or deny) and
+  every fan-down receipt is recorded against the grant-resolved tenant and
+  the validated principal (`sub`, then `azp`) with the `requestId` the
+  frame carries, a `decisionId`, the bound `policyDigest`, the refusal
+  `scope` when a quota decided, and measured cost signals (units, bytes
+  in / out, duration). A response the northbound listener cannot relay
+  (an invalid status or header from the agent) is `502 fan_down_failed`
+  with a `failed` receipt, never an `ok` receipt for a response nobody
+  received. A metering failure never changes a verdict: the decision
+  stands, is logged as unmetered, and the request proceeds. The ledger is
+  in-process and bounded; a restart clears it and reconciliation reports
+  truncation. Unset, nothing is recorded and `/usage` is 404;
 - an agent channel credential store (`MCP_CHANNEL_CREDENTIALS_FILE`, SHA-256
   digests only, hot-reloaded so revocation needs no restart). Each agent
   entry may name `sites`: catalog names that agent is allowed to serve.
@@ -221,8 +234,11 @@ and `uncertain` (fan-down timeout or channel loss after the frame crossed,
 or a receipt whose tenant or decision id disagrees with its decision).
 A response frame nobody is waiting for — late, repeated, fabricated, or
 injected from another tenant's tunnel — is recorded against the sending
-tunnel, so the injecting tenant's own reconciliation shows it. Usage is
-measured, not priced; billing and invoicing are not this surface.
+tunnel, so the injecting tenant's own reconciliation shows it. A refusal
+made before any tenant can be attributed (a client with no tenant grant, or
+a multi-tenant grant without a hint) is recorded with `tenant: null`; it
+stays in the ledger for the operator but no tenant partition serves it.
+Usage is measured, not priced; billing and invoicing are not this surface.
 
 **The agent** dials out to the edge's channel port and never listens. It
 authenticates the channel with its own issued credential (`MCP_CHANNEL_TOKEN`

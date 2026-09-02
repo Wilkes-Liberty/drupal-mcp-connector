@@ -14,7 +14,7 @@ import { writeFileSync, utimesSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { connect as netConnect } from "node:net";
 import { join } from "node:path";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { getRequestIdentity } from "../../src/lib/principal.js";
 import { attachFramer, writeFrame } from "../../src/lib/relay/frames.js";
@@ -188,7 +188,7 @@ async function startTwoTenantHarness({
     ...(promotions ? { promotions } : {}),
     ...(quotas ? { quotas } : {}),
     ...(usage ? { usage } : {}),
-    ...(fanDownTimeoutMs ? { fanDownTimeoutMs } : {}),
+    ...(fanDownTimeoutMs !== undefined ? { fanDownTimeoutMs } : {}),
     ...(now ? { now } : {}),
   }));
   closers.push(() => edge.close());
@@ -1911,6 +1911,35 @@ describe("attributable usage, quotas, and abuse signals (#256 / DEV-126)", () =>
     expect(reasons).toEqual(["not_entitled", "not_entitled", "abuse_locked", null]);
   });
 
+  it("does not count a shared tenant-quota exhaustion toward the caller's abuse lock", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      quotas: {
+        tenants: { "tenant-a": { requests: 1, windowSec: 60 } },
+        abuse: { denials: 1, windowSec: 60, lockSec: 60 },
+      },
+    });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const call = () => modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect((await call()).status).toBe(200);
+    for (let i = 0; i < 2; i += 1) {
+      const denied = await call();
+      expect(denied.status).toBe(429);
+      expect(JSON.parse(denied.body)).toEqual({ error: "quota_exceeded", scope: "tenant" });
+    }
+    const crossTenant = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha", tenant: "tenant-b" },
+    });
+    expect(crossTenant.status).toBe(403);
+    const locked = await call();
+    expect(JSON.parse(locked.body)).toEqual({ error: "abuse_locked", scope: "abuse" });
+  });
+
   it("denies cross-tenant usage reads and serves only the caller's partition", async () => {
     const usage = createUsageLedger();
     const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS, usage });
@@ -2006,6 +2035,161 @@ describe("attributable usage, quotas, and abuse signals (#256 / DEV-126)", () =>
     expect(other.reconciliation.findings).toEqual([
       { requestId: settledId, decisionId: null, state: "missing", reason: "decision_missing" },
     ]);
+  });
+
+  it("refuses to start on a quota table it cannot read, naming the defect", async () => {
+    for (const [quotas, reason] of [
+      [{ tenant: { "tenant-a": { requests: 10 } } }, "tenant"],
+      [{ tenants: "oops" }, "tenants"],
+      [{ tenants: { "tenant-a": { requests: "10" } } }, "tenants.tenant-a.requests"],
+      [{ abuse: {} }, "abuse.denials"],
+    ]) {
+      await expect(startEdge(baseEdgeOptions({ quotas })))
+        .rejects.toThrow(new RegExp(`auth\\.quotas.*${reason.replace(/\./g, "\\.")}`));
+      await expect(startEdge(baseEdgeOptions({ quotas }))).rejects.toBeInstanceOf(EdgeStartupError);
+    }
+  });
+
+  it("refuses to start with a usage ledger that lacks the record / query / stats surface", async () => {
+    for (const usage of [{}, { record() {} }, { record() {}, query() {} }, "ledger"]) {
+      await expect(startEdge(baseEdgeOptions({ usage }))).rejects.toBeInstanceOf(EdgeStartupError);
+    }
+  });
+
+  it("stamps the quota scope on the deny record even when the wire omits it", async () => {
+    const usage = createUsageLedger();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      usage,
+      quotas: { tenants: { "tenant-b": { requests: 5 } } },
+    });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(JSON.parse(denied.body)).toEqual({ error: "not_entitled" });
+    const record = usage.query({ tenant: "tenant-a" })[0];
+    expect(record).toMatchObject({ decision: "deny", reason: "not_entitled", scope: "tenant" });
+  });
+
+  it("answers no_agent before the quota boundary on the site-derived path", async () => {
+    const usage = createUsageLedger();
+    const harness = await startTwoTenantHarness({
+      usage,
+      quotas: { tenants: { "tenant-a": { requests: 5 } }, abuse: { denials: 1, lockSec: 60 } },
+    });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const call = () => modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    const down = await call();
+    expect(down.status).toBe(503);
+    expect(JSON.parse(down.body)).toEqual({ error: "no_agent" });
+    // No abuse tick for an outage: the retry is still no_agent, not abuse_locked.
+    const retry = await call();
+    expect(retry.status).toBe(503);
+    expect(usage.records().map((row) => row.reason)).toEqual(["no_agent", "no_agent"]);
+
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    expect((await call()).status).toBe(200);
+    await settle();
+    expect(mcpRequests(rawA)).toHaveLength(1);
+  });
+
+  it("records a failed receipt and answers 502 when the agent's response cannot be relayed", async () => {
+    const usage = createUsageLedger();
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS, usage });
+    const rawA = await connectRawAgent({
+      port: harness.edge.agentPort, token: harness.tokenA, autoReply: false,
+    });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const call = () => modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    const answered = new Promise((resolve) => {
+      let seen = 0;
+      const timer = setInterval(() => {
+        const frame = mcpRequests(rawA)[seen];
+        if (!frame) return;
+        seen += 1;
+        writeFrame(rawA.socket, {
+          type: "mcp-response",
+          id: frame.id,
+          status: seen === 1 ? 42 : 200,
+          headers: seen === 1 ? {} : { "x-bad header": "v" },
+          body: "{}",
+        });
+        if (seen === 2) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 10);
+    });
+    const badStatus = await call();
+    expect(badStatus.status).toBe(502);
+    expect(JSON.parse(badStatus.body)).toEqual({ error: "fan_down_failed" });
+    const badHeader = await call();
+    expect(badHeader.status).toBe(502);
+    expect(JSON.parse(badHeader.body)).toEqual({ error: "fan_down_failed" });
+    await answered;
+    await settle();
+    const receipts = usage.query({ tenant: "tenant-a" }).filter((row) => row.phase === "receipt");
+    expect(receipts.map((row) => [row.outcome, row.reason])).toEqual([
+      ["failed", "invalid_status"],
+      ["failed", "relay_write_failed"],
+    ]);
+    const payload = JSON.parse((await usageGet(harness.edge.northboundUrl, jwtA)).body);
+    expect(payload.reconciliation.summary).toMatchObject({ settled: 2, missing: 0, uncertain: 0 });
+  });
+
+  it("keeps the verdict when the ledger throws, and says so", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    closers.push(() => errors.mockRestore());
+    const usage = {
+      record() { throw new Error("disk full"); },
+      query() { return []; },
+      stats() { return { size: 0, dropped: 0, maxRecords: 1 }; },
+    };
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS, usage });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha", tenant: "tenant-b" },
+    });
+    expect(denied.status).toBe(403);
+    expect(JSON.parse(denied.body)).toEqual({ error: "not_entitled" });
+    const allowed = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(allowed.status).toBe(200);
+    // An unmatched response frame must not crash the process either.
+    writeFrame(rawA.socket, { type: "mcp-response", id: "ghost", status: 200, headers: {}, body: "{}" });
+    await settle();
+    expect(harness.edge.agentIds).toEqual(["tenant-a"]);
+    expect(errors.mock.calls.some(([line]) => String(line).includes("usage record failed"))).toBe(true);
+    expect(errors.mock.calls.every(([line]) => !String(line).includes("disk full"))).toBe(true);
+  });
+
+  it("answers 500 instead of crashing when the usage read surface fails", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    closers.push(() => errors.mockRestore());
+    const usage = {
+      record() {},
+      query() { return []; },
+      stats() { throw new Error("stats broke"); },
+    };
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS, usage });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const res = await usageGet(harness.edge.northboundUrl, jwtA);
+    expect(res.status).toBe(500);
+    expect(res.body).not.toContain("stats broke");
+    expect((await usageGet(harness.edge.northboundUrl, jwtA)).status).toBe(500);
   });
 
   it("keeps the v2.12.0 path when quotas and usage are omitted", async () => {

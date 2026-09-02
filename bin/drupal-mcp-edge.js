@@ -37,7 +37,8 @@
  *                     (or config relay.usage.maxRecords). Every decision and
  *                     receipt is recorded per tenant and principal, and
  *                     GET /usage serves the caller's own tenant partition.
- *                     Unset: nothing is recorded and /usage is 404.
+ *                     Unset: nothing is recorded and /usage is 404. Set but
+ *                     unreadable: fatal.
  *
  * Config: auth.grants (client id -> [site names]) is mandatory; the edge
  * refuses to start without it. Optional auth.tenantGrants (client id ->
@@ -49,7 +50,8 @@
  * is the W&L-operated dual-control ledger; the edge fans eligible bundles
  * to the tenant agent and requires a matching local attestation. Optional
  * auth.quotas (tenant / principal request windows plus an abuse lock)
- * fails closed at the edge with zero frames on any refusal.
+ * fails closed at the edge with zero frames on any refusal; a table the
+ * edge cannot read refuses startup.
  */
 
 import { readFileSync } from "node:fs";
@@ -145,12 +147,26 @@ const rateLimit = rateLimitEnv === undefined || rateLimitEnv === ""
   : Number(rateLimitEnv);
 
 // Usage ledger (#256): opt-in, in-process, bounded. A restart clears it.
-const usageMaxRecords = Number(
-  process.env.MCP_EDGE_USAGE_MAX_RECORDS || config.relay?.usage?.maxRecords || 0,
-);
-const usage = Number.isInteger(usageMaxRecords) && usageMaxRecords > 0
-  ? createUsageLedger({ maxRecords: usageMaxRecords })
-  : null;
+// A value that is set but unreadable is fatal: the operator asked for
+// metering, and silently running without it would be a lie.
+const usageEnv = process.env.MCP_EDGE_USAGE_MAX_RECORDS;
+const usageRaw = usageEnv !== undefined && usageEnv !== ""
+  ? usageEnv
+  : config.relay?.usage?.maxRecords;
+let usageMaxRecords = 0;
+if (usageRaw !== undefined && usageRaw !== null) {
+  const parsed = typeof usageRaw === "string" && /^[0-9]+$/.test(usageRaw.trim())
+    ? Number(usageRaw.trim())
+    : usageRaw;
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    fatal(
+      "MCP_EDGE_USAGE_MAX_RECORDS (or relay.usage.maxRecords) must be a positive "
+      + `integer; got ${JSON.stringify(usageRaw)}. Unset it to run without the usage ledger.`,
+    );
+  }
+  usageMaxRecords = parsed;
+}
+const usage = usageMaxRecords > 0 ? createUsageLedger({ maxRecords: usageMaxRecords }) : null;
 const quotas = getInboundQuotas();
 
 let edge;
