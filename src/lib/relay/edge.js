@@ -1,7 +1,8 @@
 /**
- * Relay northbound edge (#232, #242, #244, #247, #250, #253) — DEV-294 AC4,
- * DEV-122 isolation, DEV-124 tenant routing, DEV-123 actor mapping, DEV-125
- * policy digest and W&L-operated bundle promotion.
+ * Relay northbound edge (#232, #242, #244, #247, #250, #253, #256) — DEV-294
+ * AC4, DEV-122 isolation, DEV-124 tenant routing, DEV-123 actor mapping,
+ * DEV-125 policy digest and W&L-operated bundle promotion, DEV-126
+ * attributable usage, quotas, and abuse signals.
  *
  * Terminates northbound MCP over the OAuth resource server and fans requests
  * down outbound tenant-agent channels. The edge proposes; the tenant-side
@@ -27,6 +28,11 @@
  *     no `Mcp-Session-Id` crosses in either direction.
  *   - Revocation is per-request with no grace window, for both credential
  *     kinds (northbound principal, agent channel).
+ *   - Metering is optional and fail-closed. With a `usage` ledger every
+ *     decision and receipt is recorded against the grant-resolved tenant and
+ *     the validated principal; with `auth.quotas` a tenant or principal
+ *     without a row, an exhausted window, or a locked principal is refused
+ *     with zero frames. `GET /usage` serves one tenant partition only.
  */
 
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
@@ -36,7 +42,11 @@ import { createServer as createHttpsServer } from "node:https";
 import { createServer as createNetServer } from "node:net";
 import { createServer as createTlsServer } from "node:tls";
 import { createLocalRelay } from "../contracts/relay.js";
-import { createInboundHttpsAuth, SPOOFABLE_IDENTITY_HEADERS } from "../http-auth.js";
+import {
+  createInboundHttpsAuth,
+  formatWwwAuthenticate,
+  SPOOFABLE_IDENTITY_HEADERS,
+} from "../http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../http-handler.js";
 import { isWriteLikeCall } from "../operations.js";
 import {
@@ -46,6 +56,13 @@ import {
   resolveEligiblePromotion,
 } from "../policy-promotion.js";
 import { DIAGNOSTIC_TOOLS, resolveActor, resolveGrantedSites, resolvePolicy } from "../principal.js";
+import {
+  attributedTenant,
+  createQuotaGate,
+  readUsage,
+  reconcileUsage,
+  usagePrincipalKey,
+} from "../usage.js";
 import {
   attachFramer,
   createRequestBroker,
@@ -92,6 +109,9 @@ const SITE_CREDENTIAL_KEYS = Object.freeze([
 ]);
 
 const DEFAULT_FAN_DOWN_TIMEOUT_MS = 10_000;
+
+/** Post-authentication refusals that count toward a principal's abuse lock. */
+const ABUSE_SIGNAL_ERRORS = new Set(["not_entitled", "quota_exceeded"]);
 
 /**
  * Normalize a channel-record `sites` list. Empty / missing means unscoped
@@ -458,9 +478,14 @@ function assertBindAllowed(role, host, hasTls) {
   }
 }
 
-function jsonResponse(res, status, body) {
-  res.writeHead(status, { "content-type": "application/json" })
+function jsonResponse(res, status, body, headers = {}) {
+  res.writeHead(status, { ...headers, "content-type": "application/json" })
     .end(JSON.stringify(body));
+}
+
+function byteLength(value) {
+  if (value === null || value === undefined) return 0;
+  return Buffer.byteLength(typeof value === "string" ? value : JSON.stringify(value), "utf8");
 }
 
 /**
@@ -489,6 +514,14 @@ function jsonResponse(res, status, body) {
  * @param {number} [options.agentPort] Agent channel port (0 = ephemeral).
  * @param {{cert: string|Buffer, key: string|Buffer}} [options.tls]
  * @param {boolean} [options.allowHttpLoopback] Permit plain listeners on loopback.
+ * @param {object|null} [options.quotas] Optional `auth.quotas` (tenant /
+ *   principal windows plus an abuse lock). When present, a tenant or
+ *   principal without a row is refused; exhausted windows and locked
+ *   principals are refused with `Retry-After`. Zero frames on any refusal.
+ * @param {?object} [options.usage] Optional usage ledger (usage.js). When
+ *   present, every decision and receipt is recorded and `GET /usage` serves
+ *   the caller's tenant partition. Omit to record nothing (404 on /usage).
+ * @param {() => number} [options.now] Clock for quotas and cost signals.
  * @param {?object} [options.rateLimiter] Optional rate limiter (rate-limit.js).
  * @param {number} [options.fanDownTimeoutMs]
  * @param {typeof fetch} [options.fetchFn] Issuer discovery/JWKS fetch.
@@ -511,6 +544,9 @@ export async function startEdge({
   agentPort = 0,
   tls = null,
   allowHttpLoopback = false,
+  quotas = null,
+  usage = null,
+  now = () => Date.now(),
   rateLimiter = null,
   fanDownTimeoutMs = DEFAULT_FAN_DOWN_TIMEOUT_MS,
   fetchFn = fetch,
@@ -541,6 +577,8 @@ export async function startEdge({
     ? promotions
     : null;
   const promoRequired = promotionsRequired(promotionTable);
+  const quotaGate = createQuotaGate({ quotas, now });
+  const usageLedger = usage && typeof usage.record === "function" ? usage : null;
   if (typeof channelCredentials?.lookup !== "function") {
     throw new EdgeStartupError(
       "Relay edge requires an agent channel credential store; without one no "
@@ -637,7 +675,24 @@ export async function startEdge({
         return;
       }
       if (frame.type === "mcp-response") {
-        broker.settle(frame, { owner: agentId });
+        const settled = broker.settle(frame, { owner: agentId });
+        if (!settled && usageLedger) {
+          // A response nobody is waiting for: late, repeated, fabricated, or
+          // injected from another tenant's tunnel. Recorded against the
+          // sending tunnel so reconciliation and abuse signals can see it.
+          usageLedger.record({
+            phase: "receipt",
+            requestId: typeof frame.id === "string" && frame.id ? frame.id : null,
+            decisionId: null,
+            tenant: agentId,
+            principalKey: null,
+            outcome: "unknown",
+            reason: "unmatched_receipt",
+            status: Number.isInteger(frame.status) ? frame.status : null,
+            bytesOut: byteLength(frame.body),
+            durationMs: null,
+          });
+        }
         return;
       }
       // Any other frame type on the agent channel is a protocol violation.
@@ -661,11 +716,52 @@ export async function startEdge({
       return;
     }
 
+    // Attribution context (#256): who this is, which tenant the grant names,
+    // and what it cost. Stamped on every decision, allow or deny. Caller
+    // fields never reach it — the identity object and grant tables do.
+    const startedAt = now();
+    const isCall = body?.method === "tools/call";
+    const toolName = isCall && typeof body?.params?.name === "string" && body.params.name.trim()
+      ? body.params.name.trim()
+      : null;
+    const principalKey = usagePrincipalKey(identity);
+    const principal = Object.freeze({
+      clientId: identity.clientId ?? null,
+      sub: identity.sub ?? null,
+    });
+    const bytesIn = byteLength(body);
+    let usageTenant = attributedTenant(identity, tenantGrantTable);
+    let policyDigest = null;
+
+    function refuse(status, error, { scope = null, retryAfterSec = 0, extra = {} } = {}) {
+      if (ABUSE_SIGNAL_ERRORS.has(error)) quotaGate.noteDenial(principalKey);
+      usageLedger?.record({
+        phase: "decision",
+        decision: "deny",
+        reason: error,
+        requestId: null,
+        tenant: usageTenant,
+        principal,
+        principalKey,
+        method: body?.method ?? null,
+        tool: toolName,
+        policyDigest,
+        units: 1,
+        bytesIn,
+      });
+      jsonResponse(
+        res,
+        status,
+        { error, ...(scope ? { scope } : {}), ...extra },
+        retryAfterSec > 0 ? { "Retry-After": String(retryAfterSec) } : {},
+      );
+    }
+
     // Entitlement at the seam, before anything about the tenant is revealed:
     // an unlisted client learns nothing, not even whether an agent exists.
     const granted = resolveGrantedSites(identity, catalog, grantTable);
     if (!granted.length) {
-      jsonResponse(res, 403, { error: "not_entitled" });
+      refuse(403, "not_entitled");
       return;
     }
     const args = body?.params?.arguments ?? {};
@@ -673,34 +769,31 @@ export async function startEdge({
     const siteArgs = { ...args };
     delete siteArgs.tenant;
     let targetName = null;
-    if (body?.method === "tools/call") {
+    if (isCall) {
       try {
         targetName = targetRelay.resolve(identity, siteArgs).name;
       } catch {
-        jsonResponse(res, 403, { error: "not_entitled" });
+        refuse(403, "not_entitled");
         return;
       }
     }
 
     const mapped = resolveActor({ identity, actors: actorTable });
     const boundPolicy = resolvePolicy({ identity, policies: policyTable });
-    const isCall = body?.method === "tools/call";
-    const toolName = isCall && typeof body?.params?.name === "string" && body.params.name.trim()
-      ? body.params.name.trim()
-      : null;
+    policyDigest = boundPolicy.policy ?? null;
     if (mapped.required && mapped.reason && isCall && (!toolName || isWriteLikeCall(toolName, args))) {
-      jsonResponse(res, 403, { error: "not_entitled" });
+      refuse(403, "not_entitled");
       return;
     }
     const policyCall = isCall && (!toolName || !DIAGNOSTIC_TOOLS.has(toolName));
     if (
       boundPolicy.required && boundPolicy.reason && policyCall
     ) {
-      jsonResponse(res, 403, { error: "not_entitled" });
+      refuse(403, "not_entitled");
       return;
     }
     if (promoRequired && policyCall && !boundPolicy.policy) {
-      jsonResponse(res, 403, { error: "not_entitled" });
+      refuse(403, "not_entitled");
       return;
     }
 
@@ -712,6 +805,23 @@ export async function startEdge({
       targetName,
       sessions: [...sessions.values()],
     });
+    if (selected.tenant) usageTenant = selected.tenant;
+    if (!selected.session && selected.reason === "not_entitled") {
+      refuse(403, "not_entitled");
+      return;
+    }
+    // Quota boundary (#256): the tenant is now grant-resolved. Every request
+    // reaching this line counts; a tenant or principal without a row, an
+    // exhausted window, or a locked principal is refused with zero frames.
+    const verdict = quotaGate.check({ tenant: selected.tenant, principalKey });
+    if (!verdict.allowed) {
+      const unassigned = verdict.reason === "not_entitled";
+      refuse(unassigned ? 403 : 429, verdict.reason, {
+        scope: unassigned ? null : verdict.scope,
+        retryAfterSec: verdict.retryAfterSec,
+      });
+      return;
+    }
     if (promoRequired && policyCall) {
       const promo = resolveEligiblePromotion({
         digest: boundPolicy.policy,
@@ -719,25 +829,22 @@ export async function startEdge({
       });
       const attested = selected.session?.attestedDigests;
       if (!promo.eligible || !attested || !attested.has(boundPolicy.policy)) {
-        jsonResponse(res, 403, { error: "not_entitled" });
+        refuse(403, "not_entitled");
         return;
       }
     }
     if (!selected.session) {
-      const entitled = selected.reason === "not_entitled";
-      jsonResponse(res, entitled ? 403 : 503, {
-        error: entitled ? "not_entitled" : "no_agent",
-      });
+      refuse(503, "no_agent");
       return;
     }
     const record = channelCredentials.lookup(selected.session.token);
     if (!record || record.revoked) {
-      jsonResponse(res, 403, { error: "revoked", bound: EDGE_REVOCATION_BOUND.name });
+      refuse(403, "revoked", { extra: { bound: EDGE_REVOCATION_BOUND.name } });
       return;
     }
     if (siteBindingKey(record.sites) !== siteBindingKey(selected.session.sites)) {
       selected.session.socket.destroy();
-      jsonResponse(res, 503, { error: "no_agent" });
+      refuse(503, "no_agent");
       return;
     }
 
@@ -769,23 +876,118 @@ export async function startEdge({
     });
     if (!wrote) {
       broker.settle({ id, status: 503 }, { owner: selected.session.agentId });
-      jsonResponse(res, 503, { error: "no_agent" });
+      refuse(503, "no_agent");
       return;
+    }
+    const decisionRecord = usageLedger?.record({
+      phase: "decision",
+      decision: "allow",
+      reason: null,
+      requestId: id,
+      tenant: selected.tenant,
+      principal,
+      principalKey,
+      method: body?.method ?? null,
+      tool: toolName,
+      target: selected.target ?? null,
+      actor: mapped.actor ?? null,
+      policyDigest,
+      units: 1,
+      bytesIn,
+    }) ?? null;
+
+    function receipt(fields) {
+      usageLedger?.record({
+        phase: "receipt",
+        requestId: id,
+        decisionId: decisionRecord?.decisionId ?? null,
+        tenant: selected.tenant,
+        principalKey,
+        durationMs: Math.max(0, now() - startedAt),
+        ...fields,
+      });
     }
 
     let result;
     try {
       result = await waited;
     } catch {
+      // The frame crossed; no settled response came back. The tenant may
+      // have executed it — reconciliation names this chain uncertain.
+      receipt({ outcome: "unknown", reason: "fan_down_failed", status: null, bytesOut: 0 });
       jsonResponse(res, 502, { error: "fan_down_failed" });
       return;
     }
+    const status = result.status || 200;
+    receipt({
+      outcome: status >= 500 ? "failed" : "ok",
+      reason: null,
+      status,
+      bytesOut: byteLength(result.body),
+    });
     const headers = Object.fromEntries(
       Object.entries(forwardHeaders(result.headers ?? {}))
         .filter(([name]) => String(name).toLowerCase() !== "mcp-session-id"),
     );
-    res.writeHead(result.status || 200, headers);
+    res.writeHead(status, headers);
     res.end(result.body ?? "");
+  }
+
+  /**
+   * `GET /usage` — the caller's own tenant partition (#256). Authenticated
+   * on the same resource server as `/mcp`; the tenant comes from
+   * `auth.tenantGrants`, a `tenant` query value is a confirming hint, and
+   * any other tenant is `not_entitled` with no records. 404 without a ledger.
+   */
+  async function serveUsage(req, res) {
+    if (!usageLedger) {
+      res.writeHead(404).end("Not found");
+      return;
+    }
+    if (req.method !== "GET") {
+      res.writeHead(405, { Allow: "GET" }).end("Method Not Allowed");
+      return;
+    }
+    if (rateLimiter) {
+      const verdict = rateLimiter.check(req.socket?.remoteAddress || "unknown");
+      if (!verdict.allowed) {
+        res.writeHead(429, { "Retry-After": String(verdict.retryAfterSec) }).end("Too Many Requests");
+        return;
+      }
+    }
+    let auth;
+    try {
+      auth = await inbound.authenticate(req);
+    } catch {
+      res.writeHead(401, {
+        "WWW-Authenticate": formatWwwAuthenticate({
+          error: "invalid_token",
+          errorDescription: "Token validation failed",
+        }),
+      }).end("Unauthorized");
+      return;
+    }
+    if (!auth.ok) {
+      res.writeHead(auth.status, auth.headers).end(auth.body);
+      return;
+    }
+    const query = new URL(String(req.url || "/usage"), "http://edge.invalid").searchParams;
+    const read = readUsage({
+      identity: auth.identity,
+      tenantGrants: tenantGrantTable,
+      tenant: query.get("tenant"),
+      principalKey: query.get("principal"),
+      ledger: usageLedger,
+    });
+    if (!read.ok) {
+      jsonResponse(res, 403, { error: "not_entitled" });
+      return;
+    }
+    jsonResponse(res, 200, {
+      tenant: read.tenant,
+      records: read.records,
+      reconciliation: reconcileUsage(read.records, { dropped: usageLedger.stats().dropped }),
+    });
   }
 
   const requestHandler = createMcpRequestHandler({
@@ -804,9 +1006,16 @@ export async function startEdge({
     rateLimiter,
   });
 
+  function northbound(req, res) {
+    if (String(req.url || "").split("?")[0] === "/usage") {
+      void serveUsage(req, res);
+      return;
+    }
+    void requestHandler(req, res);
+  }
   const northServer = hasTls
-    ? createHttpsServer(tls, (req, res) => { void requestHandler(req, res); })
-    : createHttpServer((req, res) => { void requestHandler(req, res); });
+    ? createHttpsServer(tls, northbound)
+    : createHttpServer(northbound);
 
   const channelAddr = await listen(channelServer, agentBindHost, agentPort, "edge-agent-channel");
   const northAddr = await listen(northServer, bindHost, port, "edge-northbound");

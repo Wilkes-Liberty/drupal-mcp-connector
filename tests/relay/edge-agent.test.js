@@ -28,6 +28,7 @@ import {
 } from "../../src/lib/relay/edge.js";
 import { createLocalPolicyEnforcement } from "../../src/lib/policy-enforcement.js";
 import { createRelayAgent } from "../../src/lib/relay/agent.js";
+import { createUsageLedger, reconcileUsage } from "../../src/lib/usage.js";
 import {
   AUDIENCE,
   ISSUER,
@@ -166,7 +167,9 @@ async function startRealAgent(harness, {
   return { agent, tenant };
 }
 
-async function startTwoTenantHarness({ tenantGrants, grants, actors, policies, promotions } = {}) {
+async function startTwoTenantHarness({
+  tenantGrants, grants, actors, policies, promotions, quotas, usage, fanDownTimeoutMs, now,
+} = {}) {
   const channel = createChannelFile();
   const tokenA = `channel-a-${randomBytes(24).toString("hex")}`;
   const tokenB = `channel-b-${randomBytes(24).toString("hex")}`;
@@ -183,6 +186,10 @@ async function startTwoTenantHarness({ tenantGrants, grants, actors, policies, p
     ...(actors ? { actors } : {}),
     ...(policies ? { policies } : {}),
     ...(promotions ? { promotions } : {}),
+    ...(quotas ? { quotas } : {}),
+    ...(usage ? { usage } : {}),
+    ...(fanDownTimeoutMs ? { fanDownTimeoutMs } : {}),
+    ...(now ? { now } : {}),
   }));
   closers.push(() => edge.close());
   return { edge, channel, tokenA, tokenB, ledger };
@@ -1660,3 +1667,358 @@ describe("W&L-operated bundle promotion (#253 / DEV-125)", () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+
+/** Authenticated northbound GET against the edge's usage surface. */
+function usageGet(url, jwt, query = {}) {
+  const target = new URL(url);
+  const search = new URLSearchParams(query).toString();
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({
+      hostname: target.hostname,
+      port: target.port,
+      path: `/usage${search ? `?${search}` : ""}`,
+      method: "GET",
+      headers: jwt ? { authorization: `Bearer ${jwt}` } : {},
+    }, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+describe("attributable usage, quotas, and abuse signals (#256 / DEV-126)", () => {
+  function mcpRequests(raw) {
+    return raw.frames.filter((frame) => frame.type === "mcp-request");
+  }
+
+  it("records a decision and receipt chain that matches the framed correlation", async () => {
+    const usage = createUsageLedger();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: POLICIES,
+      usage,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(res.status).toBe(200);
+    await settle();
+    const frame = mcpRequests(rawA)[0];
+    const records = usage.records();
+    expect(records.map((row) => row.phase)).toEqual(["decision", "receipt"]);
+    const [decision, receipt] = records;
+    expect(decision).toMatchObject({
+      decision: "allow",
+      reason: null,
+      requestId: frame.correlation.requestId,
+      tenant: "tenant-a",
+      principal: { clientId: "client-a", sub: "sub-a" },
+      principalKey: "sub-a",
+      method: "tools/call",
+      tool: "drupal_list_nodes",
+      policyDigest: POLICIES["client-a"],
+      units: 1,
+    });
+    expect(decision.bytesIn).toBeGreaterThan(0);
+    expect(receipt).toMatchObject({
+      requestId: frame.correlation.requestId,
+      decisionId: decision.decisionId,
+      tenant: "tenant-a",
+      principalKey: "sub-a",
+      outcome: "ok",
+      status: 200,
+    });
+    expect(receipt.bytesOut).toBeGreaterThan(0);
+    expect(receipt.durationMs).toBeGreaterThanOrEqual(0);
+    expect(reconcileUsage(records).summary).toMatchObject({
+      settled: 1, denied: 0, missing: 0, duplicate: 0, uncertain: 0, truncated: false,
+    });
+  });
+
+  it("records a cross-tenant denial against the principal's granted tenant with zero frames", async () => {
+    const usage = createUsageLedger();
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS, usage });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha", tenant: "tenant-b" },
+    });
+    expect(denied.status).toBe(403);
+    await settle();
+    expect(mcpRequests(rawA)).toEqual([]);
+    expect(mcpRequests(rawB)).toEqual([]);
+    const records = usage.records();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      phase: "decision",
+      decision: "deny",
+      reason: "not_entitled",
+      requestId: null,
+      tenant: "tenant-a",
+      principalKey: "sub-a",
+      tool: "drupal_list_nodes",
+    });
+    expect(usage.query({ tenant: "tenant-b" })).toEqual([]);
+  });
+
+  it("exhausts a tenant quota with 429 and Retry-After and zero frames on either tunnel", async () => {
+    const usage = createUsageLedger();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      usage,
+      quotas: {
+        tenants: { "tenant-a": { requests: 2, windowSec: 60 }, "tenant-b": { requests: 5 } },
+      },
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const call = () => modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect((await call()).status).toBe(200);
+    expect((await call()).status).toBe(200);
+    const third = await call();
+    expect(third.status).toBe(429);
+    expect(JSON.parse(third.body)).toEqual({ error: "quota_exceeded", scope: "tenant" });
+    expect(Number(third.headers["retry-after"])).toBeGreaterThan(0);
+    expect(Number(third.headers["retry-after"])).toBeLessThanOrEqual(60);
+    await settle();
+    expect(mcpRequests(rawA)).toHaveLength(2);
+    expect(mcpRequests(rawB)).toEqual([]);
+
+    const jwtB = await issuer.signToken({ clientId: "client-b", sub: "sub-b" });
+    const other = await modernCall(harness.edge.northboundUrl, jwtB, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-beta" },
+    });
+    expect(other.status).toBe(200);
+
+    const denials = usage.query({ tenant: "tenant-a" })
+      .filter((row) => row.phase === "decision" && row.decision === "deny");
+    expect(denials).toHaveLength(1);
+    expect(denials[0]).toMatchObject({ reason: "quota_exceeded", principalKey: "sub-a" });
+  });
+
+  it("refuses a tenant without a quota row when the tenants table is present", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      quotas: { tenants: { "tenant-b": { requests: 5 } } },
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(denied.status).toBe(403);
+    expect(JSON.parse(denied.body)).toEqual({ error: "not_entitled" });
+    await settle();
+    expect(mcpRequests(rawA)).toEqual([]);
+    const jwtB = await issuer.signToken({ clientId: "client-b", sub: "sub-b" });
+    const ok = await modernCall(harness.edge.northboundUrl, jwtB, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-beta" },
+    });
+    expect(ok.status).toBe(200);
+    await settle();
+    expect(mcpRequests(rawB)).toHaveLength(1);
+  });
+
+  it("keeps principal quotas apart inside one tenant", async () => {
+    const usage = createUsageLedger();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      usage,
+      quotas: { principals: { "sub-a1": { requests: 1 }, "sub-a2": { requests: 1 } } },
+    });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA1 = await issuer.signToken({ clientId: "client-a", sub: "sub-a1" });
+    const jwtA2 = await issuer.signToken({ clientId: "client-a", sub: "sub-a2" });
+    const call = (jwt) => modernCall(harness.edge.northboundUrl, jwt, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect((await call(jwtA1)).status).toBe(200);
+    const second = await call(jwtA1);
+    expect(second.status).toBe(429);
+    expect(JSON.parse(second.body)).toEqual({ error: "quota_exceeded", scope: "principal" });
+    expect((await call(jwtA2)).status).toBe(200);
+    await settle();
+    expect(usage.query({ tenant: "tenant-a", principalKey: "sub-a1" }).map((row) => row.phase))
+      .toEqual(["decision", "receipt", "decision"]);
+    expect(usage.query({ tenant: "tenant-a", principalKey: "sub-a2" }).map((row) => row.phase))
+      .toEqual(["decision", "receipt"]);
+  });
+
+  it("locks a principal after repeated denials and releases when the lock expires", async () => {
+    let t = Date.now();
+    const usage = createUsageLedger({ now: () => t });
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      usage,
+      quotas: { abuse: { denials: 2, windowSec: 60, lockSec: 30 } },
+      now: () => t,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const crossTenant = () => modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha", tenant: "tenant-b" },
+    });
+    const valid = () => modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect((await crossTenant()).status).toBe(403);
+    expect((await crossTenant()).status).toBe(403);
+    const locked = await valid();
+    expect(locked.status).toBe(429);
+    expect(JSON.parse(locked.body)).toEqual({ error: "abuse_locked", scope: "abuse" });
+    expect(locked.headers["retry-after"]).toBe("30");
+    await settle();
+    expect(mcpRequests(rawA)).toEqual([]);
+
+    const jwtB = await issuer.signToken({ clientId: "client-b", sub: "sub-b" });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const unaffected = await modernCall(harness.edge.northboundUrl, jwtB, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-beta" },
+    });
+    expect(unaffected.status).toBe(200);
+    await settle();
+    expect(mcpRequests(rawB)).toHaveLength(1);
+
+    t += 30_000;
+    expect((await valid()).status).toBe(200);
+    await settle();
+    expect(mcpRequests(rawA)).toHaveLength(1);
+    const reasons = usage.query({ tenant: "tenant-a", principalKey: "sub-a" })
+      .filter((row) => row.phase === "decision")
+      .map((row) => row.reason);
+    expect(reasons).toEqual(["not_entitled", "not_entitled", "abuse_locked", null]);
+  });
+
+  it("denies cross-tenant usage reads and serves only the caller's partition", async () => {
+    const usage = createUsageLedger();
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS, usage });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const jwtB = await issuer.signToken({ clientId: "client-b", sub: "sub-b" });
+    expect((await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes", args: { site: "tenant-alpha" },
+    })).status).toBe(200);
+    expect((await modernCall(harness.edge.northboundUrl, jwtB, {
+      name: "drupal_list_nodes", args: { site: "tenant-beta" },
+    })).status).toBe(200);
+    await settle();
+
+    const crossed = await usageGet(harness.edge.northboundUrl, jwtB, { tenant: "tenant-a" });
+    expect(crossed.status).toBe(403);
+    expect(JSON.parse(crossed.body)).toEqual({ error: "not_entitled" });
+    expect(crossed.body).not.toContain("records");
+
+    const own = await usageGet(harness.edge.northboundUrl, jwtB);
+    expect(own.status).toBe(200);
+    const payload = JSON.parse(own.body);
+    expect(payload.tenant).toBe("tenant-b");
+    expect(payload.records.map((row) => row.phase)).toEqual(["decision", "receipt"]);
+    expect(payload.records.every((row) => row.tenant === "tenant-b")).toBe(true);
+    expect(own.body).not.toContain("tenant-a");
+    expect(own.body).not.toContain("sub-a");
+    expect(payload.reconciliation.summary).toMatchObject({ settled: 1, total: 1 });
+
+    const anonymous = await usageGet(harness.edge.northboundUrl, null);
+    expect(anonymous.status).toBe(401);
+    const unlisted = await usageGet(
+      harness.edge.northboundUrl,
+      await issuer.signToken({ clientId: "client-x", sub: "sub-x" }),
+    );
+    expect(unlisted.status).toBe(403);
+    expect(JSON.parse(unlisted.body)).toEqual({ error: "not_entitled" });
+  });
+
+  it("names uncertain, duplicate, and orphan chains in the tenant's reconciliation", async () => {
+    const usage = createUsageLedger();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      usage,
+      fanDownTimeoutMs: 200,
+    });
+    const silent = await connectRawAgent({
+      port: harness.edge.agentPort, token: harness.tokenA, autoReply: false,
+    });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const call = () => modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    const timedOut = await call();
+    expect(timedOut.status).toBe(502);
+    expect(JSON.parse(timedOut.body)).toEqual({ error: "fan_down_failed" });
+    const lostId = mcpRequests(silent)[0].id;
+    silent.socket.destroy();
+    await settle();
+
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    expect((await call()).status).toBe(200);
+    await settle();
+    const settledId = mcpRequests(rawA)[0].id;
+    // A late duplicate for the settled request, an orphan for a request that
+    // never existed, and a cross-tenant injection from tenant-b's tunnel.
+    writeFrame(rawA.socket, { type: "mcp-response", id: settledId, status: 200, headers: {}, body: "{}" });
+    writeFrame(rawA.socket, { type: "mcp-response", id: "ghost-request", status: 200, headers: {}, body: "{}" });
+    writeFrame(rawB.socket, { type: "mcp-response", id: settledId, status: 200, headers: {}, body: "{}" });
+    await settle();
+
+    const own = await usageGet(harness.edge.northboundUrl, jwtA);
+    expect(own.status).toBe(200);
+    const payload = JSON.parse(own.body);
+    const states = Object.fromEntries(
+      payload.reconciliation.findings.map((finding) => [finding.requestId, finding]),
+    );
+    expect(states[lostId]).toMatchObject({ state: "uncertain", reason: "fan_down_failed" });
+    expect(states[settledId]).toMatchObject({ state: "duplicate", reason: "duplicate_receipt" });
+    expect(states["ghost-request"]).toMatchObject({ state: "missing", reason: "decision_missing" });
+    expect(payload.reconciliation.summary).toMatchObject({
+      uncertain: 1, duplicate: 1, missing: 1, settled: 0, truncated: false,
+    });
+
+    const jwtB = await issuer.signToken({ clientId: "client-b", sub: "sub-b" });
+    const other = JSON.parse((await usageGet(harness.edge.northboundUrl, jwtB)).body);
+    expect(other.records.map((row) => [row.phase, row.reason])).toEqual([
+      ["receipt", "unmatched_receipt"],
+    ]);
+    expect(other.reconciliation.findings).toEqual([
+      { requestId: settledId, decisionId: null, state: "missing", reason: "decision_missing" },
+    ]);
+  });
+
+  it("keeps the v2.12.0 path when quotas and usage are omitted", async () => {
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    for (let i = 0; i < 3; i += 1) {
+      expect((await modernCall(harness.edge.northboundUrl, jwtA, {
+        name: "drupal_list_nodes", args: { site: "tenant-alpha" },
+      })).status).toBe(200);
+    }
+    await settle();
+    expect(mcpRequests(rawA)).toHaveLength(3);
+    expect((await usageGet(harness.edge.northboundUrl, jwtA)).status).toBe(404);
+  });
+});

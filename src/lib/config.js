@@ -308,6 +308,22 @@ export function getInboundPromotions() {
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
+/**
+ * Tenant / principal quota table plus abuse lock (`auth.quotas`).
+ * When present, the relay edge fails closed: a tenant or principal without
+ * a row is refused, exhausted windows and locked principals are refused.
+ * Row validation lives in usage.js (`normalizeQuotas`).
+ * @returns {object|null}
+ */
+export function getInboundQuotas() {
+  const quotas = loadConfig().auth?.quotas;
+  if (!quotas || typeof quotas !== "object" || Array.isArray(quotas)) return null;
+  const entries = Object.entries(quotas)
+    .map(([key, value]) => [key.trim(), value])
+    .filter(([key]) => key && !key.startsWith("_"));
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Auth headers — never logged, never exposed in tool responses
 // ---------------------------------------------------------------------------

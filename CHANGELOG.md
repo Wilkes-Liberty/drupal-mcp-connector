@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Attributable usage, quotas, and abuse signals on the relay edge (#256).**
+  Optional usage ledger (`MCP_EDGE_USAGE_MAX_RECORDS` / `relay.usage`)
+  records every edge decision (allow or deny) and every fan-down receipt
+  against the grant-resolved tenant and the validated principal, carrying
+  the frame's `requestId`, a `decisionId`, the bound `policyDigest`, and
+  measured cost signals (units, bytes, duration). Optional `auth.quotas`
+  (tenant / principal request windows plus an abuse lock) fails closed at
+  the edge: an unlisted tenant or principal is `not_entitled`, an exhausted
+  window is `429 quota_exceeded` with `Retry-After`, and a principal that
+  keeps earning refusals is `429 abuse_locked` — all with zero frames on any
+  tunnel. `GET /usage` serves the caller's own tenant partition (tenant from
+  `auth.tenantGrants`; any other tenant is `not_entitled` with no records)
+  with a reconciliation naming `missing`, `duplicate`, and `uncertain`
+  chains; unmatched response frames are recorded against the sending
+  tunnel. Omitting both keeps the 2.12.0 path. Lab/loopback only — measured
+  usage, not pricing, billing, a hosted metering sink, or a hosted-service
+  claim.
+
 ## [2.12.0] - 2026-09-02
 
 ### Security

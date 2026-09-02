@@ -156,6 +156,24 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
   missing attestation, or a digest mismatch is `not_entitled` with no
   fan-down. The edge never mints a Sentinel HMAC key. Omit to keep the
   digest-only path. Tenant self-service is not this table;
+- optional `auth.quotas` (`tenants` / `principals` rows of
+  `{ requests, windowSec }`, plus `abuse: { denials, windowSec, lockSec }`).
+  When a `tenants` or `principals` table names any id, a request for a
+  tenant or principal without a row is `not_entitled`; an exhausted window
+  is `429 quota_exceeded` with `Retry-After`; a principal that earns
+  `denials` post-authentication refusals inside `windowSec` is
+  `429 abuse_locked` for `lockSec`. Every refusal is zero frames on any
+  tunnel. Windows are per process and count every request that reaches the
+  quota boundary, allowed or not. Omit to keep the prior path;
+- optional usage ledger (`MCP_EDGE_USAGE_MAX_RECORDS` or
+  `relay.usage.maxRecords`, a positive integer). When set, every edge
+  decision (allow or deny) and every fan-down receipt is recorded against
+  the grant-resolved tenant and the validated principal (`sub`, then `azp`)
+  with the `requestId` the frame carries, a `decisionId`, the bound
+  `policyDigest`, and measured cost signals (units, bytes in / out,
+  duration). The ledger is in-process and bounded; a restart clears it and
+  reconciliation reports truncation. Unset, nothing is recorded and
+  `/usage` is 404;
 - an agent channel credential store (`MCP_CHANNEL_CREDENTIALS_FILE`, SHA-256
   digests only, hot-reloaded so revocation needs no restart). Each agent
   entry may name `sites`: catalog names that agent is allowed to serve.
@@ -188,6 +206,23 @@ tenant's in-flight request. Revocation of both the northbound principal and
 the agent channel is per-request with no grace window. Northbound is
 stateless MCP 2026-07-28; sessionful traffic is refused. This is still not a
 hosted-service claim and names no public hostname.
+
+**Usage reads.** With the ledger enabled, `GET /usage` on the northbound
+listener is authenticated on the same resource server as `/mcp` and answers
+the caller's own tenant partition: the tenant comes from `auth.tenantGrants`
+(a `tenant` query value is a confirming hint inside that grant, never
+authority; `principal` narrows to one principal key). Any other tenant, a
+principal with no tenant grant, a multi-tenant grant without a hint, or an
+install without `auth.tenantGrants` is `not_entitled` with no records. The
+response carries `records` and a `reconciliation` over that partition:
+`settled`, `denied`, `missing` (dispatch without receipt, or receipt without
+dispatch), `duplicate` (repeated decision or receipt for one `requestId`),
+and `uncertain` (fan-down timeout or channel loss after the frame crossed,
+or a receipt whose tenant or decision id disagrees with its decision).
+A response frame nobody is waiting for — late, repeated, fabricated, or
+injected from another tenant's tunnel — is recorded against the sending
+tunnel, so the injecting tenant's own reconciliation shows it. Usage is
+measured, not priced; billing and invoicing are not this surface.
 
 **The agent** dials out to the edge's channel port and never listens. It
 authenticates the channel with its own issued credential (`MCP_CHANNEL_TOKEN`
