@@ -35,12 +35,14 @@
  *
  * Config: auth.grants (client id -> [site names]) is mandatory; the edge
  * refuses to start without it. Optional auth.tenantGrants (client id ->
- * [tenant agent ids]) makes tenant routing grant-authoritative.
+ * [tenant agent ids]) makes tenant routing grant-authoritative. Optional
+ * auth.actors (sub / azp -> Drupal user UUID) maps the inbound principal
+ * to a Drupal actor for write-like tools.
  */
 
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { getInboundGrants, getInboundTenantGrants, getTlsConfig, loadConfig } from "../src/lib/config.js";
+import { getInboundActors, getInboundGrants, getInboundTenantGrants, getTlsConfig, loadConfig } from "../src/lib/config.js";
 import { resolveInboundAuthConfig } from "../src/lib/http-auth.js";
 import { createRateLimiter } from "../src/lib/rate-limit.js";
 import {
@@ -126,6 +128,7 @@ try {
     auth: inboundCfg,
     grants,
     tenantGrants: getInboundTenantGrants(),
+    actors: getInboundActors(),
     sites,
     defaultSite: config.defaultSite,
     channelCredentials: createChannelCredentialStore({ filePath: channelFile }),

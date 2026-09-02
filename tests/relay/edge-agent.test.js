@@ -159,7 +159,7 @@ async function startRealAgent(harness, { stub = null, token = harness.token, sit
   return { agent, tenant };
 }
 
-async function startTwoTenantHarness({ tenantGrants, grants } = {}) {
+async function startTwoTenantHarness({ tenantGrants, grants, actors } = {}) {
   const channel = createChannelFile();
   const tokenA = `channel-a-${randomBytes(24).toString("hex")}`;
   const tokenB = `channel-b-${randomBytes(24).toString("hex")}`;
@@ -173,6 +173,7 @@ async function startTwoTenantHarness({ tenantGrants, grants } = {}) {
     ledger,
     ...(grants ? { grants } : {}),
     ...(tenantGrants ? { tenantGrants } : {}),
+    ...(actors ? { actors } : {}),
   }));
   closers.push(() => edge.close());
   return { edge, channel, tokenA, tokenB, ledger };
@@ -1142,6 +1143,100 @@ describe("authoritative tenant routing (#244 / DEV-124)", () => {
     const request = rawA.frames.find((frame) => frame.type === "mcp-request");
     expect(request?.identity?.tenant).toBe("tenant-a");
     expect(rawB.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+  });
+});
+
+const ACTOR_A = "11111111-1111-4111-8111-111111111111";
+const ACTORS = {
+  "client-a": { uuid: ACTOR_A, delegators: ["operator-1"] },
+};
+
+describe("principal actor mapping (#247 / DEV-123)", () => {
+  it("stamps identity.actor from the grant and ignores a caller actor hint", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      actors: ACTORS,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_create_node",
+      args: { site: "tenant-alpha", actor: "99999999-9999-4999-8999-999999999999" },
+    });
+    expect(res.status).toBe(200);
+    await settle();
+    const request = rawA.frames.find((frame) => frame.type === "mcp-request");
+    expect(request.identity.actor).toBe(ACTOR_A);
+    expect(request.body?.params?.arguments?.actor).toBeUndefined();
+    expect(request.correlation.actor).toBe(ACTOR_A);
+    expect(JSON.stringify(request)).not.toContain(jwtA);
+  });
+
+  it("refuses an unmapped write with zero frames", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      actors: ACTORS,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtB = await issuer.signToken({ clientId: "client-b" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtB, {
+      name: "drupal_create_node",
+      args: { site: "tenant-beta" },
+    });
+    expect(denied.status).toBe(403);
+    expect(JSON.parse(denied.body)).toEqual({ error: "not_entitled" });
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+    expect(rawB.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+  });
+
+  it("refuses a disallowed act.sub on writes and stamps an allowlisted delegator", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      actors: ACTORS,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const stranger = await issuer.signToken({
+      clientId: "client-a",
+      claims: { act: { sub: "stranger" } },
+    });
+    const crossed = await modernCall(harness.edge.northboundUrl, stranger, {
+      name: "drupal_create_node",
+      args: { site: "tenant-alpha" },
+    });
+    expect(crossed.status).toBe(403);
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+
+    const delegated = await issuer.signToken({
+      clientId: "client-a",
+      claims: { act: { sub: "operator-1" } },
+    });
+    const res = await modernCall(harness.edge.northboundUrl, delegated, {
+      name: "drupal_create_node",
+      args: { site: "tenant-alpha", delegator: "forged" },
+    });
+    expect(res.status).toBe(200);
+    await settle();
+    const request = rawA.frames.find((frame) => frame.type === "mcp-request");
+    expect(request.identity.delegator).toBe("operator-1");
+    expect(request.body?.params?.arguments?.delegator).toBeUndefined();
+  });
+
+  it("does not require an actor when auth.actors is omitted", async () => {
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_create_node",
+      args: { site: "tenant-alpha" },
+    });
+    expect(res.status).toBe(200);
+    await settle();
+    const request = rawA.frames.find((frame) => frame.type === "mcp-request");
+    expect(request.identity.actor).toBeUndefined();
   });
 });
 

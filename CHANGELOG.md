@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **Principal → Drupal actor mapping on the relay edge (#247).** Optional
+  `auth.actors` maps inbound `sub` (then `azp`) to a Drupal user UUID. When
+  that table is present, write-like `tools/call` without a mapping is
+  `not_entitled` with no frames. The granted actor is stamped on
+  `identity.actor`; JWT `act.sub` is a confirming hint inside `delegators`
+  and becomes `identity.delegator`. Caller `actor` / `delegator` arguments
+  and spoofable identity headers are ignored and stripped from the framed
+  body. JSON:API writes attach `relationships.uid` from the grant. The
+  northbound JWT is never the southbound Drupal credential. Omitting
+  `actors` keeps writes on the site OAuth consumer's owner. Lab/loopback
+  only — not a live revision-uid or public-URL claim.
 - **Authoritative tenant routing on the relay edge (#244).** Optional
   `auth.tenantGrants` maps inbound client id to tenant agent ids. When that
   table is present, the edge selects the tenant from the grant (JWT `azp`),

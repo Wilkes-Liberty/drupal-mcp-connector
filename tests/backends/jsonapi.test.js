@@ -6,6 +6,7 @@ vi.mock("../../src/lib/drupal-fetch.js", () => ({
 import { drupalFetch, drupalUploadFile } from "../../src/lib/drupal-fetch.js";
 import { describe, it, expect } from "vitest";
 import { JsonApiBackend, isModeratedStatusError } from "../../src/lib/backends/jsonapi.js";
+import { runWithIdentity } from "../../src/lib/principal.js";
 
 function paramsOf(descriptor) {
   const b = new JsonApiBackend({ _name: "t", baseUrl: "https://x" });
@@ -217,6 +218,19 @@ describe("JsonApiBackend fetch methods", () => {
     expect(path).toBe("/jsonapi/node/article");
     expect(opts.method).toBe("POST");
     expect(JSON.parse(opts.body)).toEqual({ data: { type: "node--article", attributes: { title: "N", status: false } } });
+  });
+
+  it("createEntity binds uid from the grant-stamped actor and overwrites a caller uid", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({ data: { type: "node--article", id: "new", attributes: { title: "N" } } });
+    const actor = "11111111-1111-4111-8111-111111111111";
+    await runWithIdentity({ actor }, () => backend.createEntity({
+      entityType: "node",
+      bundle: "article",
+      attributes: { title: "N", status: false },
+      relationships: { uid: { data: { type: "user--user", id: "99999999-9999-4999-8999-999999999999" } } },
+    }));
+    const body = JSON.parse(vi.mocked(drupalFetch).mock.calls[0][2].body);
+    expect(body.data.relationships.uid).toEqual({ data: { type: "user--user", id: actor } });
   });
 
   it("updateEntity PATCHes a JSON:API payload with id in the body", async () => {

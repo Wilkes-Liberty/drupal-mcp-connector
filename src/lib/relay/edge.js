@@ -1,6 +1,6 @@
 /**
- * Relay northbound edge (#232, #242, #244) — DEV-294 AC4, DEV-122 isolation,
- * DEV-124 tenant routing.
+ * Relay northbound edge (#232, #242, #244, #247) — DEV-294 AC4, DEV-122
+ * isolation, DEV-124 tenant routing, DEV-123 actor mapping.
  *
  * Terminates northbound MCP over the OAuth resource server and fans requests
  * down outbound tenant-agent channels. The edge proposes; the tenant-side
@@ -37,7 +37,8 @@ import { createServer as createTlsServer } from "node:tls";
 import { createLocalRelay } from "../contracts/relay.js";
 import { createInboundHttpsAuth, SPOOFABLE_IDENTITY_HEADERS } from "../http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../http-handler.js";
-import { resolveGrantedSites } from "../principal.js";
+import { isWriteLikeTool } from "../operations.js";
+import { resolveActor, resolveGrantedSites } from "../principal.js";
 import {
   attachFramer,
   createRequestBroker,
@@ -271,17 +272,28 @@ function callerTenantHint(args = {}) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function stripTenantHint(body) {
+const CALLER_HINT_KEYS = Object.freeze(["tenant", "actor", "delegator"]);
+
+function stripCallerHints(body) {
   const args = body?.params?.arguments;
   if (!args || typeof args !== "object" || Array.isArray(args)) return body;
-  if (!Object.prototype.hasOwnProperty.call(args, "tenant")) return body;
-  const nextArgs = { ...args };
-  delete nextArgs.tenant;
-  return { ...body, params: { ...body.params, arguments: nextArgs } };
+  const bag = new Map(Object.entries(args));
+  let changed = false;
+  for (const key of CALLER_HINT_KEYS) {
+    if (bag.has(key)) {
+      bag.delete(key);
+      changed = true;
+    }
+  }
+  if (!changed) return body;
+  return { ...body, params: { ...body.params, arguments: Object.fromEntries(bag) } };
 }
 
-function identityWithTenant(identity, tenant) {
-  return Object.freeze({ ...identity, tenant });
+function identityWithGrant(identity, { tenant, actor = null, delegator = null }) {
+  const next = { ...identity, tenant };
+  if (actor) next.actor = actor;
+  if (delegator) next.delegator = delegator;
+  return Object.freeze(next);
 }
 
 /**
@@ -451,6 +463,9 @@ function jsonResponse(res, status, body) {
  * @param {object} options.grants Non-empty client-id → site-name grant table.
  * @param {object|null} [options.tenantGrants] Optional client-id → tenant
  *   agent-id table. When present, tenant routing is grant-authoritative.
+ * @param {object|null} [options.actors] Optional principal → Drupal actor
+ *   table (`sub` / `azp` → `{ uuid, delegators? }`). When present, write-like
+ *   tools/call require a mapping.
  * @param {Array<{_name: string}>} options.sites Credential-free catalog.
  * @param {string} [options.defaultSite]
  * @param {{lookup: Function}} options.channelCredentials Agent channel store.
@@ -470,6 +485,7 @@ export async function startEdge({
   auth,
   grants,
   tenantGrants = null,
+  actors = null,
   sites,
   defaultSite,
   channelCredentials,
@@ -499,6 +515,9 @@ export async function startEdge({
     );
   }
   const tenantGrantTable = normalizeGrants(tenantGrants);
+  const actorTable = actors && typeof actors === "object" && !Array.isArray(actors)
+    ? actors
+    : null;
   if (typeof channelCredentials?.lookup !== "function") {
     throw new EdgeStartupError(
       "Relay edge requires an agent channel credential store; without one no "
@@ -639,9 +658,20 @@ export async function startEdge({
       return;
     }
 
+    const mapped = resolveActor({ identity, actors: actorTable });
+    const toolName = body?.method === "tools/call" ? body?.params?.name : null;
+    if (mapped.required && mapped.reason && toolName && isWriteLikeTool(toolName)) {
+      jsonResponse(res, 403, { error: "not_entitled" });
+      return;
+    }
+
     const id = randomUUID();
     const waited = broker.track(id, { owner: selected.session.agentId });
-    const routedIdentity = identityWithTenant(identity, selected.tenant);
+    const routedIdentity = identityWithGrant(identity, {
+      tenant: selected.tenant,
+      actor: mapped.actor,
+      delegator: mapped.delegator,
+    });
     const wrote = writeFrame(selected.session.socket, {
       type: "mcp-request",
       id,
@@ -649,12 +679,14 @@ export async function startEdge({
       url: "/mcp",
       headers: fanDownHeaders(req.headers),
       identity: routedIdentity,
-      body: stripTenantHint(body),
+      body: stripCallerHints(body),
       correlation: {
         requestId: id,
         tenant: selected.tenant,
         target: selected.target,
         source: selected.source,
+        ...(mapped.actor ? { actor: mapped.actor } : {}),
+        ...(mapped.delegator ? { delegator: mapped.delegator } : {}),
       },
     });
     if (!wrote) {

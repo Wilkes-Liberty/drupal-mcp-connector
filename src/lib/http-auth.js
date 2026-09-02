@@ -68,7 +68,7 @@ export function scopesFromClaim(scope) {
 /**
  * Freeze a request identity from validated claims. Caller headers are not an input.
  * @param {object} claims
- * @returns {Readonly<{sub: ?string, iss: ?string, aud: string|string[]|null, scopes: readonly string[], sites: readonly string[]|null, exp: ?number, nbf: ?number, jti: ?string, clientId: ?string}>}
+ * @returns {Readonly<{sub: ?string, iss: ?string, aud: string|string[]|null, scopes: readonly string[], sites: readonly string[]|null, exp: ?number, nbf: ?number, jti: ?string, clientId: ?string, actSub: ?string}>}
  */
 export function buildIdentity(claims) {
   const scopes = scopesFromClaim(claims.scope ?? claims.scp);
@@ -95,6 +95,10 @@ export function buildIdentity(claims) {
       && (claims.client_id === undefined || claims.client_id === null)
       ? null
       : String(claims.azp ?? claims.client_id),
+    actSub: (claims.act && typeof claims.act === "object" && !Array.isArray(claims.act)
+      && typeof claims.act.sub === "string" && claims.act.sub.trim())
+      ? claims.act.sub.trim()
+      : null,
   });
 }
 

@@ -7,9 +7,9 @@
  * inbound principal and keep the existing site + source-governance filter
  * so a local operator is not hollowed out.
  *
- * Caller-supplied site, environment, tenant, target, or scope fields are
- * hints. They never become authority. Empty inbound scopes are no grants,
- * not a wildcard.
+ * Caller-supplied site, environment, tenant, target, actor, delegator, or
+ * scope fields are hints. They never become authority. Empty inbound scopes
+ * are no grants, not a wildcard.
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -21,6 +21,8 @@ const identityStore = new AsyncLocalStorage();
 
 /** Caller fields that look like a target but are never authority. */
 export const TARGET_HINT_KEYS = Object.freeze(["site", "environment", "tenant", "target"]);
+
+const ACTOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Always discoverable; they are how an operator sees a denial. */
 export const DIAGNOSTIC_TOOLS = new Set([
@@ -102,6 +104,84 @@ export function requiredScopeForTool(toolName) {
 export function principalHasScope(identity, scope) {
   if (!scope) return true;
   return (identity?.scopes ?? []).includes(scope);
+}
+
+function grantNameList(values) {
+  if (!Array.isArray(values)) return [];
+  return [...new Set(
+    values.map((value) => String(value).trim()).filter((value) => value && !value.startsWith("_")),
+  )];
+}
+
+/**
+ * Normalize `auth.actors` (principal key → Drupal user UUID).
+ * Keys are inbound `sub` or `azp`/`clientId`. Values may be a UUID string
+ * or `{ uuid, delegators?, revoked? }`. Comment keys are dropped.
+ *
+ * @param {object|null} actors
+ * @returns {object|null}
+ */
+export function normalizeActors(actors) {
+  if (!actors || typeof actors !== "object" || Array.isArray(actors)) return null;
+  const entries = [];
+  for (const [key, value] of Object.entries(actors)) {
+    if (key.startsWith("_")) continue;
+    let uuid = "";
+    let revoked = false;
+    let delegators = [];
+    if (typeof value === "string") {
+      uuid = value.trim();
+    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+      uuid = typeof value.uuid === "string" ? value.uuid.trim() : "";
+      revoked = value.revoked === true;
+      delegators = grantNameList(value.delegators);
+    } else {
+      continue;
+    }
+    if (!uuid || !ACTOR_UUID.test(uuid)) continue;
+    entries.push([key, Object.freeze({ uuid, revoked, delegators: Object.freeze(delegators) })]);
+  }
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
+/**
+ * Resolve the Drupal actor for this principal from server-owned grants.
+ * Caller `identity.actor` is ignored. JWT `act.sub` is a confirming hint
+ * inside `delegators`, never authority.
+ *
+ * @param {object} params
+ * @param {object|null} params.identity
+ * @param {object|null} [params.actors]
+ * @returns {{actor: string|null, delegator: string|null, required: boolean, reason: "not_entitled"|null}}
+ */
+export function resolveActor({ identity = null, actors = null } = {}) {
+  if (!actors || typeof actors !== "object" || Array.isArray(actors)) {
+    return { actor: null, delegator: null, required: false, reason: null };
+  }
+  const hasKeys = Object.keys(actors).some((key) => !key.startsWith("_"));
+  const table = normalizeActors(actors);
+  if (!table) {
+    return {
+      actor: null,
+      delegator: null,
+      required: hasKeys,
+      reason: hasKeys ? "not_entitled" : null,
+    };
+  }
+  const lookup = new Map(Object.entries(table));
+  const record = (identity?.sub && lookup.get(identity.sub))
+    || (identity?.clientId && lookup.get(identity.clientId))
+    || null;
+  if (!record || record.revoked) {
+    return { actor: null, delegator: null, required: true, reason: "not_entitled" };
+  }
+  const actSub = typeof identity?.actSub === "string" && identity.actSub.trim()
+    ? identity.actSub.trim()
+    : null;
+  if (actSub && !record.delegators.includes(actSub)) {
+    return { actor: null, delegator: null, required: true, reason: "not_entitled" };
+  }
+  return { actor: record.uuid, delegator: actSub, required: true, reason: null };
 }
 
 /**
