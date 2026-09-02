@@ -21,6 +21,8 @@ export const FRAME_TYPES = Object.freeze([
   "denied",
   "mcp-request",
   "mcp-response",
+  "policy-bundle",
+  "policy-bundle-ack",
 ]);
 
 const FRAME_TYPE_SET = new Set(FRAME_TYPES);

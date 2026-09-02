@@ -41,6 +41,8 @@ describe("relay frame codec", () => {
       "denied",
       "mcp-request",
       "mcp-response",
+      "policy-bundle",
+      "policy-bundle-ack",
     ]);
     expect(MAX_FRAME_BYTES).toBe(8 * 1024 * 1024);
   });

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **W&L-operated policy-bundle promotion on the relay edge (#253).** Optional
+  `auth.promotions` maps a SHA-256 digest to a sealed portable document plus
+  two distinct operator ids. Eligible documents fan down the tenant-agent
+  channel after hello; the agent presents them to local enforcement
+  (verify / activate / attest). When the table is present, non-diagnostic
+  `tools/call` requires the bound `auth.policies` digest **and** a matching
+  agent attestation. The edge never mints a Sentinel HMAC key. Omitting
+  `auth.promotions` keeps the digest-only path. Lab/loopback only — not
+  tenant self-service (DEV-308) or a hosted-service claim.
+
 ## [2.11.0] - 2026-09-02
 
 ### Security

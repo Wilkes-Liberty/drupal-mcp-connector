@@ -41,6 +41,9 @@
     "policies": {
       "_comment": "Optional. Map inbound sub or client_id (azp) to a SHA-256 digest of the expected signed Sentinel policy bundle, e.g. \"content-agent\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\". When present, non-diagnostic tools/call without a mapping are not_entitled. Caller policy/digest arguments are never authority. Omit to keep the prior path (no digest required at the edge). Local verify/activate stays on mcp_sentinel."
     },
+    "promotions": {
+      "_comment": "Optional W&L-operated dual-control ledger. Map a SHA-256 digest to { document, approvals } where document is the sealed portable Sentinel bundle (claims + digest + hmac-sha256 seal) and approvals is two distinct operator ids. When present, the edge fans eligible documents to the tenant agent; non-diagnostic tools/call require a matching local attestation. The edge never mints a seal. Omit to keep the digest-only path. Tenant self-service is not this table."
+    },
     "revocationFile": "",
     "introspectionUrl": "",
     "introspectionClientIdEnv": "",

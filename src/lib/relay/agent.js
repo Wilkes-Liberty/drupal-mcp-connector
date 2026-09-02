@@ -16,6 +16,7 @@
 import { connect as netConnect } from "node:net";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { createConnectorServerFactory } from "../mcp-server.js";
+import { POLICY_DIGEST } from "../policy-promotion.js";
 import { runWithIdentity } from "../principal.js";
 import { attachFramer, forwardHeaders, writeFrame } from "./frames.js";
 
@@ -35,6 +36,9 @@ import { attachFramer, forwardHeaders, writeFrame } from "./frames.js";
  * @param {?() => void} [options.onChannelClose] Called when an established
  *   channel is lost (not on deliberate `drop`/`close`), so an entry point
  *   can fail loudly instead of idling disconnected.
+ * @param {?{activate: Function}} [options.policyEnforcement] Local Sentinel
+ *   hook. `activate(document)` verifies, activates, and attests. Missing
+ *   hook fail-closes a `policy-bundle` frame (no mint on this process).
  * @param {?{recordConnect: Function}} [options.ledger]
  * @returns {object}
  */
@@ -45,6 +49,7 @@ export function createRelayAgent({
   surface,
   connectFn = netConnect,
   onChannelClose = null,
+  policyEnforcement = null,
   ledger = null,
 }) {
   if (!host || !port) {
@@ -62,6 +67,41 @@ export function createRelayAgent({
   });
   let socket = null;
   let agentInfo = null;
+
+  async function presentBundle(activeSocket, frame) {
+    let ok = false;
+    let digest = "";
+    let reason = "no_enforcement";
+    try {
+      if (policyEnforcement && typeof policyEnforcement.activate === "function") {
+        const result = await policyEnforcement.activate(frame.document);
+        const claimed = typeof result?.digest === "string"
+          ? result.digest.trim().toLowerCase()
+          : "";
+        ok = result?.ok === true && POLICY_DIGEST.test(claimed);
+        digest = ok ? claimed : "";
+        reason = ok
+          ? ""
+          : (typeof result?.reason === "string" && result.reason.trim()
+            ? result.reason.trim().slice(0, 64)
+            : "unverified");
+      }
+    } catch {
+      ok = false;
+      digest = "";
+      reason = "activate_failed";
+    }
+    try {
+      writeFrame(activeSocket, {
+        type: "policy-bundle-ack",
+        ok,
+        digest,
+        ...(ok ? {} : { reason }),
+      });
+    } catch {
+      activeSocket.destroy();
+    }
+  }
 
   async function serveFrame(activeSocket, frame) {
     if (frame.type !== "mcp-request") return;
@@ -136,6 +176,10 @@ export function createRelayAgent({
           if (frame.type === "denied") {
             next.end();
             resolve({ ok: false, reason: frame.reason });
+            return;
+          }
+          if (frame.type === "policy-bundle") {
+            void presentBundle(next, frame);
             return;
           }
           void serveFrame(next, frame);

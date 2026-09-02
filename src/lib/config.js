@@ -292,6 +292,22 @@ export function getInboundPolicies() {
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
+/**
+ * W&L-operated dual-control promotion ledger keyed by SHA-256 digest.
+ * When present, the edge fans eligible sealed documents to the tenant agent.
+ * @returns {object|null}
+ */
+export function getInboundPromotions() {
+  const promotions = loadConfig().auth?.promotions;
+  if (!promotions || typeof promotions !== "object" || Array.isArray(promotions)) {
+    return null;
+  }
+  const entries = Object.entries(promotions)
+    .map(([key, value]) => [key.trim(), value])
+    .filter(([key]) => key && !key.startsWith("_"));
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Auth headers — never logged, never exposed in tool responses
 // ---------------------------------------------------------------------------
