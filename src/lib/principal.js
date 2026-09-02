@@ -7,9 +7,9 @@
  * inbound principal and keep the existing site + source-governance filter
  * so a local operator is not hollowed out.
  *
- * Caller-supplied site, environment, tenant, target, actor, delegator, or
- * scope fields are hints. They never become authority. Empty inbound scopes
- * are no grants, not a wildcard.
+ * Caller-supplied site, environment, tenant, target, actor, delegator,
+ * policy, digest, or scope fields are hints. They never become authority.
+ * Empty inbound scopes are no grants, not a wildcard.
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -23,6 +23,14 @@ const identityStore = new AsyncLocalStorage();
 export const TARGET_HINT_KEYS = Object.freeze(["site", "environment", "tenant", "target"]);
 
 const ACTOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const POLICY_DIGEST = /^[0-9a-f]{64}$/i;
+
+function tableHasKeys(table) {
+  return Object.keys(table).some((key) => {
+    const id = key.trim();
+    return id && !id.startsWith("_");
+  });
+}
 
 /** Always discoverable; they are how an operator sees a denial. */
 export const DIAGNOSTIC_TOOLS = new Set([
@@ -159,10 +167,7 @@ export function resolveActor({ identity = null, actors = null } = {}) {
   if (!actors || typeof actors !== "object" || Array.isArray(actors)) {
     return { actor: null, delegator: null, required: false, reason: null };
   }
-  const hasKeys = Object.keys(actors).some((key) => {
-    const id = key.trim();
-    return id && !id.startsWith("_");
-  });
+  const hasKeys = tableHasKeys(actors);
   const table = normalizeActors(actors);
   if (!table) {
     return {
@@ -186,6 +191,68 @@ export function resolveActor({ identity = null, actors = null } = {}) {
     return { actor: null, delegator: null, required: true, reason: "not_entitled" };
   }
   return { actor: record.uuid, delegator: actSub, required: true, reason: null };
+}
+
+/**
+ * Normalize `auth.policies` (principal key → SHA-256 digest).
+ * Keys are inbound `sub` or `azp`/`clientId`. Values may be a digest string
+ * or `{ digest, revoked? }`. Comment keys are dropped.
+ *
+ * @param {object|null} policies
+ * @returns {object|null}
+ */
+export function normalizePolicies(policies) {
+  if (!policies || typeof policies !== "object" || Array.isArray(policies)) return null;
+  const entries = [];
+  for (const [rawKey, value] of Object.entries(policies)) {
+    const key = rawKey.trim();
+    if (!key || key.startsWith("_")) continue;
+    let digest = "";
+    let revoked = false;
+    if (typeof value === "string") {
+      digest = value.trim().toLowerCase();
+    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+      digest = typeof value.digest === "string" ? value.digest.trim().toLowerCase() : "";
+      revoked = value.revoked === true;
+    } else {
+      continue;
+    }
+    if (!digest || !POLICY_DIGEST.test(digest)) continue;
+    entries.push([key, Object.freeze({ digest, revoked })]);
+  }
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
+/**
+ * Resolve the expected policy digest for this principal from server-owned grants.
+ * Caller `identity.policy` is ignored.
+ *
+ * @param {object} params
+ * @param {object|null} params.identity
+ * @param {object|null} [params.policies]
+ * @returns {{policy: string|null, required: boolean, reason: "not_entitled"|null}}
+ */
+export function resolvePolicy({ identity = null, policies = null } = {}) {
+  if (!policies || typeof policies !== "object" || Array.isArray(policies)) {
+    return { policy: null, required: false, reason: null };
+  }
+  const hasKeys = tableHasKeys(policies);
+  const table = normalizePolicies(policies);
+  if (!table) {
+    return {
+      policy: null,
+      required: hasKeys,
+      reason: hasKeys ? "not_entitled" : null,
+    };
+  }
+  const lookup = new Map(Object.entries(table));
+  const record = (identity?.sub && lookup.get(identity.sub))
+    || (identity?.clientId && lookup.get(identity.clientId))
+    || null;
+  if (!record || record.revoked) {
+    return { policy: null, required: true, reason: "not_entitled" };
+  }
+  return { policy: record.digest, required: true, reason: null };
 }
 
 /**

@@ -278,6 +278,20 @@ export function getInboundActors() {
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
+/**
+ * Server-resolved inbound policy map keyed by OAuth `sub` or client id.
+ * When present, non-diagnostic tools/call require a mapped SHA-256 digest.
+ * @returns {object|null}
+ */
+export function getInboundPolicies() {
+  const policies = loadConfig().auth?.policies;
+  if (!policies || typeof policies !== "object" || Array.isArray(policies)) return null;
+  const entries = Object.entries(policies)
+    .map(([key, value]) => [key.trim(), value])
+    .filter(([key]) => key && !key.startsWith("_"));
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Auth headers — never logged, never exposed in tool responses
 // ---------------------------------------------------------------------------
