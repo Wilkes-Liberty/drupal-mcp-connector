@@ -38,6 +38,9 @@
     "actors": {
       "_comment": "Optional. Map inbound sub or client_id (azp) to a Drupal user UUID for write authorship, e.g. \"content-agent\": { \"uuid\": \"11111111-1111-4111-8111-111111111111\", \"delegators\": [\"operator-1\"] }. When present, write-like tools/call without a mapping are not_entitled. JWT act.sub is a confirming hint inside delegators. Caller actor/delegator arguments are never authority. Omit to keep writes on the site OAuth consumer's owner account."
     },
+    "policies": {
+      "_comment": "Optional. Map inbound sub or client_id (azp) to a SHA-256 digest of the expected signed Sentinel policy bundle, e.g. \"content-agent\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\". When present, non-diagnostic tools/call without a mapping are not_entitled. Caller policy/digest arguments are never authority. Omit to keep the prior path (no digest required at the edge). Local verify/activate stays on mcp_sentinel."
+    },
     "revocationFile": "",
     "introspectionUrl": "",
     "introspectionClientIdEnv": "",

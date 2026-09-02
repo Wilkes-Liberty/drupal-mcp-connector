@@ -37,12 +37,13 @@
  * refuses to start without it. Optional auth.tenantGrants (client id ->
  * [tenant agent ids]) makes tenant routing grant-authoritative. Optional
  * auth.actors (sub / azp -> Drupal user UUID) maps the inbound principal
- * to a Drupal actor for write-like tools.
+ * to a Drupal actor for write-like tools. Optional auth.policies
+ * (sub / azp -> SHA-256 digest) is the expected signed policy on the edge.
  */
 
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { getInboundActors, getInboundGrants, getInboundTenantGrants, getTlsConfig, loadConfig } from "../src/lib/config.js";
+import { getInboundActors, getInboundGrants, getInboundPolicies, getInboundTenantGrants, getTlsConfig, loadConfig } from "../src/lib/config.js";
 import { resolveInboundAuthConfig } from "../src/lib/http-auth.js";
 import { createRateLimiter } from "../src/lib/rate-limit.js";
 import {
@@ -129,6 +130,7 @@ try {
     grants,
     tenantGrants: getInboundTenantGrants(),
     actors: getInboundActors(),
+    policies: getInboundPolicies(),
     sites,
     defaultSite: config.defaultSite,
     channelCredentials: createChannelCredentialStore({ filePath: channelFile }),

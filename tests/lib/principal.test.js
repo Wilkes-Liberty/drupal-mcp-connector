@@ -11,6 +11,7 @@ import {
   resolveAuthoritativeTarget,
   resolveGrantedSiteNames,
   resolveActor,
+  resolvePolicy,
   runWithIdentity,
   getRequestIdentity,
   visibleSiteTargets,
@@ -391,6 +392,57 @@ describe("resolveActor (#247 / DEV-123)", () => {
       identity: identity(),
       actors: { " _comment": "lab" },
     })).toEqual({ actor: null, delegator: null, required: false, reason: null });
+  });
+});
+
+describe("resolvePolicy (#250 / DEV-125)", () => {
+  const digest = "aa".repeat(32);
+  const policies = {
+    "agent-1": digest,
+    "client-b": { digest, revoked: false },
+  };
+
+  it("is not required when the policies table is omitted", () => {
+    expect(resolvePolicy({ identity: identity() })).toEqual({
+      policy: null, required: false, reason: null,
+    });
+  });
+
+  it("maps sub then clientId and ignores a caller-supplied policy", () => {
+    expect(resolvePolicy({
+      identity: identity({ policy: "bb".repeat(32) }),
+      policies,
+    })).toMatchObject({ policy: digest, reason: null, required: true });
+    expect(resolvePolicy({
+      identity: identity({ sub: "other", clientId: "client-b" }),
+      policies,
+    })).toMatchObject({ policy: digest, required: true });
+  });
+
+  it("refuses an unmapped principal and a revoked digest", () => {
+    expect(resolvePolicy({
+      identity: identity({ sub: "ghost", clientId: "ghost" }),
+      policies,
+    })).toMatchObject({ policy: null, reason: "not_entitled", required: true });
+    expect(resolvePolicy({
+      identity: identity({ clientId: "client-b" }),
+      policies: { "client-b": { digest, revoked: true } },
+    })).toMatchObject({ policy: null, reason: "not_entitled", required: true });
+  });
+
+  it("trims keys, lowercases digests, and fail-closes invalid tables", () => {
+    expect(resolvePolicy({
+      identity: identity({ sub: "other", clientId: "client-b" }),
+      policies: { " client-b ": digest.toUpperCase() },
+    })).toMatchObject({ policy: digest, required: true, reason: null });
+    expect(resolvePolicy({
+      identity: identity(),
+      policies: { "agent-1": "not-a-digest" },
+    })).toMatchObject({ policy: null, required: true, reason: "not_entitled" });
+    expect(resolvePolicy({
+      identity: identity(),
+      policies: { " _comment": "lab" },
+    })).toEqual({ policy: null, required: false, reason: null });
   });
 });
 

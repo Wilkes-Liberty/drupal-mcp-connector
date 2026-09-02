@@ -1,6 +1,6 @@
 /**
- * Relay northbound edge (#232, #242, #244, #247) — DEV-294 AC4, DEV-122
- * isolation, DEV-124 tenant routing, DEV-123 actor mapping.
+ * Relay northbound edge (#232, #242, #244, #247, #250) — DEV-294 AC4, DEV-122
+ * isolation, DEV-124 tenant routing, DEV-123 actor mapping, DEV-125 policy digest.
  *
  * Terminates northbound MCP over the OAuth resource server and fans requests
  * down outbound tenant-agent channels. The edge proposes; the tenant-side
@@ -38,7 +38,7 @@ import { createLocalRelay } from "../contracts/relay.js";
 import { createInboundHttpsAuth, SPOOFABLE_IDENTITY_HEADERS } from "../http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../http-handler.js";
 import { isWriteLikeCall } from "../operations.js";
-import { resolveActor, resolveGrantedSites } from "../principal.js";
+import { DIAGNOSTIC_TOOLS, resolveActor, resolveGrantedSites, resolvePolicy } from "../principal.js";
 import {
   attachFramer,
   createRequestBroker,
@@ -272,7 +272,7 @@ function callerTenantHint(args = {}) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-const CALLER_HINT_KEYS = Object.freeze(["tenant", "actor", "delegator"]);
+const CALLER_HINT_KEYS = Object.freeze(["tenant", "actor", "delegator", "policy", "digest"]);
 
 function stripCallerHints(body) {
   const args = body?.params?.arguments;
@@ -289,11 +289,14 @@ function stripCallerHints(body) {
   return { ...body, params: { ...body.params, arguments: Object.fromEntries(bag) } };
 }
 
-function identityWithGrant(identity, { tenant, actor = null, delegator = null }) {
-  const next = { ...identity, tenant };
-  if (actor) next.actor = actor;
-  if (delegator) next.delegator = delegator;
-  return Object.freeze(next);
+function identityWithGrant(identity, { tenant, actor = null, delegator = null, policy = null }) {
+  const bag = new Map(Object.entries(identity ?? {}));
+  for (const key of ["actor", "delegator", "policy", "digest"]) bag.delete(key);
+  bag.set("tenant", tenant);
+  if (actor) bag.set("actor", actor);
+  if (delegator) bag.set("delegator", delegator);
+  if (policy) bag.set("policy", policy);
+  return Object.freeze(Object.fromEntries(bag));
 }
 
 /**
@@ -486,6 +489,7 @@ export async function startEdge({
   grants,
   tenantGrants = null,
   actors = null,
+  policies = null,
   sites,
   defaultSite,
   channelCredentials,
@@ -517,6 +521,9 @@ export async function startEdge({
   const tenantGrantTable = normalizeGrants(tenantGrants);
   const actorTable = actors && typeof actors === "object" && !Array.isArray(actors)
     ? actors
+    : null;
+  const policyTable = policies && typeof policies === "object" && !Array.isArray(policies)
+    ? policies
     : null;
   if (typeof channelCredentials?.lookup !== "function") {
     throw new EdgeStartupError(
@@ -633,8 +640,19 @@ export async function startEdge({
     }
 
     const mapped = resolveActor({ identity, actors: actorTable });
-    const toolName = body?.method === "tools/call" ? body?.params?.name : null;
-    if (mapped.required && mapped.reason && toolName && isWriteLikeCall(toolName, args)) {
+    const boundPolicy = resolvePolicy({ identity, policies: policyTable });
+    const isCall = body?.method === "tools/call";
+    const toolName = isCall && typeof body?.params?.name === "string" && body.params.name.trim()
+      ? body.params.name.trim()
+      : null;
+    if (mapped.required && mapped.reason && isCall && (!toolName || isWriteLikeCall(toolName, args))) {
+      jsonResponse(res, 403, { error: "not_entitled" });
+      return;
+    }
+    if (
+      boundPolicy.required && boundPolicy.reason && isCall
+      && (!toolName || !DIAGNOSTIC_TOOLS.has(toolName))
+    ) {
       jsonResponse(res, 403, { error: "not_entitled" });
       return;
     }
@@ -671,6 +689,7 @@ export async function startEdge({
       tenant: selected.tenant,
       actor: mapped.actor,
       delegator: mapped.delegator,
+      policy: boundPolicy.policy,
     });
     const wrote = writeFrame(selected.session.socket, {
       type: "mcp-request",
@@ -687,6 +706,7 @@ export async function startEdge({
         source: selected.source,
         ...(mapped.actor ? { actor: mapped.actor } : {}),
         ...(mapped.delegator ? { delegator: mapped.delegator } : {}),
+        ...(boundPolicy.policy ? { policyDigest: boundPolicy.policy } : {}),
       },
     });
     if (!wrote) {

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **Expected policy digest on the relay edge (#250).** Optional
+  `auth.policies` maps inbound `sub` (then `azp`) to a SHA-256 digest.
+  When that table is present, non-diagnostic `tools/call` without a
+  mapping is `not_entitled` with no frames (including a call that omits
+  the tool name, and even when no agent is connected). The granted digest
+  is stamped on `identity.policy` and `correlation.policyDigest`. Caller
+  `policy` / `digest` arguments are ignored and stripped. Diagnostic
+  tools stay callable. Omitting `auth.policies` keeps the prior path.
+  Lab/loopback only — not dual-control promotion, bundle distribution, or
+  a hosted-service claim.
 - **Principal → Drupal actor mapping on the relay edge (#247).** Optional
   `auth.actors` maps inbound `sub` (then `azp`) to a Drupal user UUID. When
   that table is present, write-like `tools/call` without a mapping is

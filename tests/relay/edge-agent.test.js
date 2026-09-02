@@ -159,7 +159,7 @@ async function startRealAgent(harness, { stub = null, token = harness.token, sit
   return { agent, tenant };
 }
 
-async function startTwoTenantHarness({ tenantGrants, grants, actors } = {}) {
+async function startTwoTenantHarness({ tenantGrants, grants, actors, policies } = {}) {
   const channel = createChannelFile();
   const tokenA = `channel-a-${randomBytes(24).toString("hex")}`;
   const tokenB = `channel-b-${randomBytes(24).toString("hex")}`;
@@ -174,6 +174,7 @@ async function startTwoTenantHarness({ tenantGrants, grants, actors } = {}) {
     ...(grants ? { grants } : {}),
     ...(tenantGrants ? { tenantGrants } : {}),
     ...(actors ? { actors } : {}),
+    ...(policies ? { policies } : {}),
   }));
   closers.push(() => edge.close());
   return { edge, channel, tokenA, tokenB, ledger };
@@ -1286,6 +1287,99 @@ describe("principal actor mapping (#247 / DEV-123)", () => {
     await settle();
     const request = rawA.frames.find((frame) => frame.type === "mcp-request");
     expect(request.identity.actor).toBeUndefined();
+  });
+});
+
+const POLICY_A = "aa".repeat(32);
+const POLICIES = { "client-a": POLICY_A };
+
+describe("principal policy digest (#250 / DEV-125)", () => {
+  it("stamps identity.policy from the grant and ignores a caller policy hint", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: POLICIES,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha", policy: "bb".repeat(32), digest: "cc".repeat(32) },
+    });
+    expect(res.status).toBe(200);
+    await settle();
+    const request = rawA.frames.find((frame) => frame.type === "mcp-request");
+    expect(request.identity.policy).toBe(POLICY_A);
+    expect(request.body?.params?.arguments?.policy).toBeUndefined();
+    expect(request.body?.params?.arguments?.digest).toBeUndefined();
+    expect(request.correlation.policyDigest).toBe(POLICY_A);
+    expect(JSON.stringify(request)).not.toContain(jwtA);
+  });
+
+  it("refuses an unmapped non-diagnostic call with zero frames, including with no agent", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: POLICIES,
+    });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtB = await issuer.signToken({ clientId: "client-b" });
+    const denied = await modernCall(harness.edge.northboundUrl, jwtB, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-beta" },
+    });
+    expect(denied.status).toBe(403);
+    expect(JSON.parse(denied.body)).toEqual({ error: "not_entitled" });
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
+
+    const nameless = await modernCall(harness.edge.northboundUrl, jwtB, {
+      name: "",
+      args: { site: "tenant-beta" },
+    });
+    expect(nameless.status).toBe(403);
+
+    const noAgent = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: POLICIES,
+    });
+    const ghost = await issuer.signToken({ clientId: "client-b" });
+    const down = await modernCall(noAgent.edge.northboundUrl, ghost, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-beta" },
+    });
+    expect(down.status).toBe(403);
+    expect(JSON.parse(down.body)).toEqual({ error: "not_entitled" });
+  });
+
+  it("still serves diagnostic tools without a policy mapping", async () => {
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: POLICIES,
+    });
+    const rawB = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtB = await issuer.signToken({ clientId: "client-b" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtB, {
+      name: "drupal_list_sites",
+      args: { site: "tenant-beta" },
+    });
+    expect(res.status).toBe(200);
+    await settle();
+    expect(rawB.frames.some((frame) => frame.type === "mcp-request")).toBe(true);
+  });
+
+  it("does not require a policy digest when auth.policies is omitted", async () => {
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(res.status).toBe(200);
+    await settle();
+    const request = rawA.frames.find((frame) => frame.type === "mcp-request");
+    expect(request.identity.policy).toBeUndefined();
+    expect(request.correlation.policyDigest).toBeUndefined();
   });
 });
 

@@ -138,6 +138,14 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
   `delegator` arguments and spoofable identity headers are never authority.
   Unmapped or disallowed-delegation writes are `not_entitled` with no
   fan-down. Omit to keep writes on the site OAuth consumer's owner account;
+- optional `auth.policies` (`sub` or client id → SHA-256 digest). When
+  present, non-diagnostic `tools/call` requires a mapped digest. The
+  granted digest is stamped on `identity.policy` and
+  `correlation.policyDigest`. Caller `policy` / `digest` arguments are
+  never authority. Unmapped calls (including a missing tool name) are
+  `not_entitled` with no fan-down. Diagnostic tools stay callable. Omit
+  to keep the prior path (no digest required at the edge). Local
+  verify/activate/attest stays on Sentinel;
 - an agent channel credential store (`MCP_CHANNEL_CREDENTIALS_FILE`, SHA-256
   digests only, hot-reloaded so revocation needs no restart). Each agent
   entry may name `sites`: catalog names that agent is allowed to serve.
@@ -154,9 +162,10 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
 Caller credential headers (`Authorization`, `Cookie`, `Proxy-Authorization`)
 and identity-assertion headers are stripped before a request is framed down the
 tunnel; the frame carries the validated identity object only (with `tenant` and,
-when mapped, `actor` / `delegator` stamped from the grant, never from a
+when mapped, `actor` / `delegator` / `policy` stamped from the grant, never from a
 caller argument), plus a `correlation` object `{ requestId, tenant, target,
-source, actor?, delegator? }`. Caller `tenant` / `actor` / `delegator` are
+source, actor?, delegator?, policyDigest? }`. Caller `tenant` / `actor` /
+`delegator` / `policy` / `digest` are
 stripped from the framed body. JSON:API writes attach `relationships.uid`
 from the grant-stamped actor. The southbound Authorization header is the
 tenant site credential, never the northbound JWT. Entitlement is decided
