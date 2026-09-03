@@ -1,10 +1,10 @@
 /**
- * DEV-293 laboratory outbound-relay harness.
+ * Laboratory outbound-relay harness.
  *
  * Isolated lab proof of Model B: a tenant agent dials out to a loopback
  * relay; the relay never opens a connection to the agent; a stub private
  * Drupal never listens. Not a public surface, not a hosted-service claim,
- * and not DEV-294. Vendor tunnels stay outside `createLocalRelay` (#181).
+ * and not the product edge (#232). Vendor tunnels stay outside `createLocalRelay` (#181).
  */
 
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";

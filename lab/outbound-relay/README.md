@@ -1,7 +1,7 @@
-# Lab outbound relay (DEV-293)
+# Lab outbound relay
 
 Isolated laboratory harness. It is **not** a public surface, **not** a hosted
-MCP product, and **not** DEV-294. It does not start the hosted connector and
+MCP product, and **not** the product edge (#232). It does not start the hosted connector and
 does not claim service readiness.
 
 Model B, loopback only: a tenant agent dials **out** to a lab relay. The relay
@@ -30,7 +30,7 @@ is configured.
 credential authenticates the *agent tunnel channel*; the revocation check on a
 northbound request reads that channel's credential, not anything the caller
 presents. A product edge must authenticate the northbound caller with a real
-OAuth resource server — that is DEV-294's slice, not this harness.
+OAuth resource server — that is the product edge's slice (#232), not this harness.
 
 Caller credential headers (`Authorization`, `Cookie`, `Proxy-Authorization`)
 are stripped before a request is framed down the tunnel (#229). The tenant
@@ -55,4 +55,4 @@ request to the connector's private URL.
 
 This README does **not** claim that hop ran. Do not point the lab at production
 Drupal, a public edge hostname, or a shared production bearer. Hosted-edge
-readiness is DEV-294.
+readiness is the product edge's concern (#232).

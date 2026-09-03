@@ -1,5 +1,5 @@
 /**
- * Attributable usage, quotas, and abuse signals (#256 / DEV-126) — pure rules.
+ * Attributable usage, quotas, and abuse signals (#256) — pure rules.
  *
  * No sockets. The ledger partitions by tenant and principal, the quota gate
  * fails closed at its declared boundary, cross-tenant reads are denied before

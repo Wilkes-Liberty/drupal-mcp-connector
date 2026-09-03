@@ -137,7 +137,7 @@ function applyFilter(params, { field, op = "eq", value }) {
 /**
  * Bind JSON:API `uid` from the grant-stamped identity. Caller uid is overwritten.
  * User entities are left unchanged. No actor claim (auth.actors not in effect
- * for this principal) leaves relationships as-is — the prior, pre-DEV-123 path.
+ * for this principal) leaves relationships as-is — the path before actor mapping (#247).
  * A *present* actor claim that fails UUID validation fails closed (throws)
  * rather than silently keeping a caller-supplied uid: resolveActor()/
  * normalizeActors() already validate the shape before stamping identity.actor,
@@ -309,7 +309,7 @@ export class JsonApiBackend extends Backend {
    * correct in-place alias *update* must round-trip the existing alias's `pid`
    * (Drupal `PathItem::postSave` creates a duplicate alias when `pid` is absent)
    * — so this method exposes it. Returns nulls for entities/backends without a
-   * path field. See DEV-116.
+   * path field. See the 1.5.1 alias fix.
    * @param {{entityType: string, bundle: string, id: string}} ref
    * @returns {Promise<{alias: ?string, pid: ?(number|string), langcode: ?string, drupalId: ?(number|string)}>}
    */

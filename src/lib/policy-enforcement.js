@@ -1,5 +1,5 @@
 /**
- * Tenant-side local policy enforcement (#253 / DEV-125).
+ * Tenant-side local policy enforcement (#253).
  *
  * Loopback stand-in for mcp_sentinel `McpPolicyBundleRegistry`: mint / verify
  * / activate / simulate / revoke / rollback / emergency deny. The relay edge

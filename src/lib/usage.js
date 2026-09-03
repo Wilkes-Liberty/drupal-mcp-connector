@@ -1,6 +1,5 @@
 /**
- * Attributable usage, quotas, and abuse signals on the relay edge (#256 /
- * DEV-126).
+ * Attributable usage, quotas, and abuse signals on the relay edge (#256).
  *
  * Metering at the seam, lab bounds. Every edge decision (allow or deny) and
  * every fan-down receipt is a record keyed by the grant-resolved tenant and

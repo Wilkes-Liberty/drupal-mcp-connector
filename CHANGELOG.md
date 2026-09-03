@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Comments, test names, lab notes, and older changelog entries now reference
+  GitHub issues, release versions, or plain descriptions instead of internal
+  tracker keys (#258). No behaviour change.
+
 ## [2.13.0] - 2026-09-02
 
 ### Security
@@ -124,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   credentials never appear in any frame crossing the tunnel. The lab
   README now states plainly that the lab northbound does not authenticate
   the caller (the lab credential authenticates the agent channel) — the
-  product edge's northbound OAuth is DEV-294 work, not this harness.
+  product edge's northbound OAuth is #232 work, not this harness.
 
 ### Added
 - **Deployment documentation for the relay edge and tenant-agent entry
@@ -149,13 +154,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   window. The frame codec lives at `src/lib/relay/frames.js` with hard size,
   teardown, and timeout bounds. These are entry points and libraries only;
   nothing here is a hosted service.
-- **Lab-only outbound-relay harness (DEV-293).** Isolated under
+- **Lab-only outbound-relay harness.** Isolated under
   `lab/outbound-relay/` with tests in `tests/lab/`. A tenant agent dials out
   to a loopback relay; one MCP 2026-07-28 Streamable-HTTP request (stateless,
   no `Mcp-Session-Id`) reaches an in-process stub private Drupal; reconnect
   keeps the same tunnel identity; revocation is checked per request (next
   request denied, no grace window). This is not a public surface, not a
-  hosted-service claim, and not DEV-294. Hosted MCP is unstarted.
+  hosted-service claim, and not the product edge (#232). Hosted MCP is unstarted.
 
 ## [2.9.0] - 2026-08-26
 
@@ -935,7 +940,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.5.1] - 2026-06-29
 
 ### Fixed
-- **Node URL aliases set via the connector now actually persist (DEV-116).** Setting an
+- **Node URL aliases set via the connector now actually persist.** Setting an
   alias with `drupal_update_node` (`fields.path = { alias, pathauto: 0 }`) returned
   success but silently reverted, causing nav 404s. Root cause: JSON:API deserialized the
   `path` field without the existing alias's **`pid`**, so Drupal's `PathItem::postSave`
@@ -943,7 +948,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in place. The connector now reads the current alias's `pid` (new
   `backend.getPathInfo`) and round-trips it, so the alias is **updated in place** — one
   canonical alias, no duplicate. Verified end-to-end over JSON:API on Drupal 11.
-- **Path-less updates no longer create duplicate aliases.** The DEV-114 "preserve" path
+- **Path-less updates no longer create duplicate aliases.** The 1.5.0 "preserve" path
   re-pinned the current alias *without* its `pid`, hitting the same duplicate bug; it now
   round-trips the `pid` too.
 - **Honest write responses.** `drupal_create_node` / `drupal_update_node` now **re-read**
@@ -973,29 +978,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`drupal_update_paragraph`** — update an existing Paragraph entity's field values
   in place (partial JSON:API PATCH) by bundle + UUID, so component / key-capability
-  paragraphs can be maintained end-to-end without re-embedding (DEV-114).
+  paragraphs can be maintained end-to-end without re-embedding.
 - **`drupal_update_menu_link`** — update a menu link by UUID (rename, re-weight,
   re-target, re-parent, enable/disable). `enabled` is preserved across edits unless
-  passed explicitly (DEV-114).
+  passed explicitly.
 - **`drupal_create_menu_link`** now accepts **`parent`** (nest under a parent link
   plugin id) and **`enabled`** on create, and creates links **enabled by default** so
   they render immediately — closing the "menu links created disabled / no parent on
-  create" gap (DEV-114).
+  create" gap.
 
 ### Fixed
 - **Menu links no longer silently regress to disabled.** Every menu-link write now
   asserts `enabled` explicitly (default true on create; the current value re-pinned on
   update), so an unrelated edit can't drop a live link to disabled through the JSON:API
-  write path (DEV-114).
+  write path.
 - **Node updates preserve the existing URL alias.** When `drupal_update_node` is called
   without a `path`, the connector reads the current alias and re-pins it
   (`{ alias, pathauto: 0 }`) so a save can't let Pathauto revert the alias to a stale
-  value. Pass `fields.path` to set the alias explicitly (DEV-114).
+  value. Pass `fields.path` to set the alias explicitly.
 - **Intermittent `drupal_create_menu_link` 422 "path '/…' is inaccessible".** This is a
   transient path-validator/access-cache race in Drupal's `LinkAccessConstraint`; menu-link
   create/update now retries once after a short delay when it hits that specific error.
   Prefer an `entity:node/<id>` target over `internal:/<alias>` to avoid the alias
-  resolution step entirely (DEV-114).
+  resolution step entirely.
 
 ## [1.4.0] - 2026-06-29
 
@@ -1011,7 +1016,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its status code via a partial update — the path to activate/fix a redirect that
   isn't firing. Both are governed by the per-site security policy (redirect writes /
   `administer redirects`). Resolves the gap where connector-created redirects were
-  inactive and could not be enabled (DEV-111).
+  inactive and could not be enabled.
 
 ## [1.3.2] - 2026-06-27
 

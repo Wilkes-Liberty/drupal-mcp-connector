@@ -86,7 +86,7 @@ export function createChannelFile() {
   };
 }
 
-/** Lab-pattern connection ledger (DEV-293) for outbound-only assertions. */
+/** Lab-pattern connection ledger (outbound-relay lab) for outbound-only assertions. */
 export function createConnectionLedger() {
   const listens = [];
   const connects = [];

@@ -1,5 +1,5 @@
 /**
- * Tenant-session selection (#242 / DEV-122) — pure fail-closed rules.
+ * Tenant-session selection (#242) — pure fail-closed rules.
  *
  * No sockets. Hello admission and fan-down selection are the isolation
  * primitive: tunnel identity is the tenant boundary.
@@ -37,7 +37,7 @@ describe("acceptAgentHello", () => {
     })).toEqual({ ok: false, reason: "revoked" });
   });
 
-  it("accepts the first agent unscoped (DEV-294 compatibility)", () => {
+  it("accepts the first agent unscoped (#232 compatibility)", () => {
     expect(acceptAgentHello({
       record: { agentId: "tenant-a" },
       catalogNames: CATALOG,
@@ -143,7 +143,7 @@ describe("selectTenantSession", () => {
   });
 });
 
-describe("resolveTenantRoute (#244 / DEV-124)", () => {
+describe("resolveTenantRoute (#244)", () => {
   const a = { agentId: "tenant-a", sites: ["tenant-alpha"] };
   const b = { agentId: "tenant-b", sites: ["tenant-beta"] };
   const tenantGrants = { "client-a": ["tenant-a"], "client-b": ["tenant-b"] };

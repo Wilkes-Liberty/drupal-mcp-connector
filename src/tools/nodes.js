@@ -44,11 +44,11 @@ function normalizeAlias(value) {
  * Resolve the `path` attribute to send on an alias-aware node write so the alias
  * actually persists, and decide whether a rename redirect is needed.
  *
- * The bug (DEV-116): JSON:API deserializes `{ alias, pathauto }` onto the node's
+ * The bug (fixed in 1.5.1): JSON:API deserializes `{ alias, pathauto }` onto the node's
  * `path` field, dropping the existing alias's `pid`; Drupal's `PathItem::postSave`
  * then *creates a duplicate* `path_alias` (the older one stays canonical) instead
  * of updating in place. The fix is to round-trip the existing `pid` so the update
- * is in place. DEV-114's path-omitted "preserve" had the same defect (no `pid`),
+ * is in place. The 1.5.0 path-omitted "preserve" had the same defect (no `pid`),
  * so it is fixed here too.
  *
  * @param {object} args - { backend, type, id, providedPath, isCreate }.
@@ -274,7 +274,7 @@ async function createNode({ site: siteName, type, title, body, summary, format, 
     return summaryWrite.deprecated && bodyAttr ? attachSummaryDeprecation(preview) : preview;
   }
   // Alias handling: an explicit `path.alias` is set as a manual alias; otherwise
-  // `path` is omitted so pathauto generates the alias (DEV-116).
+  // `path` is omitted so pathauto generates the alias (see the 1.5.1 alias fix).
   const { pathAttr } = await resolvePathWrite({ backend, type, id: null, providedPath: attributes.path, isCreate: true });
   if (pathAttr === undefined) delete attributes.path;
   else attributes.path = pathAttr;
@@ -357,7 +357,7 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
     };
     return summaryWrite.deprecated && bodyAttr ? attachSummaryDeprecation(preview) : preview;
   }
-  // Alias handling (DEV-116): an explicit `path.alias` is set in place by
+  // Alias handling (1.5.1 alias fix): an explicit `path.alias` is set in place by
   // round-tripping the existing alias's pid (no duplicate); a path-less update
   // re-pins the current alias *with its pid* so the save can't revert/duplicate
   // it. A rename (alias changed) also gets a 301 redirect from the old path.

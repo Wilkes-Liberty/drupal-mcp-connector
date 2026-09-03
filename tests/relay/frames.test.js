@@ -1,5 +1,5 @@
 /**
- * Relay frame codec (#232) — promoted from the DEV-293 lab harness.
+ * Relay frame codec (#232) — promoted from the outbound-relay lab harness.
  *
  * The codec is mechanism only: length-prefixed JSON frames with a hard size
  * bound, teardown on malformed or unknown-type frames, and a request broker

@@ -5,7 +5,7 @@ import {
 } from "../../src/lib/policy-enforcement.js";
 import { digestOf } from "../../src/lib/policy-enforcement.js";
 
-describe("createLocalPolicyEnforcement (#253 / DEV-125)", () => {
+describe("createLocalPolicyEnforcement (#253)", () => {
   const now = () => 1_700_000_000;
 
   it("cannot mint, verify, or activate without a signing key", () => {

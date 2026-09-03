@@ -1,5 +1,5 @@
 /**
- * W&L-operated dual-control promotion ledger (#253 / DEV-125).
+ * W&L-operated dual-control promotion ledger (#253).
  *
  * The edge never mints a Sentinel HMAC seal. A promotion is an already-sealed
  * portable document plus two distinct operator ids. Eligibility is the gate

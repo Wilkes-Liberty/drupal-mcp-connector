@@ -53,7 +53,7 @@ function echoPayload(result) {
   return JSON.parse(text);
 }
 
-describe("DEV-293 lab outbound relay", () => {
+describe("lab outbound relay", () => {
   it("carries one stateless MCP 2026-07-28 request to the stub through an outbound agent", async () => {
     const lab = track(await startLabHarness());
     const traffic = [];
