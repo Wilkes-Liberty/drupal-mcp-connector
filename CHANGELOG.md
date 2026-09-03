@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-09-02
+
 ### Security
 - **Attributable usage, quotas, and abuse signals on the relay edge (#256).**
   Optional usage ledger (`MCP_EDGE_USAGE_MAX_RECORDS` / `relay.usage`)
@@ -22,13 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   principal's lock; a quota table the edge cannot read refuses startup and
   names the offending path. A response the listener cannot relay is
   `502 fan_down_failed` with a `failed` receipt, and a metering failure
-  never changes a verdict. `GET /usage` serves the caller's own tenant partition (tenant from
-  `auth.tenantGrants`; any other tenant is `not_entitled` with no records)
-  with a reconciliation naming `missing`, `duplicate`, and `uncertain`
-  chains; unmatched response frames are recorded against the sending
-  tunnel. Omitting both keeps the 2.12.0 path. Lab/loopback only — measured
-  usage, not pricing, billing, a hosted metering sink, or a hosted-service
-  claim.
+  never changes a verdict. `GET /usage` serves the caller's own tenant
+  partition (tenant from `auth.tenantGrants`; any other tenant is
+  `not_entitled` with no records) with a reconciliation naming `missing`,
+  `duplicate`, and `uncertain` chains; unmatched response frames are
+  recorded against the sending tunnel. Omitting both keeps the 2.12.0 path.
+  Lab/loopback only — measured usage, not pricing, billing, a hosted
+  metering sink, or a hosted-service claim.
 
 ## [2.12.0] - 2026-09-02
 
@@ -1416,6 +1418,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[2.13.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.13.0
 [2.12.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.12.0
 [2.11.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.11.0
 [2.10.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.10.1
