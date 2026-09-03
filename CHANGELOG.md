@@ -1418,6 +1418,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[2.13.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.13.0
 [2.12.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.12.0
 [2.11.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.11.0
 [2.10.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.10.1
