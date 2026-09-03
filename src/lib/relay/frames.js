@@ -2,7 +2,7 @@
  * Relay frame codec (#232).
  *
  * Length-prefixed JSON frames for the edge/agent channel, promoted from the
- * DEV-293 lab harness (`lab/outbound-relay/harness.js`). Mechanism only — no
+ * outbound-relay lab harness (`lab/outbound-relay/harness.js`). Mechanism only — no
  * authentication, entitlement, or header policy lives here.
  *
  * Wire format: 4-byte big-endian payload length, then UTF-8 JSON. A frame

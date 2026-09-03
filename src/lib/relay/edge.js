@@ -1,8 +1,8 @@
 /**
- * Relay northbound edge (#232, #242, #244, #247, #250, #253, #256) — DEV-294
- * AC4, DEV-122 isolation, DEV-124 tenant routing, DEV-123 actor mapping,
- * DEV-125 policy digest and W&L-operated bundle promotion, DEV-126
- * attributable usage, quotas, and abuse signals.
+ * Relay northbound edge (#232, #242, #244, #247, #250, #253, #256) — the
+ * hosted-edge slice (#232), tenant isolation (#242), tenant routing (#244),
+ * actor mapping (#247), policy digest (#250) and W&L-operated bundle
+ * promotion (#253), attributable usage, quotas, and abuse signals (#256).
  *
  * Terminates northbound MCP over the OAuth resource server and fans requests
  * down outbound tenant-agent channels. The edge proposes; the tenant-side
@@ -23,7 +23,7 @@
  *     `agentId`; channel records may bind `sites`. A second unscoped agent
  *     or overlapping site claim is denied at hello. Fan-down selects the
  *     unique bound agent from server-owned grants. Single unscoped agent
- *     remains the DEV-294 compatibility path.
+ *     remains the #232 single-agent compatibility path.
  *   - Stateless MCP 2026-07-28 northbound: sessionful traffic is refused and
  *     no `Mcp-Session-Id` crosses in either direction.
  *   - Revocation is per-request with no grace window, for both credential
@@ -74,7 +74,7 @@ import {
 export const EDGE_MCP_PROTOCOL = "2026-07-28";
 
 /**
- * Revocation bound restated from the DEV-293 lab for both credential kinds.
+ * Revocation bound restated from the outbound-relay lab for both credential kinds.
  * The next request after revoke is denied; an in-flight request may finish.
  */
 export const EDGE_REVOCATION_BOUND = Object.freeze({
@@ -122,7 +122,7 @@ const SHARED_SCOPES = new Set(["tenant", "config"]);
 
 /**
  * Normalize a channel-record `sites` list. Empty / missing means unscoped
- * (legal only as the sole connected agent — the DEV-294 compatibility path).
+ * (legal only as the sole connected agent — the #232 compatibility path).
  *
  * @param {unknown} sites
  * @returns {string[]}
@@ -228,7 +228,7 @@ export function selectTenantSession({
  * Resolve tenant and target from server-owned grants. Caller `tenant` is a
  * confirming hint inside the grant, never authority. When `tenantGrants` is
  * omitted, tenant is derived from the unique agent covering the site grant
- * (DEV-122 / DEV-294 compatibility).
+ * (#242 / #232 compatibility).
  *
  * @param {object} params
  * @param {object|null} params.identity

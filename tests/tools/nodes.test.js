@@ -239,7 +239,7 @@ describe("nodes tools (migrated)", () => {
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
-  it("update_node without a path preserves the existing alias and round-trips its pid (DEV-116)", async () => {
+  it("update_node without a path preserves the existing alias and round-trips its pid (1.5.1)", async () => {
     backend.getPathInfo.mockResolvedValue(pathInfo({ alias: "/keep-me", pid: "204", langcode: "en" }));
     await handlers.drupal_update_node({ type: "article", id: "n1", title: "New" });
     expect(backend.getPathInfo).toHaveBeenCalledWith({ entityType: "node", bundle: "article", id: "n1" });
@@ -256,7 +256,7 @@ describe("nodes tools (migrated)", () => {
     expect(arg.attributes.path).toEqual({ alias: "/platforms/nexus", pathauto: false, langcode: "en", pid: "204" });
   });
 
-  it("update_node creates a 301 redirect from the old alias on rename (DEV-116)", async () => {
+  it("update_node creates a 301 redirect from the old alias on rename (1.5.1)", async () => {
     backend.getPathInfo.mockResolvedValue(pathInfo({ alias: "/platforms/sabal", pid: "204", drupalId: 2 }));
     backend.listEntities.mockResolvedValue({ entities: [], page: { total: 0 }, approximate: false });
     const out = await handlers.drupal_update_node({ type: "platform", id: "n1", fields: { path: { alias: "/platforms/nexus" } } });

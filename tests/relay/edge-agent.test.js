@@ -1,6 +1,6 @@
 /**
- * Edge/agent battery (#232) — the DEV-293 lab patterns upgraded with real
- * denies, run against product code (issue #232, DEV-294 AC4 slice).
+ * Edge/agent battery (#232) — the outbound-relay lab patterns upgraded with
+ * real denies, run against product code (issue #232, the hosted-edge slice).
  *
  * Every deny this battery names was watched failing before the code that
  * closes it existed: unauthenticated northbound, shared bearer, wrong
@@ -791,7 +791,7 @@ describe("agent refuses an identity-less request frame", () => {
   });
 });
 
-describe("tenant isolation (#242 / DEV-122)", () => {
+describe("tenant isolation (#242)", () => {
   it("keeps two scoped agents connected and fans each principal only to its tenant", async () => {
     const harness = await startTwoTenantHarness();
     const { tenant: tenantA } = await startRealAgent(harness, {
@@ -1080,7 +1080,7 @@ describe("tenant isolation (#242 / DEV-122)", () => {
   });
 });
 
-describe("authoritative tenant routing (#244 / DEV-124)", () => {
+describe("authoritative tenant routing (#244)", () => {
   it("routes by tenantGrants without a caller tenant hint and stamps identity.tenant", async () => {
     const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS });
     const { tenant } = await startRealAgent(harness, { token: harness.tokenA });
@@ -1202,7 +1202,7 @@ const ACTORS = {
   "client-a": { uuid: ACTOR_A, delegators: ["operator-1"] },
 };
 
-describe("principal actor mapping (#247 / DEV-123)", () => {
+describe("principal actor mapping (#247)", () => {
   it("stamps identity.actor from the grant and ignores a caller actor hint", async () => {
     const harness = await startTwoTenantHarness({
       tenantGrants: TENANT_GRANTS,
@@ -1343,7 +1343,7 @@ describe("principal actor mapping (#247 / DEV-123)", () => {
 const POLICY_A = "aa".repeat(32);
 const POLICIES = { "client-a": POLICY_A };
 
-describe("principal policy digest (#250 / DEV-125)", () => {
+describe("principal policy digest (#250)", () => {
   it("stamps identity.policy from the grant and ignores a caller policy hint", async () => {
     const harness = await startTwoTenantHarness({
       tenantGrants: TENANT_GRANTS,
@@ -1433,7 +1433,7 @@ describe("principal policy digest (#250 / DEV-125)", () => {
   });
 });
 
-describe("W&L-operated bundle promotion (#253 / DEV-125)", () => {
+describe("W&L-operated bundle promotion (#253)", () => {
   function sealedLab() {
     const enforcement = createLocalPolicyEnforcement({ signingKey: "lab-sentinel-key" });
     const bundle = enforcement.mint(["delete"], 3600);
@@ -1691,7 +1691,7 @@ function usageGet(url, jwt, query = {}) {
   });
 }
 
-describe("attributable usage, quotas, and abuse signals (#256 / DEV-126)", () => {
+describe("attributable usage, quotas, and abuse signals (#256)", () => {
   function mcpRequests(raw) {
     return raw.frames.filter((frame) => frame.type === "mcp-request");
   }

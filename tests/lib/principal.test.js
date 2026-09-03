@@ -332,7 +332,7 @@ describe("visibleSiteTargets", () => {
   });
 });
 
-describe("resolveActor (#247 / DEV-123)", () => {
+describe("resolveActor (#247)", () => {
   const uuid = "11111111-1111-4111-8111-111111111111";
   const actors = {
     "agent-1": { uuid, delegators: ["operator-1"] },
@@ -395,7 +395,7 @@ describe("resolveActor (#247 / DEV-123)", () => {
   });
 });
 
-describe("resolvePolicy (#250 / DEV-125)", () => {
+describe("resolvePolicy (#250)", () => {
   const digest = "aa".repeat(32);
   const policies = {
     "agent-1": digest,

@@ -1,5 +1,5 @@
 /**
- * Relay tenant agent (#232) — the DEV-294 AC4 slice, tenant side.
+ * Relay tenant agent (#232) — the hosted-edge slice, tenant side.
  *
  * Dials OUT to the edge's agent channel and serves the real connector server
  * (`createConnectorServerFactory`) over the framed tunnel. The agent never

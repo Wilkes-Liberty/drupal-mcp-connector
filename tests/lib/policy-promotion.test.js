@@ -21,7 +21,7 @@ function document(digest = DIGEST) {
   };
 }
 
-describe("normalizePromotions (#253 / DEV-125)", () => {
+describe("normalizePromotions (#253)", () => {
   it("is not required when the promotions table is omitted", () => {
     expect(promotionsRequired(null)).toBe(false);
     expect(promotionsRequired({ _comment: "lab" })).toBe(false);
