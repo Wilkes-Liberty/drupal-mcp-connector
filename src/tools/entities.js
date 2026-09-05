@@ -118,7 +118,7 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   assertPublishAllowed(sec, safeAttributes);
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
   const patchTarget = await prepareGuardedPatch(backend, {
-    entityType, bundle, id, existing, attributes: safeAttributes,
+    entityType, bundle, id, existing, attributes: safeAttributes, relationships: resolvedRelationships,
   });
   if (dryRun) {
     return {
@@ -129,6 +129,7 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   const result = await updateEntityGuarded(backend, {
     entityType, bundle, id, attributes: safeAttributes, relationships: resolvedRelationships,
     ...(patchTarget.resourceVersion ? { resourceVersion: patchTarget.resourceVersion } : {}),
+    ...(patchTarget.draftRevision ? { draftRevision: patchTarget.draftRevision } : {}),
   });
   const written = await readWrittenRevision({
     backend, entityType, bundle, id,
@@ -280,7 +281,7 @@ export const definitions = [
   },
   {
     name: "drupal_entity_update",
-    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision). Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved. On moderated targets an id-mismatch PATCH preflight runs first (including dryRun) against the same URL the write will hit. An addressable working copy is PATCHed via ?resourceVersion=rel:working-copy (#166); a stray revision with no addressable working copy still fails with revision-surgery language (#201). Preflight does not un-orphan paragraphs already created — probe the host before creating dependents.",
+    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision). Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved. On moderated targets a non-saving PATCH preflight runs first (including dryRun) against the same URL the write will hit. An addressable node draft uses Sentinel's governed draft endpoint with live/working revision preconditions (#166); a stray revision with no addressable working copy still fails with revision-surgery language (#201). Preflight does not un-orphan paragraphs already created — probe the host before creating dependents.",
     inputSchema: {
       type: "object", required: ["entityType", "bundle", "id"],
       properties: {
@@ -290,7 +291,7 @@ export const definitions = [
         id:            { type: "string" },
         attributes:    { type: "object" },
         relationships: { type: "object" },
-        dryRun:        { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. The probe uses a non-matching data.id so Drupal does not save, and hits the same URL as the real write (canonical, or ?resourceVersion=rel:working-copy when a draft is addressable). A working-copy 400 fails the dryRun." },
+        dryRun:        { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. An existing node draft uses Sentinel's non-saving draft endpoint with the real payload and revision preconditions. Otherwise an id-mismatch core PATCH probes writability without saving. Any refusal fails the dryRun." },
         returning:     RETURNING_SCHEMA,
       },
     },

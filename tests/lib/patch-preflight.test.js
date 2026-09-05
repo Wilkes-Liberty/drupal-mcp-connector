@@ -242,14 +242,14 @@ describe("updateEntityGuarded (#201)", () => {
       });
   });
 
-  it("treats a working-copy-targeted write 400 as stale and does not retry canonical (#166)", async () => {
+  it("refuses revision-selected core PATCH before attempting HTTP (#166)", async () => {
     const backend = backendStub({
       updateEntity: vi.fn(async () => { throw WC_400; }),
     });
     await expect(updateEntityGuarded(backend, {
       entityType: "node", bundle: "a", id: "n1", resourceVersion: "rel:working-copy",
-    })).rejects.toBeInstanceOf(WorkingCopyStaleError);
-    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
+    })).rejects.toThrow("does not support revision-selected PATCH");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 });
 

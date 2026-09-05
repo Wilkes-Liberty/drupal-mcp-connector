@@ -4,6 +4,7 @@ const backend = {
   listEntities: vi.fn(), getEntity: vi.fn(), createEntity: vi.fn(), updateEntity: vi.fn(),
   deleteEntity: vi.fn(), listResourceTypes: vi.fn(), getEntitySchema: vi.fn(),
   rawQuery: vi.fn(),
+  toCanonical: vi.fn(),
   resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
@@ -28,6 +29,7 @@ beforeEach(() => {
     "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
   ));
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
+  backend.toCanonical.mockImplementation(x => x);
 });
 
 describe("entities tools (migrated)", () => {
@@ -316,16 +318,19 @@ describe("#166 entity_update targets an addressable working copy", () => {
     fields: { moderation_state: "draft", drupal_internal__vid: 1510 },
   };
 
-  it("PATCHes rel:working-copy and returns distinct live/working vids", async () => {
+  it("PATCHes the governed draft endpoint and returns distinct live/working vids", async () => {
     backend.getEntity.mockImplementation(async ({ resourceVersion }) => (
       resourceVersion === "rel:working-copy" ? draft : live
     ));
     backend.updateEntity.mockResolvedValue(draft);
+    backend.rawQuery.mockResolvedValueOnce({ meta: { draft_preflight: true, live: 1500, working: 1510 } })
+      .mockResolvedValueOnce({ data: { ...draft, type: "node--article" } });
     const out = await handlers.drupal_entity_update({
       entityType: "node", bundle: "article", id, attributes: { title: "CTA" },
     });
     expect(backend.createEntity).not.toHaveBeenCalled();
-    expect(backend.updateEntity.mock.calls[0][0].resourceVersion).toBe("rel:working-copy");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(backend.rawQuery.mock.calls[1][0].path).toContain("/mcp-draft");
     expect(out._revisions).toEqual({ live: 1500, working: 1510 });
   });
 });
