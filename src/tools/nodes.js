@@ -344,9 +344,8 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   // #192: resolve paragraph ERR identifiers before any host PATCH. An unresolved
   // list would persist empty — fail the whole write instead.
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
-  // #201 / #166: probe the same URL the write will hit. An addressable
-  // working copy is PATCHed via rel:working-copy; a stray revision still
-  // fails the probe with revision-surgery language.
+  // #201 / #166: probe the write endpoint. Addressable drafts use Sentinel's
+  // governed continuation endpoint; stray revisions still fail the probe.
   const patchTarget = await prepareGuardedPatch(backend, {
     entityType: "node", bundle: type, id, existing, attributes, relationships: resolvedRelationships,
   });

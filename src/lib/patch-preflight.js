@@ -59,7 +59,7 @@ export const PATCH_WORKING_COPY_STALE_MESSAGE =
 
 /**
  * Operator message for a core working-copy 400.
- * A resolvable working copy is edited in place (#166) — this message is only
+ * A resolvable working copy gets a new draft revision (#166) — this message is only
  * for the invisible-row case (#201).
  * @returns {string}
  */
