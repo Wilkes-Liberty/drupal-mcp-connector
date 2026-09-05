@@ -348,7 +348,7 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   // working copy is PATCHed via rel:working-copy; a stray revision still
   // fails the probe with revision-surgery language.
   const patchTarget = await prepareGuardedPatch(backend, {
-    entityType: "node", bundle: type, id, existing, attributes,
+    entityType: "node", bundle: type, id, existing, attributes, relationships: resolvedRelationships,
   });
   if (dryRun) {
     const preview = {
@@ -367,6 +367,7 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   const patched = await updateEntityGuarded(backend, {
     entityType: "node", bundle: type, id, attributes, relationships: resolvedRelationships,
     ...(patchTarget.resourceVersion ? { resourceVersion: patchTarget.resourceVersion } : {}),
+    ...(patchTarget.draftRevision ? { draftRevision: patchTarget.draftRevision } : {}),
   });
   const redirectResult = redirect ? await createRenameRedirect(backend, sec, redirect) : null;
   // #169: when relationships were sent, the canonical re-read is the published
@@ -477,7 +478,7 @@ export const definitions = [
   },
   {
     name: "drupal_update_node",
-    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Entity-reference fields go in `relationships`, not `fields`. Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved (an unresolved identifier persists as an empty field). On moderated targets an id-mismatch PATCH preflight runs first — including on dryRun — against the same URL the write will hit. An addressable working copy is PATCHed via ?resourceVersion=rel:working-copy (#166); dryRun uses that same target. workingCopy:null from drupal_list_revisions is not proof the node is writable (possiblyPatchBlocked / #201). Preflight here does not un-orphan paragraphs already created; probe the host before creating dependents.",
+    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Entity-reference fields go in `relationships`, not `fields`. Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved (an unresolved identifier persists as an empty field). On moderated targets a non-saving PATCH preflight runs first — including on dryRun — against the same URL the write will hit. An addressable node draft uses Sentinel's governed draft endpoint with live/working revision preconditions (#166); dryRun uses that same target. workingCopy:null from drupal_list_revisions is not proof the node is writable (possiblyPatchBlocked / #201). Preflight here does not un-orphan paragraphs already created; probe the host before creating dependents.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
@@ -492,7 +493,7 @@ export const definitions = [
         moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status. Required to keep or re-publish a live node — omitting it on a published moderated node defaults the write to 'draft'." },
         fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Formatted text: a string or { value, format?, summary? }. format must be in the field's allowed_formats; a single allowed format is used when omitted. Entity-reference fields go in `relationships`, not here." },
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }. Paragraph / ERR items must carry meta.target_revision_id — the connector injects it when missing, and fails the write if it cannot." },
-        dryRun:  { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. The probe uses a non-matching data.id so Drupal does not save, and hits the same URL as the real write (canonical, or ?resourceVersion=rel:working-copy when a draft is addressable). A working-copy 400 fails the dryRun." },
+        dryRun:  { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. An existing node draft uses Sentinel's non-saving draft endpoint with the real payload and revision preconditions. Otherwise an id-mismatch core PATCH probes writability without saving. Any refusal fails the dryRun." },
         returning: RETURNING_SCHEMA,
       },
     },

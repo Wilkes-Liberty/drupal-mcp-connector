@@ -9,6 +9,7 @@ const backend = {
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
   rawQuery: vi.fn(),
+  toCanonical: vi.fn(),
   resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
   getFieldDefinition: vi.fn(),
 };
@@ -40,7 +41,8 @@ import { handlers } from "../../src/tools/nodes.js";
 function canonicalNode(over = {}) {
   return { id: "n1", entityType: "node", bundle: "article", title: "T", status: true,
     langcode: "en", created: null, changed: null, url: "/t", fields: { body: { value: "B" } },
-    relationships: {}, _backend: "jsonapi", ...over };
+    relationships: {}, _backend: "jsonapi", ...over,
+    fields: { drupal_internal__vid: 10, body: { value: "B" }, ...over.fields } };
 }
 
 /** Default path info (no existing alias) — overridden per alias test. */
@@ -60,6 +62,7 @@ beforeEach(() => {
     "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
   ));
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
+  backend.toCanonical.mockImplementation(x => x);
   // Unknown allowed_formats keeps the historical default chain (full_html).
   backend.getFieldDefinition.mockResolvedValue(null);
   // Existing summary tests assume a core text_with_summary body. #163 cases
@@ -469,7 +472,7 @@ const WC_400 = new Error(
 describe("#192 ERR attach, #169 written revision, #201 preflight", () => {
   const publishedModerated = () => canonicalNode({
     status: true,
-    fields: { moderation_state: "published", body: { value: "B" } },
+    fields: { moderation_state: "published", drupal_internal__vid: 10, body: { value: "B" } },
     relationships: {
       field_key_capabilities: [{ id: "old-1", entityType: "paragraph", bundle: "capability" }],
     },
@@ -492,7 +495,7 @@ describe("#192 ERR attach, #169 written revision, #201 preflight", () => {
         return {
           ...publishedModerated(),
           status: false,
-          fields: { moderation_state: "draft" },
+          fields: { moderation_state: "draft", drupal_internal__vid: 10 },
           relationships: {
             field_key_capabilities: [
               { id: "p-a", entityType: "paragraph", bundle: "capability", meta: { target_revision_id: 11 } },
@@ -547,7 +550,7 @@ describe("#192 ERR attach, #169 written revision, #201 preflight", () => {
       }
       return publishedModerated();
     });
-    backend.rawQuery.mockRejectedValue(WC_400);
+    backend.rawQuery.mockRejectedValue(new Error("Drupal 409 stale or concurrent draft"));
     await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "T" }))
       .rejects.toThrow(/stale or concurrent|#166/);
     expect(backend.updateEntity).not.toHaveBeenCalled();
@@ -607,6 +610,12 @@ describe("#166 iterative working-copy PATCH", () => {
       if (resourceVersion === "rel:working-copy") return { ...draft(), id };
       return live();
     });
+    backend.rawQuery.mockImplementation(async ({ options }) => {
+      if (options.headers?.["X-MCP-Draft-Preflight"] === "1") {
+        return { meta: { draft_preflight: true, live: 1500, working: 1510 } };
+      }
+      return { data: { ...draft(), type: "node--article" } };
+    });
   }
 
   it("published with no working copy PATCHes the canonical URL", async () => {
@@ -621,13 +630,14 @@ describe("#166 iterative working-copy PATCH", () => {
     expect(backend.rawQuery.mock.calls[0][0].path).not.toMatch(/working-copy/);
   });
 
-  it("addressable working copy PATCHes rel:working-copy and does not say publish or discard", async () => {
+  it("addressable working copy uses the governed endpoint without canonical PATCH", async () => {
     mockWorkingCopy();
     backend.updateEntity.mockResolvedValue(draft());
     const out = await handlers.drupal_update_node({ type: "article", id: "n1", title: "CTA pass" });
     expect(backend.createEntity).not.toHaveBeenCalled();
-    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
-    expect(backend.updateEntity.mock.calls[0][0].resourceVersion).toBe("rel:working-copy");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(backend.rawQuery).toHaveBeenCalledTimes(2);
+    expect(backend.rawQuery.mock.calls[1][0].path).toMatch(/\/mcp-draft$/);
     expect(out.title).toBe("CTA pass");
     expect(out.status).toBe(false);
     expect(out.url).toBe("/draft-alias");
@@ -639,17 +649,17 @@ describe("#166 iterative working-copy PATCH", () => {
     const out = await handlers.drupal_update_node({ type: "article", id: "n1", title: "CTA", dryRun: true });
     expect(out.dryRun).toBe(true);
     expect(backend.updateEntity).not.toHaveBeenCalled();
-    expect(backend.rawQuery.mock.calls[0][0].path).toContain("resourceVersion=rel%3Aworking-copy");
+    expect(backend.rawQuery.mock.calls[0][0].path).toContain("/mcp-draft");
     expect(backend.rawQuery.mock.calls[0][0].path).not.toBe("/jsonapi/node/article/n1");
   });
 
   it("dryRun fails when the working-copy probe 400s — it does not report success", async () => {
     mockWorkingCopy();
-    backend.rawQuery.mockRejectedValue(WC_400);
+    backend.rawQuery.mockRejectedValue(new Error("Drupal 409 stale or concurrent draft"));
     await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "CTA", dryRun: true }))
       .rejects.toThrow(/stale or concurrent|#166/i);
     expect(backend.updateEntity).not.toHaveBeenCalled();
-    expect(backend.rawQuery.mock.calls[0][0].path).toContain("resourceVersion=rel%3Aworking-copy");
+    expect(backend.rawQuery.mock.calls[0][0].path).toContain("/mcp-draft");
   });
 
   it("working copy does not resolve plus core 400 keeps the #201 stray-revision message", async () => {
@@ -662,11 +672,12 @@ describe("#166 iterative working-copy PATCH", () => {
 
   it("refuses a stale working-copy write and does not retry the canonical URL", async () => {
     mockWorkingCopy();
-    backend.updateEntity.mockRejectedValue(WC_400);
+    backend.rawQuery.mockResolvedValueOnce({ meta: { draft_preflight: true, live: 1500, working: 1510 } })
+      .mockRejectedValueOnce(new Error("Drupal 409 stale or concurrent draft"));
     await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "CTA" }))
       .rejects.toThrow(/stale or concurrent|#166/i);
-    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
-    expect(backend.updateEntity.mock.calls[0][0].resourceVersion).toBe("rel:working-copy");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(backend.rawQuery).toHaveBeenCalledTimes(2);
   });
 
   it("refuses when the working-copy id does not match the target", async () => {

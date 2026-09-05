@@ -12,19 +12,19 @@
  *
  * Two distinct cases share that core 400:
  *
- * - **#166** — `rel:working-copy` resolves. PATCH (and the dryRun probe)
- *   target `?resourceVersion=rel:working-copy`. Do not discard, do not
- *   retry the canonical URL, and do not tell the caller to publish first.
+ * - **#166** — `rel:working-copy` resolves. Both preflight and write use
+ *   Sentinel's /mcp-draft endpoint with verified live/working revision IDs.
+ *   Core rejects resourceVersion on PATCH. Never retry the canonical URL.
  * - **#201** — the working-copy alias does not resolve, but core still
  *   blocks. That is a stray revision row. Refuse with revision-surgery
  *   language. `workingCopy: null` is not proof the node is writable.
  *
- * A working-copy 400 *after* targeting the working copy is a stale or
- * concurrent write — refuse, do not fall back to discard.
+ * Unsupported endpoints and stale revisions fail closed, without discard.
  */
 
 import { entityLooksModerated, hasExplicitModerationState } from "./moderation-default.js";
 import { entityRevisionId } from "./write-revision.js";
+import { writeDraft } from "./draft-write.js";
 
 /** Stable error code for a core working-copy / not-latest-revision block. */
 export const PATCH_BLOCKED_CODE = "PATCH_BLOCKED";
@@ -300,11 +300,18 @@ export async function preflightPatchWritable({
  * @returns {Promise<{resourceVersion: ?string, workingCopy: ?object, liveVid: ?number|string, workingVid: ?number|string}>}
  */
 export async function prepareGuardedPatch(backend, {
-  entityType, bundle, id, existing, attributes,
+  entityType, bundle, id, existing, attributes, relationships,
 }) {
   const target = shouldPreflightPatch({ existing, attributes })
     ? await resolveWorkingCopyPatchTarget(backend, { entityType, bundle, id, existing })
     : { resourceVersion: undefined, workingCopy: null, liveVid: null, workingVid: null };
+  if (target.resourceVersion) {
+    target.draftRevision = { liveVid: target.liveVid, workingVid: target.workingVid };
+    await writeDraft(backend, {
+      entityType, bundle, id, attributes, relationships, draftRevision: target.draftRevision,
+    }, true);
+    return target;
+  }
   await preflightPatchWritable({
     backend, entityType, bundle, id, existing, attributes,
     resourceVersion: target.resourceVersion,
@@ -323,6 +330,10 @@ export async function prepareGuardedPatch(backend, {
  */
 export async function updateEntityGuarded(backend, input) {
   try {
+    if (input?.draftRevision) return await writeDraft(backend, input);
+    if (input?.resourceVersion) {
+      throw new Error("Core JSON:API does not support revision-selected PATCH. A governed draft preflight is required.");
+    }
     return await backend.updateEntity(input);
   } catch (err) {
     if (!isWorkingCopyPatchError(err)) throw err;

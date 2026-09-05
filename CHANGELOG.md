@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.1] - 2026-09-05
+
+### Fixed
+- Existing node drafts use Sentinel's governed draft-continuation endpoint
+  instead of a revision-selected core PATCH, which Drupal rejects (#166).
+  Preflight sends the actual fields and revision preconditions without saving.
+  An unavailable server endpoint fails closed without discarding the draft.
+
 ### Changed
 - Comments, test names, lab notes, and older changelog entries now reference
   GitHub issues, release versions, or plain descriptions instead of internal
@@ -1423,6 +1431,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[2.13.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.13.1
 [2.13.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.13.0
 [2.12.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.12.0
 [2.11.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.11.0
