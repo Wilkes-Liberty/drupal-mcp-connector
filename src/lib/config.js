@@ -332,6 +332,25 @@ export function getInboundQuotas() {
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
+/**
+ * Independent evidence notary pin (`auth.evidenceAnchor`).
+ * When present, the relay edge fails closed: a table it cannot pin refuses
+ * startup. Validation lives in evidence.js (`normalizeEvidenceAnchor`).
+ * @returns {object|null|unknown} Null when omitted or comment-only; the
+ *   comment-stripped table when it is an object; otherwise the configured
+ *   value unchanged so `startEdge()` refuses to start on it instead of
+ *   running without an independent anchor.
+ */
+export function getInboundEvidenceAnchor() {
+  const raw = loadConfig().auth?.evidenceAnchor;
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const entries = Object.entries(raw)
+    .map(([key, value]) => [key.trim(), value])
+    .filter(([key]) => key && !key.startsWith("_"));
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Auth headers — never logged, never exposed in tool responses
 // ---------------------------------------------------------------------------

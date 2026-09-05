@@ -191,6 +191,12 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
   stands, is logged as unmetered, and the request proceeds. The ledger is
   in-process and bounded; a restart clears it and reconciliation reports
   truncation. Unset, nothing is recorded and `/usage` is 404;
+- optional `auth.evidenceAnchor` (`url` + pinned Ed25519 `publicKey`).
+  When present, settled receipts are reconciled and submitted to an
+  independent notary the edge never holds the private key for;
+  `GET /assessor` serves one tenant-scoped pack bound to the live policy
+  digest. A table the edge cannot pin refuses startup. Omit to keep the
+  prior path (`/assessor` is 404). Lab/loopback only;
 - an agent channel credential store (`MCP_CHANNEL_CREDENTIALS_FILE`, SHA-256
   digests only, hot-reloaded so revocation needs no restart). Each agent
   entry may name `sites`: catalog names that agent is allowed to serve.
@@ -243,6 +249,26 @@ made before any tenant can be attributed (a client with no tenant grant, or
 a multi-tenant grant without a hint) is recorded with `tenant: null`; it
 stays in the ledger for the operator but no tenant partition serves it.
 Usage is measured, not priced; billing and invoicing are not this surface.
+
+**Independent evidence.** Optional `auth.evidenceAnchor`
+(`{ url, publicKey }`, public key is SPKI DER in standard base64). When
+present, every settled receipt is reconciled by the eight stable
+identifiers and submitted to an Ed25519 notary the edge does not hold the
+private key for (`drupal-mcp-anchor`, loopback only). The edge verifies
+every inclusion against the **pinned** public key; it does not fetch trust
+from the sink. `GET /assessor` is authenticated on the same resource
+server as `/mcp` and answers one tenant-scoped, data-minimized pack: the
+tenant comes from `auth.tenantGrants` (a `tenant` query value is a
+confirming hint; any other tenant is `not_entitled` with no records).
+Control mappings cite the live `auth.policies` digest and anchored
+evidence ids, or stay `residual`. The pack never writes `passed`. Prompts,
+payloads, emails, IPs, and bodies never enter the ledger or the export.
+A table the edge cannot pin, or an evidence ledger without a pin, **refuses
+startup**. Omit the table to keep the prior path (`/assessor` is 404).
+A shared-host lab notary is a named residual; a separately administered
+production host is not chosen here. This is still not a hosted-service or
+design-partner admission claim. Audit Chain NDJSON is the off-system
+stream, not this anchor.
 
 **The agent** dials out to the edge's channel port and never listens. It
 authenticates the channel with its own issued credential (`MCP_CHANNEL_TOKEN`

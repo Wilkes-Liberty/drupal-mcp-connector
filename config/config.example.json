@@ -47,6 +47,9 @@
     "quotas": {
       "_comment": "Optional, drupal-mcp-edge only. { tenants: { \"<agent id>\": { requests, windowSec } }, principals: { \"<sub or client_id>\": { requests, windowSec } }, abuse: { denials, windowSec, lockSec } }. When a tenants or principals table names any id, an id without a row is not_entitled; an exhausted window is 429 quota_exceeded with Retry-After; a principal that earns `denials` refusals inside windowSec is 429 abuse_locked for lockSec. Every refusal is zero frames on any tunnel. A shared tenant window running out never feeds an individual principal's abuse lock. A table the edge cannot read refuses startup and names the offending path. Omit to keep the prior path (no quota at the edge). Counting is measured usage, not pricing."
     },
+    "evidenceAnchor": {
+      "_comment": "Optional, drupal-mcp-edge only. Independent Ed25519 notary the edge never holds the private key for: { url, publicKey } (publicKey is SPKI DER, standard base64; url is https, or http on loopback). When present, every settled receipt is reconciled by stable identifiers and submitted to that notary; GET /assessor serves one tenant-scoped, data-minimized pack bound to the live policy digest. A table the edge cannot pin refuses startup. Omit to keep the prior path (404 on /assessor). Lab/loopback only — not a hosted-service or design-partner admission claim. Run `drupal-mcp-anchor` to mint a pin."
+    },
     "revocationFile": "",
     "introspectionUrl": "",
     "introspectionClientIdEnv": "",
