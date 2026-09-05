@@ -75,6 +75,7 @@ export const ASSESSOR_CONTROL_CATALOG = Object.freeze([
   Object.freeze({ id: "P8.7", title: "Independent evidence anchoring", source: "anchor" }),
   Object.freeze({ id: "P8.8", title: "Data-minimized provenance", source: "anchor" }),
   Object.freeze({ id: "P8.10", title: "Execution reconciliation", source: "anchor" }),
+  Object.freeze({ id: "P9.8", title: "Evidence-producing onboarding", source: "onboard" }),
 ]);
 
 function isRecord(value) {
@@ -429,6 +430,34 @@ function minimizeExecution(row) {
   });
 }
 
+function citeRow(row) {
+  return Object.freeze({
+    receiptId: row.receiptId,
+    anchorId: row.anchorId,
+    digest: row.digest,
+  });
+}
+
+function liveAnchored(row, liveDigest) {
+  return row.anchored
+    && row.reconcileState === "settled"
+    && row.policyDigest === liveDigest;
+}
+
+function findOnboardOutcomes(executions, liveDigest) {
+  const settled = executions.filter((row) => liveAnchored(row, liveDigest));
+  const allowed = settled.find((row) => (
+    row.outcome === "ok"
+    && (!row.approvalId || row.approvalId === ABSENT.approval)
+  )) ?? null;
+  const denied = settled.find((row) => row.outcome === "denied") ?? null;
+  const gated = settled.find((row) => (
+    row.outcome === "require_approval"
+    || (row.outcome === "ok" && row.approvalId && row.approvalId !== ABSENT.approval)
+  )) ?? null;
+  return { allowed, denied, gated, any: settled[0] ?? null };
+}
+
 /**
  * Data-minimized assessor export bound to the live policy digest.
  *
@@ -465,19 +494,35 @@ export function exportAssessor({
     )) ?? null
     : null;
 
+  const onboard = liveDigest ? findOnboardOutcomes(executions, liveDigest) : null;
   const controls = ASSESSOR_CONTROL_CATALOG.map((control) => {
+    if (control.source === "onboard") {
+      const complete = Boolean(onboard?.allowed && onboard?.denied && onboard?.gated);
+      return Object.freeze({
+        id: control.id,
+        title: control.title,
+        policyDigest: liveDigest,
+        evidence: complete
+          ? Object.freeze({
+            allowed: citeRow(onboard.allowed),
+            denied: citeRow(onboard.denied),
+            approvalGated: citeRow(onboard.gated),
+          })
+          : null,
+        state: complete ? "evidenced" : "residual",
+        reason: complete
+          ? null
+          : (!liveDigest
+            ? "no_live_policy_digest"
+            : (onboard?.any ? "incomplete_onboard_outcomes" : "no_anchored_execution")),
+      });
+    }
     const cites = Boolean(evidenced && control.source === "anchor");
     return Object.freeze({
       id: control.id,
       title: control.title,
       policyDigest: liveDigest,
-      evidence: cites
-        ? Object.freeze({
-          receiptId: evidenced.receiptId,
-          anchorId: evidenced.anchorId,
-          digest: evidenced.digest,
-        })
-        : null,
+      evidence: cites ? citeRow(evidenced) : null,
       state: cites ? "evidenced" : "residual",
       reason: cites
         ? null
@@ -507,8 +552,8 @@ export function exportAssessor({
         id: "not_a_hosted_admission",
         status: "managed",
         detail:
-          "Loopback evidence is not hosted design-partner admission. Onboard and "
-          + "offboard remain later cuts.",
+          "Loopback evidence is not hosted design-partner admission. Laboratory "
+          + "onboard may be cited here; clean offboard remains a later cut.",
       }),
     ]),
   };

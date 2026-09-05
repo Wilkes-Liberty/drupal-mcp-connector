@@ -197,6 +197,13 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
   `GET /assessor` serves one tenant-scoped pack bound to the live policy
   digest. A table the edge cannot pin refuses startup. Omit to keep the
   prior path (`/assessor` is 404). Lab/loopback only;
+- optional `auth.approvalRequiredTools` (array of tool names). When
+  present, those tools receive a one-use `require_approval` challenge
+  before fan-down; a later call with `arguments.approvalId` consumes it.
+  `GET /assessor` cites P9.8 when allow, deny, and approval-gated
+  executions are independently anchored against the live policy digest.
+  Omit to keep the prior path. A table the edge cannot read refuses
+  startup. Lab/loopback only;
 - an agent channel credential store (`MCP_CHANNEL_CREDENTIALS_FILE`, SHA-256
   digests only, hot-reloaded so revocation needs no restart). Each agent
   entry may name `sites`: catalog names that agent is allowed to serve.
@@ -261,7 +268,9 @@ server as `/mcp` and answers one tenant-scoped, data-minimized pack: the
 tenant comes from `auth.tenantGrants` (a `tenant` query value is a
 confirming hint; any other tenant is `not_entitled` with no records).
 Control mappings cite the live `auth.policies` digest and anchored
-evidence ids, or stay `residual`. The pack never writes `passed`. Prompts,
+evidence ids, or stay `residual`. P9.8 is evidenced only when the pack
+holds independently anchored allow, deny, and approval-gated executions
+for that digest. The pack never writes `passed`. Prompts,
 payloads, emails, IPs, and bodies never enter the ledger or the export.
 A table the edge cannot pin, or an evidence ledger without a pin, **refuses
 startup**. Omit the table to keep the prior path (`/assessor` is 404).
@@ -269,6 +278,17 @@ A shared-host lab notary is a named residual; a separately administered
 production host is not chosen here. This is still not a hosted-service or
 design-partner admission claim. Audit Chain NDJSON is the off-system
 stream, not this anchor.
+
+**Laboratory onboarding.** A repeatable lab proof for one grant-resolved
+tenant (`mcp-edge-alpha` in the dogfood fixture) is: install via
+`npm run verify` and `drush mcp-sentinel:verify`, connect the outbound
+agent, promote a dual-controlled bundle until the tenant attests it, then
+run one allowed call, one denied call, and one approval-gated call
+(`auth.approvalRequiredTools`). `GET /assessor` must cite P9.8 against
+the live digest and must never write `passed`. Tenant channel revoke and
+principal `jti` revoke each deny the **next** request in the same run.
+This is laboratory onboarding, not hosted design-partner admission.
+Clean offboard is a later cut.
 
 **The agent** dials out to the edge's channel port and never listens. It
 authenticates the channel with its own issued credential (`MCP_CHANNEL_TOKEN`

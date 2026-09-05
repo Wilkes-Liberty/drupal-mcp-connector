@@ -204,6 +204,68 @@ describe("ledger, read, and assessor export", () => {
     expect(ASSESSOR_CONTROL_CATALOG.map((row) => row.id)).toEqual(
       pack.controls.map((row) => row.id),
     );
+    expect(byId.get("P9.8")).toMatchObject({
+      state: "residual",
+      policyDigest: POLICY,
+      evidence: null,
+      reason: "incomplete_onboard_outcomes",
+    });
+  });
+
+  it("cites P9.8 only when allow, deny, and approval-gated executions are anchored", () => {
+    const keys = generateNotaryKeys();
+    const notary = createNotary(keys);
+    const ledger = createEvidenceLedger();
+    const allowed = chain({
+      decisionId: "dec-allow",
+      receiptId: "rcpt-allow",
+      localExecutionId: "req-allow",
+      requestId: "req-allow",
+      receiptDecisionId: "dec-allow",
+      outcome: "ok",
+    });
+    const denied = chain({
+      decisionId: "dec-deny",
+      receiptId: "rcpt-deny",
+      localExecutionId: ABSENT.localExecution,
+      requestId: "",
+      receiptDecisionId: "dec-deny",
+      outcome: "denied",
+      targetRevision: ABSENT.targetRevision,
+    });
+    const gated = chain({
+      decisionId: "dec-gate",
+      receiptId: "rcpt-gate",
+      localExecutionId: ABSENT.localExecution,
+      requestId: "",
+      receiptDecisionId: "dec-gate",
+      approvalId: "appr-1",
+      outcome: "require_approval",
+      targetRevision: ABSENT.targetRevision,
+    });
+    for (const row of [allowed, denied, gated]) {
+      ledger.record(row, notary.include(digestExecution(createExecutionChain(row))), keys.publicPin);
+    }
+
+    const pack = exportAssessor({
+      identity: { clientId: "client-a" },
+      tenantGrants: TENANT_GRANTS,
+      ledger,
+      policyDigest: POLICY,
+    });
+    expect(JSON.stringify(pack)).not.toMatch(/passed/i);
+    const byId = new Map(pack.controls.map((row) => [row.id, row]));
+    expect(byId.get("P9.8")).toMatchObject({
+      state: "evidenced",
+      policyDigest: POLICY,
+      evidence: {
+        allowed: { receiptId: "rcpt-allow" },
+        denied: { receiptId: "rcpt-deny" },
+        approvalGated: { receiptId: "rcpt-gate" },
+      },
+    });
+    expect(byId.get("P9.8").evidence.allowed.anchorId).toBeTruthy();
+    expect(byId.get("P8.7").state).toBe("evidenced");
   });
 
   it("does not cite evidence when there is no live policy digest", () => {

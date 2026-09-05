@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Laboratory tenant onboarding on the relay edge (#265).** Optional
+  `auth.approvalRequiredTools` issues a one-use approval before fan-down
+  for named tools; a later `tools/call` with `arguments.approvalId`
+  consumes it (stripped before the tenant sees it). `GET /assessor` cites
+  P9.8 when one tenant pack holds anchored allow, deny, and
+  approval-gated executions against the live policy digest. Omit the
+  list to keep the prior path. A table the edge cannot read refuses
+  startup. Lab/loopback only — not a hosted-service or design-partner
+  admission claim.
+
 ### Security
 - **Independently verifiable evidence on the relay edge (#261).** Optional
   `auth.evidenceAnchor` (`url` + pinned Ed25519 `publicKey`) submits a
