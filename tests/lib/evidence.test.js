@@ -7,8 +7,9 @@
  * keys cannot enter the export.
  */
 
+import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { createNotary, generateNotaryKeys } from "../../src/lib/anchor.js";
+import { createNotary, generateNotaryKeys, pinPublicKey } from "../../src/lib/anchor.js";
 import {
   ABSENT,
   ASSESSOR_CONTROL_CATALOG,
@@ -120,6 +121,14 @@ describe("normalizeEvidenceAnchor", () => {
       publicKey: keys.publicPin,
     }).url).toBe("http://127.0.0.1:9");
   });
+
+  it("refuses a parseable SPKI that is not Ed25519", () => {
+    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    expect(normalizeEvidenceAnchor({
+      url: "https://anchor.test",
+      publicKey: pinPublicKey(rsa.publicKey),
+    })).toMatchObject({ invalid: true, reason: "evidenceAnchor.publicKey" });
+  });
 });
 
 describe("ledger, read, and assessor export", () => {
@@ -195,6 +204,26 @@ describe("ledger, read, and assessor export", () => {
     expect(ASSESSOR_CONTROL_CATALOG.map((row) => row.id)).toEqual(
       pack.controls.map((row) => row.id),
     );
+  });
+
+  it("does not cite evidence when there is no live policy digest", () => {
+    const keys = generateNotaryKeys();
+    const notary = createNotary(keys);
+    const ledger = createEvidenceLedger();
+    const digest = digestExecution(createExecutionChain(chain()));
+    ledger.record(chain(), notary.include(digest), keys.publicPin);
+    const pack = exportAssessor({
+      identity: { clientId: "client-a" },
+      tenantGrants: TENANT_GRANTS,
+      ledger,
+    });
+    expect(pack.ok).toBe(true);
+    expect(pack.policyDigest).toBeNull();
+    expect(pack.executions[0].anchored).toBe(true);
+    expect(pack.controls.every((row) => row.state === "residual")).toBe(true);
+    expect(pack.controls.every((row) => row.evidence === null)).toBe(true);
+    expect(pack.controls.every((row) => row.reason === "no_live_policy_digest")).toBe(true);
+    expect(JSON.stringify(pack)).not.toMatch(/passed/i);
   });
 
   it("leaves every control residual when nothing was independently anchored", () => {

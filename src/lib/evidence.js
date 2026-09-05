@@ -457,11 +457,13 @@ export function exportAssessor({
     ? policyDigest.toLowerCase()
     : null;
   const executions = read.records.map(minimizeExecution);
-  const evidenced = executions.find((row) => (
-    row.anchored
-    && row.reconcileState === "settled"
-    && (!liveDigest || row.policyDigest === liveDigest)
-  )) ?? null;
+  const evidenced = liveDigest
+    ? executions.find((row) => (
+      row.anchored
+      && row.reconcileState === "settled"
+      && row.policyDigest === liveDigest
+    )) ?? null
+    : null;
 
   const controls = ASSESSOR_CONTROL_CATALOG.map((control) => {
     const cites = Boolean(evidenced && control.source === "anchor");
@@ -477,7 +479,11 @@ export function exportAssessor({
         })
         : null,
       state: cites ? "evidenced" : "residual",
-      reason: cites ? null : (evidenced ? "not_in_this_export" : "no_anchored_execution"),
+      reason: cites
+        ? null
+        : (!liveDigest
+          ? "no_live_policy_digest"
+          : (evidenced ? "not_in_this_export" : "no_anchored_execution")),
     });
   });
 

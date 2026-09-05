@@ -11,7 +11,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createAnchorClient,
   createNotary,
+  formatBoundUrl,
   generateNotaryKeys,
+  loadPinnedPublicKey,
   pinPublicKey,
   startAnchorServer,
   verifyInclusion,
@@ -53,14 +55,27 @@ describe("createNotary / verifyInclusion", () => {
       .toEqual({ ok: false, reason: "key_mismatch" });
   });
 
-  it("an RSA key the edge already holds cannot mint a valid inclusion", () => {
+  it("an RSA key the edge already holds cannot be pinned as a notary", () => {
     const keys = generateNotaryKeys();
     const notary = createNotary(keys);
     const inclusion = notary.include(DIGEST_A);
     const edgeKey = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    expect(() => pinPublicKey(edgeKey.publicKey)).not.toThrow();
-    expect(verifyInclusion(pinPublicKey(edgeKey.publicKey), inclusion))
-      .toEqual({ ok: false, reason: "key_mismatch" });
+    const rsaPin = pinPublicKey(edgeKey.publicKey);
+    expect(() => loadPinnedPublicKey(rsaPin)).toThrow(/Ed25519/);
+    expect(verifyInclusion(rsaPin, inclusion))
+      .toEqual({ ok: false, reason: "unpinned_key" });
+    expect(() => createAnchorClient({ publicKey: rsaPin })).toThrow(/Ed25519/);
+  });
+});
+
+describe("formatBoundUrl", () => {
+  it("brackets IPv6 literals and leaves IPv4 unbracketed", () => {
+    expect(formatBoundUrl({ address: "127.0.0.1", port: 9, family: "IPv4" }))
+      .toBe("http://127.0.0.1:9");
+    expect(formatBoundUrl({ address: "::1", port: 9, family: "IPv6" }))
+      .toBe("http://[::1]:9");
+    expect(formatBoundUrl({ address: "::1", port: 9, family: 6 }, "https"))
+      .toBe("https://[::1]:9");
   });
 });
 
@@ -98,5 +113,19 @@ describe("createAnchorClient", () => {
     expect(ok.ok).toBe(true);
     expect(ok.inclusion.anchorId).toBeTruthy();
     expect(verifyInclusion(keys.publicPin, ok.inclusion)).toEqual({ ok: true });
+  });
+
+  it("prints a bracketed URL when the notary binds ::1", async () => {
+    const keys = generateNotaryKeys();
+    const notary = createNotary(keys);
+    const server = await startAnchorServer({ notary, bindHost: "::1" });
+    closers.push(() => server.close());
+    expect(server.url).toMatch(/^http:\/\/\[::1\]:\d+$/);
+    const client = createAnchorClient({
+      url: server.url,
+      publicKey: keys.publicPin,
+    });
+    const ok = await client.submit(DIGEST_A);
+    expect(ok.ok).toBe(true);
   });
 });

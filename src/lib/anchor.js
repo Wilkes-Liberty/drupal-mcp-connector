@@ -31,11 +31,32 @@ export function loadPinnedPublicKey(pin) {
   if (typeof pin !== "string" || !pin.trim()) {
     throw new TypeError("Pinned public key is required.");
   }
-  return createPublicKey({
+  const key = createPublicKey({
     key: Buffer.from(pin.trim(), "base64"),
     type: "spki",
     format: "der",
   });
+  if (key.asymmetricKeyType !== "ed25519") {
+    throw new TypeError("Pinned public key must be Ed25519.");
+  }
+  return key;
+}
+
+/**
+ * Listen URL for a bound server. IPv6 literals are bracketed so
+ * `MCP_ANCHOR_BIND=::1` prints a usable URL.
+ *
+ * @param {{address?: string, port?: number, family?: string|number}} address
+ * @param {string} [scheme]
+ * @returns {string}
+ */
+export function formatBoundUrl(address, scheme = "http") {
+  const host = typeof address?.address === "string" ? address.address : "";
+  const port = address?.port;
+  const family = address?.family;
+  const ipv6 = family === "IPv6" || family === 6 || host.includes(":");
+  const hostname = ipv6 ? `[${host}]` : host;
+  return `${scheme}://${hostname}:${port}`;
 }
 
 /**
@@ -236,7 +257,7 @@ export function startAnchorServer({ notary, bindHost = "127.0.0.1", port = 0 }) 
     server.listen(port, bindHost, () => {
       const address = server.address();
       resolve({
-        url: `http://${address.address}:${address.port}`,
+        url: formatBoundUrl(address),
         port: address.port,
         close: () => new Promise((done) => server.close(() => done())),
       });
