@@ -119,13 +119,14 @@ async function bulkUpdate({ site: siteName, entityType, bundle, items = [] }) {
       assertPublishAllowed(sec, attributes);
       const resolvedRelationships = await resolveErrRelationships(backend, item.relationships ?? {});
       const patchTarget = await prepareGuardedPatch(backend, {
-        entityType, bundle, id: item.id, existing, attributes,
+        entityType, bundle, id: item.id, existing, attributes, relationships: resolvedRelationships,
       });
       const entity = await updateEntityGuarded(backend, {
         entityType, bundle, id: item.id,
         attributes,
         relationships: resolvedRelationships,
         ...(patchTarget.resourceVersion ? { resourceVersion: patchTarget.resourceVersion } : {}),
+        ...(patchTarget.draftRevision ? { draftRevision: patchTarget.draftRevision } : {}),
       });
       updated += 1;
       results.push({ index, success: true, id: entity?.id ?? item.id });

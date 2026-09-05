@@ -236,7 +236,7 @@ describe("bulk tools", () => {
   it("bulk_update probes unpublished moderated hosts via the pre-read entity", async () => {
     backend.getEntity.mockResolvedValue({
       status: false,
-      fields: { moderation_state: "draft" },
+      fields: { moderation_state: "draft", drupal_internal__vid: 1 },
     });
     backend.updateEntity.mockResolvedValue({ id: "a1" });
     await handlers.drupal_bulk_update({

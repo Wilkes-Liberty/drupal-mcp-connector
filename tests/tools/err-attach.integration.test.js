@@ -56,7 +56,7 @@ beforeEach(() => {
       return {
         id: "n1", entityType: "node", bundle: "solution", title: "S", status: false,
         langcode: "en", created: null, changed: null, url: "/s",
-        fields: { moderation_state: "draft" },
+        fields: { moderation_state: "draft", drupal_internal__vid: 1 },
         relationships: {
           field_key_capabilities: ids.map((pid, i) => ({
             id: pid, entityType: "paragraph", bundle: "capability",
@@ -69,7 +69,7 @@ beforeEach(() => {
     return {
       id: "n1", entityType: "node", bundle: "solution", title: "S", status: true,
       langcode: "en", created: null, changed: null, url: "/s",
-      fields: { moderation_state: "published" },
+      fields: { moderation_state: "published", drupal_internal__vid: 1 },
       relationships: { field_key_capabilities: [] },
       _backend: "jsonapi",
     };
