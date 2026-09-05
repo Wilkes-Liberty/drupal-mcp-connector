@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Independently verifiable evidence on the relay edge (#261).** Optional
+  `auth.evidenceAnchor` (`url` + pinned Ed25519 `publicKey`) submits a
+  minimized receipt digest to a notary process (`drupal-mcp-anchor`) whose
+  private key the edge never holds. One governed execution reconciles by
+  stable identifiers (identity, delegation, decision, obligations,
+  approval, local execution, target revision, receipt — explicit `none:*`
+  absences count). `GET /assessor` serves the caller's own tenant pack:
+  data-minimized, bound to the live policy digest, controls cite evidence
+  ids or stay `residual`, never `passed`. A table the edge cannot pin, or
+  a ledger without a pin, refuses startup. Omitting the table keeps the
+  2.13.0 path (`/assessor` is 404). Lab/loopback only — not a hosted-service
+  or design-partner admission claim. Audit Chain NDJSON remains the
+  off-system stream, not this anchor.
+
 ### Changed
 - Comments, test names, lab notes, and older changelog entries now reference
   GitHub issues, release versions, or plain descriptions instead of internal

@@ -8,7 +8,8 @@
     "drupal-mcp-connector": "src/index.js",
     "drupal-mcp-verify": "bin/drupal-mcp-verify.js",
     "drupal-mcp-edge": "bin/drupal-mcp-edge.js",
-    "drupal-mcp-agent": "bin/drupal-mcp-agent.js"
+    "drupal-mcp-agent": "bin/drupal-mcp-agent.js",
+    "drupal-mcp-anchor": "bin/drupal-mcp-anchor.js"
   },
   "files": [
     "src/",

@@ -28,6 +28,8 @@ import {
 } from "../../src/lib/relay/edge.js";
 import { createLocalPolicyEnforcement } from "../../src/lib/policy-enforcement.js";
 import { createRelayAgent } from "../../src/lib/relay/agent.js";
+import { createNotary, generateNotaryKeys, verifyInclusion } from "../../src/lib/anchor.js";
+import { ABSENT, createEvidenceLedger, EXECUTION_IDS } from "../../src/lib/evidence.js";
 import { createUsageLedger, reconcileUsage } from "../../src/lib/usage.js";
 import {
   AUDIENCE,
@@ -168,7 +170,8 @@ async function startRealAgent(harness, {
 }
 
 async function startTwoTenantHarness({
-  tenantGrants, grants, actors, policies, promotions, quotas, usage, fanDownTimeoutMs, now,
+  tenantGrants, grants, actors, policies, promotions, quotas, usage,
+  evidence, evidenceAnchor, fanDownTimeoutMs, now,
 } = {}) {
   const channel = createChannelFile();
   const tokenA = `channel-a-${randomBytes(24).toString("hex")}`;
@@ -188,6 +191,8 @@ async function startTwoTenantHarness({
     ...(promotions ? { promotions } : {}),
     ...(quotas ? { quotas } : {}),
     ...(usage ? { usage } : {}),
+    ...(evidence ? { evidence } : {}),
+    ...(evidenceAnchor ? { evidenceAnchor } : {}),
     ...(fanDownTimeoutMs !== undefined ? { fanDownTimeoutMs } : {}),
     ...(now ? { now } : {}),
   }));
@@ -231,7 +236,7 @@ function connectAttestingAgent({ port, token, enforcement }) {
 }
 
 /** Raw framed channel: captures every frame the edge sends, answers 200. */
-function connectRawAgent({ port, token, autoReply = true }) {
+function connectRawAgent({ port, token, autoReply = true, revisionId = null }) {
   return new Promise((resolve, reject) => {
     const frames = [];
     const socket = netConnect({ host: "127.0.0.1", port }, () => {
@@ -251,6 +256,7 @@ function connectRawAgent({ port, token, autoReply = true }) {
           status: 200,
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ jsonrpc: "2.0", id: 0, result: {} }),
+          ...(revisionId ? { revisionId } : {}),
         });
       }
     });
@@ -1672,13 +1678,22 @@ describe("W&L-operated bundle promotion (#253)", () => {
 
 /** Authenticated northbound GET against the edge's usage surface. */
 function usageGet(url, jwt, query = {}) {
+  return northboundGet(url, "/usage", jwt, query);
+}
+
+/** Authenticated northbound GET against the edge's assessor surface. */
+function assessorGet(url, jwt, query = {}) {
+  return northboundGet(url, "/assessor", jwt, query);
+}
+
+function northboundGet(url, path, jwt, query = {}) {
   const target = new URL(url);
   const search = new URLSearchParams(query).toString();
   return new Promise((resolve, reject) => {
     const req = httpRequest({
       hostname: target.hostname,
       port: target.port,
-      path: `/usage${search ? `?${search}` : ""}`,
+      path: `${path}${search ? `?${search}` : ""}`,
       method: "GET",
       headers: jwt ? { authorization: `Bearer ${jwt}` } : {},
     }, (res) => {
@@ -2207,5 +2222,188 @@ describe("attributable usage, quotas, and abuse signals (#256)", () => {
     await settle();
     expect(mcpRequests(rawA)).toHaveLength(3);
     expect((await usageGet(harness.edge.northboundUrl, jwtA)).status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("independently verifiable evidence (#261)", () => {
+  async function waitForEvidence(ledger, predicate, ms = 250) {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (predicate(ledger.records())) return ledger.records();
+      await settle(10);
+    }
+    return ledger.records();
+  }
+
+  it("reconciles one governed execution, anchors it, and cites it from /assessor", async () => {
+    const keys = generateNotaryKeys();
+    const notary = createNotary(keys);
+    const evidence = createEvidenceLedger();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: POLICIES,
+      usage: createUsageLedger(),
+      evidence,
+      evidenceAnchor: {
+        publicKey: keys.publicPin,
+        submit: (digest) => notary.include(digest),
+      },
+    });
+    await connectRawAgent({
+      port: harness.edge.agentPort,
+      token: harness.tokenA,
+      revisionId: "rev-lab-1",
+    });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(res.status).toBe(200);
+    const rows = await waitForEvidence(evidence, (list) => list.some((row) => row.anchored));
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row.reconciliation.state).toBe("settled");
+    expect(row.anchored).toBe(true);
+    expect(row.tenant).toBe("tenant-a");
+    expect(row.targetRevision).toBe("rev-lab-1");
+    expect(row.delegationId).toBe(ABSENT.delegation);
+    expect(row.obligationId).toBe(ABSENT.obligations);
+    expect(row.approvalId).toBe(ABSENT.approval);
+    expect(row.policyDigest).toBe(POLICY_A);
+    for (const id of EXECUTION_IDS) {
+      expect(row[id]).toBeTruthy();
+    }
+    expect(verifyInclusion(keys.publicPin, row.inclusion)).toEqual({ ok: true });
+
+    const packRes = await assessorGet(harness.edge.northboundUrl, jwtA);
+    expect(packRes.status).toBe(200);
+    const pack = JSON.parse(packRes.body);
+    expect(pack.tenant).toBe("tenant-a");
+    expect(pack.policyDigest).toBe(POLICY_A);
+    expect(JSON.stringify(pack)).not.toMatch(/passed/i);
+    expect(pack.body).toBeUndefined();
+    expect(pack.executions[0]).toMatchObject({
+      decisionId: row.decisionId,
+      receiptId: row.receiptId,
+      localExecutionId: row.localExecutionId,
+      targetRevision: "rev-lab-1",
+      anchored: true,
+      reconcileState: "settled",
+    });
+    const byId = new Map(pack.controls.map((control) => [control.id, control]));
+    expect(byId.get("P8.7")).toMatchObject({
+      state: "evidenced",
+      policyDigest: POLICY_A,
+      evidence: { receiptId: row.receiptId, digest: row.digest, anchorId: row.inclusion.anchorId },
+    });
+    expect(byId.get("P5.3")).toMatchObject({ state: "residual", evidence: null });
+  });
+
+  it("denies a cross-tenant assessor read and keeps the 2.13.0 path when omitted", async () => {
+    const keys = generateNotaryKeys();
+    const notary = createNotary(keys);
+    const evidence = createEvidenceLedger();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: POLICIES,
+      evidence,
+      evidenceAnchor: {
+        publicKey: keys.publicPin,
+        submit: (digest) => notary.include(digest),
+      },
+    });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenB });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const jwtB = await issuer.signToken({ clientId: "client-b", sub: "sub-b" });
+    expect((await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes", args: { site: "tenant-alpha" },
+    })).status).toBe(200);
+    await waitForEvidence(evidence, (list) => list.length > 0);
+
+    const crossed = await assessorGet(harness.edge.northboundUrl, jwtB, { tenant: "tenant-a" });
+    expect(crossed.status).toBe(403);
+    expect(JSON.parse(crossed.body)).toEqual({ error: "not_entitled" });
+    expect(crossed.body).not.toContain("executions");
+    expect(crossed.body).not.toContain("tenant-a");
+
+    const own = await assessorGet(harness.edge.northboundUrl, jwtB);
+    expect(own.status).toBe(200);
+    expect(JSON.parse(own.body).tenant).toBe("tenant-b");
+    expect(JSON.parse(own.body).executions).toEqual([]);
+
+    expect((await assessorGet(harness.edge.northboundUrl, null)).status).toBe(401);
+
+    const omitted = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS });
+    const jwtOmit = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    expect((await assessorGet(omitted.edge.northboundUrl, jwtOmit)).status).toBe(404);
+  });
+
+  it("refuses to start on an unreadable pin or a ledger with no pin", async () => {
+    const keys = generateNotaryKeys();
+    for (const evidenceAnchor of [
+      "oops",
+      { url: "https://anchor.test" },
+      { url: "http://anchor.test", publicKey: keys.publicPin },
+    ]) {
+      const failure = await startEdge(baseEdgeOptions({ evidenceAnchor }))
+        .then(() => null, (error) => error);
+      expect(failure).toBeInstanceOf(EdgeStartupError);
+      expect(failure.message).toContain("auth.evidenceAnchor");
+    }
+    await expect(startEdge(baseEdgeOptions({
+      evidence: createEvidenceLedger(),
+    }))).rejects.toBeInstanceOf(EdgeStartupError);
+  });
+
+  it("does not treat a foreign-key inclusion as independently anchored", async () => {
+    const keys = generateNotaryKeys();
+    const stranger = createNotary(generateNotaryKeys());
+    const evidence = createEvidenceLedger();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: POLICIES,
+      evidence,
+      evidenceAnchor: {
+        publicKey: keys.publicPin,
+        submit: (digest) => stranger.include(digest),
+      },
+    });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    expect((await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes", args: { site: "tenant-alpha" },
+    })).status).toBe(200);
+    const rows = await waitForEvidence(evidence, (list) => list.length > 0);
+    expect(rows[0].anchored).toBe(false);
+    const pack = JSON.parse((await assessorGet(harness.edge.northboundUrl, jwtA)).body);
+    expect(pack.controls.every((control) => control.state === "residual")).toBe(true);
+    expect(JSON.stringify(pack)).not.toMatch(/passed/i);
+  });
+
+  it("keeps the northbound verdict when the notary throws", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    closers.push(() => errors.mockRestore());
+    const keys = generateNotaryKeys();
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      evidenceAnchor: {
+        publicKey: keys.publicPin,
+        submit() { throw new Error("notary down"); },
+      },
+    });
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const allowed = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(allowed.status).toBe(200);
+    await settle();
+    expect(errors.mock.calls.some(([line]) => String(line).includes("evidence record failed"))).toBe(true);
+    expect(errors.mock.calls.every(([line]) => !String(line).includes("notary down"))).toBe(true);
   });
 });

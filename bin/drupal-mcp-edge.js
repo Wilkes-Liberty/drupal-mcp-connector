@@ -51,13 +51,18 @@
  * to the tenant agent and requires a matching local attestation. Optional
  * auth.quotas (tenant / principal request windows plus an abuse lock)
  * fails closed at the edge with zero frames on any refusal; a table the
- * edge cannot read refuses startup.
+ * edge cannot read refuses startup. Optional auth.evidenceAnchor
+ * ({ url, publicKey }) pins an independent Ed25519 notary; GET /assessor
+ * then serves one tenant-scoped pack bound to the live policy digest. A
+ * pin the edge cannot read refuses startup. Omit to keep the prior path
+ * (404 on /assessor). Lab/loopback only — not a hosted-service claim.
  */
 
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import {
   getInboundActors,
+  getInboundEvidenceAnchor,
   getInboundGrants,
   getInboundPolicies,
   getInboundPromotions,
@@ -168,6 +173,7 @@ if (usageRaw !== undefined && usageRaw !== null) {
 }
 const usage = usageMaxRecords > 0 ? createUsageLedger({ maxRecords: usageMaxRecords }) : null;
 const quotas = getInboundQuotas();
+const evidenceAnchor = getInboundEvidenceAnchor();
 
 let edge;
 try {
@@ -180,6 +186,7 @@ try {
     promotions: getInboundPromotions(),
     quotas,
     usage,
+    evidenceAnchor,
     sites,
     defaultSite: config.defaultSite,
     channelCredentials: createChannelCredentialStore({ filePath: channelFile }),
@@ -214,4 +221,9 @@ if (usage) {
 }
 if (quotas) {
   console.error("[drupal-mcp-edge] Quotas: auth.quotas in force; unlisted tenants / principals are refused.");
+}
+if (evidenceAnchor) {
+  console.error(
+    "[drupal-mcp-edge] Evidence: independent notary pin in force; GET /assessor serves one tenant pack.",
+  );
 }

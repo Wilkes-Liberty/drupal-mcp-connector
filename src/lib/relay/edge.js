@@ -33,6 +33,12 @@
  *     the validated principal; with `auth.quotas` a tenant or principal
  *     without a row, an exhausted window, or a locked principal is refused
  *     with zero frames. `GET /usage` serves one tenant partition only.
+ *   - Independent evidence is optional and fail-closed. With
+ *     `auth.evidenceAnchor` a settled receipt is reconciled by stable
+ *     identifiers and submitted to an Ed25519 notary whose key the edge
+ *     never holds. `GET /assessor` serves one tenant-scoped, data-minimized
+ *     export bound to the live policy digest. Omit to keep the prior path
+ *     (404 on /assessor).
  */
 
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
@@ -41,7 +47,20 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { createServer as createNetServer } from "node:net";
 import { createServer as createTlsServer } from "node:tls";
+import { createAnchorClient } from "../anchor.js";
 import { createLocalRelay } from "../contracts/relay.js";
+import {
+  ABSENT,
+  approvalId,
+  createEvidenceLedger,
+  createExecutionChain,
+  delegationId,
+  digestExecution,
+  exportAssessor,
+  identityId,
+  normalizeEvidenceAnchor,
+  obligationId,
+} from "../evidence.js";
 import {
   createInboundHttpsAuth,
   formatWwwAuthenticate,
@@ -528,6 +547,13 @@ function byteLength(value) {
  * @param {?object} [options.usage] Optional usage ledger (usage.js). When
  *   present, every decision and receipt is recorded and `GET /usage` serves
  *   the caller's tenant partition. Omit to record nothing (404 on /usage).
+ * @param {object|null} [options.evidenceAnchor] Optional `auth.evidenceAnchor`
+ *   (`url` + pinned `publicKey`, or a test `submit`). When present, every
+ *   decision/receipt is reconciled and submitted to the notary; `GET /assessor`
+ *   serves the caller's tenant pack. A table the edge cannot pin refuses
+ *   startup. Omit to keep the prior path (404 on /assessor).
+ * @param {?object} [options.evidence] Optional evidence ledger (evidence.js).
+ *   Injected by tests; created automatically when `evidenceAnchor` is set.
  * @param {() => number} [options.now] Clock for quotas and cost signals.
  * @param {?object} [options.rateLimiter] Optional rate limiter (rate-limit.js).
  * @param {number} [options.fanDownTimeoutMs]
@@ -553,6 +579,8 @@ export async function startEdge({
   allowHttpLoopback = false,
   quotas = null,
   usage = null,
+  evidenceAnchor = null,
+  evidence = null,
   now = () => Date.now(),
   rateLimiter = null,
   fanDownTimeoutMs = DEFAULT_FAN_DOWN_TIMEOUT_MS,
@@ -603,6 +631,41 @@ export async function startEdge({
       + "(see createUsageLedger in usage.js), or be omitted.",
     );
   }
+  const anchorCfg = normalizeEvidenceAnchor(evidenceAnchor);
+  if (anchorCfg?.invalid) {
+    throw new EdgeStartupError(
+      `Relay edge refuses to start: auth.evidenceAnchor is not readable at "${anchorCfg.reason}". `
+      + "An evidence anchor the edge cannot pin is not independently verifiable; "
+      + "fix the row or remove the table.",
+    );
+  }
+  let evidenceLedger = evidence === null || evidence === undefined ? null : evidence;
+  if (evidenceLedger !== null && (
+    typeof evidenceLedger !== "object"
+    || typeof evidenceLedger.record !== "function"
+    || typeof evidenceLedger.query !== "function"
+  )) {
+    throw new EdgeStartupError(
+      "Relay edge evidence ledger must expose record() and query() "
+      + "(see createEvidenceLedger in evidence.js), or be omitted.",
+    );
+  }
+  let anchorClient = null;
+  if (anchorCfg) {
+    try {
+      anchorClient = createAnchorClient(anchorCfg);
+    } catch {
+      throw new EdgeStartupError(
+        "Relay edge refuses to start: auth.evidenceAnchor.publicKey is not a pinned Ed25519 key.",
+      );
+    }
+    evidenceLedger = evidenceLedger ?? createEvidenceLedger();
+  } else if (evidenceLedger) {
+    throw new EdgeStartupError(
+      "Relay edge refuses to start with an evidence ledger and no auth.evidenceAnchor. "
+      + "Unanchored evidence is not independently verifiable; omit both to keep the prior path.",
+    );
+  }
 
   /**
    * Record without ever changing the verdict: a metering failure is logged
@@ -615,6 +678,55 @@ export async function startEdge({
     } catch {
       console.error("[drupal-mcp-edge] usage record failed; the decision stands and is unmetered.");
       return null;
+    }
+  }
+
+  /**
+   * Reconcile and (when the notary answers) independently anchor. Failures
+   * never change the northbound verdict: the action may already have run.
+   *
+   * @param {object} fields
+   * @returns {void}
+   */
+  function remember(fields) {
+    if (!evidenceLedger) return;
+    try {
+      const decisionId = fields.decisionId || randomUUID();
+      const receiptId = fields.receiptId || decisionId;
+      const built = createExecutionChain({
+        tenant: fields.tenant,
+        identityId: identityId({
+          iss: auth.issuer,
+          sub: fields.sub,
+          clientId: fields.clientId,
+        }),
+        delegationId: delegationId(fields.delegator),
+        decisionId,
+        obligationId: obligationId(fields.obligations),
+        approvalId: approvalId(fields.approvalId),
+        localExecutionId: fields.requestId || ABSENT.localExecution,
+        targetRevision: fields.targetRevision,
+        receiptId,
+        policyDigest: fields.policyDigest,
+        outcome: fields.outcome,
+        requestId: fields.requestId,
+        receiptDecisionId: decisionId,
+        receiptTenant: fields.tenant,
+      });
+      const digest = digestExecution(built);
+      const run = async () => {
+        let inclusion = null;
+        if (anchorClient) {
+          const result = await anchorClient.submit(digest);
+          inclusion = result.ok ? result.inclusion : null;
+        }
+        evidenceLedger.record(built, inclusion, anchorClient?.publicPin ?? null);
+      };
+      void run().catch(() => {
+        console.error("[drupal-mcp-edge] evidence record failed; the decision stands.");
+      });
+    } catch {
+      console.error("[drupal-mcp-edge] evidence record failed; the decision stands.");
     }
   }
   if (typeof channelCredentials?.lookup !== "function") {
@@ -777,7 +889,7 @@ export async function startEdge({
       if (ABUSE_SIGNAL_ERRORS.has(error) && !SHARED_SCOPES.has(scope)) {
         quotaGate.noteDenial(principalKey);
       }
-      meter({
+      const denied = meter({
         phase: "decision",
         decision: "deny",
         reason: error,
@@ -791,6 +903,17 @@ export async function startEdge({
         policyDigest,
         units: 1,
         bytesIn,
+      });
+      remember({
+        tenant: usageTenant,
+        sub: identity.sub,
+        clientId: identity.clientId,
+        delegator: null,
+        decisionId: denied?.decisionId ?? null,
+        receiptId: denied?.decisionId ?? null,
+        requestId: null,
+        policyDigest,
+        outcome: "denied",
       });
       jsonResponse(
         res,
@@ -947,7 +1070,7 @@ export async function startEdge({
     });
 
     function receipt(fields) {
-      meter({
+      const usageRow = meter({
         phase: "receipt",
         requestId: id,
         decisionId: decisionRecord?.decisionId ?? null,
@@ -955,6 +1078,18 @@ export async function startEdge({
         principalKey,
         durationMs: Math.max(0, now() - startedAt),
         ...fields,
+      });
+      remember({
+        tenant: selected.tenant,
+        sub: identity.sub,
+        clientId: identity.clientId,
+        delegator: mapped.delegator,
+        decisionId: decisionRecord?.decisionId ?? null,
+        receiptId: usageRow?.receiptId ?? null,
+        requestId: id,
+        targetRevision: fields.revisionId || fields.targetRevision,
+        policyDigest,
+        outcome: fields.outcome,
       });
     }
 
@@ -995,7 +1130,16 @@ export async function startEdge({
       return;
     }
     res.end(result.body ?? "");
-    receipt({ outcome: status >= 500 ? "failed" : "ok", reason: null, status, bytesOut });
+    const revision = typeof result.revisionId === "string" && result.revisionId.trim()
+      ? result.revisionId.trim()
+      : undefined;
+    receipt({
+      outcome: status >= 500 ? "failed" : "ok",
+      reason: null,
+      status,
+      bytesOut,
+      ...(revision ? { revisionId: revision } : {}),
+    });
   }
 
   /**
@@ -1064,6 +1208,81 @@ export async function startEdge({
     }
   }
 
+  /**
+   * `GET /assessor` — the caller's own tenant pack (#261). Authenticated
+   * on the same resource server as `/mcp`; the tenant comes from
+   * `auth.tenantGrants`. Controls cite the live policy digest and
+   * independently anchored evidence ids; they never write `passed`.
+   * 404 without an evidence ledger.
+   */
+  async function serveAssessor(req, res) {
+    if (!evidenceLedger) {
+      res.writeHead(404).end("Not found");
+      return;
+    }
+    if (req.method !== "GET") {
+      res.writeHead(405, { Allow: "GET" }).end("Method Not Allowed");
+      return;
+    }
+    if (rateLimiter) {
+      const verdict = rateLimiter.check(req.socket?.remoteAddress || "unknown");
+      if (!verdict.allowed) {
+        res.writeHead(429, { "Retry-After": String(verdict.retryAfterSec) }).end("Too Many Requests");
+        return;
+      }
+    }
+    let authResult;
+    try {
+      authResult = await inbound.authenticate(req);
+    } catch {
+      res.writeHead(401, {
+        "WWW-Authenticate": formatWwwAuthenticate({
+          error: "invalid_token",
+          errorDescription: "Token validation failed",
+        }),
+      }).end("Unauthorized");
+      return;
+    }
+    if (!authResult.ok) {
+      res.writeHead(authResult.status, authResult.headers).end(authResult.body);
+      return;
+    }
+    try {
+      const query = new URL(String(req.url || "/assessor"), "http://edge.invalid").searchParams;
+      const bound = resolvePolicy({ identity: authResult.identity, policies: policyTable });
+      const digest = bound.policy ?? null;
+      let attested = false;
+      if (digest) {
+        for (const session of sessions.values()) {
+          if (session.attestedDigests?.has(digest)) {
+            attested = true;
+            break;
+          }
+        }
+      }
+      const pack = exportAssessor({
+        identity: authResult.identity,
+        tenantGrants: tenantGrantTable,
+        tenant: query.get("tenant"),
+        ledger: evidenceLedger,
+        policyDigest: digest,
+        attested,
+      });
+      if (!pack.ok) {
+        jsonResponse(res, 403, { error: "not_entitled" });
+        return;
+      }
+      jsonResponse(res, 200, pack);
+    } catch {
+      console.error("[drupal-mcp-edge] assessor export failed.");
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
+      res.writeHead(500).end("Internal Server Error");
+    }
+  }
+
   const requestHandler = createMcpRequestHandler({
     authenticate: (req) => inbound.authenticate(req),
     protectedResource: inbound.protectedResource,
@@ -1081,8 +1300,13 @@ export async function startEdge({
   });
 
   function northbound(req, res) {
-    if (String(req.url || "").split("?")[0] === "/usage") {
+    const path = String(req.url || "").split("?")[0];
+    if (path === "/usage") {
       void serveUsage(req, res);
+      return;
+    }
+    if (path === "/assessor") {
+      void serveAssessor(req, res);
       return;
     }
     void requestHandler(req, res);
