@@ -1097,10 +1097,12 @@ export async function startEdge({
       };
       if (!callerApproval) {
         const issued = approvalLedger.issue(manifest, principalKey);
+        // Usage stays allow/deny (#256). A challenge is not dispatched, so
+        // it meters as deny; evidence still records outcome require_approval.
         const challenged = meter({
           phase: "decision",
-          decision: "require_approval",
-          reason: "approval_required",
+          decision: "deny",
+          reason: "require_approval",
           requestId: null,
           tenant: selected.tenant,
           principal,

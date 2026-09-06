@@ -2427,7 +2427,7 @@ describe("laboratory tenant onboarding (#265)", () => {
   }
 
   async function startOnboardHarness({
-    policies, promotions, evidence, evidenceAnchor, approvalRequiredTools, revocationFile,
+    policies, promotions, evidence, evidenceAnchor, approvalRequiredTools, revocationFile, usage,
   } = {}) {
     const channel = createChannelFile();
     const token = `channel-alpha-${randomBytes(24).toString("hex")}`;
@@ -2450,6 +2450,7 @@ describe("laboratory tenant onboarding (#265)", () => {
       ...(evidence ? { evidence } : {}),
       ...(evidenceAnchor ? { evidenceAnchor } : {}),
       ...(approvalRequiredTools ? { approvalRequiredTools } : {}),
+      ...(usage ? { usage } : {}),
     }));
     closers.push(() => edge.close());
     return { edge, channel, token, ledger };
@@ -2469,12 +2470,14 @@ describe("laboratory tenant onboarding (#265)", () => {
     const keys = generateNotaryKeys();
     const notary = createNotary(keys);
     const evidence = createEvidenceLedger();
+    const usage = createUsageLedger();
     const revocationFile = join(createChannelFile().dir, "revoked.json");
     writeFileSync(revocationFile, JSON.stringify({ jti: [] }));
     const harness = await startOnboardHarness({
       policies: lab.policies,
       promotions: lab.promotions,
       evidence,
+      usage,
       evidenceAnchor: {
         publicKey: keys.publicPin,
         submit: (digest) => notary.include(digest),
@@ -2511,6 +2514,9 @@ describe("laboratory tenant onboarding (#265)", () => {
     expect(challenge.approvalId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
+    expect(usage.records().filter((row) => (
+      row.phase === "decision" && row.decision === "deny" && row.reason === "require_approval"
+    ))).toHaveLength(1);
 
     const completed = await call("drupal_create_node", {
       site: "tenant-alpha",
