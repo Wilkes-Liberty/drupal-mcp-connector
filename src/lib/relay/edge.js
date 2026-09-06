@@ -41,10 +41,12 @@
  *     (404 on /assessor).
  *   - Optional `auth.approvalRequiredTools` issues a one-use approval
  *     before fan-down for named tools. Omit keeps the prior path.
+ *   - `offboardTenant` exports, then destroys, one grant-resolved tenant.
+ *     Omit to keep the prior path. Laboratory offboard, not hosted admission.
  */
 
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { createServer as createNetServer } from "node:net";
@@ -438,11 +440,15 @@ export function fanDownHeaders(headers = {}) {
  *
  * @param {object} options
  * @param {string} options.filePath
- * @returns {{lookup: (token: string) => {agentId: string, revoked: boolean, sites: string[]|null}|null}}
+ * @returns {{
+ *   lookup: (token: string) => {agentId: string, revoked: boolean, sites: string[]|null}|null,
+ *   destroy: (agentId: string) => {ok: boolean, reason?: string},
+ * }}
  */
 export function createChannelCredentialStore({
   filePath,
   readFile = readFileSync,
+  writeFile = writeFileSync,
   stat = statSync,
 } = {}) {
   let cache = { mtimeMs: Number.NaN, agents: [], denyAll: true };
@@ -492,6 +498,44 @@ export function createChannelCredentialStore({
         }
       }
       return null;
+    },
+
+    /**
+     * Overwrite-then-remove one agent. The digest is replaced before the
+     * row is deleted so a leftover file cannot still match the token.
+     *
+     * @param {string} agentId
+     * @returns {{ok: true}|{ok: false, reason: string}}
+     */
+    destroy(agentId) {
+      const id = typeof agentId === "string" ? agentId.trim() : "";
+      if (!id || id.startsWith("_") || !filePath) {
+        return { ok: false, reason: "missing_agent" };
+      }
+      let raw;
+      try {
+        raw = JSON.parse(readFile(filePath, "utf8"));
+      } catch {
+        return { ok: false, reason: "unreadable" };
+      }
+      if (!raw.agents || typeof raw.agents !== "object" || Array.isArray(raw.agents)) {
+        return { ok: false, reason: "unreadable" };
+      }
+      const entry = raw.agents[id];
+      if (!entry || typeof entry !== "object") {
+        return { ok: false, reason: "missing_agent" };
+      }
+      try {
+        raw.agents[id] = { ...entry, tokenSha256: "0".repeat(64), revoked: true };
+        writeFile(filePath, JSON.stringify(raw));
+        delete raw.agents[id];
+        writeFile(filePath, JSON.stringify(raw));
+      } catch {
+        return { ok: false, reason: "unreadable" };
+      }
+      cache = { mtimeMs: Number.NaN, agents: [], denyAll: true };
+      load();
+      return { ok: true };
     },
   };
 }
@@ -746,53 +790,58 @@ export async function startEdge({
   }
 
   /**
-   * Reconcile and (when the notary answers) independently anchor. Failures
-   * never change the northbound verdict: the action may already have run.
+   * Reconcile and (when the notary answers) independently anchor.
+   *
+   * @param {object} fields
+   * @returns {Promise<object|null>}
+   */
+  async function rememberNow(fields) {
+    if (!evidenceLedger) return null;
+    const decisionId = fields.decisionId || randomUUID();
+    const receiptId = fields.receiptId || decisionId;
+    const built = createExecutionChain({
+      tenant: fields.tenant,
+      identityId: identityId({
+        iss: auth.issuer,
+        sub: fields.sub,
+        clientId: fields.clientId,
+      }),
+      delegationId: delegationId(fields.delegator),
+      decisionId,
+      obligationId: obligationId(fields.obligations),
+      approvalId: approvalId(fields.approvalId),
+      localExecutionId: fields.requestId || ABSENT.localExecution,
+      targetRevision: fields.targetRevision,
+      receiptId,
+      policyDigest: fields.policyDigest,
+      outcome: fields.outcome,
+      requestId: fields.requestId,
+      receiptDecisionId: decisionId,
+      receiptTenant: fields.tenant,
+    });
+    const digest = digestExecution(built);
+    let inclusion = null;
+    if (anchorClient) {
+      const result = await anchorClient.submit(digest);
+      inclusion = result.ok ? result.inclusion : null;
+    }
+    return evidenceLedger.record(built, inclusion, anchorClient?.publicPin ?? null);
+  }
+
+  /**
+   * Fire-and-forget remember. Failures never change a northbound verdict.
    *
    * @param {object} fields
    * @returns {void}
    */
   function remember(fields) {
-    if (!evidenceLedger) return;
-    try {
-      const decisionId = fields.decisionId || randomUUID();
-      const receiptId = fields.receiptId || decisionId;
-      const built = createExecutionChain({
-        tenant: fields.tenant,
-        identityId: identityId({
-          iss: auth.issuer,
-          sub: fields.sub,
-          clientId: fields.clientId,
-        }),
-        delegationId: delegationId(fields.delegator),
-        decisionId,
-        obligationId: obligationId(fields.obligations),
-        approvalId: approvalId(fields.approvalId),
-        localExecutionId: fields.requestId || ABSENT.localExecution,
-        targetRevision: fields.targetRevision,
-        receiptId,
-        policyDigest: fields.policyDigest,
-        outcome: fields.outcome,
-        requestId: fields.requestId,
-        receiptDecisionId: decisionId,
-        receiptTenant: fields.tenant,
-      });
-      const digest = digestExecution(built);
-      const run = async () => {
-        let inclusion = null;
-        if (anchorClient) {
-          const result = await anchorClient.submit(digest);
-          inclusion = result.ok ? result.inclusion : null;
-        }
-        evidenceLedger.record(built, inclusion, anchorClient?.publicPin ?? null);
-      };
-      void run().catch(() => {
-        console.error("[drupal-mcp-edge] evidence record failed; the decision stands.");
-      });
-    } catch {
+    void rememberNow(fields).catch(() => {
       console.error("[drupal-mcp-edge] evidence record failed; the decision stands.");
-    }
+    });
   }
+
+  /** clientId → { tenant, at }. Former principals see `offboarded`, not never-existed. */
+  const tombstones = new Map();
   if (typeof channelCredentials?.lookup !== "function") {
     throw new EdgeStartupError(
       "Relay edge requires an agent channel credential store; without one no "
@@ -985,6 +1034,11 @@ export async function startEdge({
         { error, ...(scope && exposeScope ? { scope } : {}), ...extra },
         retryAfterSec > 0 ? { "Retry-After": String(retryAfterSec) } : {},
       );
+    }
+
+    if (tombstones.has(identity.clientId)) {
+      refuse(403, "offboarded");
+      return;
     }
 
     // Entitlement at the seam, before anything about the tenant is revealed:
@@ -1300,6 +1354,10 @@ export async function startEdge({
       res.writeHead(auth.status, auth.headers).end(auth.body);
       return;
     }
+    if (tombstones.has(auth.identity.clientId)) {
+      jsonResponse(res, 403, { error: "offboarded" });
+      return;
+    }
     try {
       const query = new URL(String(req.url || "/usage"), "http://edge.invalid").searchParams;
       const read = readUsage({
@@ -1365,6 +1423,10 @@ export async function startEdge({
     }
     if (!authResult.ok) {
       res.writeHead(authResult.status, authResult.headers).end(authResult.body);
+      return;
+    }
+    if (tombstones.has(authResult.identity.clientId)) {
+      jsonResponse(res, 403, { error: "offboarded" });
       return;
     }
     try {
@@ -1450,6 +1512,123 @@ export async function startEdge({
     });
   }
 
+  /**
+   * Export-then-destroy one grant-resolved tenant. Fail closed if the
+   * snapshot cannot be taken. Laboratory offboard, not hosted admission.
+   *
+   * @param {object} params
+   * @param {string} params.tenant
+   * @param {{clientId: string, sub?: string, jti?: string}} params.identity
+   * @returns {Promise<{ok: true, export: object}|{ok: true, already: true}|{ok: false, reason: string}>}
+   */
+  async function offboardTenant({ tenant, identity } = {}) {
+    const tenantId = typeof tenant === "string" ? tenant.trim() : "";
+    const clientId = typeof identity?.clientId === "string" ? identity.clientId.trim() : "";
+    if (!tenantId || !clientId) {
+      return { ok: false, reason: "not_entitled" };
+    }
+    if (tombstones.has(clientId)) {
+      return { ok: true, already: true };
+    }
+    if (!evidenceLedger || !anchorClient) {
+      return { ok: false, reason: "export_unavailable" };
+    }
+    const granted = tenantGrantTable
+      ? grantIds(new Map(Object.entries(tenantGrantTable)).get(clientId))
+      : [];
+    if (!granted.includes(tenantId)) {
+      return { ok: false, reason: "not_entitled" };
+    }
+
+    const bound = resolvePolicy({ identity, policies: policyTable });
+    const digest = bound.policy ?? null;
+    let attested = false;
+    if (digest) {
+      for (const session of sessions.values()) {
+        if (session.attestedDigests?.has(digest)) {
+          attested = true;
+          break;
+        }
+      }
+    }
+
+    try {
+      await rememberNow({
+        tenant: tenantId,
+        sub: identity.sub,
+        clientId,
+        decisionId: randomUUID(),
+        requestId: null,
+        policyDigest: digest,
+        outcome: "revoked",
+      });
+      await rememberNow({
+        tenant: tenantId,
+        sub: identity.sub,
+        clientId,
+        decisionId: randomUUID(),
+        requestId: null,
+        policyDigest: digest,
+        outcome: "destroyed",
+      });
+    } catch {
+      return { ok: false, reason: "export_unavailable" };
+    }
+
+    let snapshot;
+    try {
+      snapshot = exportAssessor({
+        identity,
+        tenantGrants: tenantGrantTable,
+        tenant: tenantId,
+        ledger: evidenceLedger,
+        policyDigest: digest,
+        attested,
+      });
+    } catch {
+      return { ok: false, reason: "export_unavailable" };
+    }
+    if (!snapshot?.ok) {
+      return { ok: false, reason: "export_unavailable" };
+    }
+
+    if (identity.jti && typeof inbound.revoke === "function") {
+      const revoked = inbound.revoke(identity.jti);
+      if (!revoked?.ok) {
+        return { ok: false, reason: "destroy_failed" };
+      }
+    }
+
+    const destroyed = channelCredentials.destroy(tenantId);
+    if (!destroyed.ok && destroyed.reason !== "missing_agent") {
+      return { ok: false, reason: destroyed.reason || "destroy_failed" };
+    }
+
+    const session = sessions.get(tenantId);
+    if (session) {
+      broker.rejectByOwner(tenantId, new Error("Tenant offboarded."));
+      session.socket.destroy();
+      sessions.delete(tenantId);
+    }
+    if (typeof approvalLedger?.purge === "function") {
+      approvalLedger.purge();
+    }
+
+    if (tenantGrantTable) {
+      const remaining = grantIds(new Map(Object.entries(tenantGrantTable)).get(clientId))
+        .filter((id) => id !== tenantId);
+      if (remaining.length) tenantGrantTable[clientId] = remaining;
+      else {
+        delete tenantGrantTable[clientId];
+        delete grantTable[clientId];
+      }
+    } else {
+      delete grantTable[clientId];
+    }
+    tombstones.set(clientId, { tenant: tenantId, at: now() });
+    return { ok: true, export: snapshot };
+  }
+
   const scheme = hasTls ? "https" : "http";
   let closed = false;
   return {
@@ -1457,6 +1636,7 @@ export async function startEdge({
     port: northAddr.port,
     agentPort: channelAddr.port,
     resourceMetadataUrl: inbound.resourceMetadataUrl,
+    offboardTenant,
     get hasAgent() {
       return sessions.size > 0;
     },

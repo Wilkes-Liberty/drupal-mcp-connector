@@ -336,6 +336,20 @@ describe("createResourceAuthenticator", () => {
     expect(denied.headers["WWW-Authenticate"]).toContain("revoked");
   });
 
+  it("revokes a jti immediately without waiting for mtime", () => {
+    const files = new Map([["/tmp/revoked.json", JSON.stringify({ jti: [] })]]);
+    const store = createRevocationStore({
+      filePath: "/tmp/revoked.json",
+      readFile: (path) => files.get(path),
+      writeFile: (path, body) => { files.set(path, body); },
+      stat: () => ({ mtimeMs: 1 }),
+    });
+    expect(store.isRevoked({ jti: "gone-1" })).toBe(false);
+    expect(store.revoke({ jti: "gone-1" })).toEqual({ ok: true });
+    expect(store.isRevoked({ jti: "gone-1" })).toBe(true);
+    expect(JSON.parse(files.get("/tmp/revoked.json")).jti).toContain("gone-1");
+  });
+
   it("fails closed when the revocation file is corrupt", async () => {
     const { privateKey, jwks } = await fixture();
     const token = await signedToken({

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Laboratory tenant offboarding on the relay edge (#267).**
+  `offboardTenant` snapshots a tenant-scoped assessor pack, independently
+  anchors revoke and destroy rows, then overwrite-removes the channel
+  digest, drops the grant and session, and tombstones the principal.
+  `GET /assessor` cites P9.9 only when those anchored rows match the
+  digest frozen at export. The held pack stays independently verifiable
+  after access is removed. A former principal sees `offboarded`; a
+  stranger stays `not_entitled`. The pack never writes `passed`.
+  Lab/loopback only — not a hosted-service or design-partner admission
+  claim.
 - **Laboratory tenant onboarding on the relay edge (#265).** Optional
   `auth.approvalRequiredTools` issues a one-use approval before fan-down
   for named tools; a later `tools/call` with `arguments.approvalId`
