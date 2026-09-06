@@ -50,6 +50,9 @@
     "evidenceAnchor": {
       "_comment": "Optional, drupal-mcp-edge only. Independent Ed25519 notary the edge never holds the private key for: { url, publicKey } (publicKey is SPKI DER, standard base64; url is https, or http on loopback). When present, every settled receipt is reconciled by stable identifiers and submitted to that notary; GET /assessor serves one tenant-scoped, data-minimized pack bound to the live policy digest. A table the edge cannot pin refuses startup. Omit to keep the prior path (404 on /assessor). Lab/loopback only — not a hosted-service or design-partner admission claim. Run `drupal-mcp-anchor` to mint a pin."
     },
+    "approvalRequiredTools": {
+      "_comment": "Optional, drupal-mcp-edge only. Array of tool names that require a one-use approval the edge issues before fan-down, e.g. [\"drupal_create_node\"]. A later tools/call with arguments.approvalId consumes that ticket (stripped before the tenant sees it). Omit to keep the prior path (no edge approval gate). A table the edge cannot read refuses startup. Lab/loopback only — not a hosted-service or design-partner admission claim."
+    },
     "revocationFile": "",
     "introspectionUrl": "",
     "introspectionClientIdEnv": "",

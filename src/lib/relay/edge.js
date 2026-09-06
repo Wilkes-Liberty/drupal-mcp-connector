@@ -39,6 +39,8 @@
  *     never holds. `GET /assessor` serves one tenant-scoped, data-minimized
  *     export bound to the live policy digest. Omit to keep the prior path
  *     (404 on /assessor).
+ *   - Optional `auth.approvalRequiredTools` issues a one-use approval
+ *     before fan-down for named tools. Omit keeps the prior path.
  */
 
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
@@ -48,7 +50,9 @@ import { createServer as createHttpsServer } from "node:https";
 import { createServer as createNetServer } from "node:net";
 import { createServer as createTlsServer } from "node:tls";
 import { createAnchorClient } from "../anchor.js";
+import { createMemoryApproval } from "../contracts/approval.js";
 import { createLocalRelay } from "../contracts/relay.js";
+import { digestPayload } from "../contracts/types.js";
 import {
   ABSENT,
   approvalId,
@@ -325,7 +329,37 @@ function callerTenantHint(args = {}) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-const CALLER_HINT_KEYS = Object.freeze(["tenant", "actor", "delegator", "policy", "digest"]);
+const CALLER_HINT_KEYS = Object.freeze([
+  "tenant", "actor", "delegator", "policy", "digest", "approvalId",
+]);
+
+function callerApprovalHint(args = {}) {
+  const value = new Map(Object.entries(args ?? {})).get("approvalId");
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/**
+ * Optional tool names that require a one-use edge approval before fan-down.
+ * Omit / comment-only keeps the prior path. Anything else unreadable is
+ * invalid and refuses startup.
+ *
+ * @param {unknown} raw
+ * @returns {string[]|{invalid: true, reason: string}}
+ */
+export function normalizeApprovalRequiredTools(raw) {
+  if (raw === null || raw === undefined) return [];
+  if (Array.isArray(raw)) {
+    return [...new Set(
+      raw.map((name) => (typeof name === "string" ? name.trim() : ""))
+        .filter((name) => name && !name.startsWith("_")),
+    )];
+  }
+  if (typeof raw === "object") {
+    const entries = Object.entries(raw).filter(([key]) => key && !key.startsWith("_"));
+    if (!entries.length) return [];
+  }
+  return { invalid: true, reason: "approvalRequiredTools" };
+}
 
 function stripCallerHints(body) {
   const args = body?.params?.arguments;
@@ -554,6 +588,13 @@ function byteLength(value) {
  *   startup. Omit to keep the prior path (404 on /assessor).
  * @param {?object} [options.evidence] Optional evidence ledger (evidence.js).
  *   Injected by tests; created automatically when `evidenceAnchor` is set.
+ * @param {string[]|null} [options.approvalRequiredTools] Optional
+ *   `auth.approvalRequiredTools`. Named tools receive a one-use
+ *   `require_approval` challenge before fan-down. Omit keeps the prior path.
+ *   An unreadable table refuses startup.
+ * @param {?object} [options.approvals] Optional approval ledger
+ *   (`createMemoryApproval`). Injected by tests; created automatically when
+ *   the tool list is non-empty.
  * @param {() => number} [options.now] Clock for quotas and cost signals.
  * @param {?object} [options.rateLimiter] Optional rate limiter (rate-limit.js).
  * @param {number} [options.fanDownTimeoutMs]
@@ -581,6 +622,8 @@ export async function startEdge({
   usage = null,
   evidenceAnchor = null,
   evidence = null,
+  approvalRequiredTools = null,
+  approvals = null,
   now = () => Date.now(),
   rateLimiter = null,
   fanDownTimeoutMs = DEFAULT_FAN_DOWN_TIMEOUT_MS,
@@ -666,6 +709,27 @@ export async function startEdge({
       + "Unanchored evidence is not independently verifiable; omit both to keep the prior path.",
     );
   }
+  const requiredTools = normalizeApprovalRequiredTools(approvalRequiredTools);
+  if (requiredTools?.invalid) {
+    throw new EdgeStartupError(
+      `Relay edge refuses to start: auth.approvalRequiredTools is not readable at "${requiredTools.reason}". `
+      + "A gate the edge cannot name authorizes nobody; fix the list or remove it.",
+    );
+  }
+  const approvalRequired = new Set(requiredTools);
+  if (approvals !== null && approvals !== undefined && (
+    typeof approvals !== "object"
+    || typeof approvals.issue !== "function"
+    || typeof approvals.consume !== "function"
+  )) {
+    throw new EdgeStartupError(
+      "Relay edge approvals ledger must expose issue() and consume() "
+      + "(see createMemoryApproval), or be omitted.",
+    );
+  }
+  const approvalLedger = approvalRequired.size
+    ? (approvals ?? createMemoryApproval())
+    : null;
 
   /**
    * Record without ever changing the verdict: a metering failure is logged
@@ -1021,6 +1085,61 @@ export async function startEdge({
       return;
     }
 
+    const callerApproval = callerApprovalHint(args);
+    let consumedApprovalId = null;
+    if (approvalLedger && isCall && toolName && approvalRequired.has(toolName)) {
+      const manifest = {
+        digest: digestPayload({
+          tool: toolName,
+          tenant: selected.tenant,
+          policyDigest: policyDigest || "",
+        }),
+      };
+      if (!callerApproval) {
+        const issued = approvalLedger.issue(manifest, principalKey);
+        // Usage stays allow/deny (#256). A challenge is not dispatched, so
+        // it meters as deny; evidence still records outcome require_approval.
+        const challenged = meter({
+          phase: "decision",
+          decision: "deny",
+          reason: "require_approval",
+          requestId: null,
+          tenant: selected.tenant,
+          principal,
+          principalKey,
+          method: body?.method ?? null,
+          tool: toolName,
+          policyDigest,
+          units: 1,
+          bytesIn,
+        });
+        remember({
+          tenant: selected.tenant,
+          sub: identity.sub,
+          clientId: identity.clientId,
+          delegator: mapped.delegator,
+          decisionId: challenged?.decisionId ?? null,
+          receiptId: challenged?.decisionId ?? null,
+          requestId: null,
+          policyDigest,
+          approvalId: issued.approvalId,
+          outcome: "require_approval",
+        });
+        jsonResponse(res, 403, {
+          error: "require_approval",
+          approvalId: issued.approvalId,
+        });
+        return;
+      }
+      try {
+        approvalLedger.consume(callerApproval, manifest.digest, principalKey);
+        consumedApprovalId = callerApproval;
+      } catch {
+        refuse(403, "not_entitled");
+        return;
+      }
+    }
+
     const id = randomUUID();
     const waited = broker.track(id, { owner: selected.session.agentId });
     const routedIdentity = identityWithGrant(identity, {
@@ -1089,6 +1208,7 @@ export async function startEdge({
         requestId: id,
         targetRevision: fields.revisionId || fields.targetRevision,
         policyDigest,
+        approvalId: consumedApprovalId,
         outcome: fields.outcome,
       });
     }

@@ -2407,3 +2407,183 @@ describe("independently verifiable evidence (#261)", () => {
     expect(errors.mock.calls.every(([line]) => !String(line).includes("notary down"))).toBe(true);
   });
 });
+
+describe("laboratory tenant onboarding (#265)", () => {
+  function sealedOnboardLab() {
+    const enforcement = createLocalPolicyEnforcement({ signingKey: "lab-sentinel-key" });
+    const bundle = enforcement.mint(["delete"], 3600);
+    const digest = bundle.digest;
+    return {
+      enforcement,
+      digest,
+      policies: { "mcp-edge-alpha": digest },
+      promotions: {
+        [digest]: {
+          document: bundle.toArray(),
+          approvals: ["operator-a", "operator-b"],
+        },
+      },
+    };
+  }
+
+  async function startOnboardHarness({
+    policies, promotions, evidence, evidenceAnchor, approvalRequiredTools, revocationFile, usage,
+  } = {}) {
+    const channel = createChannelFile();
+    const token = `channel-alpha-${randomBytes(24).toString("hex")}`;
+    channel.write({
+      "mcp-edge-alpha": { tokenSha256: sha256hex(token), sites: ["tenant-alpha"] },
+    });
+    const ledger = createConnectionLedger();
+    const edge = await startEdge(baseEdgeOptions({
+      auth: {
+        issuer: ISSUER,
+        audience: AUDIENCE,
+        ...(revocationFile ? { revocationFile } : {}),
+      },
+      grants: { "mcp-edge-alpha": ["tenant-alpha"] },
+      tenantGrants: { "mcp-edge-alpha": ["mcp-edge-alpha"] },
+      channelCredentials: createChannelCredentialStore({ filePath: channel.filePath }),
+      ledger,
+      ...(policies ? { policies } : {}),
+      ...(promotions ? { promotions } : {}),
+      ...(evidence ? { evidence } : {}),
+      ...(evidenceAnchor ? { evidenceAnchor } : {}),
+      ...(approvalRequiredTools ? { approvalRequiredTools } : {}),
+      ...(usage ? { usage } : {}),
+    }));
+    closers.push(() => edge.close());
+    return { edge, channel, token, ledger };
+  }
+
+  async function waitForEvidence(ledger, predicate, ms = 250) {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (predicate(ledger.records())) return ledger.records();
+      await settle(10);
+    }
+    return ledger.records();
+  }
+
+  it("onboards mcp-edge-alpha through allow, deny, approval-gated, assessor, and next-request revoke", async () => {
+    const lab = sealedOnboardLab();
+    const keys = generateNotaryKeys();
+    const notary = createNotary(keys);
+    const evidence = createEvidenceLedger();
+    const usage = createUsageLedger();
+    const revocationFile = join(createChannelFile().dir, "revoked.json");
+    writeFileSync(revocationFile, JSON.stringify({ jti: [] }));
+    const harness = await startOnboardHarness({
+      policies: lab.policies,
+      promotions: lab.promotions,
+      evidence,
+      usage,
+      evidenceAnchor: {
+        publicKey: keys.publicPin,
+        submit: (digest) => notary.include(digest),
+      },
+      approvalRequiredTools: ["drupal_create_node"],
+      revocationFile,
+    });
+    await connectAttestingAgent({
+      port: harness.edge.agentPort,
+      token: harness.token,
+      enforcement: lab.enforcement,
+    });
+    const jwt = await issuer.signToken({
+      clientId: "mcp-edge-alpha",
+      sub: "lab-operator",
+      jti: "j-lab-onboard",
+    });
+    const call = (name, args = {}) => modernCall(harness.edge.northboundUrl, jwt, { name, args });
+
+    const allowed = await call("drupal_list_nodes", { site: "tenant-alpha" });
+    expect(allowed.status).toBe(200);
+
+    const denied = await call("drupal_list_nodes", {
+      site: "tenant-alpha",
+      tenant: "not-this-tenant",
+    });
+    expect(denied.status).toBe(403);
+    expect(JSON.parse(denied.body)).toEqual({ error: "not_entitled" });
+
+    const gated = await call("drupal_create_node", { site: "tenant-alpha" });
+    expect(gated.status).toBe(403);
+    const challenge = JSON.parse(gated.body);
+    expect(challenge.error).toBe("require_approval");
+    expect(challenge.approvalId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(usage.records().filter((row) => (
+      row.phase === "decision" && row.decision === "deny" && row.reason === "require_approval"
+    ))).toHaveLength(1);
+
+    const completed = await call("drupal_create_node", {
+      site: "tenant-alpha",
+      approvalId: challenge.approvalId,
+    });
+    expect(completed.status).toBe(200);
+
+    const rows = await waitForEvidence(
+      evidence,
+      (list) => list.filter((row) => row.anchored && row.reconciliation.state === "settled").length >= 3,
+    );
+    expect(rows.some((row) => row.outcome === "ok" && row.approvalId === ABSENT.approval)).toBe(true);
+    expect(rows.some((row) => row.outcome === "denied")).toBe(true);
+    expect(rows.some((row) => row.outcome === "require_approval")).toBe(true);
+
+    const packRes = await assessorGet(harness.edge.northboundUrl, jwt);
+    expect(packRes.status).toBe(200);
+    const pack = JSON.parse(packRes.body);
+    expect(pack.tenant).toBe("mcp-edge-alpha");
+    expect(pack.policyDigest).toBe(lab.digest);
+    expect(pack.attested).toBe(true);
+    expect(JSON.stringify(pack)).not.toMatch(/passed/i);
+    const byId = new Map(pack.controls.map((control) => [control.id, control]));
+    expect(byId.get("P9.8")).toMatchObject({
+      state: "evidenced",
+      policyDigest: lab.digest,
+    });
+    expect(byId.get("P9.8").evidence.allowed.receiptId).toBeTruthy();
+    expect(byId.get("P9.8").evidence.denied.receiptId).toBeTruthy();
+    expect(byId.get("P9.8").evidence.approvalGated.receiptId).toBeTruthy();
+    expect(byId.get("P8.7").state).toBe("evidenced");
+
+    writeFileSync(revocationFile, JSON.stringify({ jti: ["j-lab-onboard"] }));
+    utimesSync(revocationFile, 1_700_000_100, 1_700_000_100);
+    const principalRevoked = await call("drupal_list_nodes", { site: "tenant-alpha" });
+    expect(principalRevoked.status).toBe(401);
+
+    const fresh = await issuer.signToken({ clientId: "mcp-edge-alpha", sub: "lab-operator" });
+    harness.channel.write({
+      "mcp-edge-alpha": { tokenSha256: sha256hex(harness.token), sites: ["tenant-alpha"], revoked: true },
+    });
+    const tenantRevoked = await modernCall(harness.edge.northboundUrl, fresh, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(tenantRevoked.status).toBe(403);
+    expect(JSON.parse(tenantRevoked.body)).toEqual({
+      error: "revoked",
+      bound: EDGE_REVOCATION_BOUND.name,
+    });
+  });
+
+  it("keeps the prior path when approvalRequiredTools is omitted", async () => {
+    const harness = await startOnboardHarness();
+    await connectRawAgent({ port: harness.edge.agentPort, token: harness.token });
+    const jwt = await issuer.signToken({ clientId: "mcp-edge-alpha" });
+    const res = await modernCall(harness.edge.northboundUrl, jwt, {
+      name: "drupal_create_node",
+      args: { site: "tenant-alpha" },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses to start on an unreadable approvalRequiredTools table", async () => {
+    const failure = await startEdge(baseEdgeOptions({ approvalRequiredTools: "create-everything" }))
+      .then(() => null, (error) => error);
+    expect(failure).toBeInstanceOf(EdgeStartupError);
+    expect(failure.message).toContain("approvalRequiredTools");
+  });
+});

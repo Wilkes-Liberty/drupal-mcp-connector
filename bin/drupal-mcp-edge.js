@@ -55,13 +55,16 @@
  * ({ url, publicKey }) pins an independent Ed25519 notary; GET /assessor
  * then serves one tenant-scoped pack bound to the live policy digest. A
  * pin the edge cannot read refuses startup. Omit to keep the prior path
- * (404 on /assessor). Lab/loopback only — not a hosted-service claim.
+ * (404 on /assessor). Optional auth.approvalRequiredTools issues a
+ * one-use approval before fan-down for named tools. Lab/loopback only —
+ * not a hosted-service claim.
  */
 
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import {
   getInboundActors,
+  getInboundApprovalRequiredTools,
   getInboundEvidenceAnchor,
   getInboundGrants,
   getInboundPolicies,
@@ -187,6 +190,7 @@ try {
     quotas,
     usage,
     evidenceAnchor,
+    approvalRequiredTools: getInboundApprovalRequiredTools(),
     sites,
     defaultSite: config.defaultSite,
     channelCredentials: createChannelCredentialStore({ filePath: channelFile }),

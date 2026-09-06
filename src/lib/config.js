@@ -351,6 +351,26 @@ export function getInboundEvidenceAnchor() {
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
+/**
+ * Tool names that require a one-use edge approval before fan-down
+ * (`auth.approvalRequiredTools`). When present, the relay edge fails
+ * closed: a table it cannot read refuses startup. Validation lives in
+ * edge.js (`normalizeApprovalRequiredTools`).
+ * @returns {string[]|null|unknown}
+ */
+export function getInboundApprovalRequiredTools() {
+  const raw = loadConfig().auth?.approvalRequiredTools;
+  if (raw === undefined || raw === null) return null;
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "object") {
+    const entries = Object.entries(raw)
+      .map(([key, value]) => [key.trim(), value])
+      .filter(([key]) => key && !key.startsWith("_"));
+    return entries.length ? raw : null;
+  }
+  return raw;
+}
+
 // ---------------------------------------------------------------------------
 // Auth headers — never logged, never exposed in tool responses
 // ---------------------------------------------------------------------------
