@@ -64,6 +64,11 @@ export function createMemoryApproval() {
       return { approvalId, digest };
     },
 
+    /** Drop every unused and consumed ticket. Used by laboratory offboard. */
+    purge() {
+      store.clear();
+    },
+
     /** @returns {number} */
     size() {
       return store.size;

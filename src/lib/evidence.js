@@ -76,6 +76,7 @@ export const ASSESSOR_CONTROL_CATALOG = Object.freeze([
   Object.freeze({ id: "P8.8", title: "Data-minimized provenance", source: "anchor" }),
   Object.freeze({ id: "P8.10", title: "Execution reconciliation", source: "anchor" }),
   Object.freeze({ id: "P9.8", title: "Evidence-producing onboarding", source: "onboard" }),
+  Object.freeze({ id: "P9.9", title: "Clean offboarding", source: "offboard" }),
 ]);
 
 function isRecord(value) {
@@ -411,6 +412,19 @@ export function isDataMinimized(value) {
   return Object.entries(value).every(([key, child]) => !forbiddenKey(key) && isDataMinimized(child));
 }
 
+function minimizeInclusion(inclusion) {
+  if (!isRecord(inclusion)) return null;
+  return Object.freeze({
+    schema: inclusion.schema,
+    algorithm: inclusion.algorithm,
+    anchorId: inclusion.anchorId,
+    receiptDigest: inclusion.receiptDigest,
+    signedAt: inclusion.signedAt,
+    keyId: inclusion.keyId,
+    signature: inclusion.signature,
+  });
+}
+
 function minimizeExecution(row) {
   return Object.freeze({
     identityId: row.identityId,
@@ -426,6 +440,7 @@ function minimizeExecution(row) {
     reconcileState: row.reconciliation?.state ?? "incomplete",
     digest: row.digest,
     anchorId: row.inclusion?.anchorId ?? null,
+    inclusion: minimizeInclusion(row.inclusion),
     anchored: row.anchored === true,
   });
 }
@@ -456,6 +471,13 @@ function findOnboardOutcomes(executions, liveDigest) {
     || (row.outcome === "ok" && row.approvalId && row.approvalId !== ABSENT.approval)
   )) ?? null;
   return { allowed, denied, gated, any: settled[0] ?? null };
+}
+
+function findOffboardOutcomes(executions, liveDigest) {
+  const settled = executions.filter((row) => liveAnchored(row, liveDigest));
+  const revoked = settled.find((row) => row.outcome === "revoked") ?? null;
+  const destroyed = settled.find((row) => row.outcome === "destroyed") ?? null;
+  return { revoked, destroyed, any: settled[0] ?? null };
 }
 
 /**
@@ -495,7 +517,28 @@ export function exportAssessor({
     : null;
 
   const onboard = liveDigest ? findOnboardOutcomes(executions, liveDigest) : null;
+  const offboard = liveDigest ? findOffboardOutcomes(executions, liveDigest) : null;
   const controls = ASSESSOR_CONTROL_CATALOG.map((control) => {
+    if (control.source === "offboard") {
+      const complete = Boolean(offboard?.revoked && offboard?.destroyed);
+      return Object.freeze({
+        id: control.id,
+        title: control.title,
+        policyDigest: liveDigest,
+        evidence: complete
+          ? Object.freeze({
+            revoked: citeRow(offboard.revoked),
+            destroyed: citeRow(offboard.destroyed),
+          })
+          : null,
+        state: complete ? "evidenced" : "residual",
+        reason: complete
+          ? null
+          : (!liveDigest
+            ? "no_live_policy_digest"
+            : (offboard?.any ? "incomplete_offboard_outcomes" : "no_anchored_execution")),
+      });
+    }
     if (control.source === "onboard") {
       const complete = Boolean(onboard?.allowed && onboard?.denied && onboard?.gated);
       return Object.freeze({
@@ -553,7 +596,7 @@ export function exportAssessor({
         status: "managed",
         detail:
           "Loopback evidence is not hosted design-partner admission. Laboratory "
-          + "onboard may be cited here; clean offboard remains a later cut.",
+          + "onboard and offboard may be cited here; hosted admission remains a later cut.",
       }),
     ]),
   };

@@ -10,7 +10,7 @@
  */
 
 import { timingSafeEqual } from "crypto";
-import { readFileSync, statSync } from "fs";
+import { readFileSync, statSync, writeFileSync } from "fs";
 import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
 
 /** Header names that must never become identity. */
@@ -248,11 +248,15 @@ export function authorizationServerDiscoveryUrls(issuer) {
  *
  * @param {object} options
  * @param {string} [options.filePath]
- * @returns {{isRevoked: (identity: {jti?: ?string, sub?: ?string}) => boolean}}
+ * @returns {{
+ *   isRevoked: (identity: {jti?: ?string, sub?: ?string}) => boolean,
+ *   revoke: (identity: {jti?: ?string}) => {ok: true}|{ok: false, reason: string},
+ * }}
  */
 export function createRevocationStore({
   filePath,
   readFile = readFileSync,
+  writeFile = writeFileSync,
   stat = statSync,
 } = {}) {
   let cache = { mtimeMs: Number.NaN, jti: new Set(), sub: new Set(), denyAll: false };
@@ -289,6 +293,56 @@ export function createRevocationStore({
       if (identity.jti && jti.has(identity.jti)) return true;
       if (identity.sub && sub.has(identity.sub)) return true;
       return false;
+    },
+
+    /**
+     * Persist one jti and apply it in-process. The next authenticate does
+     * not wait on mtime; a leftover file still denies after restart.
+     *
+     * @param {{jti?: ?string}} identity
+     * @returns {{ok: true}|{ok: false, reason: string}}
+     */
+    revoke(identity) {
+      const tokenId = typeof identity?.jti === "string" ? identity.jti.trim() : "";
+      if (!tokenId || !filePath) {
+        return { ok: false, reason: "unreadable" };
+      }
+      let exists = false;
+      try {
+        stat(filePath);
+        exists = true;
+      } catch (err) {
+        if (err?.code !== "ENOENT" && err?.code !== "ENOTDIR") {
+          return { ok: false, reason: "unreadable" };
+        }
+      }
+      let raw;
+      if (exists) {
+        try {
+          raw = JSON.parse(readFile(filePath, "utf8"));
+        } catch {
+          return { ok: false, reason: "unreadable" };
+        }
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          return { ok: false, reason: "unreadable" };
+        }
+      } else {
+        raw = { jti: [], sub: [] };
+      }
+      const nextJti = new Set([...(raw.jti ?? []).map(String), tokenId]);
+      const nextSub = new Set((raw.sub ?? []).map(String));
+      try {
+        writeFile(filePath, JSON.stringify({ jti: [...nextJti], sub: [...nextSub] }));
+      } catch {
+        return { ok: false, reason: "unreadable" };
+      }
+      cache = {
+        mtimeMs: Number.NaN,
+        jti: nextJti,
+        sub: nextSub,
+        denyAll: false,
+      };
+      return { ok: true };
     },
   };
 }
@@ -529,7 +583,12 @@ export function resolveInboundAuthConfig(cfg = {}, env = process.env) {
 /**
  * Build the live inbound authenticator for HTTPS.
  * @param {object} options
- * @returns {Promise<{authenticate: Function, protectedResource: object, resourceMetadataUrl: string}>}
+ * @returns {Promise<{
+ *   authenticate: Function,
+ *   protectedResource: object,
+ *   resourceMetadataUrl: string,
+ *   revoke?: (jti: string) => {ok: true}|{ok: false, reason: string},
+ * }>}
  */
 export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
   if (!inboundCfg.issuer || !inboundCfg.audience) {
@@ -587,5 +646,8 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
       scopesSupported: inboundCfg.requiredScopes,
     }),
     resourceMetadataUrl,
+    ...(revocationStore ? {
+      revoke: (jti) => revocationStore.revoke({ jti }),
+    } : {}),
   };
 }

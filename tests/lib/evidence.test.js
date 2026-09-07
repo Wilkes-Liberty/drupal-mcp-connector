@@ -9,7 +9,7 @@
 
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { createNotary, generateNotaryKeys, pinPublicKey } from "../../src/lib/anchor.js";
+import { createNotary, generateNotaryKeys, pinPublicKey, verifyInclusion } from "../../src/lib/anchor.js";
 import {
   ABSENT,
   ASSESSOR_CONTROL_CATALOG,
@@ -210,6 +210,12 @@ describe("ledger, read, and assessor export", () => {
       evidence: null,
       reason: "incomplete_onboard_outcomes",
     });
+    expect(byId.get("P9.9")).toMatchObject({
+      state: "residual",
+      policyDigest: POLICY,
+      evidence: null,
+      reason: "incomplete_offboard_outcomes",
+    });
   });
 
   it("cites P9.8 only when allow, deny, and approval-gated executions are anchored", () => {
@@ -266,6 +272,86 @@ describe("ledger, read, and assessor export", () => {
     });
     expect(byId.get("P9.8").evidence.allowed.anchorId).toBeTruthy();
     expect(byId.get("P8.7").state).toBe("evidenced");
+    expect(byId.get("P9.9")).toMatchObject({
+      state: "residual",
+      reason: "incomplete_offboard_outcomes",
+    });
+  });
+
+  it("cites P9.9 only when revoked and destroyed executions are anchored", () => {
+    const keys = generateNotaryKeys();
+    const notary = createNotary(keys);
+    const ledger = createEvidenceLedger();
+    const revoked = chain({
+      decisionId: "dec-revoked",
+      receiptId: "rcpt-revoked",
+      localExecutionId: ABSENT.localExecution,
+      requestId: "",
+      receiptDecisionId: "dec-revoked",
+      outcome: "revoked",
+      targetRevision: ABSENT.targetRevision,
+    });
+    const destroyed = chain({
+      decisionId: "dec-destroyed",
+      receiptId: "rcpt-destroyed",
+      localExecutionId: ABSENT.localExecution,
+      requestId: "",
+      receiptDecisionId: "dec-destroyed",
+      outcome: "destroyed",
+      targetRevision: ABSENT.targetRevision,
+    });
+    for (const row of [revoked, destroyed]) {
+      ledger.record(row, notary.include(digestExecution(createExecutionChain(row))), keys.publicPin);
+    }
+
+    const pack = exportAssessor({
+      identity: { clientId: "client-a" },
+      tenantGrants: TENANT_GRANTS,
+      ledger,
+      policyDigest: POLICY,
+    });
+    expect(JSON.stringify(pack)).not.toMatch(/passed/i);
+    const byId = new Map(pack.controls.map((row) => [row.id, row]));
+    expect(byId.get("P9.9")).toMatchObject({
+      state: "evidenced",
+      policyDigest: POLICY,
+      evidence: {
+        revoked: { receiptId: "rcpt-revoked" },
+        destroyed: { receiptId: "rcpt-destroyed" },
+      },
+    });
+    expect(byId.get("P9.9").evidence.revoked.anchorId).toBeTruthy();
+    const held = pack.executions.find((row) => row.outcome === "revoked");
+    expect(verifyInclusion(keys.publicPin, held.inclusion).ok).toBe(true);
+  });
+
+  it("leaves P9.9 residual when the pack has only a revoke", () => {
+    const keys = generateNotaryKeys();
+    const notary = createNotary(keys);
+    const ledger = createEvidenceLedger();
+    const revoked = chain({
+      decisionId: "dec-revoked",
+      receiptId: "rcpt-revoked",
+      localExecutionId: ABSENT.localExecution,
+      requestId: "",
+      receiptDecisionId: "dec-revoked",
+      outcome: "revoked",
+      targetRevision: ABSENT.targetRevision,
+    });
+    ledger.record(revoked, notary.include(digestExecution(createExecutionChain(revoked))), keys.publicPin);
+    const pack = exportAssessor({
+      identity: { clientId: "client-a" },
+      tenantGrants: TENANT_GRANTS,
+      ledger,
+      policyDigest: POLICY,
+    });
+    expect(JSON.stringify(pack)).not.toMatch(/passed/i);
+    const byId = new Map(pack.controls.map((row) => [row.id, row]));
+    expect(byId.get("P9.9")).toMatchObject({
+      state: "residual",
+      evidence: null,
+      reason: "incomplete_offboard_outcomes",
+    });
   });
 
   it("does not cite evidence when there is no live policy digest", () => {

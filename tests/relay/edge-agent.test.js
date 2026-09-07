@@ -10,7 +10,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { writeFileSync, utimesSync } from "node:fs";
+import { readFileSync, writeFileSync, utimesSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { connect as netConnect } from "node:net";
 import { join } from "node:path";
@@ -29,7 +29,7 @@ import {
 import { createLocalPolicyEnforcement } from "../../src/lib/policy-enforcement.js";
 import { createRelayAgent } from "../../src/lib/relay/agent.js";
 import { createNotary, generateNotaryKeys, verifyInclusion } from "../../src/lib/anchor.js";
-import { ABSENT, createEvidenceLedger, EXECUTION_IDS } from "../../src/lib/evidence.js";
+import { ABSENT, createEvidenceLedger, EXECUTION_IDS, exportAssessor } from "../../src/lib/evidence.js";
 import { createUsageLedger, reconcileUsage } from "../../src/lib/usage.js";
 import {
   AUDIENCE,
@@ -2587,3 +2587,273 @@ describe("laboratory tenant onboarding (#265)", () => {
     expect(failure.message).toContain("approvalRequiredTools");
   });
 });
+
+describe("laboratory tenant offboarding (#267)", () => {
+  it("overwrites then removes a channel digest", () => {
+    const channel = createChannelFile();
+    const token = `channel-offboard-${randomBytes(24).toString("hex")}`;
+    const digest = sha256hex(token);
+    channel.write({
+      "mcp-edge-alpha": { tokenSha256: digest, sites: ["tenant-alpha"] },
+    });
+    const store = createChannelCredentialStore({ filePath: channel.filePath });
+    expect(store.lookup(token)?.agentId).toBe("mcp-edge-alpha");
+    expect(store.destroy("mcp-edge-alpha")).toEqual({ ok: true });
+    expect(store.lookup(token)).toBeNull();
+    const raw = JSON.parse(readFileSync(channel.filePath, "utf8"));
+    expect(raw.agents["mcp-edge-alpha"]).toBeUndefined();
+    expect(JSON.stringify(raw)).not.toContain(digest);
+    expect(createChannelCredentialStore({}).destroy("mcp-edge-alpha")).toEqual({
+      ok: false,
+      reason: "unreadable",
+    });
+  });
+
+  it("offboards mcp-edge-alpha: export, destroy, held pack verifies, live reports offboarded", async () => {
+    const lab = sealedOnboardLab();
+    const keys = generateNotaryKeys();
+    const notary = createNotary(keys);
+    const evidence = createEvidenceLedger();
+    const revocationFile = join(createChannelFile().dir, "revoked.json");
+    writeFileSync(revocationFile, JSON.stringify({ jti: [] }));
+    const harness = await startOnboardHarness({
+      policies: lab.policies,
+      promotions: lab.promotions,
+      evidence,
+      evidenceAnchor: {
+        publicKey: keys.publicPin,
+        submit: (digest) => notary.include(digest),
+      },
+      approvalRequiredTools: ["drupal_create_node"],
+      revocationFile,
+    });
+    await connectAttestingAgent({
+      port: harness.edge.agentPort,
+      token: harness.token,
+      enforcement: lab.enforcement,
+    });
+    const jwt = await issuer.signToken({
+      clientId: "mcp-edge-alpha",
+      sub: "lab-operator",
+      jti: "j-lab-offboard",
+    });
+    const allowed = await modernCall(harness.edge.northboundUrl, jwt, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(allowed.status).toBe(200);
+
+    const result = await harness.edge.offboardTenant({
+      identity: {
+        clientId: "mcp-edge-alpha",
+        sub: "lab-operator",
+        jti: "j-lab-offboard",
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.export.tenant).toBe("mcp-edge-alpha");
+    expect(JSON.stringify(result.export)).not.toMatch(/passed/i);
+    const byId = new Map(result.export.controls.map((control) => [control.id, control]));
+    expect(byId.get("P9.9")).toMatchObject({
+      state: "evidenced",
+      policyDigest: lab.digest,
+    });
+    expect(byId.get("P9.9").evidence.revoked.receiptId).toBeTruthy();
+    expect(byId.get("P9.9").evidence.destroyed.receiptId).toBeTruthy();
+    const revokedRow = result.export.executions.find((row) => row.outcome === "revoked");
+    const destroyedRow = result.export.executions.find((row) => row.outcome === "destroyed");
+    expect(verifyInclusion(keys.publicPin, revokedRow.inclusion).ok).toBe(true);
+    expect(verifyInclusion(keys.publicPin, destroyedRow.inclusion).ok).toBe(true);
+
+    const stale = await modernCall(harness.edge.northboundUrl, jwt, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(stale.status).toBe(401);
+
+    const fresh = await issuer.signToken({
+      clientId: "mcp-edge-alpha",
+      sub: "lab-operator",
+    });
+    const after = await modernCall(harness.edge.northboundUrl, fresh, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(after.status).toBe(403);
+    expect(JSON.parse(after.body)).toEqual({ error: "offboarded" });
+
+    const packRes = await assessorGet(harness.edge.northboundUrl, fresh);
+    expect(packRes.status).toBe(403);
+    expect(JSON.parse(packRes.body)).toEqual({ error: "offboarded" });
+
+    const stranger = await issuer.signToken({ clientId: "client-b", sub: "stranger" });
+    const strangerRes = await modernCall(harness.edge.northboundUrl, stranger, {
+      name: "drupal_list_nodes",
+      args: { site: "tenant-alpha" },
+    });
+    expect(strangerRes.status).toBe(403);
+    expect(JSON.parse(strangerRes.body)).toEqual({ error: "not_entitled" });
+
+    const reconnect = await connectRawAgent({
+      port: harness.edge.agentPort,
+      token: harness.token,
+    });
+    expect(reconnect.denied).toBe("unauthenticated");
+    expect(harness.edge.hasAgent).toBe(false);
+    expect(storeLookupGone(harness.channel.filePath, harness.token)).toBe(true);
+  });
+
+  it("refuses offboard when the assessor cannot be exported", async () => {
+    const harness = await startOnboardHarness();
+    await connectRawAgent({
+      port: harness.edge.agentPort,
+      token: harness.token,
+    });
+    const result = await harness.edge.offboardTenant({
+      tenant: "mcp-edge-alpha",
+      identity: { clientId: "mcp-edge-alpha", sub: "lab-operator" },
+    });
+    expect(result).toEqual({ ok: false, reason: "export_unavailable" });
+    expect(harness.edge.hasAgent).toBe(true);
+    expect(storeLookupGone(harness.channel.filePath, harness.token)).toBe(false);
+  });
+
+  it("does not cite P9.9 when channel destroy is unavailable", async () => {
+    const { harness, evidence, lab } = await startOffboardLab({
+      wrapCredentials: (store) => ({ lookup: (token) => store.lookup(token) }),
+    });
+    await connectAttestingAgent({
+      port: harness.edge.agentPort,
+      token: harness.token,
+      enforcement: lab.enforcement,
+    });
+    const result = await harness.edge.offboardTenant({
+      tenant: "mcp-edge-alpha",
+      identity: { clientId: "mcp-edge-alpha", sub: "lab-operator" },
+    });
+    expect(result).toEqual({ ok: false, reason: "destroy_failed" });
+    expect(harness.edge.hasAgent).toBe(true);
+    expect(p9State(evidence, lab.digest)).toBe("residual");
+  });
+
+  it("does not cite P9.9 when channel destroy fails", async () => {
+    const { harness, evidence, lab } = await startOffboardLab({
+      wrapCredentials: (store) => ({
+        lookup: (token) => store.lookup(token),
+        destroy: () => ({ ok: false, reason: "unreadable" }),
+      }),
+    });
+    await connectAttestingAgent({
+      port: harness.edge.agentPort,
+      token: harness.token,
+      enforcement: lab.enforcement,
+    });
+    const result = await harness.edge.offboardTenant({
+      tenant: "mcp-edge-alpha",
+      identity: { clientId: "mcp-edge-alpha", sub: "lab-operator" },
+    });
+    expect(result).toEqual({ ok: false, reason: "unreadable" });
+    expect(harness.edge.hasAgent).toBe(true);
+    expect(p9State(evidence, lab.digest)).toBe("residual");
+  });
+
+  it("does not let a caller tenant hint choose among grants", async () => {
+    const { harness, lab } = await startOffboardLab({
+      tenantGrants: { "mcp-edge-alpha": ["mcp-edge-alpha", "other-tenant"] },
+    });
+    await connectAttestingAgent({
+      port: harness.edge.agentPort,
+      token: harness.token,
+      enforcement: lab.enforcement,
+    });
+    const denied = await harness.edge.offboardTenant({
+      tenant: "mcp-edge-alpha",
+      identity: { clientId: "mcp-edge-alpha", sub: "lab-operator" },
+    });
+    expect(denied).toEqual({ ok: false, reason: "not_entitled" });
+    expect(harness.edge.hasAgent).toBe(true);
+  });
+});
+
+function storeLookupGone(filePath, token) {
+  const store = createChannelCredentialStore({ filePath });
+  return store.lookup(token) === null;
+}
+
+function sealedOnboardLab() {
+  const enforcement = createLocalPolicyEnforcement({ signingKey: "lab-sentinel-key" });
+  const bundle = enforcement.mint(["delete"], 3600);
+  const digest = bundle.digest;
+  return {
+    enforcement,
+    digest,
+    policies: { "mcp-edge-alpha": digest },
+    promotions: {
+      [digest]: {
+        document: bundle.toArray(),
+        approvals: ["operator-a", "operator-b"],
+      },
+    },
+  };
+}
+
+async function startOnboardHarness({
+  policies, promotions, evidence, evidenceAnchor, approvalRequiredTools, revocationFile, usage,
+  wrapCredentials, tenantGrants,
+} = {}) {
+  const channel = createChannelFile();
+  const token = `channel-alpha-${randomBytes(24).toString("hex")}`;
+  channel.write({
+    "mcp-edge-alpha": { tokenSha256: sha256hex(token), sites: ["tenant-alpha"] },
+  });
+  const ledger = createConnectionLedger();
+  const store = createChannelCredentialStore({ filePath: channel.filePath });
+  const edge = await startEdge(baseEdgeOptions({
+    auth: {
+      issuer: ISSUER,
+      audience: AUDIENCE,
+      ...(revocationFile ? { revocationFile } : {}),
+    },
+    grants: { "mcp-edge-alpha": ["tenant-alpha"] },
+    tenantGrants: tenantGrants ?? { "mcp-edge-alpha": ["mcp-edge-alpha"] },
+    channelCredentials: wrapCredentials ? wrapCredentials(store) : store,
+    ledger,
+    ...(policies ? { policies } : {}),
+    ...(promotions ? { promotions } : {}),
+    ...(evidence ? { evidence } : {}),
+    ...(evidenceAnchor ? { evidenceAnchor } : {}),
+    ...(approvalRequiredTools ? { approvalRequiredTools } : {}),
+    ...(usage ? { usage } : {}),
+  }));
+  closers.push(() => edge.close());
+  return { edge, channel, token, ledger };
+}
+
+async function startOffboardLab(overrides = {}) {
+  const lab = sealedOnboardLab();
+  const keys = generateNotaryKeys();
+  const notary = createNotary(keys);
+  const evidence = createEvidenceLedger();
+  const harness = await startOnboardHarness({
+    policies: lab.policies,
+    promotions: lab.promotions,
+    evidence,
+    evidenceAnchor: {
+      publicKey: keys.publicPin,
+      submit: (digest) => notary.include(digest),
+    },
+    ...overrides,
+  });
+  return { harness, evidence, lab, keys };
+}
+
+function p9State(ledger, digest) {
+  const pack = exportAssessor({
+    identity: { clientId: "mcp-edge-alpha" },
+    tenantGrants: { "mcp-edge-alpha": ["mcp-edge-alpha"] },
+    tenant: "mcp-edge-alpha",
+    ledger,
+    policyDigest: digest,
+  });
+  return new Map(pack.controls.map((control) => [control.id, control])).get("P9.9")?.state;
+}

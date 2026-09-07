@@ -88,6 +88,14 @@ describe("createMemoryApproval actor binding", () => {
     });
   });
 
+  it("purges unused and consumed tickets", () => {
+    const approval = createMemoryApproval();
+    approval.issue({ digest: "abc" }, "agent-1");
+    expect(approval.size()).toBe(1);
+    approval.purge();
+    expect(approval.size()).toBe(0);
+  });
+
   it("still allows consume without an actor when none was bound", () => {
     const approval = createMemoryApproval();
     const issued = approval.issue({ digest: "abc" });

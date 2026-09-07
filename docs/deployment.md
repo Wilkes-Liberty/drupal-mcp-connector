@@ -288,7 +288,20 @@ run one allowed call, one denied call, and one approval-gated call
 the live digest and must never write `passed`. Tenant channel revoke and
 principal `jti` revoke each deny the **next** request in the same run.
 This is laboratory onboarding, not hosted design-partner admission.
-Clean offboard is a later cut.
+
+**Laboratory offboard.** After the onboard session, `offboardTenant`
+fail-closes unless a tenant-scoped assessor snapshot can be taken,
+then overwrite-removes the channel digest, drops in-flight fan-down
+and unused approvals, revokes the principal `jti` when a revocation
+file is configured, and removes the grant. Revoke and destroy rows
+are independently anchored only after that teardown succeeds; the
+held pack is snapshotted at that point and remains independently
+verifiable against the pinned notary key without calling the live edge.
+A later request from the former principal is `offboarded`; a stranger
+stays `not_entitled`. `GET /assessor` cites P9.9 only when independently
+anchored revoke and destroy rows match the digest frozen at export. The
+pack never writes `passed`. This is laboratory offboard, not hosted
+design-partner admission.
 
 **The agent** dials out to the edge's channel port and never listens. It
 authenticates the channel with its own issued credential (`MCP_CHANNEL_TOKEN`
