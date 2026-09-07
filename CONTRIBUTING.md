@@ -1,6 +1,6 @@
 # Contributing to drupal-mcp-connector
 
-Thank you for your interest in contributing! This project was created by **Jeremy Michael Cerda** and is maintained by [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty).
+Thank you for your interest in contributing! This project was created by **[Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda)** and is maintained by [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty).
 
 By participating, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 

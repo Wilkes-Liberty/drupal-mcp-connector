@@ -7,7 +7,7 @@
 [![Drupal](https://img.shields.io/badge/drupal-10%20%7C%2011-blue)](https://drupal.org)
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-purple)](https://modelcontextprotocol.io)
 
-Built by **Jeremy Michael Cerda** (opensource@wilkesliberty.com). Maintained by [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty).
+Built by **[Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda)** (opensource@wilkesliberty.com). Maintained by [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty).
 
 **If the client only shows `drupal_list_sites` and `drupal_governance_status`**, the secret env vars named in `config.json` are unset. Upgrade to the current release (2.6.1 first fixed this), or stay on 2.6.0 and launch via `bin/drupal-mcp-launch.sh` with a `config/secrets.map` (`ENV_VAR=keychain-item`). Then restart the MCP server. See [#199](https://github.com/Wilkes-Liberty/drupal-mcp-connector/issues/199).
 
@@ -324,4 +324,4 @@ Found a vulnerability? See [SECURITY.md](SECURITY.md). Please do not open a publ
 
 ## License
 
-[MIT](LICENSE) © 2026 Jeremy Michael Cerda and [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty)
+[MIT](LICENSE) © 2026 [Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda) and [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty)
