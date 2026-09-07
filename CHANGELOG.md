@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-09-06
+
 ### Added
 - **Laboratory tenant offboarding on the relay edge (#267).**
   `offboardTenant` fail-closes unless a tenant-scoped assessor snapshot
@@ -1468,6 +1470,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[2.14.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.14.0
 [2.13.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.13.1
 [2.13.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.13.0
 [2.12.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.12.0
