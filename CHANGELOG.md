@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- README, CONTRIBUTING, and the package.json author URL now link
+  Jeremy Michael Cerda to the drupal.org profile
+  (`https://www.drupal.org/u/jmcerda`).
+
 ## [2.14.0] - 2026-09-06
 
 ### Added
