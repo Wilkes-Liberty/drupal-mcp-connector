@@ -1513,8 +1513,9 @@ export async function startEdge({
   }
 
   /**
-   * Export-then-destroy one grant-resolved tenant. Fail closed if the
-   * snapshot cannot be taken. Laboratory offboard, not hosted admission.
+   * Destroy one grant-resolved tenant after a fail-closed export probe.
+   * Revoke and destroy rows are anchored only after teardown succeeds.
+   * Laboratory offboard, not hosted admission.
    *
    * @param {object} params
    * @param {string} params.tenant
@@ -1550,6 +1551,47 @@ export async function startEdge({
           break;
         }
       }
+    }
+
+    try {
+      const probe = exportAssessor({
+        identity,
+        tenantGrants: tenantGrantTable,
+        tenant: tenantId,
+        ledger: evidenceLedger,
+        policyDigest: digest,
+        attested,
+      });
+      if (!probe?.ok) {
+        return { ok: false, reason: "export_unavailable" };
+      }
+    } catch {
+      return { ok: false, reason: "export_unavailable" };
+    }
+
+    if (identity.jti && typeof inbound.revoke === "function") {
+      const revoked = inbound.revoke(identity.jti);
+      if (!revoked?.ok) {
+        return { ok: false, reason: "destroy_failed" };
+      }
+    }
+
+    if (typeof channelCredentials.destroy !== "function") {
+      return { ok: false, reason: "destroy_failed" };
+    }
+    const destroyed = channelCredentials.destroy(tenantId);
+    if (!destroyed.ok && destroyed.reason !== "missing_agent") {
+      return { ok: false, reason: destroyed.reason || "destroy_failed" };
+    }
+
+    const session = sessions.get(tenantId);
+    if (session) {
+      broker.rejectByOwner(tenantId, new Error("Tenant offboarded."));
+      session.socket.destroy();
+      sessions.delete(tenantId);
+    }
+    if (typeof approvalLedger?.purge === "function") {
+      approvalLedger.purge();
     }
 
     try {
@@ -1592,39 +1634,8 @@ export async function startEdge({
       return { ok: false, reason: "export_unavailable" };
     }
 
-    if (identity.jti && typeof inbound.revoke === "function") {
-      const revoked = inbound.revoke(identity.jti);
-      if (!revoked?.ok) {
-        return { ok: false, reason: "destroy_failed" };
-      }
-    }
-
-    const destroyed = channelCredentials.destroy(tenantId);
-    if (!destroyed.ok && destroyed.reason !== "missing_agent") {
-      return { ok: false, reason: destroyed.reason || "destroy_failed" };
-    }
-
-    const session = sessions.get(tenantId);
-    if (session) {
-      broker.rejectByOwner(tenantId, new Error("Tenant offboarded."));
-      session.socket.destroy();
-      sessions.delete(tenantId);
-    }
-    if (typeof approvalLedger?.purge === "function") {
-      approvalLedger.purge();
-    }
-
-    if (tenantGrantTable) {
-      const remaining = grantIds(new Map(Object.entries(tenantGrantTable)).get(clientId))
-        .filter((id) => id !== tenantId);
-      if (remaining.length) tenantGrantTable[clientId] = remaining;
-      else {
-        delete tenantGrantTable[clientId];
-        delete grantTable[clientId];
-      }
-    } else {
-      delete grantTable[clientId];
-    }
+    if (tenantGrantTable) delete tenantGrantTable[clientId];
+    delete grantTable[clientId];
     tombstones.set(clientId, { tenant: tenantId, at: now() });
     return { ok: true, export: snapshot };
   }

@@ -350,6 +350,40 @@ describe("createResourceAuthenticator", () => {
     expect(JSON.parse(files.get("/tmp/revoked.json")).jti).toContain("gone-1");
   });
 
+  it("refuses to overwrite a corrupt revocation file", () => {
+    const files = new Map([["/tmp/revoked.json", "{not-json"]]);
+    const store = createRevocationStore({
+      filePath: "/tmp/revoked.json",
+      readFile: (path) => files.get(path),
+      writeFile: (path, body) => { files.set(path, body); },
+      stat: () => ({ mtimeMs: 1 }),
+    });
+    expect(store.revoke({ jti: "gone-1" })).toEqual({ ok: false, reason: "unreadable" });
+    expect(files.get("/tmp/revoked.json")).toBe("{not-json");
+  });
+
+  it("creates the revocation file when none exists", () => {
+    const files = new Map();
+    const store = createRevocationStore({
+      filePath: "/tmp/revoked.json",
+      readFile: (path) => {
+        if (!files.has(path)) {
+          throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        }
+        return files.get(path);
+      },
+      writeFile: (path, body) => { files.set(path, body); },
+      stat: (path) => {
+        if (!files.has(path)) {
+          throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        }
+        return { mtimeMs: 1 };
+      },
+    });
+    expect(store.revoke({ jti: "gone-1" })).toEqual({ ok: true });
+    expect(JSON.parse(files.get("/tmp/revoked.json")).jti).toEqual(["gone-1"]);
+  });
+
   it("fails closed when the revocation file is corrupt", async () => {
     const { privateKey, jwks } = await fixture();
     const token = await signedToken({

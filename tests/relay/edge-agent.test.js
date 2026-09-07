@@ -29,7 +29,7 @@ import {
 import { createLocalPolicyEnforcement } from "../../src/lib/policy-enforcement.js";
 import { createRelayAgent } from "../../src/lib/relay/agent.js";
 import { createNotary, generateNotaryKeys, verifyInclusion } from "../../src/lib/anchor.js";
-import { ABSENT, createEvidenceLedger, EXECUTION_IDS } from "../../src/lib/evidence.js";
+import { ABSENT, createEvidenceLedger, EXECUTION_IDS, exportAssessor } from "../../src/lib/evidence.js";
 import { createUsageLedger, reconcileUsage } from "../../src/lib/usage.js";
 import {
   AUDIENCE,
@@ -2714,6 +2714,45 @@ describe("laboratory tenant offboarding (#267)", () => {
     expect(harness.edge.hasAgent).toBe(true);
     expect(storeLookupGone(harness.channel.filePath, harness.token)).toBe(false);
   });
+
+  it("does not cite P9.9 when channel destroy is unavailable", async () => {
+    const { harness, evidence, lab } = await startOffboardLab({
+      wrapCredentials: (store) => ({ lookup: (token) => store.lookup(token) }),
+    });
+    await connectAttestingAgent({
+      port: harness.edge.agentPort,
+      token: harness.token,
+      enforcement: lab.enforcement,
+    });
+    const result = await harness.edge.offboardTenant({
+      tenant: "mcp-edge-alpha",
+      identity: { clientId: "mcp-edge-alpha", sub: "lab-operator" },
+    });
+    expect(result).toEqual({ ok: false, reason: "destroy_failed" });
+    expect(harness.edge.hasAgent).toBe(true);
+    expect(p9State(evidence, lab.digest)).toBe("residual");
+  });
+
+  it("does not cite P9.9 when channel destroy fails", async () => {
+    const { harness, evidence, lab } = await startOffboardLab({
+      wrapCredentials: (store) => ({
+        lookup: (token) => store.lookup(token),
+        destroy: () => ({ ok: false, reason: "unreadable" }),
+      }),
+    });
+    await connectAttestingAgent({
+      port: harness.edge.agentPort,
+      token: harness.token,
+      enforcement: lab.enforcement,
+    });
+    const result = await harness.edge.offboardTenant({
+      tenant: "mcp-edge-alpha",
+      identity: { clientId: "mcp-edge-alpha", sub: "lab-operator" },
+    });
+    expect(result).toEqual({ ok: false, reason: "unreadable" });
+    expect(harness.edge.hasAgent).toBe(true);
+    expect(p9State(evidence, lab.digest)).toBe("residual");
+  });
 });
 
 function storeLookupGone(filePath, token) {
@@ -2740,6 +2779,7 @@ function sealedOnboardLab() {
 
 async function startOnboardHarness({
   policies, promotions, evidence, evidenceAnchor, approvalRequiredTools, revocationFile, usage,
+  wrapCredentials,
 } = {}) {
   const channel = createChannelFile();
   const token = `channel-alpha-${randomBytes(24).toString("hex")}`;
@@ -2747,6 +2787,7 @@ async function startOnboardHarness({
     "mcp-edge-alpha": { tokenSha256: sha256hex(token), sites: ["tenant-alpha"] },
   });
   const ledger = createConnectionLedger();
+  const store = createChannelCredentialStore({ filePath: channel.filePath });
   const edge = await startEdge(baseEdgeOptions({
     auth: {
       issuer: ISSUER,
@@ -2755,7 +2796,7 @@ async function startOnboardHarness({
     },
     grants: { "mcp-edge-alpha": ["tenant-alpha"] },
     tenantGrants: { "mcp-edge-alpha": ["mcp-edge-alpha"] },
-    channelCredentials: createChannelCredentialStore({ filePath: channel.filePath }),
+    channelCredentials: wrapCredentials ? wrapCredentials(store) : store,
     ledger,
     ...(policies ? { policies } : {}),
     ...(promotions ? { promotions } : {}),
@@ -2766,4 +2807,33 @@ async function startOnboardHarness({
   }));
   closers.push(() => edge.close());
   return { edge, channel, token, ledger };
+}
+
+async function startOffboardLab(overrides = {}) {
+  const lab = sealedOnboardLab();
+  const keys = generateNotaryKeys();
+  const notary = createNotary(keys);
+  const evidence = createEvidenceLedger();
+  const harness = await startOnboardHarness({
+    policies: lab.policies,
+    promotions: lab.promotions,
+    evidence,
+    evidenceAnchor: {
+      publicKey: keys.publicPin,
+      submit: (digest) => notary.include(digest),
+    },
+    ...overrides,
+  });
+  return { harness, evidence, lab, keys };
+}
+
+function p9State(ledger, digest) {
+  const pack = exportAssessor({
+    identity: { clientId: "mcp-edge-alpha" },
+    tenantGrants: { "mcp-edge-alpha": ["mcp-edge-alpha"] },
+    tenant: "mcp-edge-alpha",
+    ledger,
+    policyDigest: digest,
+  });
+  return new Map(pack.controls.map((control) => [control.id, control])).get("P9.9")?.state;
 }

@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Laboratory tenant offboarding on the relay edge (#267).**
-  `offboardTenant` snapshots a tenant-scoped assessor pack, independently
-  anchors revoke and destroy rows, then overwrite-removes the channel
-  digest, drops the grant and session, and tombstones the principal.
+  `offboardTenant` fail-closes unless a tenant-scoped assessor snapshot
+  can be taken, then overwrite-removes the channel digest, drops the
+  grant and session, and tombstones the principal. Revoke and destroy
+  rows are independently anchored only after that teardown succeeds.
   `GET /assessor` cites P9.9 only when those anchored rows match the
   digest frozen at export. The held pack stays independently verifiable
   after access is removed. A former principal sees `offboarded`; a

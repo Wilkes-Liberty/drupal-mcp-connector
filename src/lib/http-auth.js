@@ -307,10 +307,24 @@ export function createRevocationStore({
       if (!tokenId || !filePath) {
         return { ok: false, reason: "unreadable" };
       }
-      let raw = { jti: [], sub: [] };
+      let exists = false;
       try {
-        raw = JSON.parse(readFile(filePath, "utf8"));
+        stat(filePath);
+        exists = true;
       } catch {
+        exists = false;
+      }
+      let raw;
+      if (exists) {
+        try {
+          raw = JSON.parse(readFile(filePath, "utf8"));
+        } catch {
+          return { ok: false, reason: "unreadable" };
+        }
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          return { ok: false, reason: "unreadable" };
+        }
+      } else {
         raw = { jti: [], sub: [] };
       }
       const nextJti = new Set([...(raw.jti ?? []).map(String), tokenId]);

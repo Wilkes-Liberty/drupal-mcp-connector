@@ -290,11 +290,12 @@ principal `jti` revoke each deny the **next** request in the same run.
 This is laboratory onboarding, not hosted design-partner admission.
 
 **Laboratory offboard.** After the onboard session, `offboardTenant`
-exports required evidence first (fail closed if the snapshot cannot be
-taken), independently anchors revoke and destroy rows, then overwrite-
-removes the channel digest, drops in-flight fan-down and unused
-approvals, revokes the principal `jti` when a revocation file is
-configured, and removes the grant. The held pack remains independently
+fail-closes unless a tenant-scoped assessor snapshot can be taken,
+then overwrite-removes the channel digest, drops in-flight fan-down
+and unused approvals, revokes the principal `jti` when a revocation
+file is configured, and removes the grant. Revoke and destroy rows
+are independently anchored only after that teardown succeeds; the
+held pack is snapshotted at that point and remains independently
 verifiable against the pinned notary key without calling the live edge.
 A later request from the former principal is `offboarded`; a stranger
 stays `not_entitled`. `GET /assessor` cites P9.9 only when independently
