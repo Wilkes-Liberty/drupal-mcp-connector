@@ -311,8 +311,10 @@ export function createRevocationStore({
       try {
         stat(filePath);
         exists = true;
-      } catch {
-        exists = false;
+      } catch (err) {
+        if (err?.code !== "ENOENT" && err?.code !== "ENOTDIR") {
+          return { ok: false, reason: "unreadable" };
+        }
       }
       let raw;
       if (exists) {

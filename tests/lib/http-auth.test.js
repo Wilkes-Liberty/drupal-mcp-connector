@@ -384,6 +384,20 @@ describe("createResourceAuthenticator", () => {
     expect(JSON.parse(files.get("/tmp/revoked.json")).jti).toEqual(["gone-1"]);
   });
 
+  it("fails closed when stat cannot read the revocation path", () => {
+    const files = new Map([["/tmp/revoked.json", JSON.stringify({ jti: ["kept"] })]]);
+    const store = createRevocationStore({
+      filePath: "/tmp/revoked.json",
+      readFile: (path) => files.get(path),
+      writeFile: (path, body) => { files.set(path, body); },
+      stat: () => {
+        throw Object.assign(new Error("EACCES"), { code: "EACCES" });
+      },
+    });
+    expect(store.revoke({ jti: "gone-1" })).toEqual({ ok: false, reason: "unreadable" });
+    expect(JSON.parse(files.get("/tmp/revoked.json")).jti).toEqual(["kept"]);
+  });
+
   it("fails closed when the revocation file is corrupt", async () => {
     const { privateKey, jwks } = await fixture();
     const token = await signedToken({

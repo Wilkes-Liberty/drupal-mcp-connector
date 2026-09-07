@@ -509,7 +509,10 @@ export function createChannelCredentialStore({
      */
     destroy(agentId) {
       const id = typeof agentId === "string" ? agentId.trim() : "";
-      if (!id || id.startsWith("_") || !filePath) {
+      if (!filePath) {
+        return { ok: false, reason: "unreadable" };
+      }
+      if (!id || id.startsWith("_")) {
         return { ok: false, reason: "missing_agent" };
       }
       let raw;
@@ -1518,14 +1521,15 @@ export async function startEdge({
    * Laboratory offboard, not hosted admission.
    *
    * @param {object} params
-   * @param {string} params.tenant
+   * @param {string} [params.tenant] Confirming hint only. Authority is the
+   *   unique grant. A hint that does not match, or more than one grant,
+   *   is `not_entitled`.
    * @param {{clientId: string, sub?: string, jti?: string}} params.identity
    * @returns {Promise<{ok: true, export: object}|{ok: true, already: true}|{ok: false, reason: string}>}
    */
   async function offboardTenant({ tenant, identity } = {}) {
-    const tenantId = typeof tenant === "string" ? tenant.trim() : "";
     const clientId = typeof identity?.clientId === "string" ? identity.clientId.trim() : "";
-    if (!tenantId || !clientId) {
+    if (!clientId) {
       return { ok: false, reason: "not_entitled" };
     }
     if (tombstones.has(clientId)) {
@@ -1537,7 +1541,12 @@ export async function startEdge({
     const granted = tenantGrantTable
       ? grantIds(new Map(Object.entries(tenantGrantTable)).get(clientId))
       : [];
-    if (!granted.includes(tenantId)) {
+    if (granted.length !== 1) {
+      return { ok: false, reason: "not_entitled" };
+    }
+    const tenantId = granted[0];
+    const hint = typeof tenant === "string" ? tenant.trim() : "";
+    if (hint && hint !== tenantId) {
       return { ok: false, reason: "not_entitled" };
     }
 

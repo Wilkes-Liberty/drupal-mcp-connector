@@ -2603,6 +2603,10 @@ describe("laboratory tenant offboarding (#267)", () => {
     const raw = JSON.parse(readFileSync(channel.filePath, "utf8"));
     expect(raw.agents["mcp-edge-alpha"]).toBeUndefined();
     expect(JSON.stringify(raw)).not.toContain(digest);
+    expect(createChannelCredentialStore({}).destroy("mcp-edge-alpha")).toEqual({
+      ok: false,
+      reason: "unreadable",
+    });
   });
 
   it("offboards mcp-edge-alpha: export, destroy, held pack verifies, live reports offboarded", async () => {
@@ -2640,7 +2644,6 @@ describe("laboratory tenant offboarding (#267)", () => {
     expect(allowed.status).toBe(200);
 
     const result = await harness.edge.offboardTenant({
-      tenant: "mcp-edge-alpha",
       identity: {
         clientId: "mcp-edge-alpha",
         sub: "lab-operator",
@@ -2753,6 +2756,23 @@ describe("laboratory tenant offboarding (#267)", () => {
     expect(harness.edge.hasAgent).toBe(true);
     expect(p9State(evidence, lab.digest)).toBe("residual");
   });
+
+  it("does not let a caller tenant hint choose among grants", async () => {
+    const { harness, lab } = await startOffboardLab({
+      tenantGrants: { "mcp-edge-alpha": ["mcp-edge-alpha", "other-tenant"] },
+    });
+    await connectAttestingAgent({
+      port: harness.edge.agentPort,
+      token: harness.token,
+      enforcement: lab.enforcement,
+    });
+    const denied = await harness.edge.offboardTenant({
+      tenant: "mcp-edge-alpha",
+      identity: { clientId: "mcp-edge-alpha", sub: "lab-operator" },
+    });
+    expect(denied).toEqual({ ok: false, reason: "not_entitled" });
+    expect(harness.edge.hasAgent).toBe(true);
+  });
 });
 
 function storeLookupGone(filePath, token) {
@@ -2779,7 +2799,7 @@ function sealedOnboardLab() {
 
 async function startOnboardHarness({
   policies, promotions, evidence, evidenceAnchor, approvalRequiredTools, revocationFile, usage,
-  wrapCredentials,
+  wrapCredentials, tenantGrants,
 } = {}) {
   const channel = createChannelFile();
   const token = `channel-alpha-${randomBytes(24).toString("hex")}`;
@@ -2795,7 +2815,7 @@ async function startOnboardHarness({
       ...(revocationFile ? { revocationFile } : {}),
     },
     grants: { "mcp-edge-alpha": ["tenant-alpha"] },
-    tenantGrants: { "mcp-edge-alpha": ["mcp-edge-alpha"] },
+    tenantGrants: tenantGrants ?? { "mcp-edge-alpha": ["mcp-edge-alpha"] },
     channelCredentials: wrapCredentials ? wrapCredentials(store) : store,
     ledger,
     ...(policies ? { policies } : {}),
