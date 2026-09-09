@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for all 119 tools across 26 modules.
+Complete reference for all 120 tools across 26 modules.
 
 > **Tip:** Call `drupal_list_entity_types` first on an unfamiliar site to discover available resource types, and `drupal_security_info` to see the active access policy.
 
@@ -36,8 +36,9 @@ Complete reference for all 119 tools across 26 modules.
 - [References](#references) — 1 tool
 - [Bulk](#bulk) — 2 tools
 - [Translations](#translations) — 2 tools
-- [Paragraphs](#paragraphs) — 2 tools
-- [Structure](#structure) — 4 tools
+- [Paragraphs](#paragraphs) — 3 tools
+- [Structure](#structure) — 5 tools
+- [Redirects](#redirects) — 2 tools
 - [Search](#search) — 1 tool
 - [Reports (Extra)](#reports-extra) — 3 tools
 - [Reports — Links & 404](#reports--links--404) — 6 tools
@@ -45,7 +46,7 @@ Complete reference for all 119 tools across 26 modules.
 - [Reports — Content Quality](#reports--content-quality) — 8 tools
 - [Audit (Composite)](#audit-composite) — 1 tool
 
-**Total: 119 tools across 26 modules.**
+**Total: 120 tools across 26 modules.**
 
 ---
 
@@ -689,6 +690,7 @@ Manage editable site structure — custom (content) menu links and custom conten
 |------|----------------|-------------|
 | `drupal_list_menu_links` | — | List custom menu links, optionally scoped to one `menu` (e.g. `main`, `footer`). Returns title, target URI, menu, and weight. Supports `limit` / `offset` / `sort`. |
 | `drupal_create_menu_link` | `title`, `link`, `menu` | Create a custom menu link. `link` is a Drupal URI such as `internal:/about`, `entity:node/42`, or an absolute URL. |
+| `drupal_update_menu_link` | `id` | Partial update by UUID: rename, re-weight, re-target, re-parent, enable/disable. Omit `enabled` to preserve the current state. |
 | `drupal_list_blocks` | — | List custom content blocks, optionally scoped to one block `type` (bundle). Returns admin label (`info`) and body. Supports `limit` / `offset` / `sort`. |
 | `drupal_create_block` | `type`, `info` | Create a custom content block. `info` is the administrative label; `body` is optional HTML. |
 
@@ -710,6 +712,27 @@ Manage editable site structure — custom (content) menu links and custom conten
   "type": "basic",
   "info": "Homepage callout",
   "body": "<p>Welcome to our site.</p>"
+}
+```
+
+---
+
+## Redirects
+
+Create and update URL redirects via the contrib [Redirect](https://www.drupal.org/project/redirect) module. A created redirect serves immediately. `source` is the old path (a leading slash is fine — it is normalized to the module's stored, slash-less form so the redirect matches). `target` is a path (`/new`), an `entity:node/ID`, or an absolute URL.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_create_redirect` | `source`, `target` | Create an active redirect. `statusCode` defaults to 301; pass 302 for a temporary redirect. |
+| `drupal_update_redirect` | `id` | Partial update by UUID: repoint source or target, or change the status code. |
+
+### drupal_create_redirect
+
+```json
+{
+  "source": "/old-slug",
+  "target": "/new-slug",
+  "statusCode": 301
 }
 ```
 
