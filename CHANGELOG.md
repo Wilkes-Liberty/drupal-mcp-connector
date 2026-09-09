@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.14.1] - 2026-09-09
+
 ### Changed
 - README, CONTRIBUTING, and the package.json author URL now link
   Jeremy Michael Cerda to the drupal.org profile
   (`https://www.drupal.org/u/jmcerda`).
+- README and docs now report 120 tools and 125 prompts (one per tool
+  plus 5 workflow prompts), matching the shipped surface. The tools
+  reference documents `drupal_create_redirect`,
+  `drupal_update_redirect`, and `drupal_update_menu_link`.
 
 ## [2.14.0] - 2026-09-06
 
@@ -1475,6 +1481,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[2.14.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.14.1
 [2.14.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.14.0
 [2.13.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.13.1
 [2.13.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.13.0

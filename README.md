@@ -63,7 +63,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 
 ## Features
 
-### 119 Tools Across 26 Modules
+### 120 Tools Across 26 Modules
 
 | Module | Tools |
 |--------|-------|
@@ -301,7 +301,7 @@ an operator channel: keep the agent's credentials off it, and pin
 | [OAuth client_credentials](docs/oauth-client-credentials.md) | Production OAuth deploy: scope→role mapping, JSON:API writes, config persistence, secret handling, troubleshooting |
 | [Architecture](docs/architecture.md) | Backend abstraction, canonical model, and how to extend it |
 | [GraphQL Setup](docs/graphql-local-setup.md) | GraphQL Compose backend + local TLS notes |
-| [Tools Reference](docs/tools-reference.md) | Full reference for all 119 tools |
+| [Tools Reference](docs/tools-reference.md) | Full reference for all 120 tools |
 | [Security Guide](docs/security.md) | Presets, entity access control, field redaction |
 | [Security Hardening](docs/security-hardening.md) | Optional transport, identity, and secrets controls |
 | [Verification](docs/verification.md) | Prove a secure install: static + live checks, negative probes, evidence artefact, managed residuals |
