@@ -7,7 +7,10 @@ import { allDefinitions } from "../../src/tools/index.js";
 import {
   renderCommandMarkdown,
   renderClaudeCommandMarkdown,
+  renderCodexSkillMarkdown,
+  renderCodexToolsReference,
   commandFileName,
+  CODEX_SKILL_NAME,
 } from "../../scripts/generate-commands.js";
 import { install, parseArgs, CLIENTS } from "../../scripts/install-commands.js";
 
@@ -31,7 +34,7 @@ describe("install-commands", () => {
       clients: ["claude"],
     });
     expect(parseArgs(["--home=/tmp/y", "--clients=grok,agents"]).home).toBe("/tmp/y");
-    expect(parseArgs([]).clients).toEqual(["claude", "grok"]);
+    expect(parseArgs([]).clients).toEqual(["claude", "grok", "codex"]);
   });
 
   it("rejects unknown flags and unknown clients", () => {
@@ -65,8 +68,34 @@ describe("install-commands", () => {
       .toBe(renderCommandMarkdown(defs[0]));
   });
 
-  it("default client map covers claude, grok, and agents", () => {
-    expect(Object.keys(CLIENTS).sort()).toEqual(["agents", "claude", "grok"]);
+  it("default client map covers claude, grok, agents, and codex", () => {
+    expect(Object.keys(CLIENTS).sort()).toEqual(["agents", "claude", "codex", "grok"]);
+    expect(CLIENTS.codex.kind).toBe("skill");
+    expect(CLIENTS.codex.skillName).toBe(CODEX_SKILL_NAME);
     expect(allDefinitions.length).toBeGreaterThan(0);
+  });
+
+  it("writes a Codex skill under .agents/skills/drupal-mcp and prunes stale files (#263)", () => {
+    const home = mkdtempSync(join(tmpdir(), "dmc-install-"));
+    const skillDir = join(home, ".agents", "skills", "drupal-mcp");
+    mkdirSync(join(skillDir, "references"), { recursive: true });
+    mkdirSync(join(home, ".codex", "prompts"), { recursive: true });
+    writeFileSync(join(skillDir, "stale.md"), "gone");
+    writeFileSync(join(home, ".codex", "prompts", "drupal-list-nodes.md"), "must not be used");
+
+    const results = install({ home, clients: ["codex"], definitions: defs });
+    expect(results).toHaveLength(1);
+    expect(results[0].client).toBe("codex");
+    expect(results[0].dir).toBe(skillDir);
+    expect(results[0].written).toEqual(["SKILL.md", "references/tools.md"]);
+
+    expect(existsSync(join(skillDir, "stale.md"))).toBe(false);
+    expect(readFileSync(join(skillDir, "SKILL.md"), "utf8")).toBe(renderCodexSkillMarkdown(defs));
+    expect(readFileSync(join(skillDir, "references", "tools.md"), "utf8")).toBe(renderCodexToolsReference(defs));
+    expect(readFileSync(join(skillDir, "SKILL.md"), "utf8")).toContain("name: \"drupal-mcp\"");
+    expect(readFileSync(join(skillDir, "SKILL.md"), "utf8")).toMatch(/deprecated Codex custom prompts/);
+    expect(readFileSync(join(skillDir, "references", "tools.md"), "utf8")).toContain("`drupal_list_nodes`");
+    // Does not write deprecated Codex custom prompts, even if that dir exists.
+    expect(readFileSync(join(home, ".codex", "prompts", "drupal-list-nodes.md"), "utf8")).toBe("must not be used");
   });
 });

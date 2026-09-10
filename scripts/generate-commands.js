@@ -8,14 +8,17 @@
  * Build, when this repo is the project) pick them up as `/drupal-<tool>`.
  *
  * Clients that only scan a vendor home directory (Claude Code `~/.claude/commands`,
- * Grok `~/.grok/commands`) get the same files via `npm run install:commands`.
+ * Grok `~/.grok/commands`, Codex `$HOME/.agents/skills`) get the same files via
+ * `npm run install:commands`. Codex receives one skill (`drupal-mcp`), not
+ * per-tool custom prompts.
  *
  * Driven from the same tool definitions as the server (src/tools/index.js), so the
  * command set never drifts from the tools. Run: `npm run generate:commands`.
  *
- * Exports `renderCommandMarkdown`, `renderClaudeCommandMarkdown`, `commandFileName`,
- * `COMMANDS_DIR`, and `generate` for tests; the file-writing side effect runs only
- * when executed directly.
+ * Exports `renderCommandMarkdown`, `renderClaudeCommandMarkdown`,
+ * `renderCodexSkillMarkdown`, `renderCodexToolsReference`, `CODEX_SKILL_NAME`,
+ * `commandFileName`, `COMMANDS_DIR`, and `generate` for tests; the file-writing
+ * side effect runs only when executed directly.
  */
 
 import { mkdirSync, readdirSync, rmSync, writeFileSync, realpathSync } from "fs";
@@ -111,6 +114,62 @@ export function renderClaudeCommandMarkdown(def) {
     allowedTools: `mcp__drupal__${def.name}`,
     argumentsPhrase: "`$ARGUMENTS`",
   });
+}
+
+/** Codex user-skill directory name under `$HOME/.agents/skills/`. */
+export const CODEX_SKILL_NAME = "drupal-mcp";
+
+/**
+ * Codex skill adapter (OpenAI Skills). Custom `~/.codex/prompts` slash
+ * commands are deprecated; Codex discovers `$HOME/.agents/skills/<name>/SKILL.md`.
+ * One skill covers the whole Drupal MCP tool surface so the skills list stays
+ * inside Codex's discovery budget.
+ *
+ * @param {Array<object>} [definitions]
+ * @returns {string} SKILL.md contents.
+ */
+export function renderCodexSkillMarkdown(definitions = allDefinitions) {
+  const count = definitions.length;
+  return [
+    "---",
+    `name: ${yamlString(CODEX_SKILL_NAME)}`,
+    `description: ${yamlString(
+      "Use Drupal MCP tools (drupal_*) via drupal-mcp-connector to read or write Drupal content, media, taxonomy, reports, and config. Trigger when the user asks to work with a Drupal site over MCP.",
+    )}`,
+    "---",
+    "",
+    "Call Drupal MCP tools by their protocol names (`drupal_list_nodes`, `drupal_update_node`, …).",
+    "The MCP server is configured separately (`codex mcp add drupal`); this skill does not replace that connection and does not use deprecated Codex custom prompts.",
+    "",
+    "Parse the user's request into the tool's parameters. If a required parameter is missing, ask before calling.",
+    "Coerce each value to its JSON type (booleans → true/false, numbers → numeric, object/array → parse JSON), then make the tool call and summarize the result.",
+    "",
+    "Destructive tools permanently change or delete data — confirm with the user before calling.",
+    "Do not invent REST paths, Drush commands, or Drupal admin URLs when an MCP tool exists.",
+    "",
+    `The connector currently exposes **${count}** tools. Full names and descriptions: [references/tools.md](references/tools.md).`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Progressive-disclosure catalog for the Codex Drupal skill.
+ * @param {Array<object>} [definitions]
+ * @returns {string} references/tools.md contents.
+ */
+export function renderCodexToolsReference(definitions = allDefinitions) {
+  const lines = [
+    "# Drupal MCP tools",
+    "",
+    "Protocol tool names for `drupal-mcp-connector`. Call these via MCP; do not invent REST paths.",
+    "",
+  ];
+  for (const def of definitions) {
+    const desc = String(def.description || "").replace(/\s+/g, " ").trim();
+    lines.push(`- \`${def.name}\`${desc ? ` — ${desc}` : ""}`);
+  }
+  lines.push("");
+  return lines.join("\n");
 }
 
 /**

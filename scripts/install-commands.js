@@ -9,11 +9,12 @@
  * copies so `/drupal-*` works in every project without committing a vendor
  * folder to this repo or to a consuming application.
  *
- * Default targets: `~/.claude/commands` (Claude adapter) and `~/.grok/commands`
- * (canonical files). Pass `--clients` to subset. Never writes into a project
- * tree.
+ * Default targets: `~/.claude/commands` (Claude adapter), `~/.grok/commands`
+ * (canonical files), and `$HOME/.agents/skills/drupal-mcp/` (Codex skill).
+ * Pass `--clients` to subset. Never writes into a project tree. Codex custom
+ * prompts (`~/.codex/prompts`) are not written — they are deprecated.
  *
- * Run: `npm run install:commands -- [--home DIR] [--clients claude,grok,agents]`
+ * Run: `npm run install:commands -- [--home DIR] [--clients claude,grok,codex,agents]`
  */
 
 import { mkdirSync, readdirSync, rmSync, writeFileSync, realpathSync } from "fs";
@@ -26,6 +27,9 @@ import {
   commandFileName,
   renderCommandMarkdown,
   renderClaudeCommandMarkdown,
+  renderCodexSkillMarkdown,
+  renderCodexToolsReference,
+  CODEX_SKILL_NAME,
 } from "./generate-commands.js";
 
 /** Whitelisted install targets. `rel` is under `--home` (default: os.homedir()). */
@@ -42,9 +46,18 @@ export const CLIENTS = {
     rel: ".agents/commands",
     render: renderCommandMarkdown,
   },
+  // Codex discovers user skills at `$HOME/.agents/skills/<name>/SKILL.md`.
+  // One skill for the whole tool surface — not one skill per tool.
+  codex: {
+    rel: ".agents/skills",
+    kind: "skill",
+    skillName: CODEX_SKILL_NAME,
+    renderSkill: renderCodexSkillMarkdown,
+    renderReference: renderCodexToolsReference,
+  },
 };
 
-const DEFAULT_CLIENTS = ["claude", "grok"];
+const DEFAULT_CLIENTS = ["claude", "grok", "codex"];
 
 /**
  * Parse CLI flags. Unknown flags throw.
@@ -111,6 +124,15 @@ export function install(options = {}) {
     if (!client) {
       throw new Error(`Unknown client "${name}". Allowed: ${Object.keys(CLIENTS).join(", ")}`);
     }
+    if (client.kind === "skill") {
+      const dir = join(home, client.rel, client.skillName);
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(join(dir, "references"), { recursive: true });
+      writeFileSync(join(dir, "SKILL.md"), client.renderSkill(definitions));
+      writeFileSync(join(dir, "references", "tools.md"), client.renderReference(definitions));
+      results.push({ client: name, dir, written: ["SKILL.md", "references/tools.md"] });
+      continue;
+    }
     const dir = join(home, client.rel);
     mkdirSync(dir, { recursive: true });
     for (const f of readdirSync(dir)) {
@@ -127,14 +149,15 @@ export function install(options = {}) {
   return results;
 }
 
-const HELP = `Usage: node scripts/install-commands.js [--home DIR] [--clients claude,grok,agents]
+const HELP = `Usage: node scripts/install-commands.js [--home DIR] [--clients claude,grok,codex,agents]
 
-Copy generated /drupal-* command stubs into operator home directories.
-Does not write into a project tree.
+Copy generated /drupal-* command stubs (and the Codex skill) into operator
+home directories. Does not write into a project tree. Does not write
+deprecated Codex custom prompts (~/.codex/prompts).
 
   --home DIR       Install root (default: the current user's home)
-  --clients LIST   Comma-separated subset of: claude, grok, agents
-                   (default: claude,grok)
+  --clients LIST   Comma-separated subset of: claude, grok, codex, agents
+                   (default: claude,grok,codex)
 `;
 
 const invokedDirectly =

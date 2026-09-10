@@ -129,13 +129,15 @@ Clients that scan `.agents/commands/` (including Grok Build when this repo is
 the project) pick them up automatically.
 
 Clients that only scan a vendor home path (Claude Code `~/.claude/commands`,
-Grok `~/.grok/commands`) install from that tree into the **operator home**, so
-no consuming project has to commit `.claude/` or `.grok/`:
+Grok `~/.grok/commands`, Codex `$HOME/.agents/skills`) install from that tree
+into the **operator home**, so no consuming project has to commit `.claude/` or
+`.grok/`. Codex uses a **skill** (`drupal-mcp`), not deprecated custom prompts:
 
 ```bash
 npm run generate:commands    # refresh .agents/commands/ (from a clone)
-npm run install:commands     # copies into ~/.claude/commands and ~/.grok/commands
+npm run install:commands     # copies into ~/.claude/commands, ~/.grok/commands, and ~/.agents/skills/drupal-mcp/
 # npm run install:commands -- --clients claude
+# npm run install:commands -- --clients codex
 # npm run install:commands -- --home /path/to/fake-home   # tests / CI
 ```
 
