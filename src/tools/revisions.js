@@ -24,6 +24,7 @@ import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, redactCanonicalEntity,
 } from "../lib/security.js";
 import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } from "../lib/draft-write.js";
+import { omitLiveComputedMetatag } from "../lib/entity-response.js";
 
 // Attributes that describe the entity's identity / revision bookkeeping / paths.
 // These are read-only or server-managed and must NOT be replayed on a revert.
@@ -223,7 +224,7 @@ async function getRevision({ site: siteName, type, id, version, langcode }) {
       entityType: "node", bundle: type, id, langcode: targetLang,
       draftRevision: { liveVid: inventory.live.vid, workingVid: inventory.working.vid },
     });
-    const redacted = redactCanonicalEntity(entity, sec, "node");
+    const redacted = omitLiveComputedMetatag(redactCanonicalEntity(entity, sec, "node"));
     return {
       entityType: "node",
       bundle: type,

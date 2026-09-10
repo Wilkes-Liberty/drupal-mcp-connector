@@ -25,6 +25,7 @@ import {
 } from "../lib/security.js";
 import { validateUuid, validateMachineName } from "../lib/validate.js";
 import { applySafeDraftDefault } from "../lib/moderation-default.js";
+import { omitLiveComputedMetatag } from "../lib/entity-response.js";
 import { entityRevisionId } from "../lib/write-revision.js";
 import { paragraphRevisionId } from "../lib/err-relationships.js";
 import {
@@ -177,7 +178,7 @@ async function createTranslation({
   const created = await createTranslationDraft(backend, {
     entityType, bundle: type, id, langcode: targetLang, attributes: drafted, relationships, draftRevision,
   });
-  const redacted = redactCanonicalEntity(created, sec, entityType);
+  const redacted = omitLiveComputedMetatag(redactCanonicalEntity(created, sec, entityType));
   if (entityType !== "node") return redacted;
   const workingVid = entityRevisionId(created) ?? draftRevision.workingVid;
   const liveVid = draftRevision.liveVid;
@@ -221,6 +222,7 @@ export const definitions = [
       "draft (#282). English live title, body, status, alias, default revision, and " +
       "paragraph ERR pins stay unchanged. An existing translation is a conflict, not an overwrite. " +
       "The response includes `_revisions.live` / `_revisions.working` when known. " +
+      "Computed `metatag` is omitted on the draft body because JSON:API resolves it from the live default (#283); use field_metatags. " +
       "Continue a node draft with drupal_update_node and langcode; continue a paragraph with " +
       "drupal_update_paragraph and langcode. Image alt is a relationship (same file UUID, " +
       "meta.alt). For paragraphs pass revisionId as the host pin. Requires Sentinel's " +

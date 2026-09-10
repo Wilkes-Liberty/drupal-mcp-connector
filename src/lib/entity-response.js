@@ -75,6 +75,31 @@ export function flagUnrequestedStatusChange(result, existing, sentAttributes) {
   };
 }
 
+/** Why computed `metatag` is dropped on unpublished working-translation bodies. */
+export const METATAG_OMITTED_NOTE =
+  "The computed metatag array is omitted: JSON:API resolves it from the live " +
+  "default revision, not the unpublished working translation. Use the stored " +
+  "field (field_metatags / field_metatag) to verify the draft. See connector #283.";
+
+/**
+ * Drop the computed `metatag` array from a working-translation body.
+ * The stored override field is left intact. No-op when `metatag` is absent.
+ * @param {?object} entity Canonical entity.
+ * @returns {?object}
+ */
+export function omitLiveComputedMetatag(entity) {
+  if (!entity || typeof entity !== "object") return entity;
+  const fields = entity.fields && typeof entity.fields === "object" ? entity.fields : null;
+  if (!fields || !Object.prototype.hasOwnProperty.call(fields, "metatag")) return entity;
+  const nextFields = { ...fields };
+  delete nextFields.metatag;
+  return {
+    ...entity,
+    fields: nextFields,
+    _metatagOmitted: { reason: METATAG_OMITTED_NOTE },
+  };
+}
+
 /** JSON Schema fragment for the shared `returning` parameter. */
 export const RETURNING_SCHEMA = {
   type: "string",

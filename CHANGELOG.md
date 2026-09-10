@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Omit computed `metatag` on unpublished working-translation bodies (#283).**
+  JSON:API's computed `metatag` array is resolved from the live default
+  revision, so a Spanish draft response could still show English title and
+  description. The stored override (`field_metatags`) is unchanged. Draft
+  translation create/read now drop `fields.metatag` and set `_metatagOmitted`.
+
 - **`drupal_create_translation` sends live and working revision IDs when a draft exists (#282).**
   Sentinel's translation POST 409s with "A working revision exists" if If-Match
   is live-only. The connector now reads Sentinel's translation inventory for
