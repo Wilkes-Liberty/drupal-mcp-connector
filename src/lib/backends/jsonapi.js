@@ -17,6 +17,7 @@ import {
   normalizeRelationship,
   BASE_ATTRIBUTE_FIELDS,
 } from "../canonical.js";
+import { isPositiveNid, normalizeAlias, PATH_ALIAS_ENTITY_TYPE } from "../path-alias.js";
 
 // Drupal exposes internal identifiers under drupal_internal__* attributes.
 // They are dropped from canonical `fields` except for the identifiers that
@@ -310,19 +311,88 @@ export class JsonApiBackend extends Backend {
    * (Drupal `PathItem::postSave` creates a duplicate alias when `pid` is absent)
    * — so this method exposes it. Returns nulls for entities/backends without a
    * path field. See the 1.5.1 alias fix.
-   * @param {{entityType: string, bundle: string, id: string}} ref
-   * @returns {Promise<{alias: ?string, pid: ?(number|string), langcode: ?string, drupalId: ?(number|string)}>}
+   *
+   * Unpublished default / forward revisions often omit `pid` on the computed
+   * `path` field even when a `path_alias` row exists. When the node numeric id
+   * is known, this method also looks up that row (aliases are not revisioned)
+   * so title-only edits can pin the live alias (#274).
+   * @param {{entityType: string, bundle: string, id: string, resourceVersion?: string}} ref
+   * @returns {Promise<{alias: ?string, pid: ?(number|string), langcode: ?string, drupalId: ?(number|string), aliasId: ?string}>}
    */
-  async getPathInfo({ entityType, bundle, id }) {
+  async getPathInfo({ entityType, bundle, id, resourceVersion }) {
     validateUuid(id);
-    const data = await drupalFetch(this.site, `${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`);
+    let path = `${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`;
+    if (resourceVersion) {
+      path += `?resourceVersion=${encodeURIComponent(resourceVersion)}`;
+    }
+    const data = await drupalFetch(this.site, path);
     const attrs = data?.data?.attributes ?? {};
-    const path = attrs.path ?? null;
+    const nodePath = attrs.path ?? null;
+    const drupalId = attrs.drupal_internal__nid ?? attrs.drupal_internal__id ?? null;
+    const langcode = nodePath?.langcode ?? attrs.langcode ?? null;
+    let alias = nodePath?.alias ?? null;
+    let pid = nodePath?.pid ?? null;
+    let aliasId = null;
+
+    if (entityType === "node" && isPositiveNid(drupalId)) {
+      const row = await this.lookupPathAliasRow(`/node/${Number(drupalId)}`, {
+        langcode,
+        preferredAlias: alias,
+      });
+      if (row) {
+        aliasId = row.id;
+        if (pid === undefined || pid === null) pid = row.pid;
+        // Pathauto / unpublished computed fields can omit alias; the row is
+        // the router-visible value.
+        if (!alias) alias = row.alias;
+      }
+    }
+
+    return { alias, pid, langcode, drupalId, aliasId };
+  }
+
+  /**
+   * Load the path_alias row for a node source path. Best-effort: missing
+   * JSON:API exposure or an empty collection returns null.
+   * @param {string} sourcePath Drupal system path, e.g. `/node/44`.
+   * @param {{langcode?: ?string, preferredAlias?: ?string}} [opts]
+   * @returns {Promise<?{id: string, alias: ?string, pid: ?(number|string), langcode: ?string}>}
+   */
+  async lookupPathAliasRow(sourcePath, opts = {}) {
+    if (!/^\/node\/[1-9]\d*$/.test(sourcePath)) return null;
+    const params = new URLSearchParams();
+    params.set("filter[path]", sourcePath);
+    if (opts.langcode) params.set("filter[langcode]", String(opts.langcode));
+    let data;
+    try {
+      data = await drupalFetch(
+        this.site,
+        `${this.resourcePath(PATH_ALIAS_ENTITY_TYPE, PATH_ALIAS_ENTITY_TYPE)}?${params}`,
+      );
+    } catch {
+      return null;
+    }
+    const rows = Array.isArray(data?.data) ? data.data : [];
+    if (!rows.length) return null;
+    const preferred = normalizeAlias(opts.preferredAlias);
+    let picked = rows[0];
+    if (preferred) {
+      for (const row of rows) {
+        const attrs = row && typeof row === "object" ? row.attributes : null;
+        const rowAlias = attrs && typeof attrs === "object" ? attrs.alias : null;
+        if (normalizeAlias(rowAlias) === preferred) {
+          picked = row;
+          break;
+        }
+      }
+    }
+    if (!picked?.id) return null;
+    const a = picked.attributes && typeof picked.attributes === "object" ? picked.attributes : {};
     return {
-      alias: path?.alias ?? null,
-      pid: path?.pid ?? null,
-      langcode: path?.langcode ?? attrs.langcode ?? null,
-      drupalId: attrs.drupal_internal__nid ?? attrs.drupal_internal__id ?? null,
+      id: picked.id,
+      alias: a.alias ?? null,
+      pid: a.drupal_internal__id ?? a.pid ?? null,
+      langcode: a.langcode ?? null,
     };
   }
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Title-only node updates keep the existing URL alias; failed restorations error (#274).**
+  `getPathInfo` now fills `pid` / `aliasId` from the `path_alias` row when an
+  unpublished default or forward revision omits them on the computed `path`
+  field. After `drupal_update_node`, the connector re-reads the alias and, if
+  Pathauto still drifted it, PATCHes the existing `path_alias` entity. If the
+  alias still does not match, the tool throws instead of returning success or
+  creating a rename redirect. Title-only edits pin the live alias as before.
+
 ### Added
 - **Unpublished paragraph field-value translation and image alt (#280).**
   `drupal_create_translation` accepts `entityType: "paragraph"` and

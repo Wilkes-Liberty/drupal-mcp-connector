@@ -79,10 +79,12 @@ export class Backend {
    * for callers that must round-trip the alias `pid` on an in-place update (the
    * canonical entity only exposes `path.alias` as `url`). Optional capability:
    * the default returns nulls so read-only/path-less backends are safe. See the 1.5.1 alias fix.
-   * @param {{entityType: string, bundle: string, id: string}} _ref
-   * @returns {Promise<{alias: ?string, pid: ?(number|string), langcode: ?string, drupalId: ?(number|string)}>}
+   * @param {{entityType: string, bundle: string, id: string, resourceVersion?: string}} _ref
+   * @returns {Promise<{alias: ?string, pid: ?(number|string), langcode: ?string, drupalId: ?(number|string), aliasId: ?string}>}
    */
-  async getPathInfo(_ref) { return { alias: null, pid: null, langcode: null, drupalId: null }; }
+  async getPathInfo(_ref) {
+    return { alias: null, pid: null, langcode: null, drupalId: null, aliasId: null };
+  }
 
   /**
    * Create an entity.
