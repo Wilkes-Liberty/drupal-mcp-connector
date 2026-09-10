@@ -180,6 +180,14 @@ command = "/abs/path/drupal-mcp-connector/examples/launch-with-secret.sh"
 Codex supports stdio MCP servers in both the CLI and the IDE extension. Run
 `codex mcp add --help` to confirm flags on your version.
 
+Bare `/drupal-*` command files are **not** a Codex surface — custom prompts under
+`~/.codex/prompts` are deprecated in favor of [skills](https://developers.openai.com/codex/skills).
+From a connector clone, `npm run install:commands` (or `--clients codex`) writes
+one skill to `$HOME/.agents/skills/drupal-mcp/SKILL.md` with a tool catalog at
+`references/tools.md`. MCP tool connectivity is independent (`codex mcp add`);
+the skill tells Codex when and how to call those tools. Restart Codex if a
+freshly installed skill does not appear.
+
 ### ChatGPT & the Responses API (remote HTTP only)
 
 ChatGPT (Developer Mode / connectors) and the Responses API connect **only to
@@ -258,7 +266,7 @@ Hardening (see [security-hardening.md](security-hardening.md)):
 | Claude Desktop | ✅ | ✅ | `claude_desktop_config.json` |
 | Grok Build (CLI) | ✅ | ✅ | native MCP, also reads `AGENTS.md` |
 | Grok API | — | ✅ | Remote MCP Tools in `tools` array |
-| OpenAI Codex CLI | ✅ | ✅ | `~/.codex/config.toml` |
+| OpenAI Codex CLI | ✅ | ✅ | `~/.codex/config.toml`; skills at `$HOME/.agents/skills/drupal-mcp/` (not `~/.codex/prompts`) |
 | ChatGPT / Responses API | — | ✅ | remote only; Secure MCP Tunnel for private servers |
 
 Client products evolve quickly — confirm exact config keys/commands in each

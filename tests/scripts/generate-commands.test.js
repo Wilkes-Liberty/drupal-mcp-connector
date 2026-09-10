@@ -5,8 +5,11 @@ import { allDefinitions } from "../../src/tools/index.js";
 import {
   renderCommandMarkdown,
   renderClaudeCommandMarkdown,
+  renderCodexSkillMarkdown,
+  renderCodexToolsReference,
   commandFileName,
   COMMANDS_DIR,
+  CODEX_SKILL_NAME,
 } from "../../scripts/generate-commands.js";
 
 /** Extract the YAML frontmatter block into a flat key→value map. */
@@ -54,6 +57,19 @@ describe("generate-commands", () => {
     expect(fm["allowed-tools"]).toBe("mcp__drupal__drupal_list_nodes");
     expect(md).toContain("`$ARGUMENTS`");
     expect(md).toContain("Call the MCP tool `drupal_list_nodes`.");
+  });
+
+  it("Codex skill adapter is one SKILL.md plus a tools catalog, not per-tool prompts (#263)", () => {
+    const skill = renderCodexSkillMarkdown(allDefinitions);
+    expect(skill).toContain(`name: "${CODEX_SKILL_NAME}"`);
+    expect(skill).toContain("description:");
+    expect(skill).toContain("Call Drupal MCP tools");
+    expect(skill).toContain("references/tools.md");
+    expect(skill).not.toContain("~/.codex/prompts");
+    const catalog = renderCodexToolsReference(allDefinitions);
+    expect(catalog).toContain("`drupal_list_nodes`");
+    expect(catalog).toContain("`drupal_update_node`");
+    expect(allDefinitions.every((d) => catalog.includes(`\`${d.name}\``))).toBe(true);
   });
 
   it("keeps the committed .agents/commands in sync with the tools (run `npm run generate:commands`)", () => {

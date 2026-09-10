@@ -83,8 +83,10 @@ allowlists and machine paths stay in each tool’s home config.
 generated set of harness-agnostic slash-command stubs so MCP *clients* can
 call this server’s tools as `/drupal-*`. Regenerate with
 `npm run generate:commands` after tool definition changes; do not hand-edit.
-To install into a client home directory (`~/.claude/commands`, `~/.grok/commands`)
-run `npm run install:commands` — never commit a vendor folder for that.
+To install into a client home directory (`~/.claude/commands`, `~/.grok/commands`,
+`$HOME/.agents/skills/drupal-mcp/` for Codex) run `npm run install:commands` —
+never commit a vendor folder for that. Codex custom prompts (`~/.codex/prompts`)
+are not written.
 
 ## Commit Messages
 

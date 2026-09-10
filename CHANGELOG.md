@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creating a rename redirect. Title-only edits pin the live alias as before.
 
 ### Added
+- **Codex skill target for `npm run install:commands` (#263).**
+  The installer writes `$HOME/.agents/skills/drupal-mcp/SKILL.md` (plus
+  `references/tools.md`) so Drupal MCP tools are discoverable in Codex. Custom
+  prompts under `~/.codex/prompts` are not written — OpenAI deprecated that
+  surface in favor of skills. Default clients are now `claude,grok,codex`.
+  Test with `--home` on an isolated directory.
+
 - **Unpublished paragraph field-value translation and image alt (#280).**
   `drupal_create_translation` accepts `entityType: "paragraph"` and
   `revisionId` (the host pin) and POSTs Sentinel's paragraph
