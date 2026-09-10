@@ -300,11 +300,25 @@ export async function preflightPatchWritable({
  * @returns {Promise<{resourceVersion: ?string, workingCopy: ?object, liveVid: ?number|string, workingVid: ?number|string}>}
  */
 export async function prepareGuardedPatch(backend, {
-  entityType, bundle, id, existing, attributes, relationships,
+  entityType, bundle, id, existing, attributes, relationships, langcode,
 }) {
   const target = shouldPreflightPatch({ existing, attributes })
     ? await resolveWorkingCopyPatchTarget(backend, { entityType, bundle, id, existing })
     : { resourceVersion: undefined, workingCopy: null, liveVid: null, workingVid: null };
+  if (langcode) {
+    if (!target.workingVid || !target.liveVid || String(target.workingVid) === String(target.liveVid)) {
+      throw new Error(
+        "No unpublished working translation for this language. " +
+        "Create it with drupal_create_translation first; a canonical langcode PATCH is not attempted."
+      );
+    }
+    target.draftRevision = { liveVid: target.liveVid, workingVid: target.workingVid };
+    await writeDraft(backend, {
+      entityType, bundle, id, attributes, relationships, langcode,
+      draftRevision: target.draftRevision,
+    }, true);
+    return target;
+  }
   if (target.resourceVersion) {
     target.draftRevision = { liveVid: target.liveVid, workingVid: target.workingVid };
     await writeDraft(backend, {

@@ -1,16 +1,16 @@
 ---
-description: "List the translation langcode(s) for a Drupal entity (multilingual / content_translation). Reports the language(s) observable on the resource. Core JSON:API serves one language per resource and does not enumerate all translations — see the returned note. Defaults to node."
+description: "List live and working translation langcodes for a Drupal node. Uses Sentinel's translation inventory when available (live default revision vs unpublished working draft). Core JSON:API alone serves one language and cannot prove others are absent. Defaults to node."
 argument-hint: "<type> <id> [site] [entityType]"
 ---
 
 Call the MCP tool `drupal_list_translations`.
 
-List the translation langcode(s) for a Drupal entity (multilingual / content_translation). Reports the language(s) observable on the resource. Core JSON:API serves one language per resource and does not enumerate all translations — see the returned note. Defaults to node.
+List live and working translation langcodes for a Drupal node. Uses Sentinel's translation inventory when available (live default revision vs unpublished working draft). Core JSON:API alone serves one language and cannot prove others are absent. Defaults to node.
 
 Parse the arguments supplied with this command into this tool's parameters:
 
 **Required:**
-- `type` (string): Bundle machine name, e.g. 'article'
+- `type` (string): Bundle machine name, e.g. 'basic_page'
 - `id` (string): Entity UUID
 
 **Optional:**

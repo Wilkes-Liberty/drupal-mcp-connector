@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Spanish (and other) draft translations beside published English (#276).**
+  `drupal_create_translation` no longer PATCHes `langcode` on the canonical
+  entity. It POSTs Sentinel's `/mcp-draft/translations` endpoint so Drupal
+  calls `addTranslation()` on an unpublished forward revision. The live
+  default language, revision id, title, body, status, and alias stay
+  unchanged. An existing translation is a conflict. Continue the draft with
+  `drupal_update_node` + `langcode`; read it with `drupal_get_node` /
+  `drupal_list_translations` / `drupal_get_revision` + `langcode`. Requires
+  MCP Sentinel with the draft-translation contract. Paragraph field-value
+  translation and media photo-alt translation remain pending. A content-tier
+  caller still cannot publish through this path.
+
 ## [2.14.1] - 2026-09-09
 
 ### Changed

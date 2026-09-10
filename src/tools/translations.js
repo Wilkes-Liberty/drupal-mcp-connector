@@ -1,57 +1,52 @@
 /**
  * Tool group: Content translations (multilingual / content_translation).
  *
- * Drupal core JSON:API does not model translations as standalone resources —
- * a translatable entity carries a `langcode` attribute and Drupal serves the
- * negotiated/default-language variant of a resource at its canonical path. To
- * surface multilingual handling cleanly we expose:
+ * Core JSON:API does not add a translation by PATCHing `langcode` on the
+ * canonical entity — that mutates the default language. Governed node
+ * translations go through Sentinel's draft-translation surface:
  *
- *   - drupal_list_translations  — read the entity and report its langcode(s).
- *   - drupal_create_translation — governed write: set/replace a translation by
- *     PATCHing the entity with the target `langcode` plus the supplied fields.
+ *   - drupal_list_translations  — inventory of live and working languages
+ *   - drupal_create_translation — add a language as an unpublished forward draft
  *
- * Requirements (server side):
- *   - The Drupal `content_translation` module must be enabled and the target
- *     entity type/bundle configured as translatable, otherwise create attempts
- *     are rejected by Drupal and listing only ever reports the single language.
+ * Continuation of an existing unpublished translation is drupal_update_node
+ * with `langcode`. Reads of that draft are drupal_get_node / drupal_get_revision
+ * with `langcode`.
  *
- * Limitation: core JSON:API exposes the resource in one language at a time and
- * does not enumerate every available translation as a distinct resource. This
- * module therefore reports the langcode(s) it can observe on the returned
- * resource. Enumerating ALL translations of an entity requires either the
- * contrib "JSON:API Translation" module or the Drush bridge, neither of which
- * is assumed here — see the `note` field on the list result.
- *
- * Reads are redacted per the site security policy; the create path is a
- * governed write (asserts the "update" operation — a translation is a facet of
- * an existing entity, not a new entity).
+ * Paragraph field-value translation is not supported on this path. Shared
+ * structure (references, files, aliases) stays on the source language.
  */
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import {
-  resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, redactCanonicalEntity,
+  resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertPublishAllowed,
+  redactCanonicalEntity,
 } from "../lib/security.js";
 import { validateUuid, validateMachineName } from "../lib/validate.js";
+import { applySafeDraftDefault } from "../lib/moderation-default.js";
+import { loadWorkingCopy } from "../lib/patch-preflight.js";
+import { entityRevisionId } from "../lib/write-revision.js";
+import {
+  assertDraftLangcode,
+  createTranslationDraft,
+  readTranslationInventory,
+} from "../lib/draft-write.js";
 
 const LIST_NOTE =
-  "Core JSON:API serves one language per resource and does not enumerate every " +
-  "translation. langcodes reflects only the language(s) observable on the fetched " +
-  "resource. Full enumeration requires the JSON:API Translation contrib module or " +
-  "the Drush bridge. Creating translations requires content_translation enabled and " +
-  "the bundle configured as translatable.";
+  "Live languages are those on the default revision. Working languages are the " +
+  "unpublished forward revision when the principal can view it. Core JSON:API " +
+  "alone cannot enumerate translations; this inventory requires Sentinel's " +
+  "mcp-translations endpoint.";
+
+const FALLBACK_NOTE =
+  "Sentinel's translation inventory is unavailable. Core JSON:API served one " +
+  "language for this resource; it does not prove other translations are absent.";
 
 /**
- * List the translation langcode(s) observable for an entity.
- *
- * Reads the entity through the backend's validated rawQuery (so path segments
- * are checked and content_moderation handling is reused) and reports its
- * `langcode`. The entity type defaults to "node"; pass `entityType` for others.
+ * List live and working translation langcodes for an entity.
  *
  * @param {object} args - { site?, entityType?, type, id }.
- *   `type` is the bundle machine name; `entityType` defaults to "node".
  * @returns {Promise<object|null>} A translation summary, or null if not found.
- * @throws {SecurityError} If reading the type/bundle is not permitted.
  */
 async function listTranslations({ site: siteName, entityType = "node", type, id }) {
   validateMachineName(entityType, "entityType");
@@ -63,6 +58,36 @@ async function listTranslations({ site: siteName, entityType = "node", type, id 
   assertReadAllowed(sec, entityType, type);
 
   const backend = await resolveBackend(site);
+  if (entityType === "node" && typeof backend.rawQuery === "function") {
+    try {
+      const meta = await readTranslationInventory(backend, { entityType, bundle: type, id });
+      const liveLangs = (meta.live?.translations ?? []).map((row) => row.langcode);
+      const workingLangs = (meta.working?.translations ?? []).map((row) => row.langcode);
+      const langcodes = [...new Set([...liveLangs, ...workingLangs])];
+      return {
+        id,
+        entityType,
+        bundle: type,
+        defaultLangcode: meta.defaultLangcode ?? liveLangs[0] ?? null,
+        langcodes,
+        live: meta.live ?? null,
+        working: meta.working ?? null,
+        translations: (meta.working?.translations ?? meta.live?.translations ?? []).map((row) => ({
+          langcode: row.langcode,
+          default: Boolean(row.default),
+          status: row.status,
+          title: row.title,
+          moderation_state: row.moderation_state,
+        })),
+        note: LIST_NOTE,
+      };
+    } catch (error) {
+      if (!/does not provide Sentinel's governed draft-translation endpoint/.test(String(error?.message))) {
+        throw error;
+      }
+    }
+  }
+
   const res = await backend.rawQuery({ path: `/jsonapi/${entityType}/${type}/${id}` });
   const data = res?.data;
   if (!data) return null;
@@ -78,69 +103,89 @@ async function listTranslations({ site: siteName, entityType = "node", type, id 
     defaultLangcode,
     langcodes,
     translations,
-    note: LIST_NOTE,
+    note: FALLBACK_NOTE,
   };
 }
 
 /**
- * Create (or replace) a translation of an entity for a target language.
+ * Create a translation as an unpublished non-default draft revision.
  *
- * Governed write. Implemented as a PATCH (via the backend's updateEntity) that
- * sets the target `langcode` alongside the supplied attributes. With
- * content_translation enabled and the bundle marked translatable, Drupal stores
- * the supplied fields against the requested language. If the bundle is not
- * translatable, Drupal rejects the write and the error surfaces to the caller.
- *
- * The result is redacted per the site policy.
+ * Does not PATCH canonical langcode. Requires Sentinel's translation endpoint.
+ * An existing translation is a conflict. English live fields stay unchanged.
  *
  * @param {object} args - { site?, entityType?, type, id, langcode, attributes? }.
- *   `type` is the bundle; `entityType` defaults to "node"; `langcode` is the
- *   target language (e.g. "de"); `attributes` are the translated field values.
- * @returns {Promise<object>} The updated/redacted entity descriptor.
- * @throws {SecurityError} If writing the type/bundle is not permitted.
- * @throws {Error} If langcode/id/type are invalid, or Drupal rejects the write.
+ * @returns {Promise<object>} The created translation, redacted.
  */
-async function createTranslation({ site: siteName, entityType = "node", type, id, langcode, attributes = {} }) {
+async function createTranslation({
+  site: siteName, entityType = "node", type, id, langcode, attributes = {}, dryRun = false,
+}) {
   validateMachineName(entityType, "entityType");
   validateMachineName(type, "type");
   validateUuid(id);
-  // langcode is interpolated into the JSON:API payload and selects the language
-  // variant; validate it as a machine-name-like token (e.g. "en", "pt_br",
-  // "zh_hans") to block injection / malformed values.
-  validateMachineName(langcode, "langcode");
+  const targetLang = assertDraftLangcode(langcode);
 
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  // A translation is a facet of an existing entity → "update", not "create".
   assertWriteAllowed(sec, "update", entityType, type);
 
-  const backend = await resolveBackend(site);
-  const updated = await backend.updateEntity({
-    entityType,
-    bundle: type,
-    id,
-    attributes: { ...attributes, langcode },
-  });
-  return redactCanonicalEntity(updated, sec, entityType);
-}
+  if (entityType !== "node") {
+    throw new Error("Governed translation create is implemented for nodes. Other entity types are not addressed by the draft-translation contract.");
+  }
 
-// ---------------------------------------------------------------------------
-// Tool definitions
-// ---------------------------------------------------------------------------
+  const backend = await resolveBackend(site);
+  const existing = await backend.getEntity({ entityType, bundle: type, id });
+  if (!existing) {
+    throw new Error("The entity was not found.");
+  }
+  const liveVid = entityRevisionId(existing);
+  const workingCopy = await loadWorkingCopy(backend, { entityType, bundle: type, id });
+  const workingVid = entityRevisionId(workingCopy);
+  const sameWorking = workingVid !== null && liveVid !== null && String(workingVid) === String(liveVid);
+  const draftRevision = {
+    liveVid,
+    workingVid: workingCopy && !sameWorking ? workingVid : undefined,
+  };
+
+  const safeAttributes = { ...attributes };
+  delete safeAttributes.langcode;
+  if (safeAttributes.status === undefined && safeAttributes.moderation_state === undefined) {
+    safeAttributes.moderation_state = "draft";
+  }
+  const drafted = await applySafeDraftDefault({
+    backend, entityType, bundle: type, id, attributes: safeAttributes, existingEntity: existing,
+  });
+  assertPublishAllowed(sec, drafted);
+
+  if (dryRun) {
+    await createTranslationDraft(backend, {
+      entityType, bundle: type, id, langcode: targetLang, attributes: drafted, draftRevision,
+    }, true);
+    return {
+      dryRun: true, operation: "create_translation", entityType, bundle: type, id,
+      langcode: targetLang, attributes: drafted,
+    };
+  }
+
+  const created = await createTranslationDraft(backend, {
+    entityType, bundle: type, id, langcode: targetLang, attributes: drafted, draftRevision,
+  });
+  return redactCanonicalEntity(created, sec, entityType);
+}
 
 export const definitions = [
   {
     name: "drupal_list_translations",
     description:
-      "List the translation langcode(s) for a Drupal entity (multilingual / content_translation). " +
-      "Reports the language(s) observable on the resource. Core JSON:API serves one language per " +
-      "resource and does not enumerate all translations — see the returned note. Defaults to node.",
+      "List live and working translation langcodes for a Drupal node. Uses Sentinel's " +
+      "translation inventory when available (live default revision vs unpublished working " +
+      "draft). Core JSON:API alone serves one language and cannot prove others are absent. " +
+      "Defaults to node.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
         site:       { type: "string", description: "Named site (omit for default)" },
         entityType: { type: "string", description: "Entity type machine name. Default: 'node'." },
-        type:       { type: "string", description: "Bundle machine name, e.g. 'article'" },
+        type:       { type: "string", description: "Bundle machine name, e.g. 'basic_page'" },
         id:         { type: "string", description: "Entity UUID" },
       },
     },
@@ -148,27 +193,27 @@ export const definitions = [
   {
     name: "drupal_create_translation",
     description:
-      "Create or replace a translation of a Drupal entity for a target language (governed write). " +
-      "Sets the given langcode plus the supplied translated field values. Requires the content_translation " +
-      "module enabled and the bundle configured as translatable; otherwise Drupal rejects the write. " +
-      "Defaults to node.",
+      "Create a translation as an unpublished non-default draft revision (governed write). " +
+      "Adds the target language beside the default language; it does not PATCH langcode on " +
+      "the canonical entity. English live title, body, status, alias, and default revision " +
+      "stay unchanged. An existing translation is a conflict, not an overwrite. Continue the " +
+      "draft with drupal_update_node and langcode. Requires Sentinel's draft-translation " +
+      "endpoint and a translatable bundle. Paragraph field values are not translated on this " +
+      "path. Defaults to node. Publication stays denied for content-tier callers.",
     inputSchema: {
       type: "object", required: ["type", "id", "langcode"],
       properties: {
         site:       { type: "string" },
         entityType: { type: "string", description: "Entity type machine name. Default: 'node'." },
-        type:       { type: "string", description: "Bundle machine name, e.g. 'article'" },
+        type:       { type: "string", description: "Bundle machine name, e.g. 'basic_page'" },
         id:         { type: "string", description: "Entity UUID" },
-        langcode:   { type: "string", description: "Target language code, e.g. 'de', 'fr', 'pt_br'" },
+        langcode:   { type: "string", description: "Target language code, e.g. 'es', 'de', 'pt-br'" },
         attributes: { type: "object", description: "Translated field values keyed by Drupal machine name" },
+        dryRun:     { type: "boolean", description: "Validate without saving" },
       },
     },
   },
 ];
-
-// ---------------------------------------------------------------------------
-// Handler map
-// ---------------------------------------------------------------------------
 
 export const handlers = {
   drupal_list_translations:  listTranslations,

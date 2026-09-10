@@ -18,6 +18,7 @@ import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA } fro
 import { resolveErrRelationships, relationshipsWereSent } from "../lib/err-relationships.js";
 import { attachWrittenRevisionPair, readWrittenRevision } from "../lib/write-revision.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
+import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } from "../lib/draft-write.js";
 import { assertBodySummaryWritable, attachSummaryDeprecation } from "../lib/body-summary.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 import { applyAllowedFormatsToAttributes } from "../lib/field-definition.js";
@@ -176,12 +177,39 @@ function pageOf({ limit = 20, offset = 0 }) {
  * @param {object} args - { site?, type, id }.
  * @returns {Promise<object|null>} The redacted node, or null if not found.
  */
-async function getNode({ site: siteName, type, id }) {
+async function getNode({ site: siteName, type, id, langcode, resourceVersion }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
-  const entity = await backend.getEntity({ entityType: "node", bundle: type, id });
+  if (langcode) {
+    const targetLang = assertDraftLangcode(langcode);
+    const inventory = await readTranslationInventory(backend, { entityType: "node", bundle: type, id });
+    const workingHas = (inventory.working?.translations ?? []).some((row) => row.langcode === targetLang);
+    if (workingHas && inventory.live?.vid && inventory.working?.vid) {
+      const entity = await readDraftTranslation(backend, {
+        entityType: "node", bundle: type, id, langcode: targetLang,
+        draftRevision: { liveVid: inventory.live.vid, workingVid: inventory.working.vid },
+      });
+      return redactCanonicalEntity(entity, sec, "node");
+    }
+    const liveHas = (inventory.live?.translations ?? []).some((row) => row.langcode === targetLang);
+    if (!liveHas) {
+      return null;
+    }
+    if (targetLang !== inventory.defaultLangcode) {
+      const liveRow = (inventory.live.translations ?? []).find((row) => row.langcode === targetLang);
+      return {
+        id, entityType: "node", bundle: type, langcode: targetLang,
+        title: liveRow?.title ?? null,
+        status: liveRow?.status ?? null,
+        fields: { moderation_state: liveRow?.moderation_state },
+        _revisions: { live: inventory.live.vid, working: inventory.working?.vid ?? null },
+        note: "Published non-default translations are listed on the live revision; full field reads of an unpublished working translation use langcode against the working draft.",
+      };
+    }
+  }
+  const entity = await backend.getEntity({ entityType: "node", bundle: type, id, resourceVersion });
   return entity ? redactCanonicalEntity(entity, sec, "node") : null;
 }
 
@@ -310,13 +338,14 @@ async function createNode({ site: siteName, type, title, body, summary, format, 
  * @param {object} args - { site?, type, id, title?, body?, summary?, format?, status?, moderationState?, fields?, relationships? }.
  * @returns {Promise<object>} The updated node descriptor.
  */
-async function updateNode({ site: siteName, type, id, title, body, summary, format, status, moderationState, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
+async function updateNode({ site: siteName, type, id, title, body, summary, format, status, moderationState, langcode, fields = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", "node", type);
   const backend = await resolveBackend(site);
   const summaryWrite = await assertBodySummaryWritable(backend, type, summary);
   let attributes = { ...fields };
+  delete attributes.langcode;
   if (title !== undefined) attributes.title = title;
   if (moderationState !== undefined) attributes.moderation_state = moderationState;
   else if (status !== undefined) attributes.status = status;
@@ -348,6 +377,7 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   // governed continuation endpoint; stray revisions still fail the probe.
   const patchTarget = await prepareGuardedPatch(backend, {
     entityType: "node", bundle: type, id, existing, attributes, relationships: resolvedRelationships,
+    langcode,
   });
   if (dryRun) {
     const preview = {
@@ -365,6 +395,7 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   else attributes.path = pathAttr;
   const patched = await updateEntityGuarded(backend, {
     entityType: "node", bundle: type, id, attributes, relationships: resolvedRelationships,
+    ...(langcode ? { langcode } : {}),
     ...(patchTarget.resourceVersion ? { resourceVersion: patchTarget.resourceVersion } : {}),
     ...(patchTarget.draftRevision ? { draftRevision: patchTarget.draftRevision } : {}),
   });
@@ -414,13 +445,14 @@ async function deleteNode({ site: siteName, type, id, dryRun = false }) {
 export const definitions = [
   {
     name: "drupal_get_node",
-    description: "Fetch a single Drupal content node by UUID and content type. Returns title, body, status, path alias, and all attributes.",
+    description: "Fetch a single Drupal content node by UUID and content type. Returns title, body, status, path alias, and all attributes. Pass langcode to read a working translation draft via Sentinel (distinct from published English).",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
         site: { type: "string", description: "Named site (omit for default)" },
         type: { type: "string", description: "Content type machine name, e.g. 'article'" },
         id:   { type: "string", description: "Node UUID" },
+        langcode: { type: "string", description: "Target language (e.g. 'es') to read the unpublished working translation instead of the default language." },
       },
     },
   },
@@ -477,7 +509,7 @@ export const definitions = [
   },
   {
     name: "drupal_update_node",
-    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Entity-reference fields go in `relationships`, not `fields`. Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved (an unresolved identifier persists as an empty field). On moderated targets a non-saving PATCH preflight runs first — including on dryRun — against the same URL the write will hit. An addressable node draft uses Sentinel's governed draft endpoint with live/working revision preconditions (#166); dryRun uses that same target. workingCopy:null from drupal_list_revisions is not proof the node is writable (possiblyPatchBlocked / #201). Preflight here does not un-orphan paragraphs already created; probe the host before creating dependents.",
+    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Pass langcode to continue an unpublished working translation (Sentinel X-MCP-Draft-Langcode); this does not PATCH canonical langcode and will not create a missing translation — use drupal_create_translation first. Entity-reference fields go in `relationships`, not `fields`. Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved (an unresolved identifier persists as an empty field). On moderated targets a non-saving PATCH preflight runs first — including on dryRun — against the same URL the write will hit. An addressable node draft uses Sentinel's governed draft endpoint with live/working revision preconditions (#166); dryRun uses that same target. workingCopy:null from drupal_list_revisions is not proof the node is writable (possiblyPatchBlocked / #201). Preflight here does not un-orphan paragraphs already created; probe the host before creating dependents.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
@@ -490,6 +522,7 @@ export const definitions = [
         format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. When the body field's allowed_formats lists exactly one format, that is the default. A caller format outside that list is refused before write. When allowed_formats cannot be resolved, defaults to the site config's `defaultTextFormat`, then 'full_html'." },
         status:  { type: "boolean", description: "Published flag for NON-moderated types: true = publish, false = unpublish. Ignored if moderationState is set." },
         moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status. Required to keep or re-publish a live node — omitting it on a published moderated node defaults the write to 'draft'." },
+        langcode: { type: "string", description: "Target language for an unpublished working translation (e.g. 'es'). Continues that translation via Sentinel; does not create a missing translation and does not PATCH canonical langcode." },
         fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Formatted text: a string or { value, format?, summary? }. format must be in the field's allowed_formats; a single allowed format is used when omitted. Entity-reference fields go in `relationships`, not here." },
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }. Paragraph / ERR items must carry meta.target_revision_id — the connector injects it when missing, and fails the write if it cannot." },
         dryRun:  { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. An existing node draft uses Sentinel's non-saving draft endpoint with the real payload and revision preconditions. Otherwise an id-mismatch core PATCH probes writability without saving. Any refusal fails the dryRun." },

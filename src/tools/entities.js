@@ -96,7 +96,7 @@ async function createEntity({ site: siteName, entityType, bundle, attributes = {
  * @returns {Promise<object>} The updated entity descriptor.
  * @throws {SecurityError} If updating the type/bundle is not permitted.
  */
-async function updateEntity({ site: siteName, entityType, bundle, id, attributes = {}, relationships = {}, dryRun = false, returning = "full" }) {
+async function updateEntity({ site: siteName, entityType, bundle, id, attributes = {}, relationships = {}, langcode, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", entityType, bundle);
@@ -119,6 +119,7 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
   const patchTarget = await prepareGuardedPatch(backend, {
     entityType, bundle, id, existing, attributes: safeAttributes, relationships: resolvedRelationships,
+    langcode,
   });
   if (dryRun) {
     return {
@@ -128,6 +129,7 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   }
   const result = await updateEntityGuarded(backend, {
     entityType, bundle, id, attributes: safeAttributes, relationships: resolvedRelationships,
+    ...(langcode ? { langcode } : {}),
     ...(patchTarget.resourceVersion ? { resourceVersion: patchTarget.resourceVersion } : {}),
     ...(patchTarget.draftRevision ? { draftRevision: patchTarget.draftRevision } : {}),
   });
@@ -289,6 +291,7 @@ export const definitions = [
         entityType:    { type: "string" },
         bundle:        { type: "string" },
         id:            { type: "string" },
+        langcode:      { type: "string", description: "Target language for an unpublished working translation (nodes). Continues that translation via Sentinel." },
         attributes:    { type: "object" },
         relationships: { type: "object" },
         dryRun:        { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. An existing node draft uses Sentinel's non-saving draft endpoint with the real payload and revision preconditions. Otherwise an id-mismatch core PATCH probes writability without saving. Any refusal fails the dryRun." },

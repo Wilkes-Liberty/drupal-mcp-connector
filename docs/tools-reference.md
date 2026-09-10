@@ -632,26 +632,28 @@ Create or update many entities of a single type + bundle in one call. Permission
 
 ## Translations
 
-Inspect and create entity translations (multilingual / `content_translation`). Core JSON:API serves one language per resource and does not enumerate all translations; `create_translation` requires the `content_translation` module enabled and the bundle configured as translatable. Both tools default to `node`.
+Inspect and create entity translations (multilingual / `content_translation`). A translation is an unpublished forward draft beside the live default language — it is **not** a PATCH of `langcode` on the canonical entity. Node create/list/update/read go through Sentinel's `/mcp-draft` translation contract when that module is deployed. Core JSON:API alone still serves one language per resource.
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_list_translations` | `type`, `id` | List the translation langcode(s) observable on an entity. Pass `entityType` to target a non-node entity (default `node`). |
-| `drupal_create_translation` | `type`, `id`, `langcode` | Create or replace a translation for a target language (governed write), setting the supplied translated field values in `attributes`. |
+| `drupal_list_translations` | `type`, `id` | List live and working translation langcodes (Sentinel inventory). Falls back to the single observable JSON:API language with a note when the inventory endpoint is absent. |
+| `drupal_create_translation` | `type`, `id`, `langcode` | Create a target-language **unpublished draft** beside the default language. Does not overwrite an existing translation. Continue it with `drupal_update_node` + `langcode`. Paragraph field values are not translated on this path. |
 
 ### drupal_create_translation
 
 ```json
 {
-  "type": "article",
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "langcode": "de",
+  "type": "basic_page",
+  "id": "85fccde4-03be-4c7f-b2ac-0b597c7b394c",
+  "langcode": "es",
   "attributes": {
-    "title": "Mein Artikel",
-    "body": { "value": "<p>Hallo Welt</p>", "format": "full_html" }
+    "title": "Artículos",
+    "body": { "value": "<p>Últimos artículos</p>", "format": "full_html" }
   }
 }
 ```
+
+Continue that draft with `drupal_update_node` (`langcode: "es"`) and the same UUID. Read it with `drupal_get_node` (`langcode: "es"`). The published English default revision is not the write target. Paragraph field-value translation and media photo-alt translation are pending.
 
 ---
 
