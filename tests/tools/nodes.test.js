@@ -307,6 +307,17 @@ describe("nodes tools (migrated)", () => {
     expect(out.url).toBe("/keep-me");
   });
 
+  it("update_node does not return a drifted url after a path_alias repair (#274)", async () => {
+    const aliasId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    backend.getPathInfo.mockResolvedValue(pathInfo({
+      alias: "/keep-me", pid: "204", aliasId, langcode: "en",
+    }));
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: "/capabilities/intelligence-pipelines" }));
+    const out = await handlers.drupal_update_node({ type: "article", id: "n1", title: "Intelligence Pipelines" });
+    expect(backend.updateEntity.mock.calls.some((c) => c[0].entityType === "path_alias")).toBe(true);
+    expect(out.url).toBe("/keep-me");
+  });
+
   it("update_node fails honestly when an explicit alias does not persist, and does not create a redirect (#274)", async () => {
     backend.getPathInfo.mockResolvedValue(pathInfo({
       alias: "/capabilities/intelligence-pipelines", pid: "1", aliasId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

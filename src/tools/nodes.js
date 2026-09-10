@@ -177,10 +177,16 @@ async function assertAliasPersisted({
     ...(resourceVersion ? { resourceVersion } : {}),
   }).catch(() => null);
   const afterInfo = await backend.getPathInfo({ entityType: "node", bundle: type, id }).catch(() => ({}));
-  const after = normalizeAlias(fresh?.url) ?? normalizeAlias(afterInfo.alias);
-  if (after === intendedAlias) return fresh ?? written;
-
-  const reported = after || shown || "(none)";
+  const entityUrl = normalizeAlias(fresh?.url);
+  const aliasUrl = normalizeAlias(afterInfo.alias);
+  // The path_alias row is router-visible; the node's computed path field can
+  // lag. Persist if either re-read matches. Never return a drifted url.
+  if (entityUrl === intendedAlias || aliasUrl === intendedAlias) {
+    const entity = fresh ?? written;
+    if (normalizeAlias(entity?.url) === intendedAlias) return entity;
+    return { ...(entity && typeof entity === "object" ? entity : { id }), url: intendedAlias };
+  }
+  const reported = entityUrl || aliasUrl || shown || "(none)";
   throw new Error(
     `Alias restoration failed: requested "${intendedAlias}" but canonical ` +
     `and working-copy reads still show "${reported}"` +
