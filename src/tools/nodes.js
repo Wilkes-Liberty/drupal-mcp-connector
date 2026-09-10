@@ -280,8 +280,9 @@ async function getNode({ site: siteName, type, id, langcode, resourceVersion }) 
  *
  * @param {object} args - { site?, type, status?, filters?, limit?, offset?, sort? }.
  *   A `status` boolean is appended to `filters` as a status equality descriptor.
- * @returns {Promise<{total: number, approximate: boolean, offset: number,
- *   nextOffset: number, nodes: object[]}>} Paged, redacted node list.
+ * @returns {Promise<{total: number, approximate: boolean, truncated: boolean,
+ *   offset: number, nextOffset: number, hasNext: boolean, nodes: object[]}>}
+ *   Paged, redacted node list. `hasNext` is the backend's `links.next` signal.
  */
 async function listNodes({ site: siteName, type, status, filters = [], limit = 20, offset = 0, sort = [{ field: "changed", dir: "desc" }] }) {
   const site = getSiteConfig(siteName);
@@ -295,8 +296,10 @@ async function listNodes({ site: siteName, type, status, filters = [], limit = 2
   return {
     total: res.page?.total ?? nodes.length,
     approximate: res.approximate ?? false,
+    truncated: res.truncated ?? false,
     offset,
     nextOffset: offset + nodes.length,
+    hasNext: Boolean(res.page?.hasNext),
     nodes,
   };
 }
@@ -528,7 +531,7 @@ export const definitions = [
   },
   {
     name: "drupal_list_nodes",
-    description: "List nodes of a given content type. Supports status filtering, pagination, sorting, and structured filter descriptors.",
+    description: "List nodes of a given content type. Supports status filtering, pagination, sorting, and structured filter descriptors. Drupal core JSON:API caps page[limit] at 50; a larger requested limit is filled by following links.next (up to 1000). When the site does not expose meta.count, total is exact only if this window reached the end of the collection; otherwise approximate is true and hasNext is set.",
     inputSchema: {
       type: "object", required: ["type"],
       properties: {
