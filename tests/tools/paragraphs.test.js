@@ -196,6 +196,37 @@ describe("paragraphs tools", () => {
     expect(out.fields.drupal_internal__revision_id).toBe(17);
   });
 
+  it("get_paragraph with revisionId addresses that revision and returns its pin (#292)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalParagraph({
+      fields: { field_body: { value: "Draft", format: "full_html" }, drupal_internal__revision_id: 6654 },
+    }));
+    const out = await handlers.drupal_get_paragraph({
+      paragraphType: "text", id: "p-uuid-1", revisionId: "6654",
+    });
+    expect(backend.getEntity).toHaveBeenCalledWith({
+      entityType: "paragraph", bundle: "text", id: "p-uuid-1", resourceVersion: "id:6654",
+    });
+    expect(out.fields.drupal_internal__revision_id).toBe(6654);
+    expect(out.ref.meta.target_revision_id).toBe(6654);
+  });
+
+  it("get_paragraph errors when the backend serves a different revision than requested (#292)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalParagraph());
+    await expect(handlers.drupal_get_paragraph({
+      paragraphType: "text", id: "p-uuid-1", revisionId: "6654",
+    })).rejects.toThrow(/served 17/);
+    expect(backend.getEntity).toHaveBeenCalledWith({
+      entityType: "paragraph", bundle: "text", id: "p-uuid-1", resourceVersion: "id:6654",
+    });
+  });
+
+  it("get_paragraph errors when a requested revision is missing (#292)", async () => {
+    backend.getEntity.mockResolvedValue(null);
+    await expect(handlers.drupal_get_paragraph({
+      paragraphType: "text", id: "p-uuid-1", revisionId: "6654",
+    })).rejects.toThrow(/no revision/);
+  });
+
   it("get_paragraph returns null when the paragraph is not found", async () => {
     backend.getEntity.mockResolvedValue(null);
     const out = await handlers.drupal_get_paragraph({ paragraphType: "text", id: "missing" });

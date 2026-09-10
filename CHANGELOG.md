@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`drupal_get_paragraph` honors `revisionId` and refuses a default-revision fallback (#292).**
+  Passing the host pin without `langcode` now reads JSON:API
+  `?resourceVersion=id:<vid>`. If Drupal serves a different
+  `drupal_internal__revision_id` (or nothing), the tool errors instead of
+  returning the live default revision. `ref.meta.target_revision_id` is the
+  served vid. `langcode` still uses Sentinel's draft read.
 - **`drupal_list_nodes` no longer reports a Drupal-capped page as the exact collection total (#291).**
   Core JSON:API silently caps `page[limit]` at 50 and does not send `meta.count`.
   The connector was treating that page length as `total` with `approximate: false`,

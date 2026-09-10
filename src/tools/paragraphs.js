@@ -146,23 +146,84 @@ async function updateParagraph({ site: siteName, paragraphType, id, attributes =
 }
 
 /**
+ * JSON:API `resourceVersion` selector for a paragraph host pin.
+ * Accepts a numeric vid, a numeric string, or an explicit `id:<vid>`.
+ * @param {string|number} revisionId Host pin / paragraph revision id.
+ * @returns {string} e.g. `id:6654`.
+ * @throws {Error} If the value is not a usable revision id.
+ */
+export function paragraphResourceVersion(revisionId) {
+  if (typeof revisionId === "number" && Number.isFinite(revisionId) && revisionId > 0) {
+    return `id:${revisionId}`;
+  }
+  if (typeof revisionId === "string" && revisionId.length) {
+    if (/^id:[1-9]\d*$/.test(revisionId)) return revisionId;
+    if (/^[1-9]\d*$/.test(revisionId)) return `id:${revisionId}`;
+  }
+  throw new Error(
+    `Invalid paragraph revisionId "${revisionId}". Use a numeric vid (the host pin).`,
+  );
+}
+
+/**
+ * Numeric vid from a host pin (`6654` or `id:6654`).
+ * @param {string|number} revisionId
+ * @returns {?number}
+ */
+function requestedParagraphVid(revisionId) {
+  const raw = String(revisionId).replace(/^id:/, "");
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Fail closed when a requested paragraph revision was not the one served.
+ * Silent substitution of the default revision is the defect this guards (#292).
+ * @param {?object} entity Canonical paragraph, or null if the read missed.
+ * @param {string|number} requested Host pin that was asked for.
+ * @param {string} id Paragraph UUID.
+ * @returns {object} `entity` when the served vid matches.
+ * @throws {Error} On a miss or a mismatched vid.
+ */
+function requireServedParagraphRevision(entity, requested, id) {
+  const wanted = requestedParagraphVid(requested);
+  const served = paragraphRevisionId(entity);
+  if (!entity || wanted === null || served === null || served !== wanted) {
+    const got = !entity || served === null ? "no revision" : String(served);
+    throw new Error(
+      `Requested paragraph revision ${wanted ?? requested} for ${id} but the backend served ${got}. ` +
+      "Refusing to substitute a different revision.",
+    );
+  }
+  return entity;
+}
+
+/**
  * Fetch a single paragraph by bundle + UUID, redacted per the site policy, and
  * annotate it with the embedding ref (including `meta.target_revision_id`).
  *
- * @param {object} args - { site?, paragraphType, id }.
+ * When `revisionId` is set (the host's `meta.target_revision_id`), the read
+ * addresses that revision via JSON:API `?resourceVersion=id:<vid>` and errors
+ * if Drupal serves a different vid. Omitting `revisionId` still reads the
+ * default revision.
+ *
+ * @param {object} args - { site?, paragraphType, id, langcode?, revisionId? }.
  * @returns {Promise<(object & {ref: object})|null>}
- *   The redacted paragraph with an embedding `ref`, or null if not found.
+ *   The redacted paragraph with an embedding `ref`, or null if not found and
+ *   no `revisionId` was requested.
  * @throws {SecurityError} If reading paragraphs of this bundle is not permitted.
+ * @throws {Error} If a requested `revisionId` cannot be served.
  */
 async function getParagraph({ site: siteName, paragraphType, id, langcode, revisionId }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "paragraph", paragraphType);
   const backend = await resolveBackend(site);
+  const pinRequested = revisionId !== undefined && revisionId !== null && revisionId !== "";
   let entity;
   if (langcode) {
     const targetLang = assertDraftLangcode(langcode);
-    const pinned = revisionId ?? paragraphRevisionId(
+    const pinned = pinRequested ? revisionId : paragraphRevisionId(
       await backend.getEntity({ entityType: "paragraph", bundle: paragraphType, id }),
     );
     if (pinned === null || pinned === undefined || pinned === "") {
@@ -172,12 +233,18 @@ async function getParagraph({ site: siteName, paragraphType, id, langcode, revis
       entityType: "paragraph", bundle: paragraphType, id, langcode: targetLang,
       draftRevision: { revisionId: pinned },
     });
+  } else if (pinRequested) {
+    const resourceVersion = paragraphResourceVersion(revisionId);
+    entity = await backend.getEntity({
+      entityType: "paragraph", bundle: paragraphType, id, resourceVersion,
+    });
+    requireServedParagraphRevision(entity, revisionId, id);
   } else {
     entity = await backend.getEntity({ entityType: "paragraph", bundle: paragraphType, id });
   }
   if (!entity) return null;
   const redacted = redactCanonicalEntity(entity, sec, "paragraph");
-  const resolvedRevisionId = paragraphRevisionId(entity) ?? paragraphRevisionId(redacted) ?? revisionId;
+  const resolvedRevisionId = paragraphRevisionId(entity) ?? paragraphRevisionId(redacted);
   return { ...redacted, ref: embedRef(redacted.bundle || paragraphType, redacted.id, resolvedRevisionId) };
 }
 
@@ -219,7 +286,7 @@ export const definitions = [
   {
     name: "drupal_get_paragraph",
     description:
-      "Fetch a single Paragraph entity by paragraph type (bundle) and UUID. Returns the redacted paragraph (fields include drupal_internal__revision_id) plus a `ref` ({ type: 'paragraph--<bundle>', id, meta: { target_revision_id } }) you can use to embed it in a host entity's paragraph / ERR field. Pass langcode to read an unpublished working translation via Sentinel. Paragraphs are referenced from a host field rather than queried standalone in production. Governed by the site security policy.",
+      "Fetch a single Paragraph entity by paragraph type (bundle) and UUID. Returns the redacted paragraph (fields include drupal_internal__revision_id) plus a `ref` ({ type: 'paragraph--<bundle>', id, meta: { target_revision_id } }) you can use to embed it in a host entity's paragraph / ERR field. Pass revisionId (the host pin) to read that revision via JSON:API resourceVersion=id:<vid>; a mismatch or miss is an error, not a silent default-revision fallback. Pass langcode to read an unpublished working translation via Sentinel. Paragraphs are referenced from a host field rather than queried standalone in production. Governed by the site security policy.",
     inputSchema: {
       type: "object", required: ["paragraphType", "id"],
       properties: {
@@ -227,7 +294,7 @@ export const definitions = [
         paragraphType: { type: "string", description: "Paragraph type / bundle machine name" },
         id:            { type: "string", description: "Paragraph UUID" },
         langcode:      { type: "string", description: "Target language for the unpublished working translation (e.g. 'es')." },
-        revisionId:    { type: "string", description: "Paragraph revision id the host already pins." },
+        revisionId:    { type: "string", description: "Paragraph revision id the host already pins (ERR meta.target_revision_id). Honored on the read; a different served vid is an error." },
       },
     },
   },
