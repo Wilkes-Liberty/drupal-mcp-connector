@@ -89,11 +89,16 @@ describe("translations tools", () => {
     backend.getEntity.mockImplementation(async ({ resourceVersion }) => (
       resourceVersion === "rel:working-copy" ? null : live
     ));
-    backend.rawQuery.mockResolvedValue({
-      data: {
-        type: "node--article", id: UUID,
-        attributes: { title: "Hallo", langcode: "de", status: false, drupal_internal__vid: 12 },
-      },
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return { meta: { defaultLangcode: "en", live: { vid: "10" }, working: { vid: "10" } } };
+      }
+      return {
+        data: {
+          type: "node--article", id: UUID,
+          attributes: { title: "Hallo", langcode: "de", status: false, drupal_internal__vid: 12 },
+        },
+      };
     });
     const out = await handlers.drupal_create_translation({
       type: "article",
@@ -102,8 +107,9 @@ describe("translations tools", () => {
       attributes: { title: "Hallo" },
     });
     expect(backend.updateEntity).not.toHaveBeenCalled();
-    expect(backend.rawQuery).toHaveBeenCalledOnce();
-    const call = backend.rawQuery.mock.calls[0][0];
+    const post = backend.rawQuery.mock.calls.find((c) => String(c[0].path).endsWith("/mcp-draft/translations"));
+    expect(post).toBeTruthy();
+    const call = post[0];
     expect(call.path).toBe(`/jsonapi/node/article/${UUID}/mcp-draft/translations`);
     expect(call.options.method).toBe("POST");
     expect(call.options.headers["X-MCP-Draft-Langcode"]).toBe("de");
@@ -112,19 +118,58 @@ describe("translations tools", () => {
     expect(body.data.attributes.langcode).toBeUndefined();
     expect(body.data.attributes.title).toBe("Hallo");
     expect(out.langcode).toBe("de");
+    expect(out._revisions).toEqual({ live: "10", working: 12 });
   });
 
-  it("create_translation uses live:working If-Match when an English working copy exists", async () => {
+  it("create_translation uses live:working If-Match from Sentinel inventory even when rel:working-copy is unreadable (#282)", async () => {
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return { id: UUID, status: true, fields: { drupal_internal__vid: 1479, moderation_state: "published" } };
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return {
+          meta: {
+            defaultLangcode: "en",
+            live: { vid: "1479" },
+            working: { vid: "2063" },
+          },
+        };
+      }
+      return {
+        data: {
+          type: "node--article", id: UUID,
+          attributes: { title: "Socios", langcode: "es", drupal_internal__vid: 2100 },
+        },
+      };
+    });
+    const out = await handlers.drupal_create_translation({
+      type: "article", id: UUID, langcode: "es", attributes: { title: "Socios" },
+    });
+    const post = backend.rawQuery.mock.calls.find((c) => String(c[0].path).endsWith("/mcp-draft/translations"));
+    expect(post[0].options.headers["If-Match"]).toBe('"1479:2063"');
+    expect(out._revisions).toEqual({ live: "1479", working: 2100 });
+  });
+
+  it("create_translation falls back to rel:working-copy when inventory is unavailable", async () => {
     backend.getEntity.mockImplementation(async ({ resourceVersion }) => (
       resourceVersion === "rel:working-copy"
         ? { id: UUID, fields: { drupal_internal__vid: 11 } }
         : { id: UUID, status: true, fields: { drupal_internal__vid: 10, moderation_state: "published" } }
     ));
-    backend.rawQuery.mockResolvedValue({
-      data: { type: "node--article", id: UUID, attributes: { title: "Hallo", langcode: "de" } },
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        throw new Error("Drupal 404 on GET /jsonapi/node/article/x/mcp-translations");
+      }
+      return {
+        data: { type: "node--article", id: UUID, attributes: { title: "Hallo", langcode: "de" } },
+      };
     });
     await handlers.drupal_create_translation({ type: "article", id: UUID, langcode: "de", attributes: { title: "Hallo" } });
-    expect(backend.rawQuery.mock.calls[0][0].options.headers["If-Match"]).toBe('"10:11"');
+    const post = backend.rawQuery.mock.calls.find((c) => String(c[0].path).endsWith("/mcp-draft/translations"));
+    expect(post[0].options.headers["If-Match"]).toBe('"10:11"');
   });
 
   it("create_translation rejects a missing/blank langcode", async () => {
@@ -182,7 +227,8 @@ describe("translations tools", () => {
         field_photo: { data: { type: "file--file", id: fileId, meta: { alt: "Translated alt" } } },
       },
     });
-    const body = JSON.parse(backend.rawQuery.mock.calls[0][0].options.body);
+    const post = backend.rawQuery.mock.calls.find((c) => String(c[0].path).endsWith("/mcp-draft/translations"));
+    const body = JSON.parse(post[0].options.body);
     expect(body.data.relationships.field_photo.data.meta.alt).toBe("Translated alt");
     expect(body.data.relationships.field_photo.data.id).toBe(fileId);
   });

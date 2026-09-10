@@ -71,6 +71,20 @@ describe("governed translation create", () => {
     expect(options.headers["X-MCP-Draft-Langcode"]).toBe("es");
   });
 
+  it("rewrites Sentinel's live-only working-revision 409 (#282)", async () => {
+    const { createTranslationDraft, rewriteTranslationWorkingRevisionError } = await import("../../src/lib/draft-write.js");
+    const b = backend();
+    b.rawQuery.mockRejectedValue(new Error(
+      "Drupal 409 on POST /jsonapi/node/page/x/mcp-draft/translations: A working revision exists. Reload and send both revision IDs.",
+    ));
+    await expect(createTranslationDraft(b, {
+      ...input, langcode: "es", attributes: { title: "Artículos" },
+      draftRevision: { liveVid: 1479 },
+    })).rejects.toThrow(/working draft exists|#282/);
+    const wrapped = rewriteTranslationWorkingRevisionError(new Error("A working revision exists. Reload and send both revision IDs."));
+    expect(wrapped.message).toMatch(/#282/);
+  });
+
   it("POSTs translations with live-only If-Match when there is no working copy", async () => {
     const { createTranslationDraft } = await import("../../src/lib/draft-write.js");
     const b = backend({ data: { id: input.id, type: "node--page", attributes: { title: "Artículos", langcode: "es" } } });

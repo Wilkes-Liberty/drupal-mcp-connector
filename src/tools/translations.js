@@ -25,13 +25,13 @@ import {
 } from "../lib/security.js";
 import { validateUuid, validateMachineName } from "../lib/validate.js";
 import { applySafeDraftDefault } from "../lib/moderation-default.js";
-import { loadWorkingCopy } from "../lib/patch-preflight.js";
 import { entityRevisionId } from "../lib/write-revision.js";
 import { paragraphRevisionId } from "../lib/err-relationships.js";
 import {
   assertDraftLangcode,
   createTranslationDraft,
   readTranslationInventory,
+  resolveNodeTranslationPair,
 } from "../lib/draft-write.js";
 
 const LIST_NOTE =
@@ -152,14 +152,9 @@ async function createTranslation({
     draftRevision = { revisionId: pinned };
     assertPublishAllowed(sec, drafted);
   } else {
-    const liveVid = entityRevisionId(existing);
-    const workingCopy = await loadWorkingCopy(backend, { entityType, bundle: type, id });
-    const workingVid = entityRevisionId(workingCopy);
-    const sameWorking = workingVid !== null && liveVid !== null && String(workingVid) === String(liveVid);
-    draftRevision = {
-      liveVid,
-      workingVid: workingCopy && !sameWorking ? workingVid : undefined,
-    };
+    draftRevision = await resolveNodeTranslationPair(backend, {
+      entityType, bundle: type, id, existing,
+    });
     if (drafted.status === undefined && drafted.moderation_state === undefined) {
       drafted.moderation_state = "draft";
     }
@@ -182,7 +177,20 @@ async function createTranslation({
   const created = await createTranslationDraft(backend, {
     entityType, bundle: type, id, langcode: targetLang, attributes: drafted, relationships, draftRevision,
   });
-  return redactCanonicalEntity(created, sec, entityType);
+  const redacted = redactCanonicalEntity(created, sec, entityType);
+  if (entityType !== "node") return redacted;
+  const workingVid = entityRevisionId(created) ?? draftRevision.workingVid;
+  const liveVid = draftRevision.liveVid;
+  if (liveVid === undefined || liveVid === null) {
+    if (workingVid === undefined || workingVid === null) return redacted;
+  }
+  return {
+    ...redacted,
+    _revisions: {
+      ...(liveVid !== undefined && liveVid !== null ? { live: liveVid } : {}),
+      ...(workingVid !== undefined && workingVid !== null ? { working: workingVid } : {}),
+    },
+  };
 }
 
 export const definitions = [
@@ -208,8 +216,11 @@ export const definitions = [
     description:
       "Create a translation as an unpublished non-default draft (governed write). " +
       "Adds the target language beside the default language; it does not PATCH langcode on " +
-      "the canonical entity. English live title, body, status, alias, default revision, and " +
+      "the canonical entity. When an English working draft already exists, both live and " +
+      "working revision IDs are sent (If-Match) so Sentinel will add the language on that " +
+      "draft (#282). English live title, body, status, alias, default revision, and " +
       "paragraph ERR pins stay unchanged. An existing translation is a conflict, not an overwrite. " +
+      "The response includes `_revisions.live` / `_revisions.working` when known. " +
       "Continue a node draft with drupal_update_node and langcode; continue a paragraph with " +
       "drupal_update_paragraph and langcode. Image alt is a relationship (same file UUID, " +
       "meta.alt). For paragraphs pass revisionId as the host pin. Requires Sentinel's " +
