@@ -121,6 +121,42 @@ describe("translations tools", () => {
     expect(out._revisions).toEqual({ live: "10", working: 12 });
   });
 
+  it("create_translation omits computed metatag that still shows live English (#283)", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: UUID, status: true, fields: { drupal_internal__vid: 10, moderation_state: "published" },
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return { meta: { defaultLangcode: "en", live: { vid: "10" }, working: { vid: "10" } } };
+      }
+      return {
+        data: {
+          type: "node--article", id: UUID,
+          attributes: {
+            title: "Socios", langcode: "es",
+            field_metatags: '{"title":"Socios"}',
+            metatag: [{ tag: "meta", attributes: { name: "title", content: "Partners" } }],
+          },
+        },
+      };
+    });
+    backend.toCanonical.mockImplementation((data) => ({
+      id: data.id, entityType: "node", bundle: "article",
+      langcode: data.attributes?.langcode, title: data.attributes?.title,
+      fields: {
+        drupal_internal__vid: data.attributes?.drupal_internal__vid,
+        field_metatags: data.attributes?.field_metatags,
+        metatag: data.attributes?.metatag,
+      },
+    }));
+    const out = await handlers.drupal_create_translation({
+      type: "article", id: UUID, langcode: "es", attributes: { title: "Socios" },
+    });
+    expect(out.fields.field_metatags).toBe('{"title":"Socios"}');
+    expect(out.fields.metatag).toBeUndefined();
+    expect(out._metatagOmitted.reason).toMatch(/#283/);
+  });
+
   it("create_translation uses live:working If-Match from Sentinel inventory even when rel:working-copy is unreadable (#282)", async () => {
     backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
       if (resourceVersion === "rel:working-copy") {

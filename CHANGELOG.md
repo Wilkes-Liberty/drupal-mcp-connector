@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Paragraph translation updates require the `draftState` returned by a previous draft read. Pass it unchanged to Sentinel for stale-write protection. Shared-status paragraphs remain pending for human editing (#280).
+- **Omit computed `metatag` on unpublished working-translation bodies (#283).**
+  JSON:API's computed `metatag` array is resolved from the live default
+  revision, so a Spanish draft response could still show English title and
+  description. The stored override (`field_metatags`) is unchanged. Draft
+  translation create/read now drop `fields.metatag` and set `_metatagOmitted`.
 
 - **`drupal_create_translation` sends live and working revision IDs when a draft exists (#282).**
   Sentinel's translation POST 409s with "A working revision exists" if If-Match
