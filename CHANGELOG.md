@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`drupal_create_translation` sends live and working revision IDs when a draft exists (#282).**
+  Sentinel's translation POST 409s with "A working revision exists" if If-Match
+  is live-only. The connector now reads Sentinel's translation inventory for
+  the live/working pair (falling back to `rel:working-copy`) and sends
+  `If-Match: "live:working"`. The response includes `_revisions` so the caller
+  can see which revision the language landed on.
+
 - **`dryRun` fails when a published-node write would hit Sentinel's stale-copy check (#273).**
   The id-mismatch PATCH probe never reaches entity validation / presave, so it
   could not see MCP Sentinel's default-revision stale-version refusal. When

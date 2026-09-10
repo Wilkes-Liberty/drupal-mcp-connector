@@ -646,7 +646,7 @@ Inspect and create entity translations (multilingual / `content_translation`). A
 | Tool | Required params | Description |
 |------|----------------|-------------|
 | `drupal_list_translations` | `type`, `id` | List live and working translation langcodes (Sentinel inventory). Falls back to the single observable JSON:API language with a note when the inventory endpoint is absent. |
-| `drupal_create_translation` | `type`, `id`, `langcode` | Create a target-language **unpublished draft** beside the default language. Does not overwrite an existing translation. Continue a node with `drupal_update_node` + `langcode`, or a paragraph with `drupal_update_paragraph` + `langcode`. Image alt is a relationship (same file UUID, `meta.alt`). |
+| `drupal_create_translation` | `type`, `id`, `langcode` | Create a target-language **unpublished draft** beside the default language. Does not overwrite an existing translation. When an English working draft exists, both live and working revision IDs are sent so Sentinel accepts the POST (#282). Continue a node with `drupal_update_node` + `langcode`, or a paragraph with `drupal_update_paragraph` + `langcode`. Image alt is a relationship (same file UUID, `meta.alt`). |
 
 ### drupal_create_translation
 
@@ -662,7 +662,7 @@ Inspect and create entity translations (multilingual / `content_translation`). A
 }
 ```
 
-Continue that draft with `drupal_update_node` (`langcode: "es"`) and the same UUID. Read it with `drupal_get_node` (`langcode: "es"`). The published English default revision is not the write target.
+Continue that draft with `drupal_update_node` (`langcode: "es"`) and the same UUID. Read it with `drupal_get_node` (`langcode: "es"`). The published English default revision is not the write target. A successful node response includes `_revisions.live` and `_revisions.working` for the revision the language landed on. Callers do not pass revision IDs — the connector loads them from Sentinel's translation inventory (or `rel:working-copy` if that inventory is absent).
 
 For paragraph field values, pass `entityType: "paragraph"`, the paragraph bundle as `type`, and `revisionId` as the host's `meta.target_revision_id`. Nested children are translated the same way; do not retarget the parent ERR field. Image alt on a person (or any translatable image field) is a `relationships` entry with the existing file UUID and `meta.alt` — not a file replacement. Media entity translation is not used.
 

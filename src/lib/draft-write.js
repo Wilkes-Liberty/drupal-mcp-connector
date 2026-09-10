@@ -4,6 +4,8 @@
  * Translation create/update uses the same surface with X-MCP-Draft-Langcode.
  */
 
+import { entityRevisionId } from "./write-revision.js";
+
 const LANGCODE_RE = /^[a-z][a-z0-9_-]{0,11}$/;
 const MISSING_DRAFT_ENDPOINT =
   "The site does not provide Sentinel's governed draft endpoint (d.o #3621022). " +
@@ -175,7 +177,7 @@ export async function createTranslationDraft(backend, input, preflight = false) 
       },
     });
   } catch (error) {
-    throw missingEndpointError(error, MISSING_TRANSLATION_ENDPOINT);
+    throw rewriteTranslationWorkingRevisionError(missingEndpointError(error, MISSING_TRANSLATION_ENDPOINT));
   }
   if (preflight) {
     if (result?.meta?.draft_preflight !== true || String(result.meta.live) !== live) {
@@ -190,9 +192,63 @@ export async function createTranslationDraft(backend, input, preflight = false) 
 }
 
 /**
+ * Live + working revision ids for a node translation create.
+ * Prefers Sentinel's mcp-translations inventory over JSON:API
+ * `rel:working-copy`, which 403s on some unpublished drafts even when a
+ * working revision exists (#282).
+ * @param {object} backend
+ * @param {{entityType: string, bundle: string, id: string, existing?: ?object}} ref
+ * @returns {Promise<{liveVid: ?(number|string), workingVid: ?(number|string)}>}
+ */
+export async function resolveNodeTranslationPair(backend, { entityType, bundle, id, existing }) {
+  const fromEntity = existing ? entityRevisionId(existing) : null;
+  try {
+    const meta = await readTranslationInventory(backend, { entityType, bundle, id });
+    const liveVid = meta.live?.vid ?? fromEntity;
+    const workingVid = meta.working?.vid;
+    const distinct = workingVid !== undefined && workingVid !== null && workingVid !== ""
+      && liveVid !== undefined && liveVid !== null
+      && String(workingVid) !== String(liveVid);
+    return { liveVid, workingVid: distinct ? workingVid : undefined };
+  } catch {
+    if (typeof backend.getEntity !== "function") {
+      return { liveVid: fromEntity, workingVid: undefined };
+    }
+    let workingCopy = null;
+    try {
+      workingCopy = await backend.getEntity({
+        entityType, bundle, id, resourceVersion: "rel:working-copy",
+      });
+    } catch {
+      workingCopy = null;
+    }
+    const workingVid = workingCopy ? entityRevisionId(workingCopy) : null;
+    const distinct = workingVid !== null && fromEntity !== null && String(workingVid) !== String(fromEntity);
+    return { liveVid: fromEntity, workingVid: distinct ? workingVid : undefined };
+  }
+}
+
+/**
+ * Rewrite Sentinel's live-only 409 into an actionable connector error.
+ * @param {unknown} error
+ * @returns {Error}
+ */
+export function rewriteTranslationWorkingRevisionError(error) {
+  if (/A working revision exists\. Reload and send both revision IDs/i.test(String(error?.message || ""))) {
+    return new Error(
+      "Translation create sent only the live revision, but a working draft exists. " +
+      "The connector should have sent both live and working revision IDs (If-Match). " +
+      "Reload with drupal_list_translations and retry. See connector #282.",
+      { cause: error instanceof Error ? error : undefined },
+    );
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+/**
  * Read live/working translation inventory from Sentinel.
  * @param {object} backend
- * @param {{entityType: string, bundle: string, id: string}} ref
+ * @param {{entityType: string, bundle: string, id: string, revisionId?: string|number}} ref
  * @returns {Promise<object>}
  */
 export async function readTranslationInventory(backend, { entityType, bundle, id, revisionId }) {
