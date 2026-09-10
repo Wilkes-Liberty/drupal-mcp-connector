@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-09-10
+
 ### Fixed
+- Paragraph translation updates require the `draftState` returned by a previous draft read. Pass it unchanged to Sentinel for stale-write protection. Shared-status paragraphs remain pending for human editing (#280).
 - **Omit computed `metatag` on unpublished working-translation bodies (#283).**
   JSON:API's computed `metatag` array is resolved from the live default
   revision, so a Spanish draft response could still show English title and

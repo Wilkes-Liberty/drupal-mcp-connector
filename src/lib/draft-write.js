@@ -317,6 +317,10 @@ async function writeParagraphDraft(backend, input, preflight = false) {
   const { entityType, bundle, id, attributes = {}, relationships, draftRevision } = input;
   const langcode = assertDraftLangcode(input.langcode);
   const revisionId = requireParagraphRevisionId(draftRevision);
+  const draftState = input.draftState;
+  if (typeof draftState !== "string" || !/^[a-f0-9]{64}$/.test(draftState)) {
+    throw new Error("Paragraph translation update requires draftState from the previous draft read. Re-read the draft; do not retry old copy with a refreshed token.");
+  }
   const base = draftResource(backend, entityType, bundle, id);
   const data = { type: `${entityType}--${bundle}`, id, attributes };
   if (relationships) data.relationships = relationships;
@@ -324,6 +328,7 @@ async function writeParagraphDraft(backend, input, preflight = false) {
     "If-Match": `"${revisionId}"`,
     "X-MCP-Draft-Preflight": preflight ? "1" : "0",
     "X-MCP-Draft-Langcode": langcode,
+    "X-MCP-Draft-State": draftState,
   };
   let result;
   try {
@@ -345,7 +350,7 @@ async function writeParagraphDraft(backend, input, preflight = false) {
   if (!result?.data || result.data.id !== id || result.data.type !== data.type) {
     throw new Error("Paragraph translation write did not identify the requested entity. The write outcome is uncertain; re-read before retrying.");
   }
-  return backend.toCanonical(result.data);
+  return { ...backend.toCanonical(result.data), draftState: result.meta?.draft_state };
 }
 
 /**
@@ -389,7 +394,7 @@ async function createParagraphTranslationDraft(backend, input, preflight = false
   if (!result?.data || result.data.id !== id || result.data.type !== data.type) {
     throw new Error("Paragraph translation create did not identify the requested entity. The write outcome is uncertain; re-read before retrying.");
   }
-  return backend.toCanonical(result.data);
+  return { ...backend.toCanonical(result.data), draftState: result.meta?.draft_state };
 }
 
 /**
@@ -421,5 +426,5 @@ async function readParagraphDraftTranslation(backend, input) {
   if (!result?.data || result.data.id !== id) {
     throw new Error("Paragraph draft translation read did not identify the requested entity.");
   }
-  return backend.toCanonical(result.data);
+  return { ...backend.toCanonical(result.data), draftState: result.meta?.draft_state };
 }
