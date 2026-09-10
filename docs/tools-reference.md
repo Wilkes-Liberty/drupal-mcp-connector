@@ -893,3 +893,8 @@ Slash-command workflow templates.
 | `drupal-create-article` | `site?`, `topic` | Research, draft, and publish an article |
 | `drupal-seo-fix` | `site?`, `type?` | Find and fix SEO gaps interactively |
 | `drupal-user-cleanup` | `site?` | Audit and clean up user accounts |
+
+Paragraph draft create/read/update responses return `draftState`. Pass it to
+`drupal_update_paragraph` with `langcode` and the same `revisionId`. A conflict
+requires a new read and reconsideration of the copy; no automatic retry occurs.
+Shared-status paragraph bundles are refused by Sentinel, without host repinning.

@@ -100,3 +100,29 @@ describe("governed translation create", () => {
     expect(JSON.parse(options.body).data.attributes.langcode).toBeUndefined();
   });
 });
+
+
+describe("paragraph draft state", () => {
+  const paragraph = {
+    entityType: "paragraph", bundle: "text", id: "p1", langcode: "es",
+    draftRevision: { revisionId: 17 }, attributes: { field_text: "Dos" },
+    draftState: "a".repeat(64),
+  };
+  it("refuses absent state before any request", async () => {
+    const b = backend();
+    await expect(writeDraft(b, { ...paragraph, draftState: undefined })).rejects.toThrow("draftState");
+    expect(b.rawQuery).not.toHaveBeenCalled();
+  });
+  it("passes the caller's original token and returns the next token", async () => {
+    const b = backend({ data: { id: "p1", type: "paragraph--text" }, meta: { draft_state: "b".repeat(64) } });
+    const out = await writeDraft(b, paragraph);
+    expect(b.rawQuery.mock.calls[0][0].options.headers["X-MCP-Draft-State"]).toBe(paragraph.draftState);
+    expect(out.draftState).toBe("b".repeat(64));
+  });
+  it("does not refresh and retry stale copy", async () => {
+    const b = backend();
+    b.rawQuery.mockRejectedValue(new Error("Drupal 409: paragraph draft changed"));
+    await expect(writeDraft(b, paragraph)).rejects.toThrow("409");
+    expect(b.rawQuery).toHaveBeenCalledOnce();
+  });
+});

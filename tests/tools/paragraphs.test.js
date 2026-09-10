@@ -145,7 +145,7 @@ describe("paragraphs tools", () => {
       data: { id: "p-uuid-1", type: "paragraph--text" },
     });
     await handlers.drupal_update_paragraph({
-      paragraphType: "text", id: "p-uuid-1", langcode: "es", revisionId: "3556",
+      paragraphType: "text", id: "p-uuid-1", langcode: "es", revisionId: "3556", draftState: "a".repeat(64),
       attributes: { field_text: "Hola hero" },
     });
     expect(backend.updateEntity).not.toHaveBeenCalled();
@@ -154,6 +154,7 @@ describe("paragraphs tools", () => {
     expect(call.options.method).toBe("PATCH");
     expect(call.options.headers["X-MCP-Draft-Langcode"]).toBe("es");
     expect(call.options.headers["If-Match"]).toBe('"3556"');
+    expect(call.options.headers["X-MCP-Draft-State"]).toBe("a".repeat(64));
   });
 
   it("update_paragraph without langcode still uses canonical update", async () => {
@@ -169,6 +170,7 @@ describe("paragraphs tools", () => {
     backend.getEntity.mockResolvedValue(canonicalParagraph());
     backend.rawQuery.mockResolvedValue({
       data: { id: "p-uuid-1", type: "paragraph--text", attributes: { field_text: "Hola hero", langcode: "es" } },
+      meta: { draft_state: "b".repeat(64) },
     });
     backend.toCanonical.mockReturnValue({
       id: "p-uuid-1", entityType: "paragraph", bundle: "text", langcode: "es",
@@ -182,6 +184,7 @@ describe("paragraphs tools", () => {
     expect(call.options.method).toBe("GET");
     expect(call.options.headers["X-MCP-Draft-Langcode"]).toBe("es");
     expect(out.fields.field_text).toBe("Hola hero");
+    expect(out.draftState).toBe("b".repeat(64));
   });
 
   it("get_paragraph fetches a paragraph by bundle + UUID", async () => {

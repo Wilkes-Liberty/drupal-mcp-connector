@@ -116,7 +116,7 @@ async function createParagraph({ site: siteName, paragraphType, attributes = {} 
  * @throws {Error} If id is missing or the revision id cannot be read.
  * @throws {SecurityError} If updating paragraphs of this bundle is not permitted.
  */
-async function updateParagraph({ site: siteName, paragraphType, id, attributes = {}, langcode, revisionId }) {
+async function updateParagraph({ site: siteName, paragraphType, id, attributes = {}, langcode, revisionId, draftState }) {
   if (!id) throw new Error("A paragraph 'id' (UUID) is required to update an existing paragraph.");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -132,7 +132,7 @@ async function updateParagraph({ site: siteName, paragraphType, id, attributes =
       throw new Error("Paragraph translation update requires a paragraph revision ID (the host pin).");
     }
     paragraph = await writeDraft(backend, {
-      entityType: "paragraph", bundle: paragraphType, id, attributes, langcode: targetLang,
+      entityType: "paragraph", bundle: paragraphType, id, attributes, langcode: targetLang, draftState,
       draftRevision: { revisionId: pinned },
     });
   } else {
@@ -212,6 +212,7 @@ export const definitions = [
         attributes:    { type: "object", description: "Paragraph field values to change, keyed by Drupal machine name, e.g. { field_body: { value: '<p>..</p>', format: 'full_html' } }" },
         langcode:      { type: "string", description: "Target language for an unpublished paragraph translation (e.g. 'es'). Continues Sentinel /mcp-draft; does not create a missing translation." },
         revisionId:    { type: "string", description: "Paragraph revision id the host already pins. Required when that pin is not the default revision." },
+        draftState:    { type: "string", pattern: "^[a-f0-9]{64}$", description: "Required with langcode. Opaque draftState from the previous paragraph draft read/create/update; prevents overwriting newer edits." },
       },
     },
   },

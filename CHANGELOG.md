@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Paragraph translation updates require the `draftState` returned by a previous draft read. Pass it unchanged to Sentinel for stale-write protection. Shared-status paragraphs remain pending for human editing (#280).
+
 - **`drupal_create_translation` sends live and working revision IDs when a draft exists (#282).**
   Sentinel's translation POST 409s with "A working revision exists" if If-Match
   is live-only. The connector now reads Sentinel's translation inventory for
