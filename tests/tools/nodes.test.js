@@ -47,7 +47,7 @@ function canonicalNode(over = {}) {
 
 /** Default path info (no existing alias) — overridden per alias test. */
 function pathInfo(over = {}) {
-  return { alias: null, pid: null, langcode: "en", drupalId: 2, ...over };
+  return { alias: null, pid: null, langcode: "en", drupalId: 2, aliasId: null, ...over };
 }
 
 beforeEach(() => {
@@ -261,6 +261,7 @@ describe("nodes tools (migrated)", () => {
 
   it("update_node without a path preserves the existing alias and round-trips its pid (1.5.1)", async () => {
     backend.getPathInfo.mockResolvedValue(pathInfo({ alias: "/keep-me", pid: "204", langcode: "en" }));
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: "/keep-me" }));
     await handlers.drupal_update_node({ type: "article", id: "n1", title: "New" });
     expect(backend.getPathInfo).toHaveBeenCalledWith({ entityType: "node", bundle: "article", id: "n1" });
     const arg = backend.updateEntity.mock.calls[0][0];
@@ -271,6 +272,7 @@ describe("nodes tools (migrated)", () => {
 
   it("update_node with an explicit alias round-trips the existing pid (in-place, no duplicate)", async () => {
     backend.getPathInfo.mockResolvedValue(pathInfo({ alias: "/platforms/sabal", pid: "204", langcode: "en", drupalId: 2 }));
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: "/platforms/nexus" }));
     await handlers.drupal_update_node({ type: "platform", id: "n1", fields: { path: { alias: "/platforms/nexus", pathauto: 0 } } });
     const arg = backend.updateEntity.mock.calls[0][0];
     expect(arg.attributes.path).toEqual({ alias: "/platforms/nexus", pathauto: false, langcode: "en", pid: "204" });
@@ -278,6 +280,7 @@ describe("nodes tools (migrated)", () => {
 
   it("update_node creates a 301 redirect from the old alias on rename (1.5.1)", async () => {
     backend.getPathInfo.mockResolvedValue(pathInfo({ alias: "/platforms/sabal", pid: "204", drupalId: 2 }));
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: "/platforms/nexus" }));
     backend.listEntities.mockResolvedValue({ entities: [], page: { total: 0 }, approximate: false });
     const out = await handlers.drupal_update_node({ type: "platform", id: "n1", fields: { path: { alias: "/platforms/nexus" } } });
     const redirectCall = backend.createEntity.mock.calls.find((c) => c[0].entityType === "redirect");
@@ -289,6 +292,7 @@ describe("nodes tools (migrated)", () => {
 
   it("update_node does not create a redirect when the alias is unchanged (idempotent)", async () => {
     backend.getPathInfo.mockResolvedValue(pathInfo({ alias: "/same", pid: "9" }));
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: "/same" }));
     await handlers.drupal_update_node({ type: "article", id: "n1", fields: { path: { alias: "/same" } } });
     expect(backend.createEntity.mock.calls.find((c) => c[0].entityType === "redirect")).toBeFalsy();
   });
@@ -300,6 +304,48 @@ describe("nodes tools (migrated)", () => {
     const out = await handlers.drupal_update_node({ type: "platform", id: "n1", fields: { path: { alias: "/platforms/nexus" } } });
     expect(out.url).toBe("/platforms/nexus");
     expect(backend.getEntity).toHaveBeenCalledWith({ entityType: "node", bundle: "platform", id: "n1" });
+  });
+
+  it("update_node repairs a drifted alias via the path_alias entity (#274)", async () => {
+    const aliasId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    backend.getPathInfo.mockResolvedValue(pathInfo({
+      alias: "/keep-me", pid: "204", aliasId, langcode: "en",
+    }));
+    backend.getEntity.mockImplementation(async () => {
+      const repaired = backend.updateEntity.mock.calls.some((c) => c[0].entityType === "path_alias");
+      return canonicalNode({ url: repaired ? "/keep-me" : "/capabilities/intelligence-pipelines" });
+    });
+    const out = await handlers.drupal_update_node({ type: "article", id: "n1", title: "Intelligence Pipelines" });
+    const aliasWrite = backend.updateEntity.mock.calls.find((c) => c[0].entityType === "path_alias");
+    expect(aliasWrite[0]).toMatchObject({
+      entityType: "path_alias", bundle: "path_alias", id: aliasId,
+      attributes: { alias: "/keep-me" },
+    });
+    expect(out.url).toBe("/keep-me");
+  });
+
+  it("update_node does not return a drifted url after a path_alias repair (#274)", async () => {
+    const aliasId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    backend.getPathInfo.mockResolvedValue(pathInfo({
+      alias: "/keep-me", pid: "204", aliasId, langcode: "en",
+    }));
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: "/capabilities/intelligence-pipelines" }));
+    const out = await handlers.drupal_update_node({ type: "article", id: "n1", title: "Intelligence Pipelines" });
+    expect(backend.updateEntity.mock.calls.some((c) => c[0].entityType === "path_alias")).toBe(true);
+    expect(out.url).toBe("/keep-me");
+  });
+
+  it("update_node fails honestly when an explicit alias does not persist, and does not create a redirect (#274)", async () => {
+    backend.getPathInfo.mockResolvedValue(pathInfo({
+      alias: "/capabilities/intelligence-pipelines", pid: "1", aliasId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    }));
+    backend.getEntity.mockResolvedValue(canonicalNode({ url: "/capabilities/intelligence-pipelines" }));
+    await expect(handlers.drupal_update_node({
+      type: "article",
+      id: "n1",
+      fields: { path: { alias: "/capabilities/intelligence-actionable-insights", pathauto: 0 } },
+    })).rejects.toThrow(/Alias restoration failed.*intelligence-actionable-insights.*intelligence-pipelines/s);
+    expect(backend.createEntity.mock.calls.find((c) => c[0].entityType === "redirect")).toBeFalsy();
   });
 
   it("update_node sends no path when there is no existing alias to preserve", async () => {

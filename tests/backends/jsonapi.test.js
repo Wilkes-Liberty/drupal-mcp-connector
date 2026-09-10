@@ -198,6 +198,127 @@ describe("JsonApiBackend fetch methods", () => {
     expect(none).toBeNull();
   });
 
+  it("getPathInfo returns alias and pid from the node path field", async () => {
+    vi.mocked(drupalFetch)
+      .mockResolvedValueOnce({
+        data: {
+          type: "node--article",
+          id: "11111111-1111-4111-8111-111111111111",
+          attributes: {
+            path: { alias: "/keep-me", pid: 204, langcode: "en" },
+            langcode: "en",
+            drupal_internal__nid: 44,
+          },
+        },
+      })
+      .mockResolvedValueOnce({ data: [] });
+    const info = await backend.getPathInfo({
+      entityType: "node",
+      bundle: "article",
+      id: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(info).toMatchObject({
+      alias: "/keep-me", pid: 204, langcode: "en", drupalId: 44, aliasId: null,
+    });
+  });
+
+  it("getPathInfo fills pid and aliasId from path_alias when the node omits pid (#274)", async () => {
+    vi.mocked(drupalFetch)
+      .mockResolvedValueOnce({
+        data: {
+          type: "node--solution",
+          id: "11111111-1111-4111-8111-111111111111",
+          attributes: {
+            path: { alias: "/capabilities/intelligence-actionable-insights", langcode: "en" },
+            langcode: "en",
+            drupal_internal__nid: 44,
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: [{
+          type: "path_alias--path_alias",
+          id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          attributes: {
+            alias: "/capabilities/intelligence-actionable-insights",
+            path: "/node/44",
+            langcode: "en",
+            drupal_internal__id: 204,
+          },
+        }],
+      });
+    const info = await backend.getPathInfo({
+      entityType: "node",
+      bundle: "solution",
+      id: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(info).toMatchObject({
+      alias: "/capabilities/intelligence-actionable-insights",
+      pid: 204,
+      aliasId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      drupalId: 44,
+    });
+    expect(vi.mocked(drupalFetch).mock.calls[1][1]).toContain("/jsonapi/path_alias/path_alias");
+    expect(vi.mocked(drupalFetch).mock.calls[1][1]).toContain("filter%5Bpath%5D=%2Fnode%2F44");
+  });
+
+  it("getPathInfo uses the path_alias row when an unpublished node path is empty (#274)", async () => {
+    vi.mocked(drupalFetch)
+      .mockResolvedValueOnce({
+        data: {
+          type: "node--solution",
+          id: "11111111-1111-4111-8111-111111111111",
+          attributes: {
+            path: { alias: null, pid: null, langcode: "en" },
+            langcode: "en",
+            drupal_internal__nid: 9,
+            status: false,
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: [{
+          type: "path_alias--path_alias",
+          id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          attributes: {
+            alias: "/capabilities/digital-asset-tokenization-infrastructure",
+            path: "/node/9",
+            langcode: "en",
+            drupal_internal__id: 88,
+          },
+        }],
+      });
+    const info = await backend.getPathInfo({
+      entityType: "node",
+      bundle: "solution",
+      id: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(info.alias).toBe("/capabilities/digital-asset-tokenization-infrastructure");
+    expect(info.pid).toBe(88);
+    expect(info.aliasId).toBe("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+  });
+
+  it("getPathInfo still returns the node path when path_alias is not exposed", async () => {
+    vi.mocked(drupalFetch)
+      .mockResolvedValueOnce({
+        data: {
+          type: "node--article",
+          id: "11111111-1111-4111-8111-111111111111",
+          attributes: {
+            path: { alias: "/keep-me", pid: 3, langcode: "en" },
+            drupal_internal__nid: 2,
+          },
+        },
+      })
+      .mockRejectedValueOnce(new Error("Drupal 403: path_alias not exposed"));
+    const info = await backend.getPathInfo({
+      entityType: "node",
+      bundle: "article",
+      id: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(info).toMatchObject({ alias: "/keep-me", pid: 3, aliasId: null, drupalId: 2 });
+  });
+
   it("getEntity appends resourceVersion when requested (#169)", async () => {
     vi.mocked(drupalFetch).mockResolvedValue({
       data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "Draft" } },

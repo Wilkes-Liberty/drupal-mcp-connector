@@ -193,14 +193,18 @@ For `update` the preview also includes the target `id`; for `delete` it returns
 
 Pass `fields.path = { alias: "/your/path" }` to set a node's URL alias explicitly. The
 alias is written as a **manual** alias (`pathauto` off) and is **updated in place** — the
-connector round-trips the existing alias's `pid`, so setting an alias never leaves a
-stale duplicate behind (the old one stops resolving). When an explicit alias **replaces a
-different** existing alias (a rename), the connector also creates a **301 redirect** from
-the old path to the node so existing links keep working; this is idempotent (skipped when
-a redirect for that source already exists). Omit `fields.path` to let
-[Pathauto](https://www.drupal.org/project/pathauto) generate the alias from the bundle's
-pattern. Both `drupal_create_node` and `drupal_update_node` **re-read** the node after
-writing, so the returned `url` is the alias that actually persisted.
+connector round-trips the existing alias's `pid` (from the node `path` field, or from the
+`path_alias` row when an unpublished/forward revision omits `pid`), so setting an alias
+never leaves a stale duplicate behind (the old one stops resolving). When an explicit
+alias **replaces a different** existing alias (a rename), the connector also creates a
+**301 redirect** from the old path to the node so existing links keep working; this is
+idempotent (skipped when a redirect for that source already exists) and runs **only
+after** the new alias is what canonical and working-copy re-reads show. Omit
+`fields.path` on update to **preserve** the existing alias — title-only edits must not
+let Pathauto rewrite it. Both `drupal_create_node` and `drupal_update_node` **re-read**
+the node after writing, so the returned `url` is the alias that actually persisted. If
+an explicit or preserved alias does not stick, `drupal_update_node` **fails** rather
+than reporting success (#274).
 
 ---
 

@@ -22,24 +22,10 @@ import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } f
 import { assertBodySummaryWritable, attachSummaryDeprecation } from "../lib/body-summary.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 import { applyAllowedFormatsToAttributes } from "../lib/field-definition.js";
+import { normalizeAlias, PATH_ALIAS_ENTITY_TYPE } from "../lib/path-alias.js";
 
 /** Fallback language for an alias when the node exposes none. */
 const DEFAULT_ALIAS_LANGCODE = "en";
-
-/**
- * Normalize a URL-alias path for storage/comparison: trim, ensure a single
- * leading slash, drop a trailing slash (except root).
- * @param {*} value A raw alias.
- * @returns {?string} The normalized alias, or null when empty.
- */
-function normalizeAlias(value) {
-  if (value === undefined || value === null) return null;
-  let s = String(value).trim();
-  if (!s) return null;
-  if (!s.startsWith("/")) s = `/${s}`;
-  if (s.length > 1) s = s.replace(/\/+$/, "");
-  return s;
-}
 
 /**
  * Resolve the `path` attribute to send on an alias-aware node write so the alias
@@ -58,6 +44,8 @@ function normalizeAlias(value) {
  *   run on create); `redirect` is `{ from, to, nid }` when a rename redirect is due.
  */
 async function resolvePathWrite({ backend, type, id, providedPath, isCreate }) {
+  // Always read the default revision + path_alias row. Aliases are not
+  // revisioned; a working-copy GET often omits pid on unpublished drafts (#274).
   const info = id
     ? await backend.getPathInfo({ entityType: "node", bundle: type, id }).catch(() => ({}))
     : {};
@@ -131,6 +119,80 @@ async function createRenameRedirect(backend, sec, redirect) {
   } catch (err) {
     return { created: false, reason: err?.message || String(err), source: redirect.from };
   }
+}
+
+/**
+ * Update the existing path_alias row in place when a node PATCH did not stick
+ * the intended alias (Pathauto regenerating on title save, missing pid on
+ * unpublished drafts).
+ * @param {object} backend
+ * @param {object} sec
+ * @param {{aliasId?: ?string}} info
+ * @param {string} intendedAlias
+ * @returns {Promise<{repaired: boolean, reason?: string}>}
+ */
+async function repairAliasViaPathAlias(backend, sec, info, intendedAlias) {
+  if (!info?.aliasId) return { repaired: false, reason: "no path_alias id to update" };
+  try {
+    assertWriteAllowed(sec, "update", PATH_ALIAS_ENTITY_TYPE, PATH_ALIAS_ENTITY_TYPE);
+  } catch {
+    return { repaired: false, reason: "path_alias update not permitted by policy" };
+  }
+  try {
+    await backend.updateEntity({
+      entityType: PATH_ALIAS_ENTITY_TYPE,
+      bundle: PATH_ALIAS_ENTITY_TYPE,
+      id: info.aliasId,
+      attributes: { alias: intendedAlias },
+    });
+    return { repaired: true };
+  } catch (err) {
+    return { repaired: false, reason: err?.message || String(err) };
+  }
+}
+
+/**
+ * Confirm the intended alias is what canonical / working-copy reads return.
+ * If the node PATCH drifted (Pathauto), restore the path_alias row and
+ * re-read. Still-wrong reads throw — never report success for a failed
+ * restoration (#274).
+ * @param {object} args
+ * @returns {Promise<object>} The entity to return (possibly a post-repair re-read).
+ */
+async function assertAliasPersisted({
+  backend, sec, type, id, intendedAlias, resourceVersion, written,
+}) {
+  const shown = normalizeAlias(written?.url);
+  if (shown === intendedAlias) return written;
+
+  const info = await backend.getPathInfo({ entityType: "node", bundle: type, id }).catch(() => ({}));
+  if (normalizeAlias(info.alias) === intendedAlias && shown === null) {
+    // Re-read omitted url but the alias row matches; treat as persisted.
+    return written;
+  }
+
+  const repair = await repairAliasViaPathAlias(backend, sec, info, intendedAlias);
+  const fresh = await backend.getEntity({
+    entityType: "node", bundle: type, id,
+    ...(resourceVersion ? { resourceVersion } : {}),
+  }).catch(() => null);
+  const afterInfo = await backend.getPathInfo({ entityType: "node", bundle: type, id }).catch(() => ({}));
+  const entityUrl = normalizeAlias(fresh?.url);
+  const aliasUrl = normalizeAlias(afterInfo.alias);
+  // The path_alias row is router-visible; the node's computed path field can
+  // lag. Persist if either re-read matches. Never return a drifted url.
+  if (entityUrl === intendedAlias || aliasUrl === intendedAlias) {
+    const entity = fresh ?? written;
+    if (normalizeAlias(entity?.url) === intendedAlias) return entity;
+    return { ...(entity && typeof entity === "object" ? entity : { id }), url: intendedAlias };
+  }
+  const reported = entityUrl || aliasUrl || shown || "(none)";
+  throw new Error(
+    `Alias restoration failed: requested "${intendedAlias}" but canonical ` +
+    `and working-copy reads still show "${reported}"` +
+    (repair.reason ? ` (${repair.reason})` : "") +
+    ". Update the path_alias entity directly. See connector #274."
+  );
 }
 
 /**
@@ -399,16 +461,24 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
     ...(patchTarget.resourceVersion ? { resourceVersion: patchTarget.resourceVersion } : {}),
     ...(patchTarget.draftRevision ? { draftRevision: patchTarget.draftRevision } : {}),
   });
-  const redirectResult = redirect ? await createRenameRedirect(backend, sec, redirect) : null;
   // #169: when relationships were sent, the canonical re-read is the published
   // revision and is not proof an ERR field landed. Prefer rel:working-copy.
-  const fresh = await readWrittenRevision({
+  let fresh = await readWrittenRevision({
     backend, entityType: "node", bundle: type, id,
     relationshipsSent: relationshipsWereSent(resolvedRelationships),
     patchResult: patched,
     preferCanonical: true,
     resourceVersion: patchTarget.resourceVersion,
   });
+  const intendedAlias = pathAttr?.alias ? normalizeAlias(pathAttr.alias) : null;
+  if (intendedAlias) {
+    fresh = await assertAliasPersisted({
+      backend, sec, type, id, intendedAlias,
+      resourceVersion: patchTarget.resourceVersion, written: fresh,
+    });
+  }
+  // Redirect only after the new alias is what re-reads show (#274).
+  const redirectResult = redirect ? await createRenameRedirect(backend, sec, redirect) : null;
   const withRevs = await attachWrittenRevisionPair({
     backend, entityType: "node", bundle: type, id, entity: fresh, liveVid: patchTarget.liveVid,
   });
