@@ -154,8 +154,12 @@ validates the real fields and live/working revision preconditions (#166;
 Sentinel d.o #3621022). The real write creates an unpublished continuation;
 it never discards the existing draft. Without a forward draft, the canonical
 probe uses a non-matching `data.id` to exercise core's guard without saving.
-An unsupported endpoint or failed precondition fails the dryRun. Save-time
-hooks run only on the real write; preflight does not reserve the revision.
+An unsupported endpoint or failed precondition fails the dryRun. A published
+moderated node with no distinct working copy whose default `changed` is later
+than its `revision_timestamp` (`possiblyPatchBlocked`) fails dryRun the same
+way the saving write fails — Sentinel's stale-default check is not visible to
+the id-mismatch probe (#273). Save-time hooks run only on the real write;
+preflight does not reserve the revision.
 Use this (and
 `drupal_list_revisions.possiblyPatchBlocked`) **before** creating dependent
 paragraphs; preflight inside the host update cannot un-orphan work that
@@ -357,9 +361,10 @@ Works with **any** Drupal entity type — paragraphs, commerce products, webform
 optional `dryRun` boolean (default `false`). On a **moderated** `update`, `dryRun`
 also uses the same non-saving preflight as `drupal_update_node`: Sentinel's
 governed endpoint for an existing draft, or core's id-mismatch probe otherwise.
-Core revision selectors are read-only, not a PATCH target. When
-`true`, the tool validates the request and returns a preview of the write
-without committing it.
+A published node with no distinct working copy and `possiblyPatchBlocked` fails
+dryRun the same as the saving write (#273). Core revision selectors are read-only,
+not a PATCH target. When `true`, the tool validates the request and returns a
+preview of the write without committing it.
 
 ```json
 {

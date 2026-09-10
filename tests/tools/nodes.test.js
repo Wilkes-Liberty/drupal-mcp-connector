@@ -231,6 +231,23 @@ describe("nodes tools (migrated)", () => {
     expect(arg.attributes.title).toBe("Page edit");
   });
 
+  it("update_node dryRun fails when the default revision is possiblyPatchBlocked with no working copy (#273)", async () => {
+    const stale = canonicalNode({
+      status: true,
+      changed: "2026-09-07T16:00:00Z",
+      fields: {
+        moderation_state: "published",
+        drupal_internal__vid: 1962,
+        revision_timestamp: "2026-09-01T00:00:00Z",
+      },
+    });
+    backend.getEntity.mockResolvedValue(stale);
+    await expect(handlers.drupal_update_node({
+      type: "solution", id: "n1", title: "Draft title", dryRun: true,
+    })).rejects.toThrow(/changed after this copy was loaded|#273/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
   it("update_node dryRun preview includes the draft default for published moderated targets (#131)", async () => {
     backend.getEntity.mockResolvedValue(canonicalNode({
       status: true,

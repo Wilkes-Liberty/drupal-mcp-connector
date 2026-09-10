@@ -2,9 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 import {
   PatchBlockedError,
   WorkingCopyStaleError,
+  StaleCopyError,
   PATCH_BLOCKED_CODE,
   PATCH_BLOCKED_MESSAGE,
   PATCH_WORKING_COPY_STALE_MESSAGE,
+  STALE_COPY_CODE,
+  STALE_COPY_MESSAGE,
   isWorkingCopyPatchError,
   rewriteWorkingCopyPatchError,
   shouldPreflightPatch,
@@ -13,6 +16,8 @@ import {
   resolveWorkingCopyPatchTarget,
   updateEntityGuarded,
   isProbePassedWithoutSave,
+  changedAheadOfRevision,
+  rewriteStaleCopyError,
   PATCH_PROBE_MISMATCH_ID,
 } from "../../src/lib/patch-preflight.js";
 import {
@@ -347,6 +352,88 @@ describe("attachWrittenRevisionPair (#166)", () => {
       backend, entityType: "node", bundle: "a", id: "n1", entity, liveVid: 10,
     });
     expect(out._revisions).toBeUndefined();
+  });
+});
+
+describe("stale default-revision fingerprint (#273)", () => {
+  const staleExisting = {
+    id: "n1",
+    status: true,
+    changed: "2026-09-07T16:00:00Z",
+    fields: {
+      moderation_state: "published",
+      drupal_internal__vid: 1962,
+      revision_timestamp: "2026-09-01T00:00:00Z",
+    },
+  };
+
+  it("changedAheadOfRevision matches possiblyPatchBlocked", () => {
+    expect(changedAheadOfRevision(staleExisting)).toBe(true);
+    expect(changedAheadOfRevision({
+      ...staleExisting,
+      changed: "2026-09-01T00:00:00Z",
+    })).toBe(false);
+    expect(changedAheadOfRevision({ changed: "2026-09-07T16:00:00Z" })).toBe(false);
+  });
+
+  it("prepareGuardedPatch refuses when live equals working and changed is ahead of revision_timestamp", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async () => staleExisting),
+    });
+    await expect(prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: staleExisting,
+      attributes: { title: "Draft title", moderation_state: "draft" },
+    })).rejects.toMatchObject({
+      name: "StaleCopyError",
+      code: STALE_COPY_CODE,
+      message: STALE_COPY_MESSAGE,
+    });
+    expect(backend.rawQuery).not.toHaveBeenCalled();
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("does not apply the fingerprint when a distinct working copy exists", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => {
+        if (resourceVersion === "rel:working-copy") {
+          return { id: "n1", fields: { drupal_internal__vid: 1963, moderation_state: "draft" } };
+        }
+        return staleExisting;
+      }),
+      rawQuery: vi.fn(async () => ({
+        meta: { draft_preflight: true, live: "1962", working: "1963" },
+      })),
+    });
+    const out = await prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: staleExisting,
+      attributes: { title: "Draft title", moderation_state: "draft" },
+    });
+    expect(out.resourceVersion).toBe("rel:working-copy");
+    expect(out.draftRevision).toEqual({ liveVid: 1962, workingVid: 1963 });
+  });
+
+  it("updateEntityGuarded rewrites Sentinel's stale-version refusal", async () => {
+    const backend = backendStub({
+      updateEntity: vi.fn(async () => {
+        throw new Error(
+          "Drupal 500: Write denied by MCP Sentinel: the content changed after this copy was loaded. " +
+          "Reload the latest version and reapply the change.",
+        );
+      }),
+    });
+    await expect(updateEntityGuarded(backend, { entityType: "node", bundle: "solution", id: "n1" }))
+      .rejects.toMatchObject({
+        name: "StaleCopyError",
+        code: STALE_COPY_CODE,
+        message: STALE_COPY_MESSAGE,
+      });
+  });
+
+  it("rewriteStaleCopyError leaves unrelated errors alone", () => {
+    const other = new Error("Drupal 422 on PATCH: title is required");
+    expect(rewriteStaleCopyError(other)).toBe(other);
   });
 });
 
