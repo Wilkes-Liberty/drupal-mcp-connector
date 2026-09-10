@@ -185,8 +185,8 @@ async function getNode({ site: siteName, type, id, langcode, resourceVersion }) 
   if (langcode) {
     const targetLang = assertDraftLangcode(langcode);
     const inventory = await readTranslationInventory(backend, { entityType: "node", bundle: type, id });
-    const workingHas = (inventory.working?.translations ?? []).some((row) => row.langcode === targetLang);
-    if (workingHas && inventory.live?.vid && inventory.working?.vid) {
+    const workingRow = (inventory.working?.translations ?? []).find((row) => row.langcode === targetLang);
+    if (workingRow && workingRow.status === false && inventory.live?.vid && inventory.working?.vid) {
       const entity = await readDraftTranslation(backend, {
         entityType: "node", bundle: type, id, langcode: targetLang,
         draftRevision: { liveVid: inventory.live.vid, workingVid: inventory.working.vid },

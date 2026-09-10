@@ -215,7 +215,8 @@ async function getRevision({ site: siteName, type, id, version, langcode }) {
   if (langcode) {
     const targetLang = assertDraftLangcode(langcode);
     const inventory = await readTranslationInventory(backend, { entityType: "node", bundle: type, id });
-    if (!inventory.live?.vid || !inventory.working?.vid) {
+    const workingRow = (inventory.working?.translations ?? []).find((row) => row.langcode === targetLang);
+    if (!inventory.live?.vid || !inventory.working?.vid || !workingRow || workingRow.status !== false) {
       throw new Error("No unpublished working translation is addressable for this revision.");
     }
     const entity = await readDraftTranslation(backend, {
