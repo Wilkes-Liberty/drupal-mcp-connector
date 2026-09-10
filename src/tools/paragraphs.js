@@ -42,6 +42,11 @@ import {
 import {
   embedParagraphRef, paragraphRevisionId, resolveParagraphRevisionId, missingParagraphRevisionError,
 } from "../lib/err-relationships.js";
+import {
+  assertDraftLangcode,
+  readDraftTranslation,
+  writeDraft,
+} from "../lib/draft-write.js";
 
 /**
  * Build the resource-identifier ref used to embed a paragraph in a host ERR /
@@ -111,17 +116,32 @@ async function createParagraph({ site: siteName, paragraphType, attributes = {} 
  * @throws {Error} If id is missing or the revision id cannot be read.
  * @throws {SecurityError} If updating paragraphs of this bundle is not permitted.
  */
-async function updateParagraph({ site: siteName, paragraphType, id, attributes = {} }) {
+async function updateParagraph({ site: siteName, paragraphType, id, attributes = {}, langcode, revisionId }) {
   if (!id) throw new Error("A paragraph 'id' (UUID) is required to update an existing paragraph.");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", "paragraph", paragraphType);
   const backend = await resolveBackend(site);
-  const paragraph = await backend.updateEntity({ entityType: "paragraph", bundle: paragraphType, id, attributes });
+  let paragraph;
+  if (langcode) {
+    const targetLang = assertDraftLangcode(langcode);
+    const pinned = revisionId ?? paragraphRevisionId(
+      await backend.getEntity({ entityType: "paragraph", bundle: paragraphType, id }),
+    );
+    if (pinned === null || pinned === undefined || pinned === "") {
+      throw new Error("Paragraph translation update requires a paragraph revision ID (the host pin).");
+    }
+    paragraph = await writeDraft(backend, {
+      entityType: "paragraph", bundle: paragraphType, id, attributes, langcode: targetLang,
+      draftRevision: { revisionId: pinned },
+    });
+  } else {
+    paragraph = await backend.updateEntity({ entityType: "paragraph", bundle: paragraphType, id, attributes });
+  }
   const bundle = paragraph.bundle || paragraphType;
-  const revisionId = await resolveParagraphRevisionId(backend, paragraph, paragraphType);
-  if (revisionId === null) throw missingParagraphRevisionError(id, "Updated");
-  const ref = embedRef(bundle, paragraph.id, revisionId);
+  const resolvedRevisionId = await resolveParagraphRevisionId(backend, paragraph, paragraphType);
+  if (resolvedRevisionId === null) throw missingParagraphRevisionError(id, "Updated");
+  const ref = embedRef(bundle, paragraph.id, resolvedRevisionId);
   return { paragraph, ref, relationshipData: ref, note: EMBED_NOTE };
 }
 
@@ -134,16 +154,31 @@ async function updateParagraph({ site: siteName, paragraphType, id, attributes =
  *   The redacted paragraph with an embedding `ref`, or null if not found.
  * @throws {SecurityError} If reading paragraphs of this bundle is not permitted.
  */
-async function getParagraph({ site: siteName, paragraphType, id }) {
+async function getParagraph({ site: siteName, paragraphType, id, langcode, revisionId }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "paragraph", paragraphType);
   const backend = await resolveBackend(site);
-  const entity = await backend.getEntity({ entityType: "paragraph", bundle: paragraphType, id });
+  let entity;
+  if (langcode) {
+    const targetLang = assertDraftLangcode(langcode);
+    const pinned = revisionId ?? paragraphRevisionId(
+      await backend.getEntity({ entityType: "paragraph", bundle: paragraphType, id }),
+    );
+    if (pinned === null || pinned === undefined || pinned === "") {
+      throw new Error("Paragraph translation read requires a paragraph revision ID (the host pin).");
+    }
+    entity = await readDraftTranslation(backend, {
+      entityType: "paragraph", bundle: paragraphType, id, langcode: targetLang,
+      draftRevision: { revisionId: pinned },
+    });
+  } else {
+    entity = await backend.getEntity({ entityType: "paragraph", bundle: paragraphType, id });
+  }
   if (!entity) return null;
   const redacted = redactCanonicalEntity(entity, sec, "paragraph");
-  const revisionId = paragraphRevisionId(entity) ?? paragraphRevisionId(redacted);
-  return { ...redacted, ref: embedRef(redacted.bundle || paragraphType, redacted.id, revisionId) };
+  const resolvedRevisionId = paragraphRevisionId(entity) ?? paragraphRevisionId(redacted) ?? revisionId;
+  return { ...redacted, ref: embedRef(redacted.bundle || paragraphType, redacted.id, resolvedRevisionId) };
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +202,7 @@ export const definitions = [
   {
     name: "drupal_update_paragraph",
     description:
-      "Update an existing Paragraph entity's field values by paragraph type (bundle) and UUID. Only the attributes you pass are changed (partial update); the host entity's reference to the paragraph is unchanged (same UUID), so this maintains a component paragraph in place without re-embedding. Returns relationshipData including meta.target_revision_id for a later host attach. Use drupal_get_entity_schema (entityType 'paragraph', the bundle) to discover fields. Governed by the site security policy.",
+      "Update an existing Paragraph entity's field values by paragraph type (bundle) and UUID. Only the attributes you pass are changed (partial update); the host entity's reference to the paragraph is unchanged (same UUID), so this maintains a component paragraph in place without re-embedding. Pass langcode to continue an unpublished paragraph translation via Sentinel (the host pin, not a live English mutation). Omitting langcode still uses canonical JSON:API and remains gated on published-host children. Returns relationshipData including meta.target_revision_id for a later host attach. Use drupal_get_entity_schema (entityType 'paragraph', the bundle) to discover fields. Governed by the site security policy.",
     inputSchema: {
       type: "object", required: ["paragraphType", "id"],
       properties: {
@@ -175,19 +210,23 @@ export const definitions = [
         paragraphType: { type: "string", description: "Paragraph type / bundle machine name, e.g. 'text', 'image', 'cta'" },
         id:            { type: "string", description: "Paragraph UUID" },
         attributes:    { type: "object", description: "Paragraph field values to change, keyed by Drupal machine name, e.g. { field_body: { value: '<p>..</p>', format: 'full_html' } }" },
+        langcode:      { type: "string", description: "Target language for an unpublished paragraph translation (e.g. 'es'). Continues Sentinel /mcp-draft; does not create a missing translation." },
+        revisionId:    { type: "string", description: "Paragraph revision id the host already pins. Required when that pin is not the default revision." },
       },
     },
   },
   {
     name: "drupal_get_paragraph",
     description:
-      "Fetch a single Paragraph entity by paragraph type (bundle) and UUID. Returns the redacted paragraph (fields include drupal_internal__revision_id) plus a `ref` ({ type: 'paragraph--<bundle>', id, meta: { target_revision_id } }) you can use to embed it in a host entity's paragraph / ERR field. Paragraphs are referenced from a host field rather than queried standalone in production. Governed by the site security policy.",
+      "Fetch a single Paragraph entity by paragraph type (bundle) and UUID. Returns the redacted paragraph (fields include drupal_internal__revision_id) plus a `ref` ({ type: 'paragraph--<bundle>', id, meta: { target_revision_id } }) you can use to embed it in a host entity's paragraph / ERR field. Pass langcode to read an unpublished working translation via Sentinel. Paragraphs are referenced from a host field rather than queried standalone in production. Governed by the site security policy.",
     inputSchema: {
       type: "object", required: ["paragraphType", "id"],
       properties: {
         site:          { type: "string" },
         paragraphType: { type: "string", description: "Paragraph type / bundle machine name" },
         id:            { type: "string", description: "Paragraph UUID" },
+        langcode:      { type: "string", description: "Target language for the unpublished working translation (e.g. 'es')." },
+        revisionId:    { type: "string", description: "Paragraph revision id the host already pins." },
       },
     },
   },

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Unpublished paragraph field-value translation and image alt (#280).**
+  `drupal_create_translation` accepts `entityType: "paragraph"` and
+  `revisionId` (the host pin) and POSTs Sentinel's paragraph
+  `/mcp-draft/translations` surface. Continue with `drupal_update_paragraph`
+  + `langcode`; read with `drupal_get_paragraph` + `langcode`. Omitting
+  `langcode` on `drupal_update_paragraph` still uses canonical JSON:API.
+  Node translation writes forward image relationships so alt can change
+  while the file UUID stays the same. Replacing the file remains a
+  server refusal. Node-only translation create is unchanged.
+
 ## [2.14.2] - 2026-09-10
 
 ### Fixed

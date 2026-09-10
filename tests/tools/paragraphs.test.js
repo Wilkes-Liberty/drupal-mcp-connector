@@ -6,6 +6,12 @@ const backend = {
   createEntity: vi.fn(),
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
+  rawQuery: vi.fn(),
+  resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
+  toCanonical: vi.fn((data) => ({
+    id: data.id, entityType: "paragraph", bundle: "text",
+    fields: { drupal_internal__revision_id: 17 },
+  })),
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 // Per-test site security can be overridden via setSecurity(); default is open mode.
@@ -34,6 +40,11 @@ function canonicalParagraph(over = {}) {
 beforeEach(() => {
   setSecurity({ preset: "development" });
   Object.values(backend).forEach((f) => f.mockReset());
+  backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
+  backend.toCanonical.mockImplementation((data) => ({
+    id: data.id, entityType: "paragraph", bundle: "text",
+    fields: { drupal_internal__revision_id: 17 },
+  }));
 });
 
 describe("paragraphs tools", () => {
@@ -126,6 +137,51 @@ describe("paragraphs tools", () => {
     await expect(handlers.drupal_update_paragraph({ paragraphType: "text", id: "p-uuid-1", attributes: { field_body: "x" } }))
       .rejects.toThrow();
     expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("update_paragraph with langcode PATCHes mcp-draft instead of canonical JSON:API", async () => {
+    backend.getEntity.mockResolvedValue(canonicalParagraph());
+    backend.rawQuery.mockResolvedValue({
+      data: { id: "p-uuid-1", type: "paragraph--text" },
+    });
+    await handlers.drupal_update_paragraph({
+      paragraphType: "text", id: "p-uuid-1", langcode: "es", revisionId: "3556",
+      attributes: { field_text: "Hola hero" },
+    });
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    const call = backend.rawQuery.mock.calls[0][0];
+    expect(call.path).toBe("/jsonapi/paragraph/text/p-uuid-1/mcp-draft");
+    expect(call.options.method).toBe("PATCH");
+    expect(call.options.headers["X-MCP-Draft-Langcode"]).toBe("es");
+    expect(call.options.headers["If-Match"]).toBe('"3556"');
+  });
+
+  it("update_paragraph without langcode still uses canonical update", async () => {
+    backend.updateEntity.mockResolvedValue(canonicalParagraph());
+    await handlers.drupal_update_paragraph({
+      paragraphType: "text", id: "p-uuid-1", attributes: { field_text: "Hero" },
+    });
+    expect(backend.updateEntity).toHaveBeenCalledOnce();
+    expect(backend.rawQuery).not.toHaveBeenCalled();
+  });
+
+  it("get_paragraph with langcode reads mcp-draft", async () => {
+    backend.getEntity.mockResolvedValue(canonicalParagraph());
+    backend.rawQuery.mockResolvedValue({
+      data: { id: "p-uuid-1", type: "paragraph--text", attributes: { field_text: "Hola hero", langcode: "es" } },
+    });
+    backend.toCanonical.mockReturnValue({
+      id: "p-uuid-1", entityType: "paragraph", bundle: "text", langcode: "es",
+      fields: { drupal_internal__revision_id: 17, field_text: "Hola hero" },
+    });
+    const out = await handlers.drupal_get_paragraph({
+      paragraphType: "text", id: "p-uuid-1", langcode: "es", revisionId: "17",
+    });
+    const call = backend.rawQuery.mock.calls[0][0];
+    expect(call.path).toBe("/jsonapi/paragraph/text/p-uuid-1/mcp-draft");
+    expect(call.options.method).toBe("GET");
+    expect(call.options.headers["X-MCP-Draft-Langcode"]).toBe("es");
+    expect(out.fields.field_text).toBe("Hola hero");
   });
 
   it("get_paragraph fetches a paragraph by bundle + UUID", async () => {

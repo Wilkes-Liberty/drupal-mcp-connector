@@ -12,8 +12,9 @@
  * with `langcode`. Reads of that draft are drupal_get_node / drupal_get_revision
  * with `langcode`.
  *
- * Paragraph field-value translation is not supported on this path. Shared
- * structure (references, files, aliases) stays on the source language.
+ * Paragraph field-value translation uses the same surface with
+ * entityType "paragraph" and the pinned paragraph revision. Image alt is a
+ * node relationship (`meta.alt`) with the shared file target unchanged.
  */
 
 import { getSiteConfig } from "../lib/config.js";
@@ -26,6 +27,7 @@ import { validateUuid, validateMachineName } from "../lib/validate.js";
 import { applySafeDraftDefault } from "../lib/moderation-default.js";
 import { loadWorkingCopy } from "../lib/patch-preflight.js";
 import { entityRevisionId } from "../lib/write-revision.js";
+import { paragraphRevisionId } from "../lib/err-relationships.js";
 import {
   assertDraftLangcode,
   createTranslationDraft,
@@ -58,7 +60,7 @@ async function listTranslations({ site: siteName, entityType = "node", type, id 
   assertReadAllowed(sec, entityType, type);
 
   const backend = await resolveBackend(site);
-  if (entityType === "node" && typeof backend.rawQuery === "function") {
+  if ((entityType === "node" || entityType === "paragraph") && typeof backend.rawQuery === "function") {
     try {
       const meta = await readTranslationInventory(backend, { entityType, bundle: type, id });
       const liveLangs = (meta.live?.translations ?? []).map((row) => row.langcode);
@@ -117,7 +119,8 @@ async function listTranslations({ site: siteName, entityType = "node", type, id 
  * @returns {Promise<object>} The created translation, redacted.
  */
 async function createTranslation({
-  site: siteName, entityType = "node", type, id, langcode, attributes = {}, dryRun = false,
+  site: siteName, entityType = "node", type, id, langcode, attributes = {},
+  relationships, revisionId, dryRun = false,
 }) {
   validateMachineName(entityType, "entityType");
   validateMachineName(type, "type");
@@ -128,8 +131,8 @@ async function createTranslation({
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", entityType, type);
 
-  if (entityType !== "node") {
-    throw new Error("Governed translation create is implemented for nodes. Other entity types are not addressed by the draft-translation contract.");
+  if (entityType !== "node" && entityType !== "paragraph") {
+    throw new Error("Governed translation create is implemented for nodes and paragraphs.");
   }
 
   const backend = await resolveBackend(site);
@@ -137,37 +140,47 @@ async function createTranslation({
   if (!existing) {
     throw new Error("The entity was not found.");
   }
-  const liveVid = entityRevisionId(existing);
-  const workingCopy = await loadWorkingCopy(backend, { entityType, bundle: type, id });
-  const workingVid = entityRevisionId(workingCopy);
-  const sameWorking = workingVid !== null && liveVid !== null && String(workingVid) === String(liveVid);
-  const draftRevision = {
-    liveVid,
-    workingVid: workingCopy && !sameWorking ? workingVid : undefined,
-  };
 
-  const safeAttributes = { ...attributes };
-  delete safeAttributes.langcode;
-  if (safeAttributes.status === undefined && safeAttributes.moderation_state === undefined) {
-    safeAttributes.moderation_state = "draft";
+  let draftRevision;
+  let drafted = { ...attributes };
+  delete drafted.langcode;
+  if (entityType === "paragraph") {
+    const pinned = revisionId ?? paragraphRevisionId(existing);
+    if (pinned === null || pinned === undefined || pinned === "") {
+      throw new Error("Paragraph translation create requires a paragraph revision ID (the host pin).");
+    }
+    draftRevision = { revisionId: pinned };
+    assertPublishAllowed(sec, drafted);
+  } else {
+    const liveVid = entityRevisionId(existing);
+    const workingCopy = await loadWorkingCopy(backend, { entityType, bundle: type, id });
+    const workingVid = entityRevisionId(workingCopy);
+    const sameWorking = workingVid !== null && liveVid !== null && String(workingVid) === String(liveVid);
+    draftRevision = {
+      liveVid,
+      workingVid: workingCopy && !sameWorking ? workingVid : undefined,
+    };
+    if (drafted.status === undefined && drafted.moderation_state === undefined) {
+      drafted.moderation_state = "draft";
+    }
+    drafted = await applySafeDraftDefault({
+      backend, entityType, bundle: type, id, attributes: drafted, existingEntity: existing,
+    });
+    assertPublishAllowed(sec, drafted);
   }
-  const drafted = await applySafeDraftDefault({
-    backend, entityType, bundle: type, id, attributes: safeAttributes, existingEntity: existing,
-  });
-  assertPublishAllowed(sec, drafted);
 
   if (dryRun) {
     await createTranslationDraft(backend, {
-      entityType, bundle: type, id, langcode: targetLang, attributes: drafted, draftRevision,
+      entityType, bundle: type, id, langcode: targetLang, attributes: drafted, relationships, draftRevision,
     }, true);
     return {
       dryRun: true, operation: "create_translation", entityType, bundle: type, id,
-      langcode: targetLang, attributes: drafted,
+      langcode: targetLang, attributes: drafted, ...(relationships ? { relationships } : {}),
     };
   }
 
   const created = await createTranslationDraft(backend, {
-    entityType, bundle: type, id, langcode: targetLang, attributes: drafted, draftRevision,
+    entityType, bundle: type, id, langcode: targetLang, attributes: drafted, relationships, draftRevision,
   });
   return redactCanonicalEntity(created, sec, entityType);
 }
@@ -176,7 +189,7 @@ export const definitions = [
   {
     name: "drupal_list_translations",
     description:
-      "List live and working translation langcodes for a Drupal node. Uses Sentinel's " +
+      "List live and working translation langcodes for a Drupal node or paragraph. Uses Sentinel's " +
       "translation inventory when available (live default revision vs unpublished working " +
       "draft). Core JSON:API alone serves one language and cannot prove others are absent. " +
       "Defaults to node.",
@@ -193,23 +206,26 @@ export const definitions = [
   {
     name: "drupal_create_translation",
     description:
-      "Create a translation as an unpublished non-default draft revision (governed write). " +
+      "Create a translation as an unpublished non-default draft (governed write). " +
       "Adds the target language beside the default language; it does not PATCH langcode on " +
-      "the canonical entity. English live title, body, status, alias, and default revision " +
-      "stay unchanged. An existing translation is a conflict, not an overwrite. Continue the " +
-      "draft with drupal_update_node and langcode. Requires Sentinel's draft-translation " +
-      "endpoint and a translatable bundle. Paragraph field values are not translated on this " +
-      "path. Defaults to node. Publication stays denied for content-tier callers.",
+      "the canonical entity. English live title, body, status, alias, default revision, and " +
+      "paragraph ERR pins stay unchanged. An existing translation is a conflict, not an overwrite. " +
+      "Continue a node draft with drupal_update_node and langcode; continue a paragraph with " +
+      "drupal_update_paragraph and langcode. Image alt is a relationship (same file UUID, " +
+      "meta.alt). For paragraphs pass revisionId as the host pin. Requires Sentinel's " +
+      "draft-translation endpoint. Publication stays denied for content-tier callers.",
     inputSchema: {
       type: "object", required: ["type", "id", "langcode"],
       properties: {
-        site:       { type: "string" },
-        entityType: { type: "string", description: "Entity type machine name. Default: 'node'." },
-        type:       { type: "string", description: "Bundle machine name, e.g. 'basic_page'" },
-        id:         { type: "string", description: "Entity UUID" },
-        langcode:   { type: "string", description: "Target language code, e.g. 'es', 'de', 'pt-br'" },
-        attributes: { type: "object", description: "Translated field values keyed by Drupal machine name" },
-        dryRun:     { type: "boolean", description: "Validate without saving" },
+        site:          { type: "string" },
+        entityType:    { type: "string", description: "Entity type machine name. Default: 'node'. Use 'paragraph' for paragraph field values." },
+        type:          { type: "string", description: "Bundle machine name, e.g. 'basic_page' or 'p_hero'" },
+        id:            { type: "string", description: "Entity UUID" },
+        langcode:      { type: "string", description: "Target language code, e.g. 'es', 'de', 'pt-br'" },
+        attributes:    { type: "object", description: "Translated field values keyed by Drupal machine name" },
+        relationships: { type: "object", description: "JSON:API relationships. Use for image alt (same file UUID, meta.alt)." },
+        revisionId:    { type: "string", description: "Paragraph revision id the host already pins. Required for Home-shaped non-default pins." },
+        dryRun:        { type: "boolean", description: "Validate without saving" },
       },
     },
   },

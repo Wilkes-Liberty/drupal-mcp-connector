@@ -1,11 +1,11 @@
 ---
-description: "List live and working translation langcodes for a Drupal node. Uses Sentinel's translation inventory when available (live default revision vs unpublished working draft). Core JSON:API alone serves one language and cannot prove others are absent. Defaults to node."
+description: "List live and working translation langcodes for a Drupal node or paragraph. Uses Sentinel's translation inventory when available (live default revision vs unpublished working draft). Core JSON:API alone serves one language and cannot prove others are absent. Defaults to node."
 argument-hint: "<type> <id> [site] [entityType]"
 ---
 
 Call the MCP tool `drupal_list_translations`.
 
-List live and working translation langcodes for a Drupal node. Uses Sentinel's translation inventory when available (live default revision vs unpublished working draft). Core JSON:API alone serves one language and cannot prove others are absent. Defaults to node.
+List live and working translation langcodes for a Drupal node or paragraph. Uses Sentinel's translation inventory when available (live default revision vs unpublished working draft). Core JSON:API alone serves one language and cannot prove others are absent. Defaults to node.
 
 Parse the arguments supplied with this command into this tool's parameters:
 

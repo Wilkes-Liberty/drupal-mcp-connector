@@ -56,14 +56,26 @@ function requireWorkingPair(draftRevision) {
  * @param {string} id
  * @returns {string}
  */
-function nodeResource(backend, entityType, bundle, id) {
-  if (entityType !== "node") {
-    throw new Error("Governed draft translation is implemented for nodes.");
+function draftResource(backend, entityType, bundle, id) {
+  if (entityType !== "node" && entityType !== "paragraph") {
+    throw new Error("Governed draft translation is implemented for nodes and paragraphs.");
   }
   if (typeof backend.rawQuery !== "function" || typeof backend.resourcePath !== "function") {
     throw new Error("This backend does not support governed draft continuation.");
   }
   return `${backend.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`;
+}
+
+/**
+ * @param {object} [draftRevision]
+ * @returns {string}
+ */
+function requireParagraphRevisionId(draftRevision) {
+  const revisionId = String(draftRevision?.revisionId ?? draftRevision?.workingVid ?? "");
+  if (!/^[1-9]\d*$/.test(revisionId)) {
+    throw new Error("Paragraph translation requires a verified paragraph revision ID.");
+  }
+  return revisionId;
 }
 
 /**
@@ -76,8 +88,11 @@ function nodeResource(backend, entityType, bundle, id) {
  */
 export async function writeDraft(backend, input, preflight = false) {
   const { entityType, bundle, id, attributes = {}, relationships, draftRevision, langcode } = input;
+  if (entityType === "paragraph") {
+    return writeParagraphDraft(backend, input, preflight);
+  }
   const { live, working } = requireWorkingPair(draftRevision);
-  const base = nodeResource(backend, entityType, bundle, id);
+  const base = draftResource(backend, entityType, bundle, id);
   const data = { type: `${entityType}--${bundle}`, id, attributes };
   if (relationships) data.relationships = relationships;
   const headers = {
@@ -123,6 +138,11 @@ export async function writeDraft(backend, input, preflight = false) {
 export async function createTranslationDraft(backend, input, preflight = false) {
   const { entityType, bundle, id, attributes = {}, relationships, draftRevision } = input;
   const langcode = assertDraftLangcode(input.langcode);
+  if (entityType === "paragraph") {
+    return createParagraphTranslationDraft(backend, {
+      entityType, bundle, id, attributes, relationships, draftRevision, langcode,
+    }, preflight);
+  }
   const live = String(draftRevision?.liveVid ?? "");
   const workingRaw = draftRevision?.workingVid;
   const working = workingRaw === undefined || workingRaw === null || workingRaw === ""
@@ -134,7 +154,7 @@ export async function createTranslationDraft(backend, input, preflight = false) 
   if (working && (!/^[1-9]\d*$/.test(working) || working === live)) {
     throw new Error("Translation create requires distinct live and working revision IDs when a working copy exists.");
   }
-  const base = nodeResource(backend, entityType, bundle, id);
+  const base = draftResource(backend, entityType, bundle, id);
   const safeAttributes = { ...attributes };
   delete safeAttributes.langcode;
   const data = { type: `${entityType}--${bundle}`, id, attributes: safeAttributes };
@@ -175,10 +195,17 @@ export async function createTranslationDraft(backend, input, preflight = false) 
  * @param {{entityType: string, bundle: string, id: string}} ref
  * @returns {Promise<object>}
  */
-export async function readTranslationInventory(backend, { entityType, bundle, id }) {
-  const base = nodeResource(backend, entityType, bundle, id);
+export async function readTranslationInventory(backend, { entityType, bundle, id, revisionId }) {
+  const base = draftResource(backend, entityType, bundle, id);
+  const headers = {};
+  if (revisionId !== undefined && revisionId !== null && revisionId !== "") {
+    headers["If-Match"] = `"${requireParagraphRevisionId({ revisionId })}"`;
+  }
   try {
-    const result = await backend.rawQuery({ path: `${base}/mcp-translations` });
+    const result = await backend.rawQuery({
+      path: `${base}/mcp-translations`,
+      options: Object.keys(headers).length ? { method: "GET", headers } : undefined,
+    });
     if (!result?.meta?.live) {
       throw new Error("The site did not return a translation inventory.");
     }
@@ -197,8 +224,11 @@ export async function readTranslationInventory(backend, { entityType, bundle, id
 export async function readDraftTranslation(backend, input) {
   const { entityType, bundle, id, draftRevision } = input;
   const langcode = assertDraftLangcode(input.langcode);
+  if (entityType === "paragraph") {
+    return readParagraphDraftTranslation(backend, input);
+  }
   const { live, working } = requireWorkingPair(draftRevision);
-  const base = nodeResource(backend, entityType, bundle, id);
+  const base = draftResource(backend, entityType, bundle, id);
   let result;
   try {
     result = await backend.rawQuery({
@@ -216,6 +246,124 @@ export async function readDraftTranslation(backend, input) {
   }
   if (!result?.data || result.data.id !== id) {
     throw new Error("Draft translation read did not identify the requested entity.");
+  }
+  return backend.toCanonical(result.data);
+}
+
+/**
+ * Continue an unpublished paragraph translation on a pinned revision.
+ * @param {object} backend
+ * @param {object} input
+ * @param {boolean} [preflight]
+ * @returns {Promise<object>}
+ */
+async function writeParagraphDraft(backend, input, preflight = false) {
+  const { entityType, bundle, id, attributes = {}, relationships, draftRevision } = input;
+  const langcode = assertDraftLangcode(input.langcode);
+  const revisionId = requireParagraphRevisionId(draftRevision);
+  const base = draftResource(backend, entityType, bundle, id);
+  const data = { type: `${entityType}--${bundle}`, id, attributes };
+  if (relationships) data.relationships = relationships;
+  const headers = {
+    "If-Match": `"${revisionId}"`,
+    "X-MCP-Draft-Preflight": preflight ? "1" : "0",
+    "X-MCP-Draft-Langcode": langcode,
+  };
+  let result;
+  try {
+    result = await backend.rawQuery({
+      path: `${base}/mcp-draft`,
+      options: { method: "PATCH", headers, body: JSON.stringify({ data }) },
+    });
+  } catch (error) {
+    throw missingEndpointError(error, MISSING_DRAFT_ENDPOINT);
+  }
+  if (preflight) {
+    if (result?.meta?.draft_preflight !== true
+      || String(result.meta.live) !== revisionId
+      || (result.meta.langcode && String(result.meta.langcode) !== langcode)) {
+      throw new Error("The site did not confirm a non-saving paragraph translation preflight. Refusing to continue.");
+    }
+    return result;
+  }
+  if (!result?.data || result.data.id !== id || result.data.type !== data.type) {
+    throw new Error("Paragraph translation write did not identify the requested entity. The write outcome is uncertain; re-read before retrying.");
+  }
+  return backend.toCanonical(result.data);
+}
+
+/**
+ * Create an unpublished paragraph translation on a pinned revision.
+ * @param {object} backend
+ * @param {object} input
+ * @param {boolean} [preflight]
+ * @returns {Promise<object>}
+ */
+async function createParagraphTranslationDraft(backend, input, preflight = false) {
+  const { entityType, bundle, id, attributes = {}, relationships, draftRevision, langcode } = input;
+  const revisionId = requireParagraphRevisionId(draftRevision);
+  const base = draftResource(backend, entityType, bundle, id);
+  const safeAttributes = { ...attributes };
+  delete safeAttributes.langcode;
+  const data = { type: `${entityType}--${bundle}`, id, attributes: safeAttributes };
+  if (relationships) data.relationships = relationships;
+  let result;
+  try {
+    result = await backend.rawQuery({
+      path: `${base}/mcp-draft/translations`,
+      options: {
+        method: "POST",
+        headers: {
+          "If-Match": `"${revisionId}"`,
+          "X-MCP-Draft-Preflight": preflight ? "1" : "0",
+          "X-MCP-Draft-Langcode": langcode,
+        },
+        body: JSON.stringify({ data }),
+      },
+    });
+  } catch (error) {
+    throw missingEndpointError(error, MISSING_TRANSLATION_ENDPOINT);
+  }
+  if (preflight) {
+    if (result?.meta?.draft_preflight !== true || String(result.meta.live) !== revisionId) {
+      throw new Error("The site did not confirm a non-saving paragraph translation preflight. Refusing to continue.");
+    }
+    return result;
+  }
+  if (!result?.data || result.data.id !== id || result.data.type !== data.type) {
+    throw new Error("Paragraph translation create did not identify the requested entity. The write outcome is uncertain; re-read before retrying.");
+  }
+  return backend.toCanonical(result.data);
+}
+
+/**
+ * Read one unpublished paragraph translation of a pinned revision.
+ * @param {object} backend
+ * @param {object} input
+ * @returns {Promise<object>}
+ */
+async function readParagraphDraftTranslation(backend, input) {
+  const { entityType, bundle, id, draftRevision } = input;
+  const langcode = assertDraftLangcode(input.langcode);
+  const revisionId = requireParagraphRevisionId(draftRevision);
+  const base = draftResource(backend, entityType, bundle, id);
+  let result;
+  try {
+    result = await backend.rawQuery({
+      path: `${base}/mcp-draft`,
+      options: {
+        method: "GET",
+        headers: {
+          "If-Match": `"${revisionId}"`,
+          "X-MCP-Draft-Langcode": langcode,
+        },
+      },
+    });
+  } catch (error) {
+    throw missingEndpointError(error, MISSING_TRANSLATION_ENDPOINT);
+  }
+  if (!result?.data || result.data.id !== id) {
+    throw new Error("Paragraph draft translation read did not identify the requested entity.");
   }
   return backend.toCanonical(result.data);
 }
