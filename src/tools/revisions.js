@@ -21,8 +21,9 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import {
-  resolveSecurityConfig, assertReadAllowed, assertWriteAllowed,
+  resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, redactCanonicalEntity,
 } from "../lib/security.js";
+import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } from "../lib/draft-write.js";
 
 // Attributes that describe the entity's identity / revision bookkeeping / paths.
 // These are read-only or server-managed and must NOT be replayed on a revert.
@@ -205,11 +206,39 @@ async function listRevisions({ site: siteName, type, id }) {
  * @returns {Promise<?object>} The revision descriptor, or null if not found.
  * @throws {SecurityError} If reading nodes/bundle is not permitted.
  */
-async function getRevision({ site: siteName, type, id, version }) {
+async function getRevision({ site: siteName, type, id, version, langcode }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
+
+  if (langcode) {
+    const targetLang = assertDraftLangcode(langcode);
+    const inventory = await readTranslationInventory(backend, { entityType: "node", bundle: type, id });
+    if (!inventory.live?.vid || !inventory.working?.vid) {
+      throw new Error("No unpublished working translation is addressable for this revision.");
+    }
+    const entity = await readDraftTranslation(backend, {
+      entityType: "node", bundle: type, id, langcode: targetLang,
+      draftRevision: { liveVid: inventory.live.vid, workingVid: inventory.working.vid },
+    });
+    const redacted = redactCanonicalEntity(entity, sec, "node");
+    return {
+      entityType: "node",
+      bundle: type,
+      id,
+      vid: inventory.working.vid,
+      langcode: targetLang,
+      status: redacted.status,
+      attributes: {
+        title: redacted.title,
+        langcode: redacted.langcode,
+        status: redacted.status,
+        ...redacted.fields,
+      },
+      relationships: redacted.relationships ?? {},
+    };
+  }
 
   const resource = await fetchRevisionResource(backend, "node", type, id, version);
   if (!resource) return null;
@@ -314,13 +343,14 @@ export const definitions = [
   {
     name: "drupal_get_revision",
     description:
-      "Fetch a single revision of a content node by version id or alias. `version` may be a numeric vid (e.g. 42), an explicit 'id:<vid>', or the relative aliases 'rel:latest-version' / 'rel:working-copy'. Read-only; attributes are redacted per security policy.",
+      "Fetch a single revision of a content node by version id or alias. `version` may be a numeric vid (e.g. 42), an explicit 'id:<vid>', or the relative aliases 'rel:latest-version' / 'rel:working-copy'. Pass langcode to read the unpublished working translation of that node (Sentinel). Read-only; attributes are redacted per security policy.",
     inputSchema: {
       type: "object", required: ["type", "id", "version"],
       properties: {
         site:    { type: "string" },
         type:    { type: "string", description: "Content type machine name" },
         id:      { type: "string", description: "Node UUID" },
+        langcode: { type: "string", description: "Target language for the unpublished working translation (e.g. 'es')." },
         version: {
           type: ["string", "number"],
           description: "Numeric vid, 'id:<vid>', 'rel:latest-version', or 'rel:working-copy'.",

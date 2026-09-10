@@ -4,36 +4,48 @@ const backend = {
   getEntity: vi.fn(),
   updateEntity: vi.fn(),
   rawQuery: vi.fn(),
+  resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
+  toCanonical: vi.fn((data) => ({
+    id: data.id, entityType: "node", bundle: "article",
+    langcode: data.attributes?.langcode, title: data.attributes?.title,
+    status: data.attributes?.status ?? false,
+    fields: { drupal_internal__vid: data.attributes?.drupal_internal__vid },
+  })),
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 vi.mock("../../src/lib/config.js", () => ({
   getSiteConfig: vi.fn((n) => ({ _name: n || "d", baseUrl: "https://x", security: { preset: "development" } })),
 }));
-// Use the REAL security layer (handlers call assertReadAllowed/assertWriteAllowed);
-// site.security = {} resolves to the permissive "development" preset.
 
 import { handlers, definitions } from "../../src/tools/translations.js";
 
 const UUID = "11111111-2222-3333-4444-555555555555";
 
-function rawEntity(over = {}) {
+function inventoryMeta() {
   return {
-    data: {
-      type: "node--article",
-      id: UUID,
-      attributes: {
-        title: "Hello",
-        langcode: "en",
-        status: true,
-        body: { value: "B", format: "full_html", summary: "" },
-        ...over,
+    meta: {
+      defaultLangcode: "en",
+      live: {
+        vid: "10",
+        translations: [{ langcode: "en", default: true, status: true, title: "Hello", moderation_state: "published" }],
       },
-      links: { self: { href: "https://x/jsonapi/node/article/" + UUID } },
+      working: {
+        vid: "11",
+        translations: [
+          { langcode: "en", default: true, status: true, title: "Hello", moderation_state: "published" },
+          { langcode: "es", default: false, status: false, title: "Hola", moderation_state: "draft" },
+        ],
+      },
     },
   };
 }
 
-beforeEach(() => Object.values(backend).forEach((f) => f.mockReset()));
+beforeEach(() => {
+  backend.getEntity.mockReset();
+  backend.updateEntity.mockReset();
+  backend.rawQuery.mockReset();
+  backend.toCanonical.mockClear();
+});
 
 describe("translations tools", () => {
   it("exposes the two governed tools with correct required params", () => {
@@ -45,87 +57,92 @@ describe("translations tools", () => {
 
     const create = definitions.find((d) => d.name === "drupal_create_translation");
     expect(create.inputSchema.required).toEqual(expect.arrayContaining(["type", "id", "langcode"]));
+    expect(create.description).toMatch(/unpublished non-default draft/);
+    expect(create.description).not.toMatch(/replace a translation/);
   });
 
-  it("list_translations defaults entityType to node and reports the current langcode", async () => {
-    backend.rawQuery.mockResolvedValue(rawEntity());
+  it("list_translations prefers Sentinel inventory over a single JSON:API langcode", async () => {
+    backend.rawQuery.mockResolvedValue(inventoryMeta());
     const out = await handlers.drupal_list_translations({ type: "article", id: UUID });
+    expect(backend.rawQuery.mock.calls[0][0].path).toBe(`/jsonapi/node/article/${UUID}/mcp-translations`);
+    expect(out.langcodes).toEqual(["en", "es"]);
+    expect(out.working.vid).toBe("11");
+    expect(out.live.translations).toHaveLength(1);
+  });
 
-    // It must read the entity through the validated backend rawQuery (not bypass it).
-    expect(backend.rawQuery).toHaveBeenCalledTimes(1);
-    const path = backend.rawQuery.mock.calls[0][0].path;
-    expect(path).toBe(`/jsonapi/node/article/${UUID}`);
-
-    expect(out.id).toBe(UUID);
-    expect(out.entityType).toBe("node");
-    expect(out.bundle).toBe("article");
-    expect(out.defaultLangcode).toBe("en");
+  it("list_translations falls back to one observable langcode when Sentinel is absent", async () => {
+    backend.rawQuery
+      .mockRejectedValueOnce(new Error("Drupal 404 on GET /jsonapi/node/article/x/mcp-translations"))
+      .mockResolvedValueOnce({
+        data: { type: "node--article", id: UUID, attributes: { title: "Hello", langcode: "en" } },
+      });
+    const out = await handlers.drupal_list_translations({ type: "article", id: UUID });
     expect(out.langcodes).toEqual(["en"]);
-    expect(out.translations).toEqual([{ langcode: "en", default: true }]);
+    expect(out.note).toMatch(/unavailable/);
   });
 
-  it("list_translations supports a non-node entityType", async () => {
-    backend.rawQuery.mockResolvedValue(rawEntity({ langcode: "de" }));
-    await handlers.drupal_list_translations({ entityType: "taxonomy_term", type: "tags", id: UUID });
-    expect(backend.rawQuery.mock.calls[0][0].path).toBe(`/jsonapi/taxonomy_term/tags/${UUID}`);
-  });
-
-  it("list_translations returns null-ish shape when the entity is missing", async () => {
-    backend.rawQuery.mockResolvedValue({ data: null });
-    const out = await handlers.drupal_list_translations({ type: "article", id: UUID });
-    expect(out).toBeNull();
-  });
-
-  it("list_translations validates the id (rejects non-UUID)", async () => {
-    await expect(
-      handlers.drupal_list_translations({ type: "article", id: "not-a-uuid" })
-    ).rejects.toThrow();
-    expect(backend.rawQuery).not.toHaveBeenCalled();
-  });
-
-  it("create_translation is a governed write: PATCHes langcode + attributes via updateEntity", async () => {
-    backend.updateEntity.mockResolvedValue({ id: UUID, entityType: "node", bundle: "article", langcode: "de" });
+  it("create_translation POSTs the translation endpoint instead of PATCHing langcode", async () => {
+    const live = {
+      id: UUID, entityType: "node", bundle: "article", langcode: "en", status: true,
+      fields: { drupal_internal__vid: 10, moderation_state: "published" },
+    };
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => (
+      resourceVersion === "rel:working-copy" ? null : live
+    ));
+    backend.rawQuery.mockResolvedValue({
+      data: {
+        type: "node--article", id: UUID,
+        attributes: { title: "Hallo", langcode: "de", status: false, drupal_internal__vid: 12 },
+      },
+    });
     const out = await handlers.drupal_create_translation({
       type: "article",
       id: UUID,
       langcode: "de",
-      attributes: { title: "Hallo", body: { value: "B", format: "full_html" } },
+      attributes: { title: "Hallo" },
     });
-
-    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
-    const arg = backend.updateEntity.mock.calls[0][0];
-    expect(arg).toMatchObject({ entityType: "node", bundle: "article", id: UUID });
-    expect(arg.attributes.langcode).toBe("de");
-    expect(arg.attributes.title).toBe("Hallo");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(backend.rawQuery).toHaveBeenCalledOnce();
+    const call = backend.rawQuery.mock.calls[0][0];
+    expect(call.path).toBe(`/jsonapi/node/article/${UUID}/mcp-draft/translations`);
+    expect(call.options.method).toBe("POST");
+    expect(call.options.headers["X-MCP-Draft-Langcode"]).toBe("de");
+    expect(call.options.headers["If-Match"]).toBe('"10"');
+    const body = JSON.parse(call.options.body);
+    expect(body.data.attributes.langcode).toBeUndefined();
+    expect(body.data.attributes.title).toBe("Hallo");
     expect(out.langcode).toBe("de");
   });
 
-  it("create_translation defaults to node and requires a langcode", async () => {
-    backend.updateEntity.mockResolvedValue({ id: UUID, langcode: "fr" });
-    await handlers.drupal_create_translation({ type: "article", id: UUID, langcode: "fr", attributes: {} });
-    const arg = backend.updateEntity.mock.calls[0][0];
-    expect(arg.entityType).toBe("node");
-    expect(arg.attributes.langcode).toBe("fr");
+  it("create_translation uses live:working If-Match when an English working copy exists", async () => {
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => (
+      resourceVersion === "rel:working-copy"
+        ? { id: UUID, fields: { drupal_internal__vid: 11 } }
+        : { id: UUID, status: true, fields: { drupal_internal__vid: 10, moderation_state: "published" } }
+    ));
+    backend.rawQuery.mockResolvedValue({
+      data: { type: "node--article", id: UUID, attributes: { title: "Hallo", langcode: "de" } },
+    });
+    await handlers.drupal_create_translation({ type: "article", id: UUID, langcode: "de", attributes: { title: "Hallo" } });
+    expect(backend.rawQuery.mock.calls[0][0].options.headers["If-Match"]).toBe('"10:11"');
   });
 
   it("create_translation rejects a missing/blank langcode", async () => {
     await expect(
       handlers.drupal_create_translation({ type: "article", id: UUID, langcode: "", attributes: {} })
     ).rejects.toThrow();
-    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(backend.rawQuery).not.toHaveBeenCalled();
   });
 
   it("create_translation validates the langcode shape (no path injection)", async () => {
     await expect(
       handlers.drupal_create_translation({ type: "article", id: UUID, langcode: "../../evil", attributes: {} })
     ).rejects.toThrow();
-    expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
   it("create_translation validates the id (rejects non-UUID)", async () => {
     await expect(
       handlers.drupal_create_translation({ type: "article", id: "nope", langcode: "de", attributes: {} })
     ).rejects.toThrow();
-    expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 });

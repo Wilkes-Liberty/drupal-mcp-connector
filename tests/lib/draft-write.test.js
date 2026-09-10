@@ -48,4 +48,26 @@ describe("governed draft continuation", () => {
     await expect(writeDraft(b, input)).rejects.toThrow("409");
     expect(b.rawQuery).toHaveBeenCalledOnce();
   });
+  it("sends X-MCP-Draft-Langcode when continuing a translation", async () => {
+    const b = backend({ meta: { draft_preflight: true, live: "10", working: "11", langcode: "es" } });
+    await writeDraft(b, { ...input, langcode: "es" }, true);
+    expect(b.rawQuery.mock.calls[0][0].options.headers["X-MCP-Draft-Langcode"]).toBe("es");
+  });
+});
+
+describe("governed translation create", () => {
+  it("POSTs translations with live-only If-Match when there is no working copy", async () => {
+    const { createTranslationDraft } = await import("../../src/lib/draft-write.js");
+    const b = backend({ data: { id: input.id, type: "node--page", attributes: { title: "Artículos", langcode: "es" } } });
+    await createTranslationDraft(b, {
+      ...input, langcode: "es", attributes: { title: "Artículos", langcode: "es" },
+      draftRevision: { liveVid: 10 },
+    });
+    const [{ path, options }] = b.rawQuery.mock.calls[0];
+    expect(path).toBe("/jsonapi/node/page/example-uuid/mcp-draft/translations");
+    expect(options.method).toBe("POST");
+    expect(options.headers["If-Match"]).toBe('"10"');
+    expect(options.headers["X-MCP-Draft-Langcode"]).toBe("es");
+    expect(JSON.parse(options.body).data.attributes.langcode).toBeUndefined();
+  });
 });
