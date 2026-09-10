@@ -14,7 +14,7 @@ import {
   assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
 } from "../lib/security.js";
 import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
-import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA } from "../lib/entity-response.js";
+import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA, omitLiveComputedMetatag } from "../lib/entity-response.js";
 import { resolveErrRelationships, relationshipsWereSent } from "../lib/err-relationships.js";
 import { attachWrittenRevisionPair, readWrittenRevision } from "../lib/write-revision.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
@@ -253,7 +253,7 @@ async function getNode({ site: siteName, type, id, langcode, resourceVersion }) 
         entityType: "node", bundle: type, id, langcode: targetLang,
         draftRevision: { liveVid: inventory.live.vid, workingVid: inventory.working.vid },
       });
-      return redactCanonicalEntity(entity, sec, "node");
+      return omitLiveComputedMetatag(redactCanonicalEntity(entity, sec, "node"));
     }
     const liveHas = (inventory.live?.translations ?? []).some((row) => row.langcode === targetLang);
     if (!liveHas) {
