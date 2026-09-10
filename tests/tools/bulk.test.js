@@ -189,7 +189,10 @@ describe("bulk tools", () => {
     });
     // Explicit state still skips the #131 existing-entity pre-read; #166 may
     // GET rel:working-copy so the PATCH can target a draft when one exists.
-    expect(backend.getEntity.mock.calls.every(([arg]) => arg.resourceVersion === "rel:working-copy")).toBe(true);
+    // #273 may GET rel:latest-version for the possiblyPatchBlocked fingerprint.
+    expect(backend.getEntity.mock.calls.every(([arg]) => (
+      arg.resourceVersion === "rel:working-copy" || arg.resourceVersion === "rel:latest-version"
+    ))).toBe(true);
   });
 
   it("bulk_update continues past a per-item failure (partial success)", async () => {

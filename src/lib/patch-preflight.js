@@ -35,6 +35,9 @@ export const PATCH_WORKING_COPY_STALE_CODE = "PATCH_WORKING_COPY_STALE";
 /** Stable error code when the working-copy resource does not match the target. */
 export const PATCH_TARGET_AMBIGUOUS_CODE = "PATCH_TARGET_AMBIGUOUS";
 
+/** Stable error code for Sentinel's save-time stale-default-revision refusal. */
+export const STALE_COPY_CODE = "STALE_COPY";
+
 const WORKING_COPY_PATCH_RE = /has a working copy is not yet supported/i;
 
 /**
@@ -96,6 +99,81 @@ export class WorkingCopyStaleError extends Error {
     this.code = PATCH_WORKING_COPY_STALE_CODE;
     if (cause) this.cause = cause;
   }
+}
+
+/**
+ * Sentinel's save-time stale-default check (McpWritePreconditions) is not
+ * exercised by the id-mismatch PATCH probe — that probe fails before
+ * entity validation / presave. A published node with no distinct working
+ * copy and a changed timestamp later than its own revision_timestamp is
+ * the readable fingerprint (`possiblyPatchBlocked`). dryRun and the real
+ * write must refuse the same way; reloading and retrying does not help.
+ * Do not bypass the draft or publish gate. See connector #273.
+ */
+export const STALE_COPY_MESSAGE =
+  "This entity cannot be updated: MCP Sentinel refused a stale default-revision " +
+  "write (the content changed after this copy was loaded). dryRun and the real " +
+  "write share this check. rel:latest-version and rel:working-copy report the " +
+  "same vid, but the default revision's changed timestamp is later than its " +
+  "revision_timestamp (possiblyPatchBlocked). Reloading and retrying the same " +
+  "canonical PATCH will not help. Do not bypass the draft or publish gate. " +
+  "See connector #273 / #201.";
+
+const STALE_COPY_RE = /changed after this copy was loaded/i;
+
+/**
+ * Thrown when a canonical write (or its dryRun) would hit Sentinel's
+ * stale-default-revision check (#273).
+ */
+export class StaleCopyError extends Error {
+  /**
+   * @param {?Error} [cause]
+   */
+  constructor(cause) {
+    super(STALE_COPY_MESSAGE);
+    this.name = "StaleCopyError";
+    this.code = STALE_COPY_CODE;
+    if (cause) this.cause = cause;
+  }
+}
+
+/**
+ * Whether an error is Sentinel's stale-version refusal (or our rewrite).
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isStaleCopyError(err) {
+  if (err instanceof StaleCopyError) return true;
+  return STALE_COPY_RE.test(String(err?.message || ""));
+}
+
+/**
+ * Whether a canonical entity's `changed` is later than its own
+ * `revision_timestamp` — the same fingerprint `drupal_list_revisions`
+ * reports as `possiblyPatchBlocked`.
+ * @param {?object} entity Canonical entity or revision summary.
+ * @returns {boolean}
+ */
+export function changedAheadOfRevision(entity) {
+  if (!entity || typeof entity !== "object") return false;
+  const fields = entity.fields && typeof entity.fields === "object" ? entity.fields : {};
+  const changed = entity.changed;
+  const rev = entity.revisionTimestamp ?? fields.revision_timestamp;
+  if (!changed || !rev) return false;
+  const changedMs = Date.parse(changed);
+  const revMs = Date.parse(rev);
+  if (!Number.isFinite(changedMs) || !Number.isFinite(revMs)) return false;
+  return changedMs > revMs;
+}
+
+/**
+ * Rewrite Sentinel's save-time stale-version refusal into {@link StaleCopyError}.
+ * @param {unknown} err
+ * @returns {unknown}
+ */
+export function rewriteStaleCopyError(err) {
+  if (!isStaleCopyError(err) || err instanceof StaleCopyError) return err;
+  return new StaleCopyError(err instanceof Error ? err : new Error(String(err)));
 }
 
 /**
@@ -305,6 +383,25 @@ export async function prepareGuardedPatch(backend, {
   const target = shouldPreflightPatch({ existing, attributes })
     ? await resolveWorkingCopyPatchTarget(backend, { entityType, bundle, id, existing })
     : { resourceVersion: undefined, workingCopy: null, liveVid: null, workingVid: null };
+  if (shouldPreflightPatch({ existing, attributes }) && !target.resourceVersion) {
+    // Canonical path (no distinct working copy). The id-mismatch probe never
+    // reaches Sentinel's save-time stale-default check; refuse here when the
+    // possiblyPatchBlocked fingerprint is already readable (#273).
+    let fingerprint = existing;
+    const fields = fingerprint?.fields && typeof fingerprint.fields === "object" ? fingerprint.fields : {};
+    const hasTimestamps = Boolean(
+      fingerprint?.changed && (fingerprint.revisionTimestamp || fields.revision_timestamp),
+    );
+    if (!hasTimestamps && typeof backend?.getEntity === "function") {
+      const latest = await backend.getEntity({
+        entityType, bundle, id, resourceVersion: "rel:latest-version",
+      }).catch(() => null);
+      if (latest) fingerprint = latest;
+    }
+    if (changedAheadOfRevision(fingerprint)) {
+      throw new StaleCopyError();
+    }
+  }
   if (langcode) {
     if (!target.workingVid || !target.liveVid || String(target.workingVid) === String(target.liveVid)) {
       throw new Error(
@@ -313,23 +410,35 @@ export async function prepareGuardedPatch(backend, {
       );
     }
     target.draftRevision = { liveVid: target.liveVid, workingVid: target.workingVid };
-    await writeDraft(backend, {
-      entityType, bundle, id, attributes, relationships, langcode,
-      draftRevision: target.draftRevision,
-    }, true);
+    try {
+      await writeDraft(backend, {
+        entityType, bundle, id, attributes, relationships, langcode,
+        draftRevision: target.draftRevision,
+      }, true);
+    } catch (err) {
+      throw rewriteStaleCopyError(err);
+    }
     return target;
   }
   if (target.resourceVersion) {
     target.draftRevision = { liveVid: target.liveVid, workingVid: target.workingVid };
-    await writeDraft(backend, {
-      entityType, bundle, id, attributes, relationships, draftRevision: target.draftRevision,
-    }, true);
+    try {
+      await writeDraft(backend, {
+        entityType, bundle, id, attributes, relationships, draftRevision: target.draftRevision,
+      }, true);
+    } catch (err) {
+      throw rewriteStaleCopyError(err);
+    }
     return target;
   }
-  await preflightPatchWritable({
-    backend, entityType, bundle, id, existing, attributes,
-    resourceVersion: target.resourceVersion,
-  });
+  try {
+    await preflightPatchWritable({
+      backend, entityType, bundle, id, existing, attributes,
+      resourceVersion: target.resourceVersion,
+    });
+  } catch (err) {
+    throw rewriteStaleCopyError(err);
+  }
   return target;
 }
 
@@ -350,6 +459,8 @@ export async function updateEntityGuarded(backend, input) {
     }
     return await backend.updateEntity(input);
   } catch (err) {
+    const stale = rewriteStaleCopyError(err);
+    if (stale !== err) throw stale;
     if (!isWorkingCopyPatchError(err)) throw err;
     const cause = err instanceof Error ? err : new Error(String(err));
     if (input?.resourceVersion === "rel:working-copy") {

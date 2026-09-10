@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`dryRun` fails when a published-node write would hit Sentinel's stale-copy check (#273).**
+  The id-mismatch PATCH probe never reaches entity validation / presave, so it
+  could not see MCP Sentinel's default-revision stale-version refusal. When
+  `rel:latest-version` and `rel:working-copy` share a vid and the default
+  revision's `changed` is later than `revision_timestamp` (`possiblyPatchBlocked`),
+  `drupal_update_node` / `drupal_entity_update` (including `dryRun`) now refuse
+  with a stable `STALE_COPY` error. The same message is rewritten if Sentinel
+  still returns it on the saving write. Governance is unchanged: the draft and
+  publish gates are not bypassed.
+
 ### Added
 - **Unpublished paragraph field-value translation and image alt (#280).**
   `drupal_create_translation` accepts `entityType: "paragraph"` and
