@@ -145,4 +145,52 @@ describe("translations tools", () => {
       handlers.drupal_create_translation({ type: "article", id: "nope", langcode: "de", attributes: {} })
     ).rejects.toThrow();
   });
+
+  it("create_translation for a paragraph POSTs the paragraph translation endpoint", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: UUID, entityType: "paragraph", bundle: "text_block",
+      fields: { drupal_internal__revision_id: 3556 },
+    });
+    backend.rawQuery.mockResolvedValue({
+      data: { type: "paragraph--text_block", id: UUID, attributes: { field_text: "Hola hero", langcode: "es" } },
+    });
+    await handlers.drupal_create_translation({
+      entityType: "paragraph", type: "text_block", id: UUID, langcode: "es",
+      revisionId: "3556", attributes: { field_text: "Hola hero" },
+    });
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    const call = backend.rawQuery.mock.calls[0][0];
+    expect(call.path).toBe(`/jsonapi/paragraph/text_block/${UUID}/mcp-draft/translations`);
+    expect(call.options.method).toBe("POST");
+    expect(call.options.headers["If-Match"]).toBe('"3556"');
+    expect(call.options.headers["X-MCP-Draft-Langcode"]).toBe("es");
+  });
+
+  it("create_translation forwards image relationships for alt-only writes", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: UUID, entityType: "node", bundle: "person", status: true,
+      fields: { drupal_internal__vid: 10, moderation_state: "published" },
+    });
+    backend.rawQuery.mockResolvedValue({
+      data: { type: "node--person", id: UUID, attributes: { title: "Nombre", langcode: "es" } },
+    });
+    const fileId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    await handlers.drupal_create_translation({
+      type: "person", id: UUID, langcode: "es",
+      attributes: { title: "Nombre" },
+      relationships: {
+        field_photo: { data: { type: "file--file", id: fileId, meta: { alt: "Translated alt" } } },
+      },
+    });
+    const body = JSON.parse(backend.rawQuery.mock.calls[0][0].options.body);
+    expect(body.data.relationships.field_photo.data.meta.alt).toBe("Translated alt");
+    expect(body.data.relationships.field_photo.data.id).toBe(fileId);
+  });
+
+  it("create_translation rejects entity types other than node and paragraph", async () => {
+    await expect(
+      handlers.drupal_create_translation({ entityType: "media", type: "image", id: UUID, langcode: "es" })
+    ).rejects.toThrow(/nodes and paragraphs/);
+    expect(backend.rawQuery).not.toHaveBeenCalled();
+  });
 });

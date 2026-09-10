@@ -637,7 +637,7 @@ Inspect and create entity translations (multilingual / `content_translation`). A
 | Tool | Required params | Description |
 |------|----------------|-------------|
 | `drupal_list_translations` | `type`, `id` | List live and working translation langcodes (Sentinel inventory). Falls back to the single observable JSON:API language with a note when the inventory endpoint is absent. |
-| `drupal_create_translation` | `type`, `id`, `langcode` | Create a target-language **unpublished draft** beside the default language. Does not overwrite an existing translation. Continue it with `drupal_update_node` + `langcode`. Paragraph field values are not translated on this path. |
+| `drupal_create_translation` | `type`, `id`, `langcode` | Create a target-language **unpublished draft** beside the default language. Does not overwrite an existing translation. Continue a node with `drupal_update_node` + `langcode`, or a paragraph with `drupal_update_paragraph` + `langcode`. Image alt is a relationship (same file UUID, `meta.alt`). |
 
 ### drupal_create_translation
 
@@ -653,7 +653,9 @@ Inspect and create entity translations (multilingual / `content_translation`). A
 }
 ```
 
-Continue that draft with `drupal_update_node` (`langcode: "es"`) and the same UUID. Read it with `drupal_get_node` (`langcode: "es"`). The published English default revision is not the write target. Paragraph field-value translation and media photo-alt translation are pending.
+Continue that draft with `drupal_update_node` (`langcode: "es"`) and the same UUID. Read it with `drupal_get_node` (`langcode: "es"`). The published English default revision is not the write target.
+
+For paragraph field values, pass `entityType: "paragraph"`, the paragraph bundle as `type`, and `revisionId` as the host's `meta.target_revision_id`. Nested children are translated the same way; do not retarget the parent ERR field. Image alt on a person (or any translatable image field) is a `relationships` entry with the existing file UUID and `meta.alt` — not a file replacement. Media entity translation is not used.
 
 ---
 
@@ -668,8 +670,8 @@ The create/update tools return `relationshipData` that includes that meta key. H
 | Tool | Required params | Description |
 |------|----------------|-------------|
 | `drupal_create_paragraph` | `paragraphType` | Create a Paragraph of a given bundle. Returns the paragraph plus `relationshipData` (`{ type: 'paragraph--<bundle>', id, meta: { target_revision_id } }`). Governed write. |
-| `drupal_update_paragraph` | `paragraphType`, `id` | Partial update of an existing paragraph. Returns the same `relationshipData` shape (with the current revision id). |
-| `drupal_get_paragraph` | `paragraphType`, `id` | Fetch a single Paragraph by bundle + UUID. Returns the redacted paragraph (including `fields.drupal_internal__revision_id`) plus a `ref` with `meta.target_revision_id` when known. |
+| `drupal_update_paragraph` | `paragraphType`, `id` | Partial update of an existing paragraph. Pass `langcode` to continue an unpublished translation via Sentinel. Without `langcode`, canonical JSON:API is still gated on published-host children. |
+| `drupal_get_paragraph` | `paragraphType`, `id` | Fetch a single Paragraph by bundle + UUID. Pass `langcode` to read an unpublished working translation. Returns the redacted paragraph (including `fields.drupal_internal__revision_id`) plus a `ref` with `meta.target_revision_id` when known. |
 
 ### drupal_create_paragraph
 

@@ -56,6 +56,21 @@ describe("governed draft continuation", () => {
 });
 
 describe("governed translation create", () => {
+  it("POSTs paragraph translations with the pinned revision If-Match", async () => {
+    const { createTranslationDraft } = await import("../../src/lib/draft-write.js");
+    const b = backend({ data: { id: "p-uuid", type: "paragraph--text_block" } });
+    b.resourcePath = () => "/jsonapi/paragraph/text_block";
+    await createTranslationDraft(b, {
+      entityType: "paragraph", bundle: "text_block", id: "p-uuid",
+      langcode: "es", attributes: { field_text: "Hola hero" },
+      draftRevision: { revisionId: 3556 },
+    });
+    const [{ path, options }] = b.rawQuery.mock.calls[0];
+    expect(path).toBe("/jsonapi/paragraph/text_block/p-uuid/mcp-draft/translations");
+    expect(options.headers["If-Match"]).toBe('"3556"');
+    expect(options.headers["X-MCP-Draft-Langcode"]).toBe("es");
+  });
+
   it("POSTs translations with live-only If-Match when there is no working copy", async () => {
     const { createTranslationDraft } = await import("../../src/lib/draft-write.js");
     const b = backend({ data: { id: input.id, type: "node--page", attributes: { title: "Artículos", langcode: "es" } } });
