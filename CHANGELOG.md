@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`langcode` reads target only an unpublished working translation.**
+  After a Spanish draft exists, English on that working revision is still
+  the published copy. `drupal_get_node` / `drupal_get_revision` with
+  `langcode` now read the working translation only when that language is
+  unpublished, so they do not treat published English as a draft.
 - **Spanish (and other) draft translations beside published English (#276).**
   `drupal_create_translation` no longer PATCHes `langcode` on the canonical
   entity. It POSTs Sentinel's `/mcp-draft/translations` endpoint so Drupal
