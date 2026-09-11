@@ -33,7 +33,7 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 
-import { listSiteNames, getTlsConfig, loadConfig, CLIENT_VERSION } from "./lib/config.js";
+import { listSiteNames, getTlsConfig, loadConfig, CLIENT_VERSION, SERVER_INFO } from "./lib/config.js";
 import { loadLocalSecrets, secretLoadFatalMessage, secretTableMismatchMessage } from "./lib/load-secrets.js";
 import {
   makeBearerCheck,
@@ -291,7 +291,7 @@ function getPromptMessages(name, args) {
 // ---------------------------------------------------------------------------
 
 const buildConnectorServer = createConnectorServerFactory({
-  serverInfo: { name: "drupal-mcp-connector", version: CLIENT_VERSION },
+  serverInfo: SERVER_INFO,
   tools: {
     definitions: allDefinitions,
     list: discoverableTools,

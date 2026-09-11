@@ -23,7 +23,7 @@
  */
 
 import fetch from "node-fetch";
-import { authHeadersAsync, clientHeaders, CLIENT_VERSION } from "./config.js";
+import { authHeadersAsync, clientHeaders, CLIENT_NAME, CLIENT_VERSION } from "./config.js";
 import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial } from "./data-flow.js";
 import { clearToken } from "./oauth.js";
 
@@ -164,7 +164,7 @@ async function initializeSession(site, endpoint) {
     params: {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: {},
-      clientInfo: { name: "drupal-mcp-connector", version: CLIENT_VERSION },
+      clientInfo: { name: CLIENT_NAME, version: CLIENT_VERSION },
     },
   };
 

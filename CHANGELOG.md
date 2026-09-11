@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Public product name is Drupal MCP Connector (#301).** Document titles and
+  the MCP handshake `serverInfo.title` now use the title-case product name.
+  The machine identifiers are unchanged: npm package, GitHub repo, binaries,
+  `X-MCP-Client`, log prefixes, and `serverInfo.name` remain
+  `drupal-mcp-connector`.
+
 ## [2.15.2] - 2026-09-11
 
 ### Fixed
