@@ -40,7 +40,10 @@ const ID_MISMATCH = new Error(
 function backendStub(over = {}) {
   return {
     resourcePath: (et, b) => `/jsonapi/${et}/${b}`,
-    rawQuery: vi.fn(async () => { throw ID_MISMATCH; }),
+    rawQuery: vi.fn(async ({ path }) => {
+      if (path.endsWith("/mcp-translations")) throw new Error("Drupal 404 inventory unavailable");
+      throw ID_MISMATCH;
+    }),
     getEntity: vi.fn(async () => null),
     updateEntity: vi.fn(async (input) => ({ id: input.id })),
     ...over,
@@ -389,7 +392,7 @@ describe("stale default-revision fingerprint (#273)", () => {
       code: STALE_COPY_CODE,
       message: STALE_COPY_MESSAGE,
     });
-    expect(backend.rawQuery).not.toHaveBeenCalled();
+    expect(backend.rawQuery.mock.calls.every(([call]) => call.path.endsWith("/mcp-translations"))).toBe(true);
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 

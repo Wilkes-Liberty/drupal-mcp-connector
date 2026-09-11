@@ -63,6 +63,7 @@ function rawResource(over = {}) {
 
 beforeEach(() => {
   Object.values(backend).forEach((f) => f.mockReset());
+  backend.rawQuery.mockRejectedValue(new Error("Drupal 404 inventory unavailable"));
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
 });
 

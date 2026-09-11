@@ -469,16 +469,18 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   let fresh = await readWrittenRevision({
     backend, entityType: "node", bundle: type, id,
     relationshipsSent: relationshipsWereSent(resolvedRelationships),
+    langcode,
     patchResult: patched,
     preferCanonical: true,
     resourceVersion: patchTarget.resourceVersion,
   });
   const intendedAlias = pathAttr?.alias ? normalizeAlias(pathAttr.alias) : null;
   if (intendedAlias) {
-    fresh = await assertAliasPersisted({
+    const aliasChecked = await assertAliasPersisted({
       backend, sec, type, id, intendedAlias,
       resourceVersion: patchTarget.resourceVersion, written: fresh,
     });
+    fresh = langcode ? { ...fresh, url: aliasChecked.url } : aliasChecked;
   }
   // Redirect only after the new alias is what re-reads show (#274).
   const redirectResult = redirect ? await createRenameRedirect(backend, sec, redirect) : null;
@@ -582,7 +584,7 @@ export const definitions = [
   },
   {
     name: "drupal_update_node",
-    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Pass langcode to continue an unpublished working translation (Sentinel X-MCP-Draft-Langcode); this does not PATCH canonical langcode and will not create a missing translation — use drupal_create_translation first. Entity-reference fields go in `relationships`, not `fields`. Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved (an unresolved identifier persists as an empty field). On moderated targets a non-saving PATCH preflight runs first — including on dryRun — against the same URL the write will hit. An addressable node draft uses Sentinel's governed draft endpoint with live/working revision preconditions (#166); dryRun uses that same target. workingCopy:null from drupal_list_revisions is not proof the node is writable (possiblyPatchBlocked / #201). Preflight here does not un-orphan paragraphs already created; probe the host before creating dependents.",
+    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Pass langcode to continue an unpublished working translation (Sentinel X-MCP-Draft-Langcode); this does not PATCH canonical langcode and will not create a missing translation — use drupal_create_translation first. Entity-reference fields go in `relationships`, not `fields`. Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved (an unresolved identifier persists as an empty field). On moderated targets a non-saving PATCH preflight runs first — including on dryRun — against the same URL the write will hit. Existing node drafts use Sentinel's governed draft endpoint with verified live/working revision preconditions; translation-only drafts are discovered through Sentinel inventory (#297). Pass explicit langcode to continue an unpublished translation. Published languages are not converted into drafts; dryRun uses the same target. workingCopy:null from drupal_list_revisions is not proof the node is writable (possiblyPatchBlocked / #201). Preflight here does not un-orphan paragraphs already created; probe the host before creating dependents.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {

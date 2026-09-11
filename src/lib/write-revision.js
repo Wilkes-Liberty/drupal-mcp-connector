@@ -65,7 +65,10 @@ export async function attachWrittenRevisionPair({
   backend, entityType, bundle, id, entity, liveVid,
 }) {
   if (liveVid === null || liveVid === undefined || !entity) return entity;
-  let workingVid = null;
+  let workingVid = entityRevisionId(entity);
+  if (workingVid !== null && String(workingVid) !== String(liveVid)) {
+    return attachRevisionPair(entity, { live: liveVid, working: workingVid });
+  }
   if (typeof backend?.getEntity === "function") {
     try {
       const wc = await backend.getEntity({
@@ -93,12 +96,16 @@ export async function attachWrittenRevisionPair({
  *   for the write (e.g. `rel:working-copy`). PreferCanonical re-reads this
  *   resource instead of the default revision so a draft PATCH is not
  *   replaced by the live body.
+ * @param {?string} [args.langcode] Language returned by governed draft continuation.
  * @returns {Promise<object>} Entity to return, with `_revision` when relevant.
  */
 export async function readWrittenRevision({
   backend, entityType, bundle, id, relationshipsSent, patchResult = null, preferCanonical = false,
-  resourceVersion,
+  resourceVersion, langcode,
 }) {
+  // Sentinel returned the requested translation; a canonical read would replace
+  // it with live English, and the core working-copy alias may not address it.
+  if (langcode && patchResult) return patchResult;
   if (!relationshipsSent) {
     if (preferCanonical && typeof backend.getEntity === "function") {
       const fresh = await backend.getEntity({
