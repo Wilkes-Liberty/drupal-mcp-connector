@@ -1,4 +1,4 @@
-# drupal-mcp-connector
+# Drupal MCP Connector
 
 > A secure, multi-site Model Context Protocol (MCP) connector for Drupal — dual-protocol JSON:API and GraphQL access, governed draft translations, content tools, audit reports, and an SSH Drush bridge.
 
@@ -15,7 +15,7 @@ Built by **[Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda)** (opensourc
 
 ## What It Does
 
-`drupal-mcp-connector` connects any [Model Context Protocol](https://modelcontextprotocol.io) client to one or more Drupal sites. It exposes Drupal content and configuration as a set of MCP **tools**, **resources**, and **prompts**, so an MCP client can read, audit, and (where permitted) write content through structured, governed operations instead of the admin UI:
+**Drupal MCP Connector** (`drupal-mcp-connector`) connects any [Model Context Protocol](https://modelcontextprotocol.io) client to one or more Drupal sites. It exposes Drupal content and configuration as a set of MCP **tools**, **resources**, and **prompts**, so an MCP client can read, audit, and (where permitted) write content through structured, governed operations instead of the admin UI:
 
 ```
 "Find all articles missing a meta description and list them."

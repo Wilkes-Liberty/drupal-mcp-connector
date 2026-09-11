@@ -134,7 +134,7 @@ export function renderCodexSkillMarkdown(definitions = allDefinitions) {
     "---",
     `name: ${yamlString(CODEX_SKILL_NAME)}`,
     `description: ${yamlString(
-      "Use Drupal MCP tools (drupal_*) via drupal-mcp-connector to read or write Drupal content, media, taxonomy, reports, and config. Trigger when the user asks to work with a Drupal site over MCP.",
+      "Use Drupal MCP tools (drupal_*) via Drupal MCP Connector (drupal-mcp-connector) to read or write Drupal content, media, taxonomy, reports, and config. Trigger when the user asks to work with a Drupal site over MCP.",
     )}`,
     "---",
     "",
@@ -161,7 +161,7 @@ export function renderCodexToolsReference(definitions = allDefinitions) {
   const lines = [
     "# Drupal MCP tools",
     "",
-    "Protocol tool names for `drupal-mcp-connector`. Call these via MCP; do not invent REST paths.",
+    "Protocol tool names for Drupal MCP Connector. Call these via MCP; do not invent REST paths.",
     "",
   ];
   for (const def of definitions) {

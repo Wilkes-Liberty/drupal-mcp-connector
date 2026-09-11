@@ -1,4 +1,4 @@
-# Contributing to drupal-mcp-connector
+# Contributing to Drupal MCP Connector
 
 Thank you for your interest in contributing! This project was created by **[Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda)** and is maintained by [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty).
 

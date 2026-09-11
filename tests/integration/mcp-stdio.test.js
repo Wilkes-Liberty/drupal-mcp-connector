@@ -36,6 +36,10 @@ describe("stdio transport integration", () => {
     await client.connect(stdioTransport());
 
     expect(client.getNegotiatedProtocolVersion()).toBe("2026-07-28");
+    expect(client.getServerVersion()).toMatchObject({
+      name: "drupal-mcp-connector",
+      title: "Drupal MCP Connector",
+    });
     expect((await client.listTools()).tools.length).toBeGreaterThan(0);
     expect((await client.listResources()).resources.map((resource) => resource.uri)).toContain("drupal://sites");
     expect((await client.listPrompts()).prompts.map((prompt) => prompt.name)).toContain("drupal-content-audit");
@@ -51,6 +55,10 @@ describe("stdio transport integration", () => {
     await client.connect(stdioTransport());
 
     expect(client.getNegotiatedProtocolVersion()).toBe("2025-11-25");
+    expect(client.getServerVersion()).toMatchObject({
+      name: "drupal-mcp-connector",
+      title: "Drupal MCP Connector",
+    });
     expect((await client.listTools()).tools.length).toBeGreaterThan(0);
     expect(await client.callTool({ name: "drupal_list_sites", arguments: {} })).toMatchObject({
       content: [{ type: "text" }],

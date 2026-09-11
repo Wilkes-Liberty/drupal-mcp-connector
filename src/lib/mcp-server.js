@@ -29,7 +29,7 @@ function resourceUriIsListed(listed, requested) {
  * Create the server factory shared by HTTP and stdio transports.
  *
  * @param {object} surface
- * @param {{name: string, version: string}} surface.serverInfo
+ * @param {{name: string, title?: string, version: string}} surface.serverInfo
  * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, call: (name: string, args: object, context: object) => Promise<object>}} surface.tools
  *   `definitions` is the full static surface (schema projection); the optional
  *   `list` hook decides what is DISCOVERABLE per request (governance + entitlement).

@@ -1,6 +1,6 @@
 # MCP Client Setup
 
-`drupal-mcp-connector` is a standard [Model Context Protocol](https://modelcontextprotocol.io)
+**Drupal MCP Connector** (`drupal-mcp-connector`) is a standard [Model Context Protocol](https://modelcontextprotocol.io)
 server, so any MCP-capable client can use it. There are two integration shapes —
 pick per client:
 

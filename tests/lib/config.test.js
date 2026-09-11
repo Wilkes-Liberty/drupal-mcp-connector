@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { clientHeaders, CLIENT_VERSION, resolveApiToken, resolveOauth, assertSecureAuth } from "../../src/lib/config.js";
+import { clientHeaders, CLIENT_NAME, CLIENT_TITLE, CLIENT_VERSION, SERVER_INFO, resolveApiToken, resolveOauth, assertSecureAuth } from "../../src/lib/config.js";
 import { SecurityError } from "../../src/lib/security.js";
 
 const ORIG = process.env.MCP_CLIENT_ID;
@@ -9,8 +9,9 @@ describe("clientHeaders", () => {
   it("defaults to drupal-mcp-connector/<version> on both headers", () => {
     delete process.env.MCP_CLIENT_ID;
     const h = clientHeaders();
-    expect(h["X-MCP-Client"]).toBe(`drupal-mcp-connector/${CLIENT_VERSION}`);
-    expect(h["User-Agent"]).toBe(`drupal-mcp-connector/${CLIENT_VERSION}`);
+    expect(h["X-MCP-Client"]).toBe(`${CLIENT_NAME}/${CLIENT_VERSION}`);
+    expect(h["User-Agent"]).toBe(`${CLIENT_NAME}/${CLIENT_VERSION}`);
+    expect(CLIENT_NAME).toBe("drupal-mcp-connector");
   });
   it("honors a custom MCP_CLIENT_ID", () => {
     process.env.MCP_CLIENT_ID = "acme-bot/9.9";
@@ -19,6 +20,17 @@ describe("clientHeaders", () => {
   it("can be disabled with an empty MCP_CLIENT_ID", () => {
     process.env.MCP_CLIENT_ID = "";
     expect(clientHeaders()).toEqual({});
+  });
+});
+
+describe("SERVER_INFO", () => {
+  it("keeps the protocol name and advertises the product title", () => {
+    expect(SERVER_INFO).toEqual({
+      name: "drupal-mcp-connector",
+      title: CLIENT_TITLE,
+      version: CLIENT_VERSION,
+    });
+    expect(CLIENT_TITLE).toBe("Drupal MCP Connector");
   });
 });
 

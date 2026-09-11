@@ -16,8 +16,25 @@ import { getAccessToken }                from "./oauth.js";
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- fixed path relative to this module (the package's own package.json), not user input
 const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
 
+/** npm / protocol machine name. Public identifier — not the display name. */
+export const CLIENT_NAME = "drupal-mcp-connector";
+
+/** Human-readable product name for docs and MCP `serverInfo.title`. */
+export const CLIENT_TITLE = "Drupal MCP Connector";
+
 /** Connector version, sourced from package.json so it never drifts out of sync. */
 export const CLIENT_VERSION = pkg.version;
+
+/**
+ * MCP Implementation advertised in the handshake.
+ * `name` is the protocol identifier; `title` is the display name.
+ * @type {{name: string, title: string, version: string}}
+ */
+export const SERVER_INFO = {
+  name: CLIENT_NAME,
+  title: CLIENT_TITLE,
+  version: CLIENT_VERSION,
+};
 
 /**
  * Identity headers sent on every outbound Drupal request. Lets governance layers
@@ -26,7 +43,7 @@ export const CLIENT_VERSION = pkg.version;
  * @returns {Object<string,string>} Header map (empty when the identity is disabled).
  */
 export function clientHeaders() {
-  const id = process.env.MCP_CLIENT_ID ?? `drupal-mcp-connector/${CLIENT_VERSION}`;
+  const id = process.env.MCP_CLIENT_ID ?? `${CLIENT_NAME}/${CLIENT_VERSION}`;
   if (!id) return {};
   return { "X-MCP-Client": id, "User-Agent": id };
 }

@@ -1,4 +1,4 @@
-# Agent instructions — drupal-mcp-connector
+# Agent instructions — Drupal MCP Connector
 
 **Provider-agnostic** project rules for any coding agent or IDE assistant.
 This file is the only committed agent instruction surface. Keep it short and

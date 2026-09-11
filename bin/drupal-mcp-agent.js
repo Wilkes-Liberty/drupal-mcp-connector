@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
 import { connect as netConnect } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import process from "node:process";
-import { CLIENT_VERSION, listSiteNames, loadConfig } from "../src/lib/config.js";
+import { CLIENT_VERSION, SERVER_INFO, listSiteNames, loadConfig } from "../src/lib/config.js";
 import { callTool, listResolvableSiteConfigs } from "../src/lib/dispatch.js";
 import { filterDiscoverableTools } from "../src/lib/governance.js";
 import {
@@ -110,7 +110,7 @@ async function discoverableTools() {
 }
 
 const surface = {
-  serverInfo: { name: "drupal-mcp-connector", version: CLIENT_VERSION },
+  serverInfo: SERVER_INFO,
   tools: {
     definitions: allDefinitions,
     list: discoverableTools,
