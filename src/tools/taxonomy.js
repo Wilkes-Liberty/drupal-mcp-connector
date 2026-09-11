@@ -12,6 +12,7 @@ import {
   resolveSecurityConfig, redactCanonicalEntity,
   assertReadAllowed, assertWriteAllowed, assertDeleteAllowed,
 } from "../lib/security.js";
+import { assertDraftLangcode } from "../lib/draft-write.js";
 
 // ---------------------------------------------------------------------------
 // Implementations
@@ -58,12 +59,15 @@ async function getTaxonomyTerms({ site: siteName, vocabulary, limit = 50, offset
  * @param {object} args - { site?, vocabulary, id }.
  * @returns {Promise<object|null>} The redacted term, or null if not found.
  */
-async function getTaxonomyTerm({ site: siteName, vocabulary, id }) {
+async function getTaxonomyTerm({ site: siteName, vocabulary, id, langcode }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "taxonomy_term", vocabulary);
   const backend = await resolveBackend(site);
-  const entity = await backend.getEntity({ entityType: "taxonomy_term", bundle: vocabulary, id });
+  const entity = await backend.getEntity({
+    entityType: "taxonomy_term", bundle: vocabulary, id,
+    ...(langcode ? { langcode: assertDraftLangcode(langcode) } : {}),
+  });
   return entity ? redactCanonicalEntity(entity, sec, "taxonomy_term") : null;
 }
 
@@ -93,7 +97,7 @@ async function createTaxonomyTerm({ site: siteName, vocabulary, name, descriptio
  * @param {object} args - { site?, vocabulary, id, name?, description?, weight? }.
  * @returns {Promise<object>} The updated term descriptor.
  */
-async function updateTaxonomyTerm({ site: siteName, vocabulary, id, name, description, weight }) {
+async function updateTaxonomyTerm({ site: siteName, vocabulary, id, name, description, weight, langcode }) {
   const site = getSiteConfig(siteName);
   assertWriteAllowed(resolveSecurityConfig(site), "update", "taxonomy_term", vocabulary);
   const backend = await resolveBackend(site);
@@ -101,7 +105,10 @@ async function updateTaxonomyTerm({ site: siteName, vocabulary, id, name, descri
   if (name !== undefined) attributes.name = name;
   if (weight !== undefined) attributes.weight = weight;
   if (description !== undefined) attributes.description = { value: description, format: "plain_text" };
-  return backend.updateEntity({ entityType: "taxonomy_term", bundle: vocabulary, id, attributes });
+  return backend.updateEntity({
+    entityType: "taxonomy_term", bundle: vocabulary, id, attributes,
+    ...(langcode ? { langcode: assertDraftLangcode(langcode) } : {}),
+  });
 }
 
 /**
@@ -147,13 +154,14 @@ export const definitions = [
   },
   {
     name: "drupal_get_taxonomy_term",
-    description: "Fetch a single taxonomy term by UUID.",
+    description: "Fetch a single taxonomy term by UUID. Pass langcode to request that translation; omit for the default language. JSON:API must negotiate language or the tool errors if a different language is served.",
     inputSchema: {
       type: "object", required: ["vocabulary", "id"],
       properties: {
         site:       { type: "string" },
         vocabulary: { type: "string" },
         id:         { type: "string", description: "Term UUID" },
+        langcode:   { type: "string", description: "Translation language (e.g. 'es'). Omit for the default language." },
       },
     },
   },
@@ -174,7 +182,7 @@ export const definitions = [
   },
   {
     name: "drupal_update_taxonomy_term",
-    description: "Update an existing taxonomy term's name, description, or weight.",
+    description: "Update an existing taxonomy term's name, description, or weight. Pass langcode to update an existing translation; this does not create a missing translation.",
     inputSchema: {
       type: "object", required: ["vocabulary", "id"],
       properties: {
@@ -184,6 +192,7 @@ export const definitions = [
         name:        { type: "string" },
         description: { type: "string" },
         weight:      { type: "number" },
+        langcode:    { type: "string", description: "Existing translation to update (e.g. 'es'). Omit for the default language." },
       },
     },
   },

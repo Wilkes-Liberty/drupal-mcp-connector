@@ -1,11 +1,11 @@
 ---
-description: "Introspect the fields of a Drupal entity type + bundle: returns a per-field list of { name, type, kind, cardinality?, approximate }. Read-only. Built on schema SAMPLING (an existing entity), so results are approximate — only populated fields are visible and required/cardinality/allowedValues are inferred from value shape. Authoritative field metadata comes from the Drush bridge (Field API). Use this before creating/updating entities to learn field names."
+description: "Introspect the fields of a Drupal entity type + bundle: returns a per-field list of { name, type, kind, cardinality?, translatable?, approximate }. Read-only. Built on schema SAMPLING (an existing entity), so results are approximate — only populated fields are visible and required/cardinality/allowedValues are inferred from value shape. When JSON:API field_config is readable, translatable is copied from Field API; omitted means unknown, not false. Authoritative field metadata comes from the Drush bridge (Field API). Use this before creating/updating entities to learn field names."
 argument-hint: "<site> [type] [entityType] [bundle]"
 ---
 
 Call the MCP tool `drupal_describe_fields`.
 
-Introspect the fields of a Drupal entity type + bundle: returns a per-field list of { name, type, kind, cardinality?, approximate }. Read-only. Built on schema SAMPLING (an existing entity), so results are approximate — only populated fields are visible and required/cardinality/allowedValues are inferred from value shape. Authoritative field metadata comes from the Drush bridge (Field API). Use this before creating/updating entities to learn field names.
+Introspect the fields of a Drupal entity type + bundle: returns a per-field list of { name, type, kind, cardinality?, translatable?, approximate }. Read-only. Built on schema SAMPLING (an existing entity), so results are approximate — only populated fields are visible and required/cardinality/allowedValues are inferred from value shape. When JSON:API field_config is readable, translatable is copied from Field API; omitted means unknown, not false. Authoritative field metadata comes from the Drush bridge (Field API). Use this before creating/updating entities to learn field names.
 
 Parse the arguments supplied with this command into this tool's parameters:
 

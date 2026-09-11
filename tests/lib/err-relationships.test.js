@@ -10,6 +10,7 @@ import {
   resolveErrRelationships,
   resolveParagraphRevisionId,
   missingParagraphRevisionError,
+  paragraphPinsFromEntity,
 } from "../../src/lib/err-relationships.js";
 
 function paragraphEntity(id, revisionId, bundle = "capability") {
@@ -35,6 +36,21 @@ describe("paragraph identifier helpers (#192)", () => {
       entityType: "paragraph", bundle: "key-capability",
     });
     expect(parseResourceType("node")).toBeNull();
+  });
+
+  it("paragraphPinsFromEntity collects ERR paragraph refs", () => {
+    const pins = paragraphPinsFromEntity({
+      relationships: {
+        field_components: [
+          { id: "p1", entityType: "paragraph", bundle: "hero", meta: { target_revision_id: "9" } },
+        ],
+        field_tags: { id: "t1", entityType: "taxonomy_term", bundle: "tags" },
+      },
+    });
+    expect(pins).toEqual([
+      { field: "field_components", id: "p1", paragraphType: "hero", revisionId: "9" },
+    ]);
+    expect(paragraphPinsFromEntity({})).toEqual([]);
   });
 
   it("paragraphRevisionId reads fields then a top-level fallback", () => {

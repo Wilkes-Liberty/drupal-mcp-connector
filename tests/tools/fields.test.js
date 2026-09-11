@@ -104,6 +104,17 @@ describe("fields tools", () => {
     expect(backend.getEntitySchema).toHaveBeenCalledWith("user", "user");
   });
 
+  it("sets translatable from Field API when listFieldTranslatability is available", async () => {
+    backend.getEntitySchema.mockResolvedValue(sampledSchema());
+    backend.listFieldTranslatability = vi.fn(async () => ({ body: true, field_image: false }));
+    const out = await handlers.drupal_describe_fields({ site: "d", type: "node", bundle: "article" });
+    const byName = Object.fromEntries(out.fields.map((f) => [f.name, f]));
+    expect(byName.body.translatable).toBe(true);
+    expect(byName.field_image.translatable).toBe(false);
+    expect(byName.title.translatable).toBeUndefined();
+    delete backend.listFieldTranslatability;
+  });
+
   it("handles an empty schema (no entities sampled) gracefully", async () => {
     backend.getEntitySchema.mockResolvedValue({
       entityType: "node",

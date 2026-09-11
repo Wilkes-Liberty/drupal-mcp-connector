@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Field `translatable`, taxonomy/menu `langcode`, and composed node reads (#303).**
+  `drupal_describe_fields` copies Field API `translatable` when JSON:API
+  `field_config` is readable (omitted means unknown). Taxonomy get/update and
+  menu-link update accept optional `langcode` (existing translations only).
+  `drupal_get_node` accepts `includeComponents` (default false) to attach
+  pinned paragraph translations.
 - **Optional `langcode` on the editorial queue (#303).**
   `drupal_content_by_moderation_state` and `drupal_set_moderation_state` accept
   a translation language. Omitting it keeps the previous default-language
