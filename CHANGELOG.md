@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Optional graphql_compose_codegen tools (#308).**
+  `drupal_codegen_inspect`, `drupal_codegen_diff`, and `drupal_codegen_generate`
+  call `drush graphql-compose-codegen:*` over the existing SSH bridge.
+  Generate is `--dry-run` only (artefacts as text; no `--output-dir`).
+  Missing module or unknown command fails loud. If `allowedCommands` is set,
+  the matching `graphql-compose-codegen:*` subcommand must be listed.
 - **Field `translatable`, taxonomy/menu `langcode`, and composed node reads (#303).**
   `drupal_describe_fields` copies Field API `translatable` when JSON:API
   `field_config` is readable (omitted means unknown). Taxonomy get/update and

@@ -38,11 +38,12 @@ import * as reportsConfig  from "./reports-config.js";
 import * as reportsContent from "./reports-content.js";
 import * as auditComposite from "./audit-composite.js";
 import * as config       from "./config.js";
+import * as codegen      from "./codegen.js";
 import { SITE_PARAM } from "../lib/site-target.js";
 
 export const allModules = [nodes, taxonomy, users, media, graphql, site, entities, reports, drush,
   revisions, moderation, scheduler, fields, references, bulk, translations, paragraphs, structure, redirects, search, reportsExtra,
-  reportsLinks, reportsConfig, reportsContent, auditComposite, config];
+  reportsLinks, reportsConfig, reportsContent, auditComposite, config, codegen];
 
 /**
  * Stamp the shared `site` description onto every tool that accepts one so
