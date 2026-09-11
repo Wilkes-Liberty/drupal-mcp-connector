@@ -1,6 +1,6 @@
 ---
 description: "Find content stuck in a non-published moderation state (draft/needs_review) beyond N days — editorial bottlenecks. Reads moderation_state; gated when content_moderation isn't exposed."
-argument-hint: "[site] [type] [days] [states] [sampleSize]"
+argument-hint: "[site] [type] [days] [states] [langcode] [sampleSize]"
 ---
 
 Call the MCP tool `drupal_report_workflow_bottlenecks`.
@@ -14,6 +14,7 @@ Parse the arguments supplied with this command into this tool's parameters:
 - `type` (string): Content type (default: article)
 - `days` (number): Days-in-state threshold
 - `states` (array (pass as JSON)): Moderation states to treat as bottlenecks
+- `langcode` (string): Limit to this translation (Sentinel inventory). Omit for the default-language field on each node.
 - `sampleSize` (number)
 
 If a required parameter is missing, ask before calling — do not invent values. Coerce each value to its JSON type (booleans → true/false, numbers → numeric, object/array → parse JSON), then make the single tool call and summarize the result.

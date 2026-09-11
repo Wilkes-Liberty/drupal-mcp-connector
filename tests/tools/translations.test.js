@@ -70,6 +70,33 @@ describe("translations tools", () => {
     expect(out.live.translations).toHaveLength(1);
   });
 
+  it("list_translations passes through outdated and source when Sentinel sends them", async () => {
+    backend.rawQuery.mockResolvedValue({
+      meta: {
+        defaultLangcode: "en",
+        live: {
+          vid: "10",
+          translations: [{ langcode: "en", default: true, status: true, title: "Hello", moderation_state: "published" }],
+        },
+        working: {
+          vid: "11",
+          translations: [
+            { langcode: "en", default: true, status: true, title: "Hello", moderation_state: "published" },
+            {
+              langcode: "es", default: false, status: false, title: "Hola",
+              moderation_state: "draft", outdated: true, source: "en",
+            },
+          ],
+        },
+      },
+    });
+    const out = await handlers.drupal_list_translations({ type: "article", id: UUID });
+    const es = out.translations.find((row) => row.langcode === "es");
+    expect(es.outdated).toBe(true);
+    expect(es.source).toBe("en");
+    expect(out.translations.find((row) => row.langcode === "en").outdated).toBeUndefined();
+  });
+
   it("list_translations falls back to one observable langcode when Sentinel is absent", async () => {
     backend.rawQuery
       .mockRejectedValueOnce(new Error("Drupal 404 on GET /jsonapi/node/article/x/mcp-translations"))

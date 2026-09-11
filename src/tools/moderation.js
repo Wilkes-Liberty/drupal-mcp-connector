@@ -21,6 +21,9 @@ import {
   redactCanonicalEntity,
 } from "../lib/security.js";
 import { collectEntities } from "../lib/reports-support.js";
+import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
+import { assertDraftLangcode, readTranslationInventory } from "../lib/draft-write.js";
+import { inventoryRowMatching } from "../lib/translation-rows.js";
 
 /** Cap for the client-side scan when JSON:API cannot filter the field. */
 const SAMPLE_CAP = 500;
@@ -54,7 +57,7 @@ function moderationStateOf(entity) {
  * @returns {Promise<object>} The updated, redacted node.
  * @throws {SecurityError} If writing node/type is not permitted.
  */
-async function setModerationState({ site: siteName, type, id, state }) {
+async function setModerationState({ site: siteName, type, id, state, langcode }) {
   if (!state) throw new Error("A moderation 'state' is required (e.g. 'draft', 'published').");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
@@ -62,6 +65,23 @@ async function setModerationState({ site: siteName, type, id, state }) {
   const attributes = { moderation_state: state };
   assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
+  if (langcode) {
+    const targetLang = assertDraftLangcode(langcode);
+    let existing = null;
+    try {
+      existing = (await backend.getEntity({ entityType: "node", bundle: type, id })) ?? null;
+    } catch {
+      existing = null;
+    }
+    const patchTarget = await prepareGuardedPatch(backend, {
+      entityType: "node", bundle: type, id, existing, attributes, langcode: targetLang,
+    });
+    const patched = await updateEntityGuarded(backend, {
+      entityType: "node", bundle: type, id, attributes, langcode: targetLang,
+      ...(patchTarget.draftRevision ? { draftRevision: patchTarget.draftRevision } : {}),
+    });
+    return redactCanonicalEntity(patched, sec, "node");
+  }
   const entity = await backend.updateEntity({ entityType: "node", bundle: type, id, attributes });
   return redactCanonicalEntity(entity, sec, "node");
 }
@@ -76,12 +96,59 @@ async function setModerationState({ site: siteName, type, id, state }) {
  *
  * @param {object} args - { site?, type, state, limit?, offset? }.
  */
-async function contentByModerationState({ site: siteName, type, state, limit = 20, offset = 0 }) {
+async function contentByModerationState({ site: siteName, type, state, limit = 20, offset = 0, langcode }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
   const sort = [{ field: "changed", dir: "desc" }];
+  const targetLang = langcode ? assertDraftLangcode(langcode) : null;
+  if (targetLang) {
+    if (typeof backend.rawQuery !== "function" || typeof backend.resourcePath !== "function") {
+      return {
+        type, state, langcode: targetLang, unavailable: true,
+        reason: "A langcode filter requires Sentinel's translation inventory.",
+      };
+    }
+    const scanned = await collectEntities(
+      backend,
+      { entityType: "node", bundle: type, sort },
+      SAMPLE_CAP,
+    );
+    const matches = [];
+    for (const entity of scanned) {
+      try {
+        const inventory = await readTranslationInventory(backend, {
+          entityType: "node", bundle: type, id: entity.id,
+        });
+        const row = inventoryRowMatching(inventory, { langcode: targetLang, state });
+        if (row) {
+          matches.push({
+            ...entity,
+            langcode: targetLang,
+            fields: { ...entity.fields, moderation_state: row.moderation_state },
+          });
+        }
+      } catch (error) {
+        if (/does not provide Sentinel's governed draft-translation endpoint/.test(String(error?.message))) {
+          return {
+            type, state, langcode: targetLang, unavailable: true,
+            reason: "A langcode filter requires Sentinel's translation inventory.",
+          };
+        }
+        throw error;
+      }
+    }
+    const page = matches.slice(offset, offset + limit);
+    return {
+      type, state, langcode: targetLang, source: "inventory",
+      approximate: scanned.length >= SAMPLE_CAP,
+      scanned: scanned.length,
+      total: matches.length,
+      offset, nextOffset: offset + page.length,
+      nodes: page.map((e) => redactCanonicalEntity(e, sec, "node")),
+    };
+  }
   const canFilter = typeof backend.capabilities === "function"
     ? Boolean(backend.capabilities()?.filter)
     : true;
@@ -167,28 +234,30 @@ async function listModerationStates({ site: siteName, type, sample = 50 }) {
 export const definitions = [
   {
     name: "drupal_set_moderation_state",
-    description: "Transition a content node to a moderation state (content_moderation), e.g. 'draft', 'needs_review', 'published', 'archived'. Governed write.",
+    description: "Transition a content node to a moderation state (content_moderation), e.g. 'draft', 'needs_review', 'published', 'archived'. Governed write. Pass langcode to change one translation via Sentinel; omit it for the default-language / shared-state write. If moderation_state is not translatable, a langcode write is refused.",
     inputSchema: {
       type: "object", required: ["type", "id", "state"],
       properties: {
-        site:  { type: "string" },
-        type:  { type: "string", description: "Content type machine name" },
-        id:    { type: "string", description: "Node UUID" },
-        state: { type: "string", description: "Target moderation state machine name" },
+        site:     { type: "string" },
+        type:     { type: "string", description: "Content type machine name" },
+        id:       { type: "string", description: "Node UUID" },
+        state:    { type: "string", description: "Target moderation state machine name" },
+        langcode: { type: "string", description: "Target translation (e.g. 'es'). Omit for the default language. Requires Sentinel." },
       },
     },
   },
   {
     name: "drupal_content_by_moderation_state",
-    description: "List nodes of a content type currently in a given moderation state (e.g. what is in 'draft' or 'needs_review'). Stock JSON:API cannot filter the computed moderation_state field; when the site rejects that filter the tool samples recent nodes client-side and marks the result approximate, instead of returning Drupal's 500.",
+    description: "List nodes of a content type currently in a given moderation state (e.g. what is in 'draft' or 'needs_review'). Pass langcode to match that translation via Sentinel inventory (the editorial work queue). Omit langcode for default-language JSON:API / sampled behavior. Stock JSON:API cannot filter the computed moderation_state field; when the site rejects that filter the tool samples recent nodes client-side and marks the result approximate, instead of returning Drupal's 500.",
     inputSchema: {
       type: "object", required: ["type", "state"],
       properties: {
-        site:   { type: "string" },
-        type:   { type: "string", description: "Content type machine name" },
-        state:  { type: "string", description: "Moderation state machine name" },
-        limit:  { type: "number", default: 20 },
-        offset: { type: "number", default: 0 },
+        site:     { type: "string" },
+        type:     { type: "string", description: "Content type machine name" },
+        state:    { type: "string", description: "Moderation state machine name" },
+        langcode: { type: "string", description: "Match this translation (e.g. 'es'). Requires Sentinel. Omit for default-language listing." },
+        limit:    { type: "number", default: 20 },
+        offset:   { type: "number", default: 0 },
       },
     },
   },

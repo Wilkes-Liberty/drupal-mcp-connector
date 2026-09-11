@@ -34,6 +34,7 @@ import {
   readTranslationInventory,
   resolveNodeTranslationPair,
 } from "../lib/draft-write.js";
+import { mapTranslationRow } from "../lib/translation-rows.js";
 
 const LIST_NOTE =
   "Live languages are those on the default revision. Working languages are the " +
@@ -75,13 +76,7 @@ async function listTranslations({ site: siteName, entityType = "node", type, id 
         langcodes,
         live: meta.live ?? null,
         working: meta.working ?? null,
-        translations: (meta.working?.translations ?? meta.live?.translations ?? []).map((row) => ({
-          langcode: row.langcode,
-          default: Boolean(row.default),
-          status: row.status,
-          title: row.title,
-          moderation_state: row.moderation_state,
-        })),
+        translations: (meta.working?.translations ?? meta.live?.translations ?? []).map(mapTranslationRow),
         note: LIST_NOTE,
       };
     } catch (error) {
@@ -200,7 +195,8 @@ export const definitions = [
     description:
       "List live and working translation langcodes for a Drupal node or paragraph. Uses Sentinel's " +
       "translation inventory when available (live default revision vs unpublished working " +
-      "draft). Core JSON:API alone serves one language and cannot prove others are absent. " +
+      "draft), including core content_translation_outdated and source when the server sends them. " +
+      "Core JSON:API alone serves one language and cannot prove others are absent. " +
       "Defaults to node.",
     inputSchema: {
       type: "object", required: ["type", "id"],
