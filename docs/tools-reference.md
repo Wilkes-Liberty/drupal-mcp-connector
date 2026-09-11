@@ -445,6 +445,24 @@ deployed; until then the server returns a tool-not-found error.
 
 ---
 
+## GraphQL Compose Codegen
+
+Requires `drushSsh` and `drupal/graphql_compose_codegen` on the site. These
+tools wrap the module's Drush commands; they do not run GraphQL Code Generator
+against the SDL and they do not write files on the Drupal host. Missing module
+or unknown command fails loud. If `drushSsh.allowedCommands` is set, include the
+matching `graphql-compose-codegen:*` subcommand.
+
+| Tool | Write? | Description |
+|------|:------:|-------------|
+| `drupal_codegen_inspect` | — | Bundles and extra fields (`gqcc:inspect`). |
+| `drupal_codegen_diff` | — | Live schema vs last generate snapshot (`gqcc:diff`). |
+| `drupal_codegen_generate` | — | Scaffold artefacts as text (`gqcc:generate --dry-run`). Copy locally; disk write stays a local DDEV/script concern. |
+
+Optional `bundles` and `skipFields` are machine-name lists. Omit for module defaults.
+
+---
+
 ## Drush
 
 Requires `drushSsh` config block. SSH key auth only — no passwords. An optional
