@@ -1,6 +1,6 @@
 ---
 description: "Update a custom menu link by UUID (rename, re-weight, re-target, re-parent, enable/disable). Only the fields you pass change. The link's enabled state is preserved across edits — an unrelated change will not disable a live link — unless you pass 'enabled' explicitly. Checked against the site security config."
-argument-hint: "<id> [site] [title] [link] [menu] [weight] [parent] [enabled]"
+argument-hint: "<id> [site] [title] [link] [menu] [weight] [parent] [enabled] [langcode]"
 ---
 
 Call the MCP tool `drupal_update_menu_link`.
@@ -20,5 +20,6 @@ Parse the arguments supplied with this command into this tool's parameters:
 - `weight` (number): New ordering weight. Omit to leave unchanged.
 - `parent` (string): New parent link plugin id (e.g. 'menu_link_content:<uuid>'), or '' for top level. Omit to leave unchanged.
 - `enabled` (boolean (true/false)): Enable/disable the link. Omit to preserve the current state.
+- `langcode` (string): Existing translation to update (e.g. 'es'). Omit for the default language. Does not create a missing translation.
 
 If a required parameter is missing, ask before calling — do not invent values. Coerce each value to its JSON type (booleans → true/false, numbers → numeric, object/array → parse JSON), then make the single tool call and summarize the result.

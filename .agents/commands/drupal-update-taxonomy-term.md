@@ -1,11 +1,11 @@
 ---
-description: "Update an existing taxonomy term's name, description, or weight."
-argument-hint: "<vocabulary> <id> [site] [name] [description] [weight]"
+description: "Update an existing taxonomy term's name, description, or weight. Pass langcode to update an existing translation; this does not create a missing translation."
+argument-hint: "<vocabulary> <id> [site] [name] [description] [weight] [langcode]"
 ---
 
 Call the MCP tool `drupal_update_taxonomy_term`.
 
-Update an existing taxonomy term's name, description, or weight.
+Update an existing taxonomy term's name, description, or weight. Pass langcode to update an existing translation; this does not create a missing translation.
 
 Parse the arguments supplied with this command into this tool's parameters:
 
@@ -18,5 +18,6 @@ Parse the arguments supplied with this command into this tool's parameters:
 - `name` (string)
 - `description` (string)
 - `weight` (number)
+- `langcode` (string): Existing translation to update (e.g. 'es'). Omit for the default language.
 
 If a required parameter is missing, ask before calling — do not invent values. Coerce each value to its JSON type (booleans → true/false, numbers → numeric, object/array → parse JSON), then make the single tool call and summarize the result.

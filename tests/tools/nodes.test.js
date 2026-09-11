@@ -94,6 +94,12 @@ describe("nodes tools (migrated)", () => {
     expect(backend.getEntity).toHaveBeenCalledWith({ entityType: "node", bundle: "article", id: "n1" });
   });
 
+  it("get_node includeComponents is empty when the host has no paragraph pins", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({ relationships: {} }));
+    const out = await handlers.drupal_get_node({ type: "article", id: "n1", includeComponents: true });
+    expect(out.components).toEqual([]);
+  });
+
   it("list_nodes compiles status + structured filters into a descriptor", async () => {
     backend.listEntities.mockResolvedValue({ entities: [canonicalNode()], page: { total: 1, hasNext: false }, approximate: false });
     const out = await handlers.drupal_list_nodes({ type: "article", status: true, filters: [{ field: "promote", op: "eq", value: true }], limit: 5, sort: [{ field: "changed", dir: "desc" }] });
