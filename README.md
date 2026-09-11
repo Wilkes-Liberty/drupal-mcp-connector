@@ -1,6 +1,6 @@
 # drupal-mcp-connector
 
-> A secure, multi-site Model Context Protocol (MCP) connector for Drupal — dual-protocol JSON:API and GraphQL access, governed content tools, audit reports, and an SSH Drush bridge.
+> A secure, multi-site Model Context Protocol (MCP) connector for Drupal — dual-protocol JSON:API and GraphQL access, governed draft translations, content tools, audit reports, and an SSH Drush bridge.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-green)](https://nodejs.org)
