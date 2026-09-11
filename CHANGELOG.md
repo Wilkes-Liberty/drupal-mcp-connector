@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-09-11
+
 ### Added
 - **Field `translatable`, taxonomy/menu `langcode`, and composed node reads (#303).**
   `drupal_describe_fields` copies Field API `translatable` when JSON:API
@@ -1612,6 +1614,7 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[2.16.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.16.0
 [2.15.2]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.15.2
 [2.15.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.15.1
 [2.15.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.15.0
