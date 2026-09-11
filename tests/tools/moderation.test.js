@@ -6,6 +6,8 @@ const backend = {
   createEntity: vi.fn(),
   updateEntity: vi.fn(),
   deleteEntity: vi.fn(),
+  rawQuery: vi.fn(),
+  resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 vi.mock("../../src/lib/config.js", () => ({
@@ -114,6 +116,52 @@ describe("moderation tools", () => {
     backend.listEntities.mockRejectedValue(new Error("Drupal 500 on GET /jsonapi/node/article: SQLSTATE[HY000]"));
     await expect(handlers.drupal_content_by_moderation_state({ type: "article", state: "draft" }))
       .rejects.toThrow(/SQLSTATE/);
+  });
+
+  it("set_moderation_state with langcode does not PATCH canonical langcode", async () => {
+    backend.getEntity.mockResolvedValue(node({ fields: { drupal_internal__vid: 10, moderation_state: "published" } }));
+    await expect(handlers.drupal_set_moderation_state({
+      type: "article", id: "n1", state: "needs_review", langcode: "es",
+    })).rejects.toThrow(/working translation|draft-translation endpoint|langcode|translation inventory/i);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("content_by_moderation_state with langcode uses Sentinel inventory", async () => {
+    backend.listEntities.mockResolvedValue({
+      entities: [node({ id: "n1" }), node({ id: "n2" })],
+      page: { hasNext: false },
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      const esDraft = path.includes("n1");
+      return {
+        meta: {
+          defaultLangcode: "en",
+          live: { vid: "10", translations: [{ langcode: "en", default: true, status: true, title: "T", moderation_state: "published" }] },
+          working: {
+            vid: "11",
+            translations: esDraft
+              ? [
+                { langcode: "en", default: true, status: true, title: "T", moderation_state: "published" },
+                { langcode: "es", default: false, status: false, title: "T", moderation_state: "draft" },
+              ]
+              : [{ langcode: "en", default: true, status: true, title: "T", moderation_state: "published" }],
+          },
+        },
+      };
+    });
+    const out = await handlers.drupal_content_by_moderation_state({ type: "article", state: "draft", langcode: "es" });
+    expect(out.source).toBe("inventory");
+    expect(out.langcode).toBe("es");
+    expect(out.nodes.map((n) => n.id)).toEqual(["n1"]);
+    expect(out.unavailable).toBeUndefined();
+  });
+
+  it("content_by_moderation_state with langcode is unavailable without Sentinel", async () => {
+    backend.rawQuery.mockRejectedValue(new Error("Drupal 404 on GET /jsonapi/node/article/n1/mcp-translations"));
+    backend.listEntities.mockResolvedValue({ entities: [node({ id: "n1" })], page: { hasNext: false } });
+    const out = await handlers.drupal_content_by_moderation_state({ type: "article", state: "draft", langcode: "es" });
+    expect(out.unavailable).toBe(true);
+    expect(out.reason).toMatch(/inventory/i);
   });
 
   it("list_moderation_states returns distinct observed states (non-authoritative)", async () => {

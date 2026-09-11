@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const h = vi.hoisted(() => ({
-  backend: { listEntities: vi.fn() },
+  backend: {
+    listEntities: vi.fn(),
+    rawQuery: vi.fn(),
+    resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
+  },
   site: null,
 }));
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => h.backend) }));
@@ -32,6 +36,7 @@ function isoDaysAgo(n) {
 beforeEach(() => {
   h.site = { _name: "d", baseUrl: "https://example.com" };
   backend.listEntities.mockReset();
+  backend.rawQuery.mockReset();
 });
 
 describe("reports-content", () => {
@@ -71,14 +76,41 @@ describe("reports-content", () => {
   });
 
   describe("drupal_report_translation_coverage", () => {
-    it("flags lagging languages", async () => {
+    it("uses Sentinel inventory instead of a default-language histogram", async () => {
       backend.listEntities.mockResolvedValue(page([
-        node({ langcode: "en" }), node({ langcode: "en" }), node({ langcode: "en" }), node({ langcode: "en" }),
-        node({ langcode: "es" }),
+        node({ id: "1", title: "One" }),
+        node({ id: "2", title: "Two" }),
       ]));
+      backend.rawQuery.mockImplementation(async ({ path }) => ({
+        meta: {
+          defaultLangcode: "en",
+          live: {
+            vid: "10",
+            translations: path.includes("/1/")
+              ? [
+                { langcode: "en", default: true, status: true, title: "One", moderation_state: "published" },
+                { langcode: "es", default: false, status: true, title: "Uno", moderation_state: "published", outdated: true, source: "en" },
+              ]
+              : [{ langcode: "en", default: true, status: true, title: "Two", moderation_state: "published" }],
+          },
+        },
+      }));
       const res = await handlers.drupal_report_translation_coverage({ type: "page" });
-      expect(res.languages[0]).toEqual({ langcode: "en", count: 4 });
-      expect(res.laggingLanguages[0].langcode).toBe("es");
+      expect(res.unavailable).toBeUndefined();
+      expect(res.missing.map((n) => n.id)).toEqual(["2"]);
+      expect(res.outdated.map((n) => n.id)).toEqual(["1"]);
+      expect(res.languages).toEqual(expect.arrayContaining([
+        { langcode: "en", count: 2 },
+        { langcode: "es", count: 1 },
+      ]));
+    });
+
+    it("is unavailable when Sentinel inventory is missing", async () => {
+      backend.listEntities.mockResolvedValue(page([node({ id: "1" })]));
+      backend.rawQuery.mockRejectedValue(new Error("Drupal 404 on GET /jsonapi/node/page/1/mcp-translations"));
+      const res = await handlers.drupal_report_translation_coverage({ type: "page" });
+      expect(res.unavailable).toBe(true);
+      expect(res.reason).toMatch(/inventory/i);
     });
   });
 

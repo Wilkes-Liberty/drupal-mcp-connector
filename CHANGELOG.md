@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Optional `langcode` on the editorial queue (#303).**
+  `drupal_content_by_moderation_state` and `drupal_set_moderation_state` accept
+  a translation language. Omitting it keeps the previous default-language
+  behavior. A langcode write uses Sentinel's draft-translation surface (no
+  canonical `langcode` PATCH). A langcode list uses the translation inventory;
+  without Sentinel the result is `unavailable`. `drupal_report_workflow_bottlenecks`
+  has the same optional filter.
+
 ### Changed
+- **`drupal_list_translations` passes through core outdated/source (#303).**
+  When Sentinel sends `content_translation_outdated` / `content_translation_source`,
+  those keys appear on each row. They are omitted when absent.
+- **`drupal_report_translation_coverage` uses Sentinel inventory (#303).**
+  Per-node missing non-default language and outdated flags replace the
+  default-language histogram. Without Sentinel the report is `unavailable`
+  rather than a misleading 100% default-language chart.
 - **Public product name is Drupal MCP Connector (#301).** Document titles and
   the MCP handshake `serverInfo.title` now use the title-case product name.
   The machine identifiers are unchanged: npm package, GitHub repo, binaries,

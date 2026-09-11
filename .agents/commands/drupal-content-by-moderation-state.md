@@ -1,11 +1,11 @@
 ---
-description: "List nodes of a content type currently in a given moderation state (e.g. what is in 'draft' or 'needs_review'). Stock JSON:API cannot filter the computed moderation_state field; when the site rejects that filter the tool samples recent nodes client-side and marks the result approximate, instead of returning Drupal's 500."
-argument-hint: "<type> <state> [site] [limit] [offset]"
+description: "List nodes of a content type currently in a given moderation state (e.g. what is in 'draft' or 'needs_review'). Pass langcode to match that translation via Sentinel inventory (the editorial work queue). Omit langcode for default-language JSON:API / sampled behavior. Stock JSON:API cannot filter the computed moderation_state field; when the site rejects that filter the tool samples recent nodes client-side and marks the result approximate, instead of returning Drupal's 500."
+argument-hint: "<type> <state> [site] [langcode] [limit] [offset]"
 ---
 
 Call the MCP tool `drupal_content_by_moderation_state`.
 
-List nodes of a content type currently in a given moderation state (e.g. what is in 'draft' or 'needs_review'). Stock JSON:API cannot filter the computed moderation_state field; when the site rejects that filter the tool samples recent nodes client-side and marks the result approximate, instead of returning Drupal's 500.
+List nodes of a content type currently in a given moderation state (e.g. what is in 'draft' or 'needs_review'). Pass langcode to match that translation via Sentinel inventory (the editorial work queue). Omit langcode for default-language JSON:API / sampled behavior. Stock JSON:API cannot filter the computed moderation_state field; when the site rejects that filter the tool samples recent nodes client-side and marks the result approximate, instead of returning Drupal's 500.
 
 Parse the arguments supplied with this command into this tool's parameters:
 
@@ -15,6 +15,7 @@ Parse the arguments supplied with this command into this tool's parameters:
 
 **Optional:**
 - `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
+- `langcode` (string): Match this translation (e.g. 'es'). Requires Sentinel. Omit for default-language listing.
 - `limit` (number)
 - `offset` (number)
 

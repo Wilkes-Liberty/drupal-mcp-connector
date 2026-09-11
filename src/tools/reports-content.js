@@ -17,6 +17,8 @@ import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
 import { collectEntities, fieldValue, daysSince } from "../lib/reports-support.js";
 import { bodyHtml, extractAnchors, classifyLink, normalizePath } from "../lib/audit-support.js";
+import { assertDraftLangcode, readTranslationInventory } from "../lib/draft-write.js";
+import { inventoryRowMatching, inventoryTranslationRows, mapTranslationRow } from "../lib/translation-rows.js";
 
 // ---------------------------------------------------------------------------
 // Shared text helpers
@@ -99,13 +101,14 @@ async function duplicateContent({ site: siteName, type, sampleSize = 200 }) {
  * @param {object} args - { site?, type?, days?, states?, sampleSize? }.
  * @returns {Promise<object>} Stuck-content findings.
  */
-async function workflowBottlenecks({ site: siteName, type, days = 30, states, sampleSize = 200 }) {
+async function workflowBottlenecks({ site: siteName, type, days = 30, states, sampleSize = 200, langcode }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
   const contentType = type || "article";
   const targetStates = (states && states.length ? states : ["draft", "needs_review", "review"]).map((s) => s.toLowerCase());
+  const targetLang = langcode ? assertDraftLangcode(langcode) : null;
 
   const nodes = await collectEntities(
     backend,
@@ -113,16 +116,55 @@ async function workflowBottlenecks({ site: siteName, type, days = 30, states, sa
     sampleSize
   );
 
+  if (targetLang && (typeof backend.rawQuery !== "function" || typeof backend.resourcePath !== "function")) {
+    return {
+      contentType,
+      unavailable: true,
+      reason: "A langcode filter requires Sentinel's translation inventory.",
+    };
+  }
+
   let sawState = false;
   const findings = [];
+  let inventoried = 0;
   for (const n of nodes) {
-    const state = scalar(n, ["moderation_state"]);
+    let state = scalar(n, ["moderation_state"]);
+    if (targetLang) {
+      try {
+        const inventory = await readTranslationInventory(backend, {
+          entityType: "node", bundle: contentType, id: n.id,
+        });
+        inventoried += 1;
+        const row = inventoryRowMatching(inventory, { langcode: targetLang });
+        if (!row) continue;
+        state = row.moderation_state;
+      } catch (error) {
+        if (/does not provide Sentinel's governed draft-translation endpoint/.test(String(error?.message))) {
+          return {
+            contentType,
+            unavailable: true,
+            reason: "A langcode filter requires Sentinel's translation inventory.",
+          };
+        }
+        throw error;
+      }
+    }
     if (state === undefined || state === null) continue;
     sawState = true;
     const age = daysSince(n.changed);
     if (targetStates.includes(String(state).toLowerCase()) && age !== null && age > days) {
-      findings.push({ id: n.id, title: n.title, state, daysInState: age, path: n.url });
+      findings.push({
+        id: n.id, title: n.title, state, daysInState: age, path: n.url,
+        ...(targetLang ? { langcode: targetLang } : {}),
+      });
     }
+  }
+  if (targetLang && inventoried === 0 && nodes.length > 0) {
+    return {
+      contentType,
+      unavailable: true,
+      reason: "A langcode filter requires Sentinel's translation inventory.",
+    };
   }
 
   if (!sawState) {
@@ -144,16 +186,16 @@ async function workflowBottlenecks({ site: siteName, type, days = 30, states, sa
 // ---------------------------------------------------------------------------
 
 /**
- * Report content distribution by language for a content type and flag languages
- * that lag the most-populated language — a coverage signal for multilingual
- * sites. (Exact per-node missing-translation detection requires translation
- * metadata the canonical model doesn't carry; this aggregate is the best-effort
- * stand-in.)
+ * Per-node translation coverage from Sentinel inventory.
  *
- * @param {object} args - { site?, type?, gapThreshold?, sampleSize? }.
- * @returns {Promise<object>} Per-language counts and lagging languages.
+ * JSON:API serves one language per resource, so a histogram of `n.langcode`
+ * looks like 100% default language even when translations exist. Without
+ * Sentinel the report is `unavailable` rather than that misleading chart.
+ *
+ * @param {object} args - { site?, type?, sampleSize? }.
+ * @returns {Promise<object>} Coverage, or unavailable.
  */
-async function translationCoverage({ site: siteName, type, gapThreshold = 0.5, sampleSize = 500 }) {
+async function translationCoverage({ site: siteName, type, sampleSize = 100 }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "node", type);
@@ -165,24 +207,71 @@ async function translationCoverage({ site: siteName, type, gapThreshold = 0.5, s
     sampleSize
   );
 
-  const byLang = new Map();
-  for (const n of nodes) {
-    const lang = n.langcode || "und";
-    byLang.set(lang, (byLang.get(lang) || 0) + 1);
+  const missingEndpoint = /does not provide Sentinel's governed draft-translation endpoint/;
+  if (typeof backend.rawQuery !== "function" || typeof backend.resourcePath !== "function") {
+    return {
+      contentType,
+      scanned: nodes.length,
+      unavailable: true,
+      reason:
+        "Translation coverage requires Sentinel's GET .../mcp-translations inventory. " +
+        "JSON:API only shows the default language; a language histogram would be misleading.",
+    };
   }
-  const counts = [...byLang.entries()].map(([langcode, count]) => ({ langcode, count })).sort((a, b) => b.count - a.count);
-  const top = counts[0]?.count ?? 0;
-  const lagging = counts
-    .filter((c) => top > 0 && c.count / top < gapThreshold)
-    .map((c) => ({ langcode: c.langcode, count: c.count, coverage: Number((c.count / top).toFixed(2)) }));
+
+  const findings = [];
+  let inventoried = 0;
+  for (const n of nodes) {
+    try {
+      const inventory = await readTranslationInventory(backend, {
+        entityType: "node", bundle: contentType, id: n.id,
+      });
+      inventoried += 1;
+      const rows = inventoryTranslationRows(inventory);
+      const defaultLangcode = inventory.defaultLangcode ?? n.langcode ?? null;
+      const nonDefault = rows.filter((row) => row.langcode !== defaultLangcode);
+      findings.push({
+        id: n.id,
+        title: n.title,
+        defaultLangcode,
+        languages: rows.map(mapTranslationRow),
+        missingNonDefault: nonDefault.length === 0,
+        outdated: rows.some((row) => row.outdated === true),
+      });
+    } catch (error) {
+      if (!missingEndpoint.test(String(error?.message))) throw error;
+    }
+  }
+
+  if (inventoried === 0) {
+    return {
+      contentType,
+      scanned: nodes.length,
+      unavailable: true,
+      reason:
+        "Translation coverage requires Sentinel's GET .../mcp-translations inventory. " +
+        "JSON:API only shows the default language; a language histogram would be misleading.",
+    };
+  }
+
+  const languageCounts = new Map();
+  for (const finding of findings) {
+    for (const row of finding.languages) {
+      languageCounts.set(row.langcode, (languageCounts.get(row.langcode) || 0) + 1);
+    }
+  }
 
   return {
     contentType,
     scanned: nodes.length,
-    approximate: nodes.length >= sampleSize,
-    languages: counts,
-    laggingLanguages: lagging,
-    note: "Coverage is a distribution-by-language signal; exact per-node missing translations require translation metadata not in the canonical model.",
+    inventoried,
+    approximate: nodes.length >= sampleSize || inventoried < nodes.length,
+    languages: [...languageCounts.entries()]
+      .map(([langcode, count]) => ({ langcode, count }))
+      .sort((a, b) => b.count - a.count),
+    missing: findings.filter((f) => f.missingNonDefault).map((f) => ({ id: f.id, title: f.title })),
+    outdated: findings.filter((f) => f.outdated).map((f) => ({ id: f.id, title: f.title })),
+    findings,
   };
 }
 
@@ -555,20 +644,20 @@ export const definitions = [
         type:       { type: "string", description: "Content type (default: article)" },
         days:       { type: "number", default: 30, description: "Days-in-state threshold" },
         states:     { type: "array", items: { type: "string" }, description: "Moderation states to treat as bottlenecks" },
+        langcode:   { type: "string", description: "Limit to this translation (Sentinel inventory). Omit for the default-language field on each node." },
         sampleSize: { type: "number", default: 200 },
       },
     },
   },
   {
     name: "drupal_report_translation_coverage",
-    description: "Report content distribution by language for a content type and flag languages lagging the most-populated language — a multilingual coverage signal.",
+    description: "Per-node translation coverage from Sentinel's inventory (missing non-default language, outdated core flag, language counts). Without Sentinel the report is unavailable — JSON:API only shows the default language, so a histogram would be misleading.",
     inputSchema: {
       type: "object",
       properties: {
-        site:         { type: "string" },
-        type:         { type: "string", description: "Content type (default: article)" },
-        gapThreshold: { type: "number", default: 0.5, description: "Flag languages below this fraction of the top language" },
-        sampleSize:   { type: "number", default: 500 },
+        site:       { type: "string" },
+        type:       { type: "string", description: "Content type (default: article)" },
+        sampleSize: { type: "number", default: 100, description: "Max nodes to inventory" },
       },
     },
   },
