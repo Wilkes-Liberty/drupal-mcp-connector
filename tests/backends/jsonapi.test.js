@@ -189,6 +189,71 @@ describe("JsonApiBackend fetch methods", () => {
     expect(vi.mocked(drupalFetch).mock.calls[0][1]).toContain("page%5Blimit%5D=1");
   });
 
+  const listPage = (n, hasNext, meta) => ({
+    data: Array.from({ length: n }, (_, i) => ({
+      type: "node--article", id: `u${i}`, attributes: { title: `N${i}`, status: true },
+    })),
+    ...(meta ? { meta } : { meta: {} }),
+    links: hasNext ? { next: { href: "https://x/jsonapi/node/article?page[offset]=next" } } : { self: { href: "s" } },
+  });
+
+  it("does not treat a capped page length as an exact total when meta.count is absent (#291)", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue(listPage(50, true));
+    const res = await backend.listEntities({ entityType: "node", bundle: "article", page: { limit: 50, offset: 0 } });
+    expect(res.entities).toHaveLength(50);
+    expect(res.page.total).toBe(50);
+    expect(res.page.hasNext).toBe(true);
+    expect(res.approximate).toBe(true);
+    expect(res.truncated).toBe(false);
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a short final page as an exact total when meta.count is absent (#291)", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue(listPage(4, false));
+    const res = await backend.listEntities({ entityType: "node", bundle: "article", page: { limit: 50, offset: 50 } });
+    expect(res.entities).toHaveLength(4);
+    expect(res.page.total).toBe(54);
+    expect(res.page.hasNext).toBe(false);
+    expect(res.approximate).toBe(false);
+  });
+
+  it("follows links.next to fill a limit above Drupal's page cap (#291)", async () => {
+    vi.mocked(drupalFetch)
+      .mockResolvedValueOnce(listPage(50, true))
+      .mockResolvedValueOnce(listPage(4, false));
+    const res = await backend.listEntities({ entityType: "node", bundle: "article", page: { limit: 100, offset: 0 } });
+    expect(res.entities).toHaveLength(54);
+    expect(res.page.total).toBe(54);
+    expect(res.page.hasNext).toBe(false);
+    expect(res.approximate).toBe(false);
+    expect(res.truncated).toBe(false);
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(drupalFetch).mock.calls[0][1]).toContain("page%5Blimit%5D=100");
+    expect(vi.mocked(drupalFetch).mock.calls[1][1]).toContain("page%5Boffset%5D=50");
+  });
+
+  it("stops at the requested limit and keeps hasNext when more rows remain (#291)", async () => {
+    vi.mocked(drupalFetch)
+      .mockResolvedValueOnce(listPage(50, true))
+      .mockResolvedValueOnce(listPage(50, true));
+    const res = await backend.listEntities({ entityType: "node", bundle: "article", page: { limit: 100 } });
+    expect(res.entities).toHaveLength(100);
+    expect(res.page.total).toBe(100);
+    expect(res.page.hasNext).toBe(true);
+    expect(res.approximate).toBe(true);
+    expect(res.truncated).toBe(false);
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not extra-fetch when the first page already fills the requested limit (#291)", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue(listPage(20, true));
+    const res = await backend.listEntities({ entityType: "node", bundle: "article", page: { limit: 20 } });
+    expect(res.entities).toHaveLength(20);
+    expect(res.page.hasNext).toBe(true);
+    expect(res.approximate).toBe(true);
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(1);
+  });
+
   it("getEntity returns a canonical entity or null", async () => {
     vi.mocked(drupalFetch).mockResolvedValue({ data: { type: "node--article", id: "11111111-1111-4111-8111-111111111111", attributes: { title: "A" } } });
     const c = await backend.getEntity({ entityType: "node", bundle: "article", id: "11111111-1111-4111-8111-111111111111" });

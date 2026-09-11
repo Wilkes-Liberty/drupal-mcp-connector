@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`drupal_list_nodes` no longer reports a Drupal-capped page as the exact collection total (#291).**
+  Core JSON:API silently caps `page[limit]` at 50 and does not send `meta.count`.
+  The connector was treating that page length as `total` with `approximate: false`,
+  so a `limit: 100` call on a 54-item collection returned 50 and looked complete.
+  `listEntities` now follows `links.next` to fill a larger requested limit (up to
+  1000) and only reports an exact `total` when `meta.count` is present or the
+  window reached the end. Otherwise `approximate` is true and `hasNext` is
+  returned on the tool result.
+
 ## [2.15.0] - 2026-09-10
 
 ### Fixed

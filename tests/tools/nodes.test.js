@@ -119,6 +119,21 @@ describe("nodes tools (migrated)", () => {
     expect(out.nextOffset).toBe(22);
   });
 
+  it("list_nodes surfaces hasNext and approximate instead of dropping them (#291)", async () => {
+    backend.listEntities.mockResolvedValue({
+      entities: [canonicalNode(), canonicalNode({ id: "n2" })],
+      page: { total: 2, hasNext: true },
+      approximate: true,
+      truncated: false,
+    });
+    const out = await handlers.drupal_list_nodes({ type: "article", limit: 100 });
+    expect(out.total).toBe(2);
+    expect(out.approximate).toBe(true);
+    expect(out.hasNext).toBe(true);
+    expect(out.truncated).toBe(false);
+    expect(out.nextOffset).toBe(2);
+  });
+
   it("update_node merges fields, builds the body wrapper, and calls updateEntity", async () => {
     backend.updateEntity.mockResolvedValue(canonicalNode());
     await handlers.drupal_update_node({ type: "article", id: "n1", title: "New", body: "<p>y</p>", fields: { field_x: 1 } });

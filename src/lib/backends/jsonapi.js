@@ -24,13 +24,29 @@ import { isPositiveNid, normalizeAlias, PATH_ALIAS_ENTITY_TYPE } from "../path-a
 // governed read/write workflows explicitly need.
 const INTERNAL_ATTR_RE = /^drupal_internal__/;
 
-// countEntities() pagination. Drupal core JSON:API returns no total in `meta`,
-// so an exact count is obtained by walking pages until `links.next` is gone.
-// COUNT_PAGE_SIZE is Drupal's default max page size; COUNT_MAX_RECORDS bounds
-// the walk so a huge collection can't issue unbounded requests (mirrors the
-// GraphQL backend's MAX_CLIENT_RECORDS) — past it the count is approximate.
+// countEntities() / listEntities() pagination. Drupal core JSON:API returns no
+// total in `meta` and silently caps `page[limit]` at OffsetPage::SIZE_MAX
+// (50 by default). COUNT_PAGE_SIZE matches that default; COUNT_MAX_RECORDS
+// bounds a walk so a huge collection can't issue unbounded requests (mirrors
+// the GraphQL backend's MAX_CLIENT_RECORDS) — past it the count is approximate.
 const COUNT_PAGE_SIZE = 50;
 const COUNT_MAX_RECORDS = 1000;
+
+/**
+ * Whether a JSON:API collection document advertises another page.
+ * `links.next` may be a string href or a `{ href }` link object.
+ * @param {?object} data JSON:API document.
+ * @returns {boolean}
+ */
+function jsonApiHasNext(data) {
+  const next = data?.links?.next;
+  if (next === undefined || next === null || next === false) return false;
+  if (typeof next === "string") return next.length > 0;
+  if (typeof next === "object" && next.href !== undefined && next.href !== null) {
+    return String(next.href).length > 0;
+  }
+  return Boolean(next);
+}
 
 /**
  * Detect the JSON:API error Drupal returns when a write attempts to set the
@@ -268,24 +284,72 @@ export class JsonApiBackend extends Backend {
   }
 
   /**
-   * List entities for a descriptor. Server-side filter/sort/paging means the
-   * result is always exact (`approximate`/`truncated` are false).
+   * List entities for a descriptor.
+   *
+   * Drupal core JSON:API has no `meta.count` (jsonapi_extras can add it) and
+   * silently caps `page[limit]` at OffsetPage::SIZE_MAX (50 by default). When
+   * the caller asks for more rows than one Drupal page returns and
+   * `links.next` is present, this method follows that link until the requested
+   * window is filled, the collection ends, or COUNT_MAX_RECORDS is hit.
+   * `page.total` is exact when `meta.count` is present or this window reached
+   * the end; otherwise it is the number of rows seen so far and `approximate`
+   * is true. Never report a single page's length as an exact collection total.
+   *
    * @param {import("../canonical.js").QueryDescriptor} descriptor
    * @returns {Promise<import("./backend-interface.js").ListResult>}
    */
   async listEntities(descriptor) {
-    const params = this.compileQuery(descriptor);
-    const qs = params.toString();
-    const base = this.resourcePath(descriptor.entityType, descriptor.bundle);
-    const path = qs ? `${base}?${qs}` : base;
-    const data = await drupalFetch(this.site, path);
-    const entities = (data.data || []).map((r) => this.toCanonical(r));
-    const total = data.meta?.count ?? entities.length;
+    const requestedLimit = descriptor.page?.limit;
+    const startOffset = descriptor.page?.offset ?? 0;
+    const fillTo = typeof requestedLimit === "number"
+      ? Math.min(Math.max(0, requestedLimit), COUNT_MAX_RECORDS)
+      : null;
+
+    const entities = [];
+    let offset = startOffset;
+    let hasNext = false;
+    let metaCount = null;
+
+    for (;;) {
+      const remaining = fillTo === null ? requestedLimit : fillTo - entities.length;
+      const page = {
+        ...descriptor.page,
+        offset,
+        ...(typeof remaining === "number" ? { limit: remaining } : {}),
+      };
+      const params = this.compileQuery({ ...descriptor, page });
+      const qs = params.toString();
+      const base = this.resourcePath(descriptor.entityType, descriptor.bundle);
+      const path = qs ? `${base}?${qs}` : base;
+      const data = await drupalFetch(this.site, path);
+      if (metaCount === null && typeof data?.meta?.count === "number") {
+        metaCount = data.meta.count;
+      }
+      const pageEntities = (data.data || []).map((r) => this.toCanonical(r));
+      entities.push(...pageEntities);
+      hasNext = jsonApiHasNext(data);
+
+      if (fillTo === null) break;
+      if (!hasNext || pageEntities.length === 0) break;
+      if (entities.length >= fillTo) break;
+      offset += pageEntities.length;
+    }
+
+    const truncated = fillTo !== null
+      && typeof requestedLimit === "number"
+      && entities.length < requestedLimit
+      && hasNext;
+    const seen = startOffset + entities.length;
+    const exact = typeof metaCount === "number" || !hasNext;
     return {
       entities,
-      page: { total, hasNext: Boolean(data.links?.next), cursor: null },
-      approximate: false,
-      truncated: false,
+      page: {
+        total: typeof metaCount === "number" ? metaCount : seen,
+        hasNext,
+        cursor: null,
+      },
+      approximate: !exact,
+      truncated,
     };
   }
 

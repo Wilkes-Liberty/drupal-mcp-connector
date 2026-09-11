@@ -57,7 +57,7 @@ Tools for creating, reading, updating, and deleting Drupal content nodes. Reads 
 | Tool | Required params | Description |
 |------|----------------|-------------|
 | `drupal_get_node` | `type`, `id` | Fetch a single node by UUID. Returns all attributes. |
-| `drupal_list_nodes` | `type` | List nodes with filter, sort, pagination support. |
+| `drupal_list_nodes` | `type` | List nodes with filter, sort, pagination support. Drupal core caps `page[limit]` at 50; a larger `limit` is filled via `links.next`. `total` is exact only when `meta.count` is present or the window reached the end; otherwise `approximate` is true and `hasNext` is set. |
 | `drupal_search_content` | `query` | Search nodes by title substring. |
 | `drupal_create_node` | `type`, `title` | Create a node. Scalar fields via `fields`; **entity-reference fields (taxonomy, related content, media) via `relationships`** (JSON:API shape). `returning: "minimal"` for a compact identity+state response. |
 | `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. Reference fields go in `relationships`, not `fields`; `returning: "minimal"` bounds the response size. On a **published moderated** node, omitting `moderationState` defaults the write to `moderation_state: "draft"` (forward revision). An unrequested published-state flip in the persisted node is reported via `_statusChanged` (#171). Paragraph / ERR identifiers are resolved to include `meta.target_revision_id` before PATCH (#192); the write fails if any ref cannot be resolved. On moderated targets a non-saving PATCH preflight runs first, including on `dryRun`, against the same URL the write will hit. An addressable node draft uses Sentinel's governed draft endpoint with live/working revision preconditions (#166). A successful write may include `_revisions: { live, working }` when both vids can be read. A stray revision with no addressable working copy still fails with revision-surgery language (#201). |
@@ -91,6 +91,8 @@ Returns a canonical entity: `id`, `entityType`, `bundle`, `title`, `status`, `la
 ```
 
 The `filter` object accepts raw JSON:API filter parameters for advanced filtering.
+
+`total` is the collection size when the backend knows it. Drupal core JSON:API does not send `meta.count` and caps `page[limit]` at 50, so a `limit` above that cap is filled by following `links.next`. If this window did not reach the end, `approximate` is true and `hasNext` is true — do not treat `nodes.length` as the collection size.
 
 ### drupal_create_node
 

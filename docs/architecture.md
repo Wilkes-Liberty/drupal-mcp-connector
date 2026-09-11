@@ -93,7 +93,7 @@ Tools consult capabilities before acting. A write tool against the GraphQL backe
 | Write / delete | ✅ | ❌ (no mutations) |
 | Server-side filter | ✅ | ❌ → client-side, bounded, flagged `approximate`/`truncated` |
 | Server-side sort | ✅ | partial (`created`/`changed`/`title` native; others client-side) |
-| Total count | exact, paginated (Drupal core JSON:API has no `meta.count`, so counts walk `links.next`; flagged `approximate` past a 1000-record safety cap) | bounded fetch, always `approximate` |
+| Total count | exact when `meta.count` is present or the walk/`list` window reached the end; Drupal core JSON:API has no `meta.count` and caps `page[limit]` at 50, so counts and oversized list windows walk `links.next` (flagged `approximate` past a 1000-record safety cap) | bounded fetch, always `approximate` |
 | Revisions | ✅ | depends on schema |
 
 The GraphQL backend is introspection-driven and type-aware (handles irregular plurals, scalar-wrapper objects like `DateTime`/`Language`/`TextSummary`, and entity-reference unions). See [graphql-local-setup.md](graphql-local-setup.md).
