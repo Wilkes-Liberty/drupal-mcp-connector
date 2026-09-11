@@ -54,6 +54,14 @@ describe("taxonomy tools (migrated)", () => {
     expect(arg.relationships.parent).toEqual({ data: [{ type: "taxonomy_term--tags", id: "p1" }] });
   });
 
+  it("get_taxonomy_term passes langcode through to getEntity", async () => {
+    backend.getEntity.mockResolvedValue(term);
+    await handlers.drupal_get_taxonomy_term({ vocabulary: "tags", id: "t1", langcode: "es" });
+    expect(backend.getEntity).toHaveBeenCalledWith({
+      entityType: "taxonomy_term", bundle: "tags", id: "t1", langcode: "es",
+    });
+  });
+
   it("update_taxonomy_term sets only provided fields and calls updateEntity", async () => {
     backend.updateEntity.mockResolvedValue(term);
     await handlers.drupal_update_taxonomy_term({ vocabulary: "tags", id: "t1", name: "Renamed", description: "d2" });

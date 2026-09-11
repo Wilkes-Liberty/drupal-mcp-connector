@@ -96,11 +96,18 @@ async function describeFields({ site: siteName, type, entityType: entityTypeArg,
 
   const backend = await resolveBackend(site);
   const schema = await backend.getEntitySchema(entityType, resolvedBundle);
+  const translatable = typeof backend.listFieldTranslatability === "function"
+    ? await backend.listFieldTranslatability(entityType, resolvedBundle).catch(() => ({}))
+    : {};
+  const translatableMap = translatable && typeof translatable === "object" ? new Map(Object.entries(translatable)) : new Map();
 
   const fields = [
     ...Object.entries(schema.attributes ?? {}).map(([name, t]) => attributeField(name, t)),
     ...Object.keys(schema.relationships ?? {}).map((name) => relationshipField(name)),
-  ].sort((a, b) => a.name.localeCompare(b.name));
+  ].sort((a, b) => a.name.localeCompare(b.name)).map((field) => {
+    if (!translatableMap.has(field.name)) return field;
+    return { ...field, translatable: Boolean(translatableMap.get(field.name)) };
+  });
 
   const sampledEmpty = fields.length === 0;
 
@@ -125,11 +132,12 @@ export const definitions = [
     name: "drupal_describe_fields",
     description:
       "Introspect the fields of a Drupal entity type + bundle: returns a per-field " +
-      "list of { name, type, kind, cardinality?, approximate }. Read-only. Built on " +
+      "list of { name, type, kind, cardinality?, translatable?, approximate }. Read-only. Built on " +
       "schema SAMPLING (an existing entity), so results are approximate — only " +
       "populated fields are visible and required/cardinality/allowedValues are " +
-      "inferred from value shape. Authoritative field metadata comes from the Drush " +
-      "bridge (Field API). Use this before creating/updating entities to learn field names.",
+      "inferred from value shape. When JSON:API field_config is readable, translatable " +
+      "is copied from Field API; omitted means unknown, not false. Authoritative field " +
+      "metadata comes from the Drush bridge (Field API). Use this before creating/updating entities to learn field names.",
     inputSchema: {
       type: "object",
       required: ["site"],

@@ -33,6 +33,38 @@ const COUNT_PAGE_SIZE = 50;
 const COUNT_MAX_RECORDS = 1000;
 
 /**
+ * JSON:API language headers. Drupal negotiates Content-Language / Accept-Language
+ * when URL prefixes are not used on /jsonapi.
+ * @param {?string} langcode
+ * @returns {object}
+ */
+function languageFetchOptions(langcode) {
+  if (!langcode) return {};
+  return { headers: { "Content-Language": langcode, "Accept-Language": langcode } };
+}
+
+/**
+ * Fail if JSON:API served a different language than requested.
+ * @param {?object} entity
+ * @param {?string} langcode
+ */
+function assertServedLanguage(entity, langcode) {
+  if (!langcode || !entity) return;
+  if (!entity.langcode) {
+    throw new Error(
+      `JSON:API did not report a language for requested langcode "${langcode}". ` +
+      "The translation may not exist, or this backend does not negotiate language.",
+    );
+  }
+  if (entity.langcode !== langcode) {
+    throw new Error(
+      `JSON:API served language "${entity.langcode}" for requested langcode "${langcode}". ` +
+      "The translation may not exist, or this site does not negotiate JSON:API by language.",
+    );
+  }
+}
+
+/**
  * Whether a JSON:API collection document advertises another page.
  * `links.next` may be a string href or a `{ href }` link object.
  * @param {?object} data JSON:API document.
@@ -358,14 +390,16 @@ export class JsonApiBackend extends Backend {
    * @param {{entityType: string, bundle: string, id: string, resourceVersion?: string}} ref
    * @returns {Promise<?import("../canonical.js").CanonicalEntity>} Entity, or null.
    */
-  async getEntity({ entityType, bundle, id, resourceVersion }) {
+  async getEntity({ entityType, bundle, id, resourceVersion, langcode }) {
     validateUuid(id);
     let path = `${this.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}`;
     if (resourceVersion) {
       path += `?resourceVersion=${encodeURIComponent(resourceVersion)}`;
     }
-    const data = await drupalFetch(this.site, path);
-    return data?.data ? this.toCanonical(data.data) : null;
+    const data = await drupalFetch(this.site, path, languageFetchOptions(langcode));
+    const entity = data?.data ? this.toCanonical(data.data) : null;
+    assertServedLanguage(entity, langcode);
+    return entity;
   }
 
   /**
@@ -478,14 +512,15 @@ export class JsonApiBackend extends Backend {
    * @param {object} attributes Entity attributes (may include `status`).
    * @returns {Promise<object>} The JSON:API response body.
    */
-  async writeWithModerationFallback(path, method, buildPayload, attributes) {
+  async writeWithModerationFallback(path, method, buildPayload, attributes, langcode) {
+    const lang = languageFetchOptions(langcode);
     try {
-      return await drupalFetch(this.site, path, { method, body: JSON.stringify(buildPayload(attributes)) });
+      return await drupalFetch(this.site, path, { method, body: JSON.stringify(buildPayload(attributes)), ...lang });
     } catch (err) {
       if (!isModeratedStatusError(err) || !("status" in attributes)) throw err;
       const withoutStatus = { ...attributes };
       delete withoutStatus.status;
-      return drupalFetch(this.site, path, { method, body: JSON.stringify(buildPayload(withoutStatus)) });
+      return drupalFetch(this.site, path, { method, body: JSON.stringify(buildPayload(withoutStatus)), ...lang });
     }
   }
 
@@ -515,7 +550,7 @@ export class JsonApiBackend extends Backend {
    *   canonical default (#166 / Drupal #2795279).
    * @returns {Promise<import("../canonical.js").CanonicalEntity>} The updated entity.
    */
-  async updateEntity({ entityType, bundle, id, attributes = {}, relationships, resourceVersion }) {
+  async updateEntity({ entityType, bundle, id, attributes = {}, relationships, resourceVersion, langcode }) {
     validateUuid(id);
     const buildPayload = (attrs) => {
       const payload = { data: { type: `${entityType}--${bundle}`, id, attributes: attrs } };
@@ -527,8 +562,10 @@ export class JsonApiBackend extends Backend {
     if (resourceVersion) {
       path += `?resourceVersion=${encodeURIComponent(resourceVersion)}`;
     }
-    const data = await this.writeWithModerationFallback(path, "PATCH", buildPayload, attributes);
-    return this.toCanonical(data.data);
+    const data = await this.writeWithModerationFallback(path, "PATCH", buildPayload, attributes, langcode);
+    const entity = this.toCanonical(data.data);
+    assertServedLanguage(entity, langcode);
+    return entity;
   }
 
   /**
@@ -704,6 +741,45 @@ export class JsonApiBackend extends Backend {
    * @param {{entityType: string, bundle: string, fieldName: string}} ref
    * @returns {Promise<?{fieldName: string, fieldType: ?string, allowedFormats: string[]}>}
    */
+  /**
+   * Map of field machine name → translatable from JSON:API field_config.
+   * Base fields (title, moderation_state) are omitted unless exposed as
+   * base_field_override. Missing keys must not be treated as false.
+   * @param {string} entityType
+   * @param {string} bundle
+   * @returns {Promise<Object<string, boolean>>}
+   */
+  async listFieldTranslatability(entityType, bundle) {
+    validateMachineName(entityType, "entityType");
+    validateMachineName(bundle, "bundle");
+    const map = new Map();
+    const params = new URLSearchParams();
+    params.set("filter[entity_type]", entityType);
+    params.set("filter[bundle]", bundle);
+    params.set("page[limit]", "50");
+    const ingest = (rows) => {
+      for (const row of rows) {
+        const name = row?.attributes?.field_name;
+        if (typeof name === "string" && typeof row.attributes?.translatable === "boolean") {
+          map.set(name, row.attributes.translatable);
+        }
+      }
+    };
+    try {
+      const data = await drupalFetch(this.site, `/jsonapi/field_config/field_config?${params}`);
+      ingest(Array.isArray(data?.data) ? data.data : []);
+    } catch {
+      // field_config may be unexposed.
+    }
+    try {
+      const data = await drupalFetch(this.site, `/jsonapi/base_field_override/base_field_override?${params}`);
+      ingest(Array.isArray(data?.data) ? data.data : []);
+    } catch {
+      // base_field_override is often not JSON:API-exposed.
+    }
+    return Object.fromEntries(map);
+  }
+
   async getFieldDefinition({ entityType, bundle, fieldName }) {
     validateMachineName(entityType, "entityType");
     validateMachineName(bundle, "bundle");

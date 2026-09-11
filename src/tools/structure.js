@@ -19,6 +19,7 @@ import { resolveBackend } from "../lib/backends/index.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, redactCanonicalEntity,
 } from "../lib/security.js";
+import { assertDraftLangcode } from "../lib/draft-write.js";
 
 const MENU_LINK_TYPE = "menu_link_content";
 const BLOCK_TYPE = "block_content";
@@ -150,12 +151,13 @@ async function createMenuLink({ site: siteName, title, link, menu, weight, paren
  * @throws {Error} If id is missing.
  * @throws {SecurityError} If updating menu_link_content is not permitted.
  */
-async function updateMenuLink({ site: siteName, id, title, link, menu, weight, parent, enabled }) {
+async function updateMenuLink({ site: siteName, id, title, link, menu, weight, parent, enabled, langcode }) {
   if (!id) throw new Error("A menu link 'id' (UUID) is required to update an existing menu link.");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", MENU_LINK_TYPE, MENU_LINK_TYPE);
   const backend = await resolveBackend(site);
+  const language = langcode ? { langcode: assertDraftLangcode(langcode) } : {};
   const attributes = {};
   if (title !== undefined) attributes.title = title;
   if (link !== undefined) attributes.link = { uri: link };
@@ -165,12 +167,12 @@ async function updateMenuLink({ site: siteName, id, title, link, menu, weight, p
   if (enabled !== undefined) {
     attributes.enabled = enabled;
   } else {
-    const current = await backend.getEntity({ entityType: MENU_LINK_TYPE, bundle: MENU_LINK_TYPE, id });
+    const current = await backend.getEntity({ entityType: MENU_LINK_TYPE, bundle: MENU_LINK_TYPE, id, ...language });
     const currentEnabled = current?.fields?.enabled;
     attributes.enabled = currentEnabled === undefined ? true : currentEnabled;
   }
   return writeMenuLinkWithRetry(() =>
-    backend.updateEntity({ entityType: MENU_LINK_TYPE, bundle: MENU_LINK_TYPE, id, attributes }));
+    backend.updateEntity({ entityType: MENU_LINK_TYPE, bundle: MENU_LINK_TYPE, id, attributes, ...language }));
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +275,7 @@ export const definitions = [
         weight:  { type: "number", description: "New ordering weight. Omit to leave unchanged." },
         parent:  { type: "string", description: "New parent link plugin id (e.g. 'menu_link_content:<uuid>'), or '' for top level. Omit to leave unchanged." },
         enabled: { type: "boolean", description: "Enable/disable the link. Omit to preserve the current state." },
+        langcode: { type: "string", description: "Existing translation to update (e.g. 'es'). Omit for the default language. Does not create a missing translation." },
       },
     },
   },

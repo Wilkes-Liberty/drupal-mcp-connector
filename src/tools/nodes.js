@@ -15,10 +15,11 @@ import {
 } from "../lib/security.js";
 import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
 import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA, omitLiveComputedMetatag } from "../lib/entity-response.js";
-import { resolveErrRelationships, relationshipsWereSent } from "../lib/err-relationships.js";
+import { resolveErrRelationships, relationshipsWereSent, paragraphPinsFromEntity } from "../lib/err-relationships.js";
 import { attachWrittenRevisionPair, readWrittenRevision } from "../lib/write-revision.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
 import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } from "../lib/draft-write.js";
+import { paragraphResourceVersion } from "./paragraphs.js";
 import { assertBodySummaryWritable, attachSummaryDeprecation } from "../lib/body-summary.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 import { applyAllowedFormatsToAttributes } from "../lib/field-definition.js";
@@ -239,7 +240,51 @@ function pageOf({ limit = 20, offset = 0 }) {
  * @param {object} args - { site?, type, id }.
  * @returns {Promise<object|null>} The redacted node, or null if not found.
  */
-async function getNode({ site: siteName, type, id, langcode, resourceVersion }) {
+/**
+ * Load pinned paragraph translations (or default-language pins) onto a host.
+ * Per-component failures are recorded; they do not fail the host read.
+ * @param {object} backend
+ * @param {object} sec
+ * @param {object} entity
+ * @param {?string} langcode
+ * @returns {Promise<object>}
+ */
+async function withComponents(backend, sec, entity, langcode) {
+  const pins = paragraphPinsFromEntity(entity);
+  const components = [];
+  for (const pin of pins) {
+    try {
+      let para;
+      if (langcode && pin.revisionId) {
+        para = await readDraftTranslation(backend, {
+          entityType: "paragraph",
+          bundle: pin.paragraphType,
+          id: pin.id,
+          langcode,
+          draftRevision: { revisionId: pin.revisionId },
+        });
+      } else if (pin.revisionId) {
+        para = await backend.getEntity({
+          entityType: "paragraph",
+          bundle: pin.paragraphType,
+          id: pin.id,
+          resourceVersion: paragraphResourceVersion(pin.revisionId),
+          ...(langcode ? { langcode } : {}),
+        });
+      }
+      components.push({
+        ...pin,
+        entity: para ? redactCanonicalEntity(para, sec, "paragraph") : null,
+        ...(para ? {} : { note: "missing revision pin" }),
+      });
+    } catch (error) {
+      components.push({ ...pin, entity: null, error: String(error.message || error) });
+    }
+  }
+  return { ...entity, components };
+}
+
+async function getNode({ site: siteName, type, id, langcode, resourceVersion, includeComponents = false }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "node", type);
@@ -253,7 +298,8 @@ async function getNode({ site: siteName, type, id, langcode, resourceVersion }) 
         entityType: "node", bundle: type, id, langcode: targetLang,
         draftRevision: { liveVid: inventory.live.vid, workingVid: inventory.working.vid },
       });
-      return omitLiveComputedMetatag(redactCanonicalEntity(entity, sec, "node"));
+      const redacted = omitLiveComputedMetatag(redactCanonicalEntity(entity, sec, "node"));
+      return includeComponents ? withComponents(backend, sec, redacted, targetLang) : redacted;
     }
     const liveHas = (inventory.live?.translations ?? []).some((row) => row.langcode === targetLang);
     if (!liveHas) {
@@ -261,7 +307,7 @@ async function getNode({ site: siteName, type, id, langcode, resourceVersion }) 
     }
     if (targetLang !== inventory.defaultLangcode) {
       const liveRow = (inventory.live.translations ?? []).find((row) => row.langcode === targetLang);
-      return {
+      const stub = {
         id, entityType: "node", bundle: type, langcode: targetLang,
         title: liveRow?.title ?? null,
         status: liveRow?.status ?? null,
@@ -269,10 +315,13 @@ async function getNode({ site: siteName, type, id, langcode, resourceVersion }) 
         _revisions: { live: inventory.live.vid, working: inventory.working?.vid ?? null },
         note: "Published non-default translations are listed on the live revision; full field reads of an unpublished working translation use langcode against the working draft.",
       };
+      return includeComponents ? { ...stub, components: [] } : stub;
     }
   }
   const entity = await backend.getEntity({ entityType: "node", bundle: type, id, resourceVersion });
-  return entity ? redactCanonicalEntity(entity, sec, "node") : null;
+  if (!entity) return null;
+  const redacted = redactCanonicalEntity(entity, sec, "node");
+  return includeComponents ? withComponents(backend, sec, redacted, langcode || null) : redacted;
 }
 
 /**
@@ -520,7 +569,7 @@ async function deleteNode({ site: siteName, type, id, dryRun = false }) {
 export const definitions = [
   {
     name: "drupal_get_node",
-    description: "Fetch a single Drupal content node by UUID and content type. Returns title, body, status, path alias, and all attributes. Pass langcode to read a working translation draft via Sentinel (distinct from published English).",
+    description: "Fetch a single Drupal content node by UUID and content type. Returns title, body, status, path alias, and all attributes. Pass langcode to read a working translation draft via Sentinel (distinct from published English). Pass includeComponents true to attach pinned paragraph translations under `components` (default false).",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
@@ -528,6 +577,7 @@ export const definitions = [
         type: { type: "string", description: "Content type machine name, e.g. 'article'" },
         id:   { type: "string", description: "Node UUID" },
         langcode: { type: "string", description: "Target language (e.g. 'es') to read the unpublished working translation instead of the default language." },
+        includeComponents: { type: "boolean", default: false, description: "If true, include pinned paragraph translations under `components` (empty array when the host has no ERR fields). Default false so existing callers are unchanged." },
       },
     },
   },

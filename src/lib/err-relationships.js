@@ -39,6 +39,28 @@ export function isParagraphResourceType(type) {
 }
 
 /**
+ * Paragraph ERR pins on a canonical host entity.
+ * @param {object} entity Canonical node (or other host).
+ * @returns {Array<{field: string, id: string, paragraphType: string, revisionId: ?string}>}
+ */
+export function paragraphPinsFromEntity(entity) {
+  const pins = [];
+  const rels = entity?.relationships && typeof entity.relationships === "object" ? entity.relationships : {};
+  for (const [field, value] of Object.entries(rels)) {
+    const list = Array.isArray(value) ? value : value ? [value] : [];
+    for (const ref of list) {
+      if (!ref?.id) continue;
+      const paragraphType = ref.bundle || parseResourceType(ref.type)?.bundle;
+      if (ref.entityType !== "paragraph" && !isParagraphResourceType(ref.type)) continue;
+      if (!paragraphType) continue;
+      const revisionId = ref.meta?.target_revision_id ?? null;
+      pins.push({ field, id: ref.id, paragraphType, revisionId });
+    }
+  }
+  return pins;
+}
+
+/**
  * Split a JSON:API resource type into entity type + bundle.
  * @param {string} type e.g. "paragraph--capability".
  * @returns {?{entityType: string, bundle: string}}
