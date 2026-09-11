@@ -682,7 +682,7 @@ The create/update tools return `relationshipData` that includes that meta key. H
 |------|----------------|-------------|
 | `drupal_create_paragraph` | `paragraphType` | Create a Paragraph of a given bundle. Returns the paragraph plus `relationshipData` (`{ type: 'paragraph--<bundle>', id, meta: { target_revision_id } }`). Governed write. |
 | `drupal_update_paragraph` | `paragraphType`, `id` | Partial update of an existing paragraph. Pass `langcode` to continue an unpublished translation via Sentinel. Without `langcode`, canonical JSON:API is still gated on published-host children. |
-| `drupal_get_paragraph` | `paragraphType`, `id` | Fetch a single Paragraph by bundle + UUID. Pass `langcode` to read an unpublished working translation. Returns the redacted paragraph (including `fields.drupal_internal__revision_id`) plus a `ref` with `meta.target_revision_id` when known. |
+| `drupal_get_paragraph` | `paragraphType`, `id` | Fetch a single Paragraph by bundle + UUID. Pass `revisionId` (the host pin) to read that revision; a different served vid is an error, not a silent default-revision fallback. Pass `langcode` to read an unpublished working translation. Returns the redacted paragraph (including `fields.drupal_internal__revision_id`) plus a `ref` with `meta.target_revision_id` when known. |
 
 ### drupal_create_paragraph
 
