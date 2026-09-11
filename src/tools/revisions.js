@@ -23,6 +23,7 @@ import { resolveBackend } from "../lib/backends/index.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, redactCanonicalEntity,
 } from "../lib/security.js";
+import { readNodeDraftInventory } from "../lib/node-draft-inventory.js";
 import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } from "../lib/draft-write.js";
 import { omitLiveComputedMetatag } from "../lib/entity-response.js";
 
@@ -177,13 +178,28 @@ async function listRevisions({ site: siteName, type, id }) {
 
   // The working-copy alias only resolves on entities under a content_moderation
   // workflow with a pending forward revision; absence is expected, not an error.
-  const workingCopy = await fetchRevisionResource(backend, "node", type, id, "rel:working-copy")
+  let workingCopy = await fetchRevisionResource(backend, "node", type, id, "rel:working-copy")
     .then(summarizeRevision)
     .catch(() => null);
+
+  if (!workingCopy || String(workingCopy.vid) === String(latestVersion?.vid)) {
+    const inventory = await readNodeDraftInventory(backend, { entityType: "node", bundle: type, id });
+    if (inventory?.working && String(inventory.working.vid) !== String(inventory.live.vid)) {
+      if (latestVersion && String(latestVersion.vid) !== String(inventory.live.vid)) {
+        throw new Error("The live revision changed during discovery. Re-read the revision inventory.");
+      }
+      // No aggregate publication flag: English may be published while Spanish is draft.
+      workingCopy = { vid: Number(inventory.working.vid), source: "sentinel-inventory",
+        translations: inventory.working.translations.map(({ langcode, status, moderation_state, default: isDefault }) => ({
+          langcode, status, moderation_state, default: isDefault,
+        })) };
+    }
+  }
 
   const possiblyPatchBlocked = Boolean(latestVersion && changedAheadOfRevision(latestVersion));
   let note = LIST_REVISIONS_BASE_NOTE;
   if (!workingCopy) note += LIST_REVISIONS_NULL_WC_NOTE;
+  if (workingCopy?.source === "sentinel-inventory") note += " Working revision discovered through Sentinel; publication state is language-specific. Continue an unpublished translation with explicit langcode.";
   if (possiblyPatchBlocked) note += LIST_REVISIONS_FINGERPRINT_NOTE;
 
   return {
@@ -332,7 +348,7 @@ export const definitions = [
   {
     name: "drupal_list_revisions",
     description:
-      "Surface the addressable revisions of a content node: the latest default revision and the working-copy (forward) revision, with their version ids and links. workingCopy: null is not an all-clear — Drupal core can still reject PATCH when a revision row sits above the default without a content_moderation working copy (#201). The payload includes possiblyPatchBlocked (true when default changed is later than its revision_timestamp) plus changed and revisionTimestamp on latestVersion. Probe the host (this flag, then dryRun on the update) before creating dependent paragraphs. NOTE: JSON:API cannot enumerate full chronological revision history. Full history enumeration requires the Drush bridge.",
+      "Surface the latest default and working node revisions. When the core working-copy alias is absent or echoes live, consult Sentinel translation inventory; workingCopy then includes source and language-specific translations instead of a misleading aggregate status. Continue an unpublished translation with explicit langcode. workingCopy: null is not an all-clear — Drupal core can still reject PATCH when a revision row sits above the default without a content_moderation working copy (#201). The payload includes possiblyPatchBlocked (true when default changed is later than its revision_timestamp) plus changed and revisionTimestamp on latestVersion. Probe the host (this flag, then dryRun on the update) before creating dependent paragraphs. NOTE: JSON:API cannot enumerate full chronological revision history. Full history enumeration requires the Drush bridge.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {

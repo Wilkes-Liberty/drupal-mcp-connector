@@ -136,6 +136,7 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   const written = await readWrittenRevision({
     backend, entityType, bundle, id,
     relationshipsSent: relationshipsWereSent(resolvedRelationships),
+    langcode,
     patchResult: result,
     preferCanonical: false,
   });

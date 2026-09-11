@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Discover and continue translation-only forward revisions (#297).** When core's
+  working-copy alias is absent or echoes live, node revision listing and guarded
+  updates consult Sentinel's translation inventory. Existing unpublished languages
+  continue through the governed endpoint with explicit language and live/working
+  preconditions. Published languages and ambiguous multilingual edits remain refused.
+  Permission and transport failures stop discovery rather than becoming “no draft”.
+  Update responses preserve the saved translation instead of replacing it with live
+  English. An unresolved revision conflict no longer prescribes revision surgery.
+
 ## [2.15.1] - 2026-09-10
 
 ### Fixed

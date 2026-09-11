@@ -57,10 +57,13 @@ beforeEach(() => {
   backend.getEntity.mockResolvedValue(canonicalNode());
   backend.createEntity.mockResolvedValue(canonicalNode());
   backend.updateEntity.mockResolvedValue(canonicalNode());
-  backend.rawQuery.mockRejectedValue(new Error(
+  backend.rawQuery.mockImplementation(async ({ path }) => {
+    if (path.endsWith("/mcp-translations")) throw new Error("Drupal 404 inventory unavailable");
+    throw new Error(
     "Drupal 400 on PATCH /jsonapi/node/article/n1: The selected entity (n1) " +
     "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
-  ));
+    );
+  });
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
   backend.toCanonical.mockImplementation(x => x);
   // Unknown allowed_formats keeps the historical default chain (full_html).
@@ -592,8 +595,8 @@ describe("#192 ERR attach, #169 written revision, #201 preflight", () => {
       relationships: { field_key_capabilities: { data: paras } },
     });
 
-    expect(backend.rawQuery).toHaveBeenCalledTimes(1);
-    const probe = backend.rawQuery.mock.calls[0][0];
+    expect(backend.rawQuery).toHaveBeenCalledTimes(2);
+    const probe = backend.rawQuery.mock.calls[1][0];
     const probeData = JSON.parse(probe.options.body).data;
     expect(probeData).not.toHaveProperty("relationships");
     expect(probeData).not.toHaveProperty("attributes");
@@ -704,8 +707,8 @@ describe("#166 iterative working-copy PATCH", () => {
     expect(backend.updateEntity).toHaveBeenCalledTimes(1);
     const sent = backend.updateEntity.mock.calls[0][0];
     expect(sent).not.toHaveProperty("resourceVersion");
-    expect(backend.rawQuery.mock.calls[0][0].path).toBe("/jsonapi/node/article/n1");
-    expect(backend.rawQuery.mock.calls[0][0].path).not.toMatch(/working-copy/);
+    expect(backend.rawQuery.mock.calls[0][0].path).toMatch(/mcp-translations$/);
+    expect(backend.rawQuery.mock.calls[1][0].path).toBe("/jsonapi/node/article/n1");
   });
 
   it("addressable working copy uses the governed endpoint without canonical PATCH", async () => {
@@ -742,7 +745,10 @@ describe("#166 iterative working-copy PATCH", () => {
 
   it("working copy does not resolve plus core 400 keeps the #201 stray-revision message", async () => {
     mockNoWorkingCopy();
-    backend.rawQuery.mockRejectedValue(WC_400);
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (path.endsWith("/mcp-translations")) throw new Error("Drupal 404 inventory unavailable");
+      throw WC_400;
+    });
     await expect(handlers.drupal_update_node({ type: "article", id: "n1", title: "T" }))
       .rejects.toThrow(/revision surgery|#201/);
     expect(backend.updateEntity).not.toHaveBeenCalled();

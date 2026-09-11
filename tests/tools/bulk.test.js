@@ -39,10 +39,13 @@ const openSec = () => ({
 
 beforeEach(() => {
   Object.values(backend).forEach((f) => f.mockReset());
-  backend.rawQuery.mockRejectedValue(new Error(
+  backend.rawQuery.mockImplementation(async ({ path }) => {
+    if (path.endsWith("/mcp-translations")) throw new Error("Drupal 404 inventory unavailable");
+    throw new Error(
     "Drupal 400 on PATCH /jsonapi/node/article/n1: The selected entity (n1) " +
     "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
-  ));
+    );
+  });
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
   assertWriteAllowed.mockReset();
   resolveSecurityConfig.mockReset();
@@ -246,7 +249,7 @@ describe("bulk tools", () => {
       entityType: "node", bundle: "article",
       items: [{ id: "a1", attributes: { title: "Draft edit" } }],
     });
-    expect(backend.rawQuery).toHaveBeenCalledTimes(1);
+    expect(backend.rawQuery).toHaveBeenCalledTimes(2);
     expect(backend.updateEntity).toHaveBeenCalled();
   });
 

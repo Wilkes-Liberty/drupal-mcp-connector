@@ -16,8 +16,8 @@
  *   Sentinel's /mcp-draft endpoint with verified live/working revision IDs.
  *   Core rejects resourceVersion on PATCH. Never retry the canonical URL.
  * - **#201** — the working-copy alias does not resolve, but core still
- *   blocks. That is a stray revision row. Refuse with revision-surgery
- *   language. `workingCopy: null` is not proof the node is writable.
+ *   blocks. Consult Sentinel inventory for translation-only revisions before
+ *   refusing the unresolved revision conflict. `workingCopy: null` is not proof the node is writable.
  *
  * Unsupported endpoints and stale revisions fail closed, without discard.
  */
@@ -25,6 +25,7 @@
 import { entityLooksModerated, hasExplicitModerationState } from "./moderation-default.js";
 import { entityRevisionId } from "./write-revision.js";
 import { writeDraft } from "./draft-write.js";
+import { readNodeDraftInventory, assertInventoryDraftLanguage } from "./node-draft-inventory.js";
 
 /** Stable error code for a core working-copy / not-latest-revision block. */
 export const PATCH_BLOCKED_CODE = "PATCH_BLOCKED";
@@ -48,7 +49,7 @@ export const PATCH_BLOCKED_MESSAGE =
   "This entity cannot be updated over JSON:API because the stored entity is not " +
   "the latest revision (Drupal core #2795279). The JSON:API aliases " +
   "rel:latest-version and rel:working-copy cannot show the blocking row. " +
-  "Clearing it requires revision surgery outside JSON:API (Drush / the entity API). " +
+  "Inspect the translation inventory and revision history before considering repair; do not delete drafts. " +
   "See connector #201. Do not retry the same canonical PATCH.";
 
 /**
@@ -248,16 +249,31 @@ export async function loadWorkingCopy(backend, { entityType, bundle, id }) {
  */
 export async function resolveWorkingCopyPatchTarget(backend, { entityType, bundle, id, existing }) {
   const workingCopy = await loadWorkingCopy(backend, { entityType, bundle, id });
+  if (workingCopy?.id && workingCopy.id !== id) {
+    throw new PatchTargetAmbiguousError(id, workingCopy.id);
+  }
   let liveVid = entityRevisionId(existing);
   if (workingCopy && (liveVid === null || liveVid === undefined) && typeof backend?.getEntity === "function") {
     const live = await backend.getEntity({ entityType, bundle, id }).catch(() => null);
     liveVid = entityRevisionId(live);
   }
+  const aliasVid = entityRevisionId(workingCopy);
+  if (!workingCopy || (liveVid !== null && String(aliasVid) === String(liveVid))) {
+    const inventory = await readNodeDraftInventory(backend, { entityType, bundle, id });
+    if (inventory) {
+      if (liveVid !== null && String(liveVid) !== String(inventory.live.vid)) {
+        throw new WorkingCopyStaleError(new Error("Sentinel's live revision changed during discovery."));
+      }
+      liveVid = Number(inventory.live.vid);
+      const workingVid = inventory.working ? Number(inventory.working.vid) : null;
+      if (workingVid !== null && workingVid !== liveVid) {
+        return { resourceVersion: `id:${workingVid}`, workingCopy: null,
+          liveVid, workingVid, inventory };
+      }
+    }
+  }
   if (!workingCopy) {
     return { resourceVersion: undefined, workingCopy: null, liveVid, workingVid: null };
-  }
-  if (workingCopy.id && workingCopy.id !== id) {
-    throw new PatchTargetAmbiguousError(id, workingCopy.id);
   }
   const workingVid = entityRevisionId(workingCopy);
   if (workingVid !== null && liveVid !== null && String(workingVid) === String(liveVid)) {
@@ -402,6 +418,7 @@ export async function prepareGuardedPatch(backend, {
       throw new StaleCopyError();
     }
   }
+  if (target.inventory) assertInventoryDraftLanguage(target.inventory, langcode);
   if (langcode) {
     if (!target.workingVid || !target.liveVid || String(target.workingVid) === String(target.liveVid)) {
       throw new Error(
