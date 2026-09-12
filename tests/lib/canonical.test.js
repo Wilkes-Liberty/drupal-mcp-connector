@@ -64,6 +64,25 @@ describe("canonical", () => {
       meta: { target_revision_id: 17 },
     });
   });
+
+  it("normalizeRelationship keeps image meta.alt and meta.title (#296)", () => {
+    expect(normalizeRelationship({
+      type: "file--file", id: "f1", meta: { alt: "Aerospace still", title: "Demo" },
+    })).toEqual({
+      id: "f1", entityType: "file", bundle: "file",
+      meta: { alt: "Aerospace still", title: "Demo" },
+    });
+  });
+
+  it("normalizeRelationship keeps empty-string alt with a revision pin", () => {
+    expect(normalizeRelationship({
+      type: "file--file", id: "f1",
+      meta: { alt: "", title: "", target_revision_id: 9 },
+    })).toEqual({
+      id: "f1", entityType: "file", bundle: "file",
+      meta: { target_revision_id: 9, alt: "", title: "" },
+    });
+  });
 });
 
 describe("isRelationshipLinkage (#171)", () => {

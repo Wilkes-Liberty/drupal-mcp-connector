@@ -14,6 +14,11 @@ import {
   resolveSecurityConfig, redactCanonicalEntity,
   assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
 } from "../lib/security.js";
+import {
+  assertDraftLangcode, readDraftTranslation, readTranslationInventory, writeDraft,
+} from "../lib/draft-write.js";
+import { assertInventoryDraftLanguage } from "../lib/node-draft-inventory.js";
+import { entityRevisionId } from "../lib/write-revision.js";
 
 /**
  * List all media types (bundles of the media entity type).
@@ -51,14 +56,39 @@ async function listMedia({ site: siteName, type, status, name, limit = 20, offse
 
 /**
  * Fetch a single media entity by UUID, redacted per policy.
- * @param {object} args - { site?, type, id }.
+ * Pass langcode to read an unpublished working translation via Sentinel.
+ * @param {object} args - { site?, type, id, langcode? }.
  * @returns {Promise<object|null>} The redacted media entity, or null.
  */
-async function getMedia({ site: siteName, type, id }) {
+async function getMedia({ site: siteName, type, id, langcode }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "media", type);
   const backend = await resolveBackend(site);
+  if (langcode) {
+    const targetLang = assertDraftLangcode(langcode);
+    const inventory = await readTranslationInventory(backend, { entityType: "media", bundle: type, id });
+    const workingRow = (inventory.working?.translations ?? []).find((row) => row.langcode === targetLang);
+    if (workingRow && workingRow.status === false && inventory.live?.vid && inventory.working?.vid) {
+      const entity = await readDraftTranslation(backend, {
+        entityType: "media", bundle: type, id, langcode: targetLang,
+        draftRevision: { liveVid: inventory.live.vid, workingVid: inventory.working.vid },
+      });
+      return redactCanonicalEntity(entity, sec, "media");
+    }
+    const liveHas = (inventory.live?.translations ?? []).some((row) => row.langcode === targetLang);
+    if (!liveHas) return null;
+    if (targetLang !== inventory.defaultLangcode) {
+      const liveRow = (inventory.live.translations ?? []).find((row) => row.langcode === targetLang);
+      return {
+        id, entityType: "media", bundle: type, langcode: targetLang,
+        status: liveRow?.status ?? null,
+        fields: { name: liveRow?.name ?? null },
+        _revisions: { live: inventory.live.vid, working: inventory.working?.vid ?? null },
+        note: "Published non-default translations are listed on the live revision; full field reads of an unpublished working translation use langcode against the working draft.",
+      };
+    }
+  }
   const entity = await backend.getEntity({ entityType: "media", bundle: type, id });
   return entity ? redactCanonicalEntity(entity, sec, "media") : null;
 }
@@ -91,12 +121,13 @@ async function createMedia({ site: siteName, type, name, status = false, fields 
 /**
  * Update a media entity (partial — omitted fields are left untouched; `status`
  * is strictly opt-in, #171). Reference-shaped `fields` values are routed to
- * relationships — see splitReferenceFields.
+ * relationships — see splitReferenceFields. Pass langcode to continue an
+ * unpublished working translation via Sentinel (not a canonical live PATCH).
  *
- * @param {object} args - { site?, type, id, name?, status?, fields? }.
+ * @param {object} args - { site?, type, id, name?, status?, fields?, langcode? }.
  * @returns {Promise<object>} The updated media descriptor.
  */
-async function updateMedia({ site: siteName, type, id, name, status, fields = {} }) {
+async function updateMedia({ site: siteName, type, id, name, status, fields = {}, langcode }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", "media", type);
@@ -105,6 +136,30 @@ async function updateMedia({ site: siteName, type, id, name, status, fields = {}
   if (status !== undefined) attributes.status = status;
   assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
+  if (langcode) {
+    const targetLang = assertDraftLangcode(langcode);
+    const inventory = await readTranslationInventory(backend, { entityType: "media", bundle: type, id });
+    assertInventoryDraftLanguage(inventory, targetLang);
+    const liveVid = inventory.live?.vid;
+    const workingVid = inventory.working?.vid;
+    if (!liveVid || !workingVid || String(workingVid) === String(liveVid)) {
+      throw new Error(
+        "No unpublished working translation for this language. " +
+        "Create it with drupal_create_translation first; a canonical langcode PATCH is not attempted.",
+      );
+    }
+    const result = await writeDraft(backend, {
+      entityType: "media", bundle: type, id, attributes, langcode: targetLang,
+      ...(relationships ? { relationships } : {}),
+      draftRevision: { liveVid, workingVid },
+    });
+    const redacted = redactCanonicalEntity(result, sec, "media");
+    const working = entityRevisionId(result) ?? workingVid;
+    return {
+      ...redacted,
+      _revisions: { live: liveVid, working },
+    };
+  }
   // #171: pre-read so an unrequested published-state flip is reported, not silent.
   let existing = null;
   if (status === undefined) {
@@ -241,13 +296,14 @@ export const definitions = [
   },
   {
     name: "drupal_get_media",
-    description: "Fetch a single media entity by UUID and media type.",
+    description: "Fetch a single media entity by UUID and media type. Image alt/title are on the file relationship (meta.alt / meta.title). Pass langcode to read an unpublished working translation via Sentinel.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
         site: { type: "string" },
         type: { type: "string" },
         id:   { type: "string", description: "Media entity UUID" },
+        langcode: { type: "string", description: "Target language (e.g. 'es') to read the unpublished working translation instead of the default language." },
       },
     },
   },
@@ -267,7 +323,7 @@ export const definitions = [
   },
   {
     name: "drupal_update_media",
-    description: "Update a media entity's name, status, or field values. Partial: omitted fields (status included) are left untouched.",
+    description: "Update a media entity's name, status, or field values. Partial: omitted fields (status included) are left untouched. Pass langcode to continue an unpublished working translation via Sentinel; this does not PATCH canonical langcode and will not create a missing translation — use drupal_create_translation first.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
@@ -276,7 +332,8 @@ export const definitions = [
         id:     { type: "string" },
         name:   { type: "string" },
         status: { type: "boolean", description: "Published flag. Only sent when provided; requires allowPublish when true." },
-        fields: { type: "object", description: "Field values. Entity-reference values in JSON:API linkage shape ({ data: { type, id } }) are sent as relationships automatically." },
+        fields: { type: "object", description: "Field values. Entity-reference values in JSON:API linkage shape ({ data: { type, id } }) are sent as relationships automatically. Image alt is meta.alt on field_media_image with the existing file UUID." },
+        langcode: { type: "string", description: "Target language for an unpublished working translation (e.g. 'es'). Continues that translation via Sentinel; does not create a missing translation and does not PATCH canonical langcode." },
       },
     },
   },
