@@ -1,6 +1,6 @@
 {
   "name": "drupal-mcp-connector",
-  "version": "2.16.0",
+  "version": "2.17.0",
   "description": "Drupal MCP Connector — multi-site MCP server for Drupal with JSON:API and GraphQL, governed writes, draft translations, content tools, audit reports, and an SSH Drush bridge.",
   "type": "module",
   "main": "src/index.js",
