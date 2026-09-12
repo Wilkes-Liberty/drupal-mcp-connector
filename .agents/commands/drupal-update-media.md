@@ -1,11 +1,11 @@
 ---
-description: "Update a media entity's name, status, or field values. Partial: omitted fields (status included) are left untouched."
-argument-hint: "<type> <id> [site] [name] [status] [fields]"
+description: "Update a media entity's name, status, or field values. Partial: omitted fields (status included) are left untouched. Pass langcode to continue an unpublished working translation via Sentinel; this does not PATCH canonical langcode and will not create a missing translation — use drupal_create_translation first."
+argument-hint: "<type> <id> [site] [name] [status] [fields] [langcode]"
 ---
 
 Call the MCP tool `drupal_update_media`.
 
-Update a media entity's name, status, or field values. Partial: omitted fields (status included) are left untouched.
+Update a media entity's name, status, or field values. Partial: omitted fields (status included) are left untouched. Pass langcode to continue an unpublished working translation via Sentinel; this does not PATCH canonical langcode and will not create a missing translation — use drupal_create_translation first.
 
 Parse the arguments supplied with this command into this tool's parameters:
 
@@ -17,6 +17,7 @@ Parse the arguments supplied with this command into this tool's parameters:
 - `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
 - `name` (string)
 - `status` (boolean (true/false)): Published flag. Only sent when provided; requires allowPublish when true.
-- `fields` (object (pass as JSON)): Field values. Entity-reference values in JSON:API linkage shape ({ data: { type, id } }) are sent as relationships automatically.
+- `fields` (object (pass as JSON)): Field values. Entity-reference values in JSON:API linkage shape ({ data: { type, id } }) are sent as relationships automatically. Image alt is meta.alt on field_media_image with the existing file UUID.
+- `langcode` (string): Target language for an unpublished working translation (e.g. 'es'). Continues that translation via Sentinel; does not create a missing translation and does not PATCH canonical langcode.
 
 If a required parameter is missing, ask before calling — do not invent values. Coerce each value to its JSON type (booleans → true/false, numbers → numeric, object/array → parse JSON), then make the single tool call and summarize the result.

@@ -5,12 +5,7 @@ const backend = {
   updateEntity: vi.fn(),
   rawQuery: vi.fn(),
   resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
-  toCanonical: vi.fn((data) => ({
-    id: data.id, entityType: "node", bundle: "article",
-    langcode: data.attributes?.langcode, title: data.attributes?.title,
-    status: data.attributes?.status ?? false,
-    fields: { drupal_internal__vid: data.attributes?.drupal_internal__vid },
-  })),
+  toCanonical: vi.fn(toCanonicalEntity),
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 vi.mock("../../src/lib/config.js", () => ({
@@ -40,11 +35,25 @@ function inventoryMeta() {
   };
 }
 
+function toCanonicalEntity(data) {
+  const [entityType, bundle] = String(data.type || "node--article").split("--");
+  return {
+    id: data.id, entityType, bundle,
+    langcode: data.attributes?.langcode, title: data.attributes?.title,
+    status: data.attributes?.status ?? false,
+    fields: {
+      name: data.attributes?.name,
+      drupal_internal__vid: data.attributes?.drupal_internal__vid,
+    },
+  };
+}
+
 beforeEach(() => {
   backend.getEntity.mockReset();
   backend.updateEntity.mockReset();
   backend.rawQuery.mockReset();
-  backend.toCanonical.mockClear();
+  backend.toCanonical.mockReset();
+  backend.toCanonical.mockImplementation(toCanonicalEntity);
 });
 
 describe("translations tools", () => {
@@ -296,10 +305,66 @@ describe("translations tools", () => {
     expect(body.data.relationships.field_photo.data.id).toBe(fileId);
   });
 
-  it("create_translation rejects entity types other than node and paragraph", async () => {
+  it("create_translation rejects entity types other than node, paragraph, and media", async () => {
     await expect(
-      handlers.drupal_create_translation({ entityType: "media", type: "image", id: UUID, langcode: "es" })
-    ).rejects.toThrow(/nodes and paragraphs/);
+      handlers.drupal_create_translation({ entityType: "taxonomy_term", type: "tags", id: UUID, langcode: "es" })
+    ).rejects.toThrow(/nodes, paragraphs, and media/);
     expect(backend.rawQuery).not.toHaveBeenCalled();
+  });
+
+  it("list_translations queries the media inventory (#296)", async () => {
+    backend.rawQuery.mockResolvedValue({
+      meta: {
+        defaultLangcode: "en",
+        live: { vid: "40", translations: [{ langcode: "en", default: true, status: true, name: "Still" }] },
+        working: {
+          vid: "41",
+          translations: [
+            { langcode: "en", default: true, status: true, name: "Still" },
+            { langcode: "es", default: false, status: false, name: "Imagen" },
+          ],
+        },
+      },
+    });
+    const out = await handlers.drupal_list_translations({ entityType: "media", type: "image", id: UUID });
+    expect(backend.rawQuery.mock.calls[0][0].path).toBe(`/jsonapi/media/image/${UUID}/mcp-translations`);
+    expect(out.langcodes).toEqual(["en", "es"]);
+    expect(out.entityType).toBe("media");
+  });
+
+  it("create_translation for media POSTs /mcp-draft/translations without moderation_state (#296)", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: UUID, entityType: "media", bundle: "image", status: true,
+      fields: { drupal_internal__vid: 40, name: "Aerospace demonstration still" },
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return { meta: { defaultLangcode: "en", live: { vid: "40" }, working: { vid: "40" } } };
+      }
+      return {
+        data: {
+          type: "media--image", id: UUID,
+          attributes: { name: "Imagen aeroespacial", langcode: "es", status: false, drupal_internal__vid: 41 },
+        },
+      };
+    });
+    const fileId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const out = await handlers.drupal_create_translation({
+      entityType: "media", type: "image", id: UUID, langcode: "es",
+      attributes: { name: "Imagen aeroespacial", field_caption: "Demostración" },
+      relationships: {
+        field_media_image: { data: { type: "file--file", id: fileId, meta: { alt: "Avión" } } },
+      },
+    });
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    const post = backend.rawQuery.mock.calls.find((c) => String(c[0].path).endsWith("/mcp-draft/translations"));
+    expect(post[0].path).toBe(`/jsonapi/media/image/${UUID}/mcp-draft/translations`);
+    expect(post[0].options.headers["If-Match"]).toBe('"40"');
+    const body = JSON.parse(post[0].options.body);
+    expect(body.data.attributes.moderation_state).toBeUndefined();
+    expect(body.data.attributes.name).toBe("Imagen aeroespacial");
+    expect(body.data.relationships.field_media_image.data.meta.alt).toBe("Avión");
+    expect(out.entityType).toBe("media");
+    expect(out._revisions).toEqual({ live: "40", working: 41 });
   });
 });

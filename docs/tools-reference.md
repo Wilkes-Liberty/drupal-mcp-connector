@@ -249,9 +249,9 @@ requires `allowPublish: true` and an explicit `status: true`.
 |------|----------------|-------------|
 | `drupal_list_media_types` | — | List all media types (image, document, remote_video, etc.). |
 | `drupal_list_media` | — | List media entities. Filter by type, status, name. |
-| `drupal_get_media` | `type`, `id` | Fetch a single media entity by UUID. |
+| `drupal_get_media` | `type`, `id` | Fetch a single media entity by UUID. Image alt/title are on the file relationship (`meta.alt` / `meta.title`). Pass `langcode` to read an unpublished working translation via Sentinel. |
 | `drupal_create_media` | `type`, `name` | Create a media entity. Pass source field in `fields`; entity-reference values in JSON:API linkage shape (`{ data: { type, id } }`) are sent as relationships automatically (#171). Defaults unpublished. |
-| `drupal_update_media` | `type`, `id` | Update a media entity. Partial: `status` is only sent when provided (publish gated by `allowPublish`). Reference-shaped `fields` values route to relationships automatically; an unrequested published-state flip is reported via `_statusChanged` (#171). |
+| `drupal_update_media` | `type`, `id` | Update a media entity. Partial: `status` is only sent when provided (publish gated by `allowPublish`). Reference-shaped `fields` values route to relationships automatically; an unrequested published-state flip is reported via `_statusChanged` (#171). Pass `langcode` to continue an unpublished working translation via Sentinel (not a canonical live PATCH). |
 | `drupal_delete_media` | `type`, `id` | Delete a media entity. Requires `allowDestructive: true`. |
 | `drupal_upload_file` | `filePath`, `bundle`, `fieldName` | Upload a local file under `MCP_UPLOAD_ROOT` (or cwd). Returns file UUID for use in create_media. |
 | `drupal_upload_file_and_create_media` | `filePath`, `mediaType`, `fieldName` | Upload + create media in one step. Media defaults unpublished. |
@@ -661,12 +661,12 @@ Create or update many entities of a single type + bundle in one call. Permission
 
 ## Translations
 
-Inspect and create entity translations (multilingual / `content_translation`). A translation is an unpublished forward draft beside the live default language — it is **not** a PATCH of `langcode` on the canonical entity. Node create/list/update/read go through Sentinel's `/mcp-draft` translation contract when that module is deployed. Core JSON:API alone still serves one language per resource.
+Inspect and create entity translations (multilingual / `content_translation`). A translation is an unpublished forward draft beside the live default language — it is **not** a PATCH of `langcode` on the canonical entity. Node, paragraph, and media create/list/update/read go through Sentinel's `/mcp-draft` translation contract when that module is deployed. Core JSON:API alone still serves one language per resource.
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_list_translations` | `type`, `id` | List live and working translation langcodes (Sentinel inventory). Falls back to the single observable JSON:API language with a note when the inventory endpoint is absent. |
-| `drupal_create_translation` | `type`, `id`, `langcode` | Create a target-language **unpublished draft** beside the default language. Does not overwrite an existing translation. When an English working draft exists, both live and working revision IDs are sent so Sentinel accepts the POST (#282). Continue a node with `drupal_update_node` + `langcode`, or a paragraph with `drupal_update_paragraph` + `langcode`. Image alt is a relationship (same file UUID, `meta.alt`). |
+| `drupal_list_translations` | `type`, `id` | List live and working translation langcodes (Sentinel inventory). Falls back to the single observable JSON:API language with a note when the inventory endpoint is absent. Pass `entityType: "media"` or `"paragraph"` when not listing nodes. |
+| `drupal_create_translation` | `type`, `id`, `langcode` | Create a target-language **unpublished draft** beside the default language. Does not overwrite an existing translation. When an English working draft exists, both live and working revision IDs are sent so Sentinel accepts the POST (#282). Continue a node with `drupal_update_node` + `langcode`, a paragraph with `drupal_update_paragraph` + `langcode`, or media with `drupal_update_media` + `langcode`. Image alt is a relationship (same file UUID, `meta.alt`). |
 
 ### drupal_create_translation
 
@@ -684,7 +684,9 @@ Inspect and create entity translations (multilingual / `content_translation`). A
 
 Continue that draft with `drupal_update_node` (`langcode: "es"`) and the same UUID. Read it with `drupal_get_node` (`langcode: "es"`). The published English default revision is not the write target. A successful node response includes `_revisions.live` and `_revisions.working` for the revision the language landed on. Callers do not pass revision IDs — the connector loads them from Sentinel's translation inventory (or `rel:working-copy` if that inventory is absent). Computed `metatag` on that body is omitted (`_metatagOmitted`) because JSON:API resolves it from the live English default, not the unpublished translation (#283). Verify the stored `field_metatags` (or `field_metatag`) instead.
 
-For paragraph field values, pass `entityType: "paragraph"`, the paragraph bundle as `type`, and `revisionId` as the host's `meta.target_revision_id`. Nested children are translated the same way; do not retarget the parent ERR field. Image alt on a person (or any translatable image field) is a `relationships` entry with the existing file UUID and `meta.alt` — not a file replacement. Media entity translation is not used.
+For paragraph field values, pass `entityType: "paragraph"`, the paragraph bundle as `type`, and `revisionId` as the host's `meta.target_revision_id`. Nested children are translated the same way; do not retarget the parent ERR field. Image alt on a person (or any translatable image field on a node) is a `relationships` entry with the existing file UUID and `meta.alt` — not a file replacement.
+
+For media entities (`media--image` and other translatable media bundles), pass `entityType: "media"` and the media bundle as `type`. Continue with `drupal_update_media` (`langcode`) and read with `drupal_get_media` (`langcode`). Alt and title live on `field_media_image` (`meta.alt` / `meta.title`) with the same file UUID. Requires MCP Sentinel media draft routes (d.o #3622412). A canonical `drupal_update_media` without `langcode` still writes the live default revision and is not a translation.
 
 ---
 

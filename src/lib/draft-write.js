@@ -46,7 +46,7 @@ function requireWorkingPair(draftRevision) {
   const live = String(draftRevision?.liveVid ?? "");
   const working = String(draftRevision?.workingVid ?? "");
   if (!/^[1-9]\d*$/.test(live) || !/^[1-9]\d*$/.test(working) || live === working) {
-    throw new Error("Draft continuation requires distinct, verified live and working node revision IDs.");
+    throw new Error("Draft continuation requires distinct, verified live and working revision IDs.");
   }
   return { live, working };
 }
@@ -59,8 +59,8 @@ function requireWorkingPair(draftRevision) {
  * @returns {string}
  */
 function draftResource(backend, entityType, bundle, id) {
-  if (entityType !== "node" && entityType !== "paragraph") {
-    throw new Error("Governed draft translation is implemented for nodes and paragraphs.");
+  if (entityType !== "node" && entityType !== "paragraph" && entityType !== "media") {
+    throw new Error("Governed draft translation is implemented for nodes, paragraphs, and media.");
   }
   if (typeof backend.rawQuery !== "function" || typeof backend.resourcePath !== "function") {
     throw new Error("This backend does not support governed draft continuation.");
@@ -150,8 +150,8 @@ export async function createTranslationDraft(backend, input, preflight = false) 
   const working = workingRaw === undefined || workingRaw === null || workingRaw === ""
     ? ""
     : String(workingRaw);
-  if (entityType !== "node" || !/^[1-9]\d*$/.test(live)) {
-    throw new Error("Translation create requires a verified live node revision ID.");
+  if ((entityType !== "node" && entityType !== "media") || !/^[1-9]\d*$/.test(live)) {
+    throw new Error("Translation create requires a verified live revision ID.");
   }
   if (working && (!/^[1-9]\d*$/.test(working) || working === live)) {
     throw new Error("Translation create requires distinct live and working revision IDs when a working copy exists.");

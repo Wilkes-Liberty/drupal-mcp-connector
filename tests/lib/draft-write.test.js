@@ -53,6 +53,22 @@ describe("governed draft continuation", () => {
     await writeDraft(b, { ...input, langcode: "es" }, true);
     expect(b.rawQuery.mock.calls[0][0].options.headers["X-MCP-Draft-Langcode"]).toBe("es");
   });
+
+  it("PATCHes media drafts on /mcp-draft with the live:working pair (#296)", async () => {
+    const b = backend({ data: { id: "media-uuid", type: "media--image" } });
+    b.resourcePath = () => "/jsonapi/media/image";
+    await writeDraft(b, {
+      entityType: "media", bundle: "image", id: "media-uuid",
+      attributes: { name: "Imagen aeroespacial" },
+      langcode: "es",
+      draftRevision: { liveVid: 40, workingVid: 41 },
+    });
+    const [{ path, options }] = b.rawQuery.mock.calls[0];
+    expect(path).toBe("/jsonapi/media/image/media-uuid/mcp-draft");
+    expect(options.method).toBe("PATCH");
+    expect(options.headers["If-Match"]).toBe('"40:41"');
+    expect(options.headers["X-MCP-Draft-Langcode"]).toBe("es");
+  });
 });
 
 describe("governed translation create", () => {
@@ -98,6 +114,30 @@ describe("governed translation create", () => {
     expect(options.headers["If-Match"]).toBe('"10"');
     expect(options.headers["X-MCP-Draft-Langcode"]).toBe("es");
     expect(JSON.parse(options.body).data.attributes.langcode).toBeUndefined();
+  });
+
+  it("POSTs media translations on the same live/working surface as nodes (#296)", async () => {
+    const { createTranslationDraft } = await import("../../src/lib/draft-write.js");
+    const b = backend({ data: { id: "media-uuid", type: "media--image" } });
+    b.resourcePath = () => "/jsonapi/media/image";
+    await createTranslationDraft(b, {
+      entityType: "media", bundle: "image", id: "media-uuid",
+      langcode: "es",
+      attributes: { name: "Imagen aeroespacial", field_caption: "Demostración" },
+      relationships: {
+        field_media_image: { data: { type: "file--file", id: "file-uuid", meta: { alt: "Avión" } } },
+      },
+      draftRevision: { liveVid: 40 },
+    });
+    const [{ path, options }] = b.rawQuery.mock.calls[0];
+    expect(path).toBe("/jsonapi/media/image/media-uuid/mcp-draft/translations");
+    expect(options.method).toBe("POST");
+    expect(options.headers["If-Match"]).toBe('"40"');
+    expect(options.headers["X-MCP-Draft-Langcode"]).toBe("es");
+    const body = JSON.parse(options.body);
+    expect(body.data.attributes.langcode).toBeUndefined();
+    expect(body.data.attributes.moderation_state).toBeUndefined();
+    expect(body.data.relationships.field_media_image.data.meta.alt).toBe("Avión");
   });
 });
 

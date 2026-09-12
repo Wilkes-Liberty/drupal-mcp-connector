@@ -9,12 +9,15 @@
  *   - drupal_create_translation — add a language as an unpublished forward draft
  *
  * Continuation of an existing unpublished translation is drupal_update_node
- * with `langcode`. Reads of that draft are drupal_get_node / drupal_get_revision
+ * with `langcode` (media: drupal_update_media; paragraph: drupal_update_paragraph).
+ * Reads of that draft are drupal_get_node / drupal_get_media / drupal_get_paragraph
  * with `langcode`.
  *
  * Paragraph field-value translation uses the same surface with
- * entityType "paragraph" and the pinned paragraph revision. Image alt is a
- * node relationship (`meta.alt`) with the shared file target unchanged.
+ * entityType "paragraph" and the pinned paragraph revision. Media uses the
+ * node live/working pair (`entityType: "media"`). Image alt on a media entity
+ * is the file relationship (`field_media_image` + `meta.alt`) with the shared
+ * file target unchanged.
  */
 
 import { getSiteConfig } from "../lib/config.js";
@@ -62,7 +65,8 @@ async function listTranslations({ site: siteName, entityType = "node", type, id 
   assertReadAllowed(sec, entityType, type);
 
   const backend = await resolveBackend(site);
-  if ((entityType === "node" || entityType === "paragraph") && typeof backend.rawQuery === "function") {
+  if ((entityType === "node" || entityType === "paragraph" || entityType === "media")
+    && typeof backend.rawQuery === "function") {
     try {
       const meta = await readTranslationInventory(backend, { entityType, bundle: type, id });
       const liveLangs = (meta.live?.translations ?? []).map((row) => row.langcode);
@@ -127,8 +131,8 @@ async function createTranslation({
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", entityType, type);
 
-  if (entityType !== "node" && entityType !== "paragraph") {
-    throw new Error("Governed translation create is implemented for nodes and paragraphs.");
+  if (entityType !== "node" && entityType !== "paragraph" && entityType !== "media") {
+    throw new Error("Governed translation create is implemented for nodes, paragraphs, and media.");
   }
 
   const backend = await resolveBackend(site);
@@ -151,12 +155,14 @@ async function createTranslation({
     draftRevision = await resolveNodeTranslationPair(backend, {
       entityType, bundle: type, id, existing,
     });
-    if (drafted.status === undefined && drafted.moderation_state === undefined) {
-      drafted.moderation_state = "draft";
+    if (entityType === "node") {
+      if (drafted.status === undefined && drafted.moderation_state === undefined) {
+        drafted.moderation_state = "draft";
+      }
+      drafted = await applySafeDraftDefault({
+        backend, entityType, bundle: type, id, attributes: drafted, existingEntity: existing,
+      });
     }
-    drafted = await applySafeDraftDefault({
-      backend, entityType, bundle: type, id, attributes: drafted, existingEntity: existing,
-    });
     assertPublishAllowed(sec, drafted);
   }
 
@@ -174,7 +180,7 @@ async function createTranslation({
     entityType, bundle: type, id, langcode: targetLang, attributes: drafted, relationships, draftRevision,
   });
   const redacted = omitLiveComputedMetatag(redactCanonicalEntity(created, sec, entityType));
-  if (entityType !== "node") return redacted;
+  if (entityType === "paragraph") return redacted;
   const workingVid = entityRevisionId(created) ?? draftRevision.workingVid;
   const liveVid = draftRevision.liveVid;
   if (liveVid === undefined || liveVid === null) {
@@ -193,7 +199,7 @@ export const definitions = [
   {
     name: "drupal_list_translations",
     description:
-      "List live and working translation langcodes for a Drupal node or paragraph. Uses Sentinel's " +
+      "List live and working translation langcodes for a Drupal node, paragraph, or media entity. Uses Sentinel's " +
       "translation inventory when available (live default revision vs unpublished working " +
       "draft), including core content_translation_outdated and source when the server sends them. " +
       "Core JSON:API alone serves one language and cannot prove others are absent. " +
@@ -202,7 +208,7 @@ export const definitions = [
       type: "object", required: ["type", "id"],
       properties: {
         site:       { type: "string", description: "Named site (omit for default)" },
-        entityType: { type: "string", description: "Entity type machine name. Default: 'node'." },
+        entityType: { type: "string", description: "Entity type machine name. Default: 'node'. Use 'paragraph' or 'media' when listing those." },
         type:       { type: "string", description: "Bundle machine name, e.g. 'basic_page'" },
         id:         { type: "string", description: "Entity UUID" },
       },
@@ -219,15 +225,17 @@ export const definitions = [
       "paragraph ERR pins stay unchanged. An existing translation is a conflict, not an overwrite. " +
       "The response includes `_revisions.live` / `_revisions.working` when known. " +
       "Computed `metatag` is omitted on the draft body because JSON:API resolves it from the live default (#283); use field_metatags. " +
-      "Continue a node draft with drupal_update_node and langcode; continue a paragraph with " +
-      "drupal_update_paragraph and langcode. Image alt is a relationship (same file UUID, " +
-      "meta.alt). For paragraphs pass revisionId as the host pin. Requires Sentinel's " +
-      "draft-translation endpoint. Publication stays denied for content-tier callers.",
+      "Continue a node draft with drupal_update_node and langcode; a paragraph with " +
+      "drupal_update_paragraph and langcode; media with drupal_update_media and langcode. " +
+      "Image alt is a relationship (same file UUID, meta.alt) — on media that is " +
+      "field_media_image, not a node image field. For paragraphs pass revisionId as the " +
+      "host pin. Requires Sentinel's draft-translation endpoint. Publication stays denied " +
+      "for content-tier callers.",
     inputSchema: {
       type: "object", required: ["type", "id", "langcode"],
       properties: {
         site:          { type: "string" },
-        entityType:    { type: "string", description: "Entity type machine name. Default: 'node'. Use 'paragraph' for paragraph field values." },
+        entityType:    { type: "string", description: "Entity type machine name. Default: 'node'. Use 'paragraph' for paragraph field values, 'media' for media (name, caption, image alt)." },
         type:          { type: "string", description: "Bundle machine name, e.g. 'basic_page' or 'p_hero'" },
         id:            { type: "string", description: "Entity UUID" },
         langcode:      { type: "string", description: "Target language code, e.g. 'es', 'de', 'pt-br'" },

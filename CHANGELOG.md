@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Governed media draft translation (#296).** `drupal_create_translation` and
+  `drupal_list_translations` accept `entityType: "media"`. Continue with
+  `drupal_update_media` + `langcode`; read with `drupal_get_media` + `langcode`.
+  Same Sentinel `/mcp-draft` live/working pair as nodes (d.o #3622412). Image
+  alt/title are kept on the file relationship (`meta.alt` / `meta.title`) so a
+  translator can read the source. Canonical media writes without `langcode` are
+  unchanged. Requires MCP Sentinel with media draft routes.
+
 ### Security
 - Bump transitive `hono` 4.13.1 → 4.13.7 (via `@modelcontextprotocol/node`)
   and override it to `^4.13.5`, clearing three moderate advisories:

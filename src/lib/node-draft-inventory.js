@@ -9,7 +9,8 @@ import { readTranslationInventory } from "./draft-write.js";
  * @returns {Promise<object|null>}
  */
 export async function readNodeDraftInventory(backend, ref) {
-  if (ref.entityType !== "node" || typeof backend.rawQuery !== "function"
+  if ((ref.entityType !== "node" && ref.entityType !== "media")
+    || typeof backend.rawQuery !== "function"
     || typeof backend.resourcePath !== "function") return null;
   let inventory;
   try {
@@ -24,7 +25,7 @@ export async function readNodeDraftInventory(backend, ref) {
       || !Array.isArray(inventory.working.translations)
       || inventory.working.translations.some((row) => !row || typeof row.langcode !== "string"
         || typeof row.status !== "boolean")))) {
-    throw new Error("Sentinel returned an invalid node revision inventory. Re-read before updating.");
+    throw new Error("Sentinel returned an invalid revision inventory. Re-read before updating.");
   }
   return inventory;
 }
