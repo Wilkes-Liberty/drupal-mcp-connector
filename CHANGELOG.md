@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Bump transitive `hono` 4.13.1 → 4.13.7 (via `@modelcontextprotocol/node`)
+  and override it to `^4.13.5`, clearing three moderate advisories:
+  GHSA-gqvv-2mrq-wpjv (`toSSG()` path traversal), GHSA-g6gw-c38x-mqfc
+  (`parseBody()` unbounded nesting), and GHSA-crvj-82cr-hjcx (query parser
+  after URL fragment). `npm audit` reports 0 vulnerabilities (#299).
+
 ## [2.16.0] - 2026-09-11
 
 ### Added
