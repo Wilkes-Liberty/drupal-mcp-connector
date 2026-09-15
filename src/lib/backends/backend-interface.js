@@ -23,6 +23,9 @@
  * @property {"full"|"enum"|"none"} sort Server-side sort support: arbitrary
  *   fields ("full"), a fixed enum of keys ("enum"), or none ("none").
  * @property {boolean} revisions Adapter exposes entity revisions.
+ * @property {boolean} [sentinelDraft] Adapter can issue Sentinel's JSON:API
+ *   `/mcp-draft` and `/mcp-translations` routes (`rawQuery({ path, options })`
+ *   plus `resourcePath`). GraphQL `rawQuery({ query })` must be false.
  * @property {((entityType: string, bundle: string) => string[])|null} fieldAvailability
  *   Optional resolver returning the known field names for a bundle, or null
  *   when the adapter cannot cheaply enumerate fields.

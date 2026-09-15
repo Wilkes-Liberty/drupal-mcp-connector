@@ -244,6 +244,17 @@ describe("translations tools", () => {
     expect(post[0].options.headers["If-Match"]).toBe('"10:11"');
   });
 
+  it("create_translation fails closed when inventory is a permission error", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: UUID, status: true, fields: { drupal_internal__vid: 10, moderation_state: "published" },
+    });
+    backend.rawQuery.mockRejectedValue(new Error("Drupal 403 on GET /jsonapi/node/article/x/mcp-translations"));
+    await expect(handlers.drupal_create_translation({
+      type: "article", id: UUID, langcode: "de", attributes: { title: "Hallo" },
+    })).rejects.toThrow(/403/);
+    expect(backend.rawQuery.mock.calls.some((c) => String(c[0].path).endsWith("/mcp-draft/translations"))).toBe(false);
+  });
+
   it("create_translation rejects a missing/blank langcode", async () => {
     await expect(
       handlers.drupal_create_translation({ type: "article", id: UUID, langcode: "", attributes: {} })

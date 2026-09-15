@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **One Sentinel HTTP client and fail-closed inventory policy.** Draft,
+  translation, and inventory requests share `src/lib/sentinel-draft.js`
+  (paths, If-Match, lang/state headers, missing-endpoint classifiers,
+  validated inventory). Missing 404/405 stays unavailable / no canonical
+  langcode PATCH. Permission, 5xx, and malformed inventory now throw from
+  `resolveNodeTranslationPair` instead of falling through to
+  `rel:working-copy`. JSON:API advertises `capabilities().sentinelDraft`;
+  GraphQL `rawQuery` does not count as Sentinel-capable.
+
 ## [2.17.0] - 2026-09-11
 
 ### Added

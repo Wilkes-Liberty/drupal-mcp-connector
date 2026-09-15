@@ -12,7 +12,7 @@ import {
   resolveSecurityConfig, redactCanonicalEntity,
   assertReadAllowed, assertWriteAllowed, assertDeleteAllowed,
 } from "../lib/security.js";
-import { assertDraftLangcode } from "../lib/draft-write.js";
+import { assertDraftLangcode } from "../lib/sentinel-draft.js";
 
 // ---------------------------------------------------------------------------
 // Implementations

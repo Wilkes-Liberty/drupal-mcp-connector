@@ -65,6 +65,7 @@ export class GraphqlBackend extends Backend {
     return {
       read: true, write: false, delete: false,
       count: false, filter: false, sort: "enum", revisions: false,
+      sentinelDraft: false,
       fieldAvailability: (entityType, bundle) => this._fieldNames(entityType, bundle),
     };
   }

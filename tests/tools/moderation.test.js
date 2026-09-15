@@ -164,6 +164,13 @@ describe("moderation tools", () => {
     expect(out.reason).toMatch(/inventory/i);
   });
 
+  it("content_by_moderation_state with langcode throws on inventory permission errors", async () => {
+    backend.rawQuery.mockRejectedValue(new Error("Drupal 403 on GET /jsonapi/node/article/n1/mcp-translations"));
+    backend.listEntities.mockResolvedValue({ entities: [node({ id: "n1" })], page: { hasNext: false } });
+    await expect(handlers.drupal_content_by_moderation_state({ type: "article", state: "draft", langcode: "es" }))
+      .rejects.toThrow(/403/);
+  });
+
   it("list_moderation_states returns distinct observed states (non-authoritative)", async () => {
     backend.listEntities.mockResolvedValue({ entities: [
       node({ fields: { moderation_state: "draft" } }),

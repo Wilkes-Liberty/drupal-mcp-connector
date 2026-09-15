@@ -22,7 +22,9 @@ import {
 } from "../lib/security.js";
 import { collectEntities } from "../lib/reports-support.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
-import { assertDraftLangcode, readTranslationInventory } from "../lib/draft-write.js";
+import {
+  assertDraftLangcode, isMissingTranslationEndpoint, readTranslationInventory, supportsSentinelDraft,
+} from "../lib/sentinel-draft.js";
 import { inventoryRowMatching } from "../lib/translation-rows.js";
 
 /** Cap for the client-side scan when JSON:API cannot filter the field. */
@@ -104,7 +106,7 @@ async function contentByModerationState({ site: siteName, type, state, limit = 2
   const sort = [{ field: "changed", dir: "desc" }];
   const targetLang = langcode ? assertDraftLangcode(langcode) : null;
   if (targetLang) {
-    if (typeof backend.rawQuery !== "function" || typeof backend.resourcePath !== "function") {
+    if (!supportsSentinelDraft(backend)) {
       return {
         type, state, langcode: targetLang, unavailable: true,
         reason: "A langcode filter requires Sentinel's translation inventory.",
@@ -130,7 +132,7 @@ async function contentByModerationState({ site: siteName, type, state, limit = 2
           });
         }
       } catch (error) {
-        if (/does not provide Sentinel's governed draft-translation endpoint/.test(String(error?.message))) {
+        if (isMissingTranslationEndpoint(error)) {
           return {
             type, state, langcode: targetLang, unavailable: true,
             reason: "A langcode filter requires Sentinel's translation inventory.",

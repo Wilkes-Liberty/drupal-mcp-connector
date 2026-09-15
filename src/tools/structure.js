@@ -19,7 +19,7 @@ import { resolveBackend } from "../lib/backends/index.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, redactCanonicalEntity,
 } from "../lib/security.js";
-import { assertDraftLangcode } from "../lib/draft-write.js";
+import { assertDraftLangcode } from "../lib/sentinel-draft.js";
 
 const MENU_LINK_TYPE = "menu_link_content";
 const BLOCK_TYPE = "block_content";

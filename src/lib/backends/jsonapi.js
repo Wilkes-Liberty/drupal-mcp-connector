@@ -228,6 +228,7 @@ export class JsonApiBackend extends Backend {
     return {
       read: true, write: true, delete: true,
       count: true, filter: true, sort: "full", revisions: true,
+      sentinelDraft: true,
       fieldAvailability: null,
     };
   }

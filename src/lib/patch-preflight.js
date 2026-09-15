@@ -24,8 +24,7 @@
 
 import { entityLooksModerated, hasExplicitModerationState } from "./moderation-default.js";
 import { entityRevisionId } from "./write-revision.js";
-import { writeDraft } from "./draft-write.js";
-import { readNodeDraftInventory, assertInventoryDraftLanguage } from "./node-draft-inventory.js";
+import { writeDraft, readNodeDraftInventory, assertInventoryDraftLanguage } from "./sentinel-draft.js";
 
 /** Stable error code for a core working-copy / not-latest-revision block. */
 export const PATCH_BLOCKED_CODE = "PATCH_BLOCKED";

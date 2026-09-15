@@ -112,6 +112,13 @@ describe("reports-content", () => {
       expect(res.unavailable).toBe(true);
       expect(res.reason).toMatch(/inventory/i);
     });
+
+    it("throws when inventory is a permission error, not unavailable", async () => {
+      backend.listEntities.mockResolvedValue(page([node({ id: "1" })]));
+      backend.rawQuery.mockRejectedValue(new Error("Drupal 403 on GET /jsonapi/node/page/1/mcp-translations"));
+      await expect(handlers.drupal_report_translation_coverage({ type: "page" }))
+        .rejects.toThrow(/403/);
+    });
   });
 
   describe("drupal_report_scheduled_content", () => {

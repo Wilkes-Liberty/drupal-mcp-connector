@@ -15,9 +15,9 @@ import {
   assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
 } from "../lib/security.js";
 import {
-  assertDraftLangcode, readDraftTranslation, readTranslationInventory, writeDraft,
-} from "../lib/draft-write.js";
-import { assertInventoryDraftLanguage } from "../lib/node-draft-inventory.js";
+  assertDraftLangcode, assertInventoryDraftLanguage, readDraftTranslation,
+  readTranslationInventory, writeDraft,
+} from "../lib/sentinel-draft.js";
 import { entityRevisionId } from "../lib/write-revision.js";
 
 /**
