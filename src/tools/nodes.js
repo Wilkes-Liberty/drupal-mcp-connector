@@ -18,7 +18,7 @@ import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA, omit
 import { resolveErrRelationships, relationshipsWereSent, paragraphPinsFromEntity } from "../lib/err-relationships.js";
 import { attachWrittenRevisionPair, readWrittenRevision } from "../lib/write-revision.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
-import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } from "../lib/draft-write.js";
+import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } from "../lib/sentinel-draft.js";
 import { paragraphResourceVersion } from "./paragraphs.js";
 import { assertBodySummaryWritable, attachSummaryDeprecation } from "../lib/body-summary.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";

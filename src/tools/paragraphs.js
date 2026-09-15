@@ -46,7 +46,7 @@ import {
   assertDraftLangcode,
   readDraftTranslation,
   writeDraft,
-} from "../lib/draft-write.js";
+} from "../lib/sentinel-draft.js";
 
 /**
  * Build the resource-identifier ref used to embed a paragraph in a host ERR /

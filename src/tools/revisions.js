@@ -23,8 +23,9 @@ import { resolveBackend } from "../lib/backends/index.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, redactCanonicalEntity,
 } from "../lib/security.js";
-import { readNodeDraftInventory } from "../lib/node-draft-inventory.js";
-import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } from "../lib/draft-write.js";
+import {
+  assertDraftLangcode, readDraftTranslation, readNodeDraftInventory, readTranslationInventory,
+} from "../lib/sentinel-draft.js";
 import { omitLiveComputedMetatag } from "../lib/entity-response.js";
 
 // Attributes that describe the entity's identity / revision bookkeeping / paths.

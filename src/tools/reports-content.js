@@ -17,7 +17,9 @@ import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
 import { collectEntities, fieldValue, daysSince } from "../lib/reports-support.js";
 import { bodyHtml, extractAnchors, classifyLink, normalizePath } from "../lib/audit-support.js";
-import { assertDraftLangcode, readTranslationInventory } from "../lib/draft-write.js";
+import {
+  assertDraftLangcode, isMissingTranslationEndpoint, readTranslationInventory, supportsSentinelDraft,
+} from "../lib/sentinel-draft.js";
 import { inventoryRowMatching, inventoryTranslationRows, mapTranslationRow } from "../lib/translation-rows.js";
 
 // ---------------------------------------------------------------------------
@@ -116,7 +118,7 @@ async function workflowBottlenecks({ site: siteName, type, days = 30, states, sa
     sampleSize
   );
 
-  if (targetLang && (typeof backend.rawQuery !== "function" || typeof backend.resourcePath !== "function")) {
+  if (targetLang && !supportsSentinelDraft(backend)) {
     return {
       contentType,
       unavailable: true,
@@ -139,7 +141,7 @@ async function workflowBottlenecks({ site: siteName, type, days = 30, states, sa
         if (!row) continue;
         state = row.moderation_state;
       } catch (error) {
-        if (/does not provide Sentinel's governed draft-translation endpoint/.test(String(error?.message))) {
+        if (isMissingTranslationEndpoint(error)) {
           return {
             contentType,
             unavailable: true,
@@ -207,8 +209,7 @@ async function translationCoverage({ site: siteName, type, sampleSize = 100 }) {
     sampleSize
   );
 
-  const missingEndpoint = /does not provide Sentinel's governed draft-translation endpoint/;
-  if (typeof backend.rawQuery !== "function" || typeof backend.resourcePath !== "function") {
+  if (!supportsSentinelDraft(backend)) {
     return {
       contentType,
       scanned: nodes.length,
@@ -239,7 +240,7 @@ async function translationCoverage({ site: siteName, type, sampleSize = 100 }) {
         outdated: rows.some((row) => row.outdated === true),
       });
     } catch (error) {
-      if (!missingEndpoint.test(String(error?.message))) throw error;
+      if (!isMissingTranslationEndpoint(error)) throw error;
     }
   }
 

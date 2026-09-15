@@ -42,7 +42,10 @@ beforeEach(() => {
 describe("GraphqlBackend", () => {
   it("capabilities reflect a read-only GraphQL backend", () => {
     const b = new GraphqlBackend(site);
-    expect(b.capabilities()).toMatchObject({ read: true, write: false, delete: false, count: false, filter: false, sort: "enum", revisions: false });
+    expect(b.capabilities()).toMatchObject({
+      read: true, write: false, delete: false, count: false, filter: false, sort: "enum",
+      revisions: false, sentinelDraft: false,
+    });
     expect(typeof b.capabilities().fieldAvailability).toBe("function");
   });
 

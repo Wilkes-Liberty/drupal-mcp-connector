@@ -34,9 +34,11 @@ import { paragraphRevisionId } from "../lib/err-relationships.js";
 import {
   assertDraftLangcode,
   createTranslationDraft,
+  isMissingTranslationEndpoint,
   readTranslationInventory,
   resolveNodeTranslationPair,
-} from "../lib/draft-write.js";
+  supportsSentinelDraft,
+} from "../lib/sentinel-draft.js";
 import { mapTranslationRow } from "../lib/translation-rows.js";
 
 const LIST_NOTE =
@@ -66,7 +68,7 @@ async function listTranslations({ site: siteName, entityType = "node", type, id 
 
   const backend = await resolveBackend(site);
   if ((entityType === "node" || entityType === "paragraph" || entityType === "media")
-    && typeof backend.rawQuery === "function") {
+    && supportsSentinelDraft(backend)) {
     try {
       const meta = await readTranslationInventory(backend, { entityType, bundle: type, id });
       const liveLangs = (meta.live?.translations ?? []).map((row) => row.langcode);
@@ -84,7 +86,7 @@ async function listTranslations({ site: siteName, entityType = "node", type, id 
         note: LIST_NOTE,
       };
     } catch (error) {
-      if (!/does not provide Sentinel's governed draft-translation endpoint/.test(String(error?.message))) {
+      if (!isMissingTranslationEndpoint(error)) {
         throw error;
       }
     }

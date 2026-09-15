@@ -66,7 +66,10 @@ describe("JsonApiBackend.compileQuery", () => {
 
   it("capabilities are all-capable for JSON:API", () => {
     const caps = new JsonApiBackend({ _name: "t", baseUrl: "https://x" }).capabilities();
-    expect(caps).toMatchObject({ read: true, write: true, delete: true, count: true, filter: true, sort: "full", revisions: true });
+    expect(caps).toMatchObject({
+      read: true, write: true, delete: true, count: true, filter: true, sort: "full",
+      revisions: true, sentinelDraft: true,
+    });
   });
 });
 

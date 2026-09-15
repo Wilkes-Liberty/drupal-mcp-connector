@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { writeDraft } from "../../src/lib/draft-write.js";
+import {
+  isMissingDraftEndpoint,
+  isMissingTranslationEndpoint,
+  resolveNodeTranslationPair,
+  supportsSentinelDraft,
+  writeDraft,
+} from "../../src/lib/draft-write.js";
 
 const input = {
   entityType: "node", bundle: "page", id: "example-uuid",
@@ -164,5 +170,96 @@ describe("paragraph draft state", () => {
     b.rawQuery.mockRejectedValue(new Error("Drupal 409: paragraph draft changed"));
     await expect(writeDraft(b, paragraph)).rejects.toThrow("409");
     expect(b.rawQuery).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Sentinel capability and missing-endpoint classifiers", () => {
+  it("treats JSON:API resourcePath + rawQuery as Sentinel-capable without a flag", () => {
+    expect(supportsSentinelDraft({
+      rawQuery: () => {},
+      resourcePath: () => "/jsonapi/node/page",
+    })).toBe(true);
+  });
+
+  it("does not treat GraphQL rawQuery as Sentinel-capable", async () => {
+    const graphqlish = {
+      rawQuery: vi.fn(async ({ query }) => ({ data: { query } })),
+      capabilities: () => ({ read: true, write: false, sentinelDraft: false }),
+    };
+    expect(supportsSentinelDraft(graphqlish)).toBe(false);
+    await expect(writeDraft(graphqlish, input, true)).rejects.toThrow(/does not support governed draft continuation/);
+    expect(graphqlish.rawQuery).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a query-shaped rawQuery without resourcePath as Sentinel-capable", async () => {
+    const graphqlish = { rawQuery: vi.fn(async ({ query }) => ({ data: { query } })) };
+    expect(supportsSentinelDraft(graphqlish)).toBe(false);
+    await expect(writeDraft(graphqlish, input, true)).rejects.toThrow(/does not support governed draft continuation/);
+    expect(graphqlish.rawQuery).not.toHaveBeenCalled();
+  });
+
+  it("classifies only the rewritten missing-endpoint English as absence", () => {
+    expect(isMissingDraftEndpoint(new Error(
+      "The site does not provide Sentinel's governed draft endpoint (d.o #3621022). Update the server-side module.",
+    ))).toBe(true);
+    expect(isMissingTranslationEndpoint(new Error(
+      "The site does not provide Sentinel's governed draft-translation endpoint. Update MCP Sentinel.",
+    ))).toBe(true);
+    expect(isMissingTranslationEndpoint(new Error("Drupal 403 on GET /jsonapi/node/page/x/mcp-translations"))).toBe(false);
+    expect(isMissingTranslationEndpoint(new Error("Drupal 500 on GET /jsonapi/node/page/x/mcp-translations"))).toBe(false);
+    expect(isMissingDraftEndpoint(new Error("Drupal 409 conflict"))).toBe(false);
+  });
+});
+
+describe("resolveNodeTranslationPair fail-closed inventory", () => {
+  const existing = { fields: { drupal_internal__vid: 10 } };
+
+  it("falls back to rel:working-copy when the translation endpoint is absent (404)", async () => {
+    const b = backend();
+    b.rawQuery.mockRejectedValue(new Error("Drupal 404 on GET /jsonapi/node/page/x/mcp-translations"));
+    b.getEntity = vi.fn(async ({ resourceVersion }) => (
+      resourceVersion === "rel:working-copy" ? { fields: { drupal_internal__vid: 11 } } : existing
+    ));
+    await expect(resolveNodeTranslationPair(b, {
+      entityType: "node", bundle: "page", id: "example-uuid", existing,
+    })).resolves.toEqual({ liveVid: 10, workingVid: 11 });
+  });
+
+  it("falls back to rel:working-copy when the translation endpoint is absent (405)", async () => {
+    const b = backend();
+    b.rawQuery.mockRejectedValue(new Error("Drupal 405 on GET /jsonapi/node/page/x/mcp-translations"));
+    b.getEntity = vi.fn(async () => null);
+    await expect(resolveNodeTranslationPair(b, {
+      entityType: "node", bundle: "page", id: "example-uuid", existing,
+    })).resolves.toEqual({ liveVid: 10, workingVid: undefined });
+  });
+
+  it("rethrows a permission failure instead of treating it as absence", async () => {
+    const b = backend();
+    b.rawQuery.mockRejectedValue(new Error("Drupal 403 on GET /jsonapi/node/page/x/mcp-translations"));
+    b.getEntity = vi.fn();
+    await expect(resolveNodeTranslationPair(b, {
+      entityType: "node", bundle: "page", id: "example-uuid", existing,
+    })).rejects.toThrow(/403/);
+    expect(b.getEntity).not.toHaveBeenCalled();
+  });
+
+  it("rethrows a 5xx instead of treating it as absence", async () => {
+    const b = backend();
+    b.rawQuery.mockRejectedValue(new Error("Drupal 500 on GET /jsonapi/node/page/x/mcp-translations"));
+    b.getEntity = vi.fn();
+    await expect(resolveNodeTranslationPair(b, {
+      entityType: "node", bundle: "page", id: "example-uuid", existing,
+    })).rejects.toThrow(/500/);
+    expect(b.getEntity).not.toHaveBeenCalled();
+  });
+
+  it("rethrows a malformed inventory instead of treating it as absence", async () => {
+    const b = backend({ meta: {} });
+    b.getEntity = vi.fn();
+    await expect(resolveNodeTranslationPair(b, {
+      entityType: "node", bundle: "page", id: "example-uuid", existing,
+    })).rejects.toThrow(/did not return a translation inventory/);
+    expect(b.getEntity).not.toHaveBeenCalled();
   });
 });
