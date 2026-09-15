@@ -299,8 +299,13 @@ describe("translations tools", () => {
       id: UUID, entityType: "node", bundle: "person", status: true,
       fields: { drupal_internal__vid: 10, moderation_state: "published" },
     });
-    backend.rawQuery.mockResolvedValue({
-      data: { type: "node--person", id: UUID, attributes: { title: "Nombre", langcode: "es" } },
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return { meta: { defaultLangcode: "en", live: { vid: "10" }, working: { vid: "10" } } };
+      }
+      return {
+        data: { type: "node--person", id: UUID, attributes: { title: "Nombre", langcode: "es" } },
+      };
     });
     const fileId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     await handlers.drupal_create_translation({
