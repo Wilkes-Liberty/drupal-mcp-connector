@@ -145,6 +145,17 @@ describe("module-owned tool registry", () => {
     await expect(registry.list(context())).rejects.toThrow("Duplicate");
   });
 
+  it("isolates a malformed action schema from valid siblings", async () => {
+    list.mockResolvedValue({ tools: [
+      { ...remote("tool_api.relationship"), inputSchema: { type: "object", invalidKeyword: true } },
+      remote("tool_api.asset"),
+    ] });
+    const definitions = await registry.list(context());
+    expect(definitions.map((definition) => definition.name)).toEqual(["drupal_module_write_stage__asset"]);
+    expect(list).toHaveBeenCalledTimes(1);
+    expect((await registry.call(definitions[0].name, parameters(definitions[0]), context())).isError).toBe(false);
+  });
+
   it("preserves tool failure and refuses non-JSON attachments", async () => {
     const [definition] = await registry.list(context());
     call.mockResolvedValue({ content: [{ type: "text", text: "Denied" }], isError: true });

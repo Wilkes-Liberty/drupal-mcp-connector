@@ -149,17 +149,22 @@ export function createModuleToolRegistry({ list = listServerTools, call = callSe
       const catalogs = new Map();
       const definitions = [];
       for (const entry of enabled) {
-        try {
-          if (!catalogs.has(entry.site._name)) {
+        if (!catalogs.has(entry.site._name)) {
+          try {
             const found = await securityMiddleware(entry.name, { site: entry.site._name },
               () => catalog(entry.site, list), { ...context, sites, identity, moduleTool: entry.policy });
             catalogs.set(entry.site._name, found);
           }
+          catch {
+            // A failed catalog fetch invalidates this provider for the request.
+            catalogs.set(entry.site._name, new Map());
+          }
+        }
+        try {
           const remote = catalogs.get(entry.site._name).get(entry.policy.name);
           if (remote) definitions.push(describe(entry, remote).definition);
         } catch {
-          // Never retain a stale catalog when a provider is unavailable.
-          catalogs.set(entry.site._name, new Map());
+          // A malformed schema disables only that action, not its siblings.
         }
       }
       return definitions.sort((a, b) => a.name.localeCompare(b.name));
