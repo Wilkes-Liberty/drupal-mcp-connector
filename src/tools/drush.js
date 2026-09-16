@@ -20,6 +20,7 @@
  * Requires per-site "drushSsh" config block — tools fail gracefully if absent.
  */
 
+import { callBoundModuleTool, toolResultData } from "../lib/server-tools.js";
 import { Client }        from "ssh2";
 import { readFileSync }  from "fs";
 import { homedir }       from "os";
@@ -456,6 +457,15 @@ async function sqlQuery({ site: siteName, query }) {
   assertGovernedRawSql(sshCfg, site._name);
   // Fast local reject only; mcp_sentinel's guard is the authority.
   validateSqlQuery(query);
+  if (site.serverTools?.bindings !== undefined) {
+    const result = toolResultData(await callBoundModuleTool(site, "sqlQuery", { query }, {
+      operation: "read", scope: "mcp_admin", capabilities: ["rawSql"],
+    }));
+    if (result?.success !== true || !result.data || !Array.isArray(result.data.rows)) {
+      throw new SecurityError("SQL module returned an invalid governed result. No SSH fallback was attempted.");
+    }
+    return result.data;
+  }
   const out = await sshDrush(site, ["mcp-sentinel:sql-query", query]);
   // The command emits a JSON object; a non-JSON reply means the command was
   // not found (mcp_sentinel absent or too old), which must not be reported as
@@ -534,7 +544,7 @@ export const definitions = [
   },
   {
     name: "drupal_drush_sql_query",
-    description: "Run a single read-only SELECT through mcp_sentinel's governed command (`drush mcp-sentinel:sql-query`). Requires the site to set drushSsh.rawSql=\"governed\" AND the site's policy profile to set allow_raw_sql; both are off by default. The server refuses statements touching a denied entity type, a non-entity table, or a redacted field, and records every attempt in the tamper-evident audit log. Use the site-context or entity-schema tools for schema introspection.",
+    description: "Run a single read-only SELECT through the configured sqlQuery module binding, or the legacy governed Drush command on unbound sites. Requires the site to set drushSsh.rawSql=\"governed\" AND the site's policy profile to set allow_raw_sql; both are off by default. The server refuses statements touching a denied entity type, a non-entity table, or a redacted field, and records every attempt in the tamper-evident audit log. Use the site-context or entity-schema tools for schema introspection.",
     inputSchema: { type: "object", required: ["query"], properties: { site: { type: "string" }, query: { type: "string" } } },
   },
   {

@@ -1,11 +1,11 @@
 ---
-description: "Run a single read-only SELECT through mcp_sentinel's governed command (`drush mcp-sentinel:sql-query`). Requires the site to set drushSsh.rawSql=\"governed\" AND the site's policy profile to set allow_raw_sql; both are off by default. The server refuses statements touching a denied entity type, a non-entity table, or a redacted field, and records every attempt in the tamper-evident audit log. Use the site-context or entity-schema tools for schema introspection."
+description: "Run a single read-only SELECT through the configured sqlQuery module binding, or the legacy governed Drush command on unbound sites. Requires the site to set drushSsh.rawSql=\"governed\" AND the site's policy profile to set allow_raw_sql; both are off by default. The server refuses statements touching a denied entity type, a non-entity table, or a redacted field, and records every attempt in the tamper-evident audit log. Use the site-context or entity-schema tools for schema introspection."
 argument-hint: "<query> [site]"
 ---
 
 Call the MCP tool `drupal_drush_sql_query`.
 
-Run a single read-only SELECT through mcp_sentinel's governed command (`drush mcp-sentinel:sql-query`). Requires the site to set drushSsh.rawSql="governed" AND the site's policy profile to set allow_raw_sql; both are off by default. The server refuses statements touching a denied entity type, a non-entity table, or a redacted field, and records every attempt in the tamper-evident audit log. Use the site-context or entity-schema tools for schema introspection.
+Run a single read-only SELECT through the configured sqlQuery module binding, or the legacy governed Drush command on unbound sites. Requires the site to set drushSsh.rawSql="governed" AND the site's policy profile to set allow_raw_sql; both are off by default. The server refuses statements touching a denied entity type, a non-entity table, or a redacted field, and records every attempt in the tamper-evident audit log. Use the site-context or entity-schema tools for schema introspection.
 
 Parse the arguments supplied with this command into this tool's parameters:
 

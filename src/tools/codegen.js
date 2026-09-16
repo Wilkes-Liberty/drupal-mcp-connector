@@ -1,7 +1,8 @@
 /**
  * Tool group: GraphQL Compose Codegen (TypeScript / Next.js scaffolds).
  *
- * Thin Drush wrappers around `drupal/graphql_compose_codegen`. The generator
+ * Compatibility adapters through configured module bindings, or legacy Drush.
+ * Thin wrappers around `drupal/graphql_compose_codegen`. The generator
  * lives on the Drupal site; this connector does not reimplement it and does
  * not run GraphQL Code Generator against the SDL.
  *
@@ -16,6 +17,7 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { sshDrush } from "./drush.js";
+import { callBoundModuleTool, toolResultData } from "../lib/server-tools.js";
 import { SecurityError } from "../lib/security.js";
 import { validateMachineName } from "../lib/validate.js";
 
@@ -75,6 +77,18 @@ async function runGqcc(
   const site = getSiteConfig(siteName);
   const names = parseMachineNameList(bundles, "bundles");
   const skip = parseMachineNameList(skipFields, "skipFields");
+  if (site.serverTools?.bindings !== undefined) {
+    const binding = new Map([
+      [INSPECT, "codegenInspect"], [DIFF, "codegenDiff"], [GENERATE, "codegenPreview"],
+    ]).get(subcommand);
+    const result = toolResultData(await callBoundModuleTool(site, binding, {
+      bundles: names, skip_fields: skip,
+    }, { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }));
+    if (result?.success !== true || !result.data || typeof result.data !== "object" || Array.isArray(result.data)) {
+      throw new SecurityError("Codegen module returned an invalid result. No SSH fallback was attempted.");
+    }
+    return { output: JSON.stringify(result.data), command: `module:${binding}`, wroteFiles: false };
+  }
   const args = [subcommand];
   if (names.length) args.push(`--bundles=${names.join(",")}`);
   if (skip.length) args.push(`--skip-fields=${skip.join(",")}`);
@@ -126,19 +140,19 @@ export const definitions = [
   {
     name: "drupal_codegen_inspect",
     description:
-      "List node and paragraph bundles and extra fields from graphql_compose_codegen (`drush graphql-compose-codegen:inspect`). Requires the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:inspect. Does not write files.",
+      "List node and paragraph bundles and extra fields from graphql_compose_codegen (`drush graphql-compose-codegen:inspect`). Uses the configured module binding; unbound sites require the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:inspect. Does not write files.",
     inputSchema: { type: "object", properties: LIST_PROPS },
   },
   {
     name: "drupal_codegen_diff",
     description:
-      "Compare the live graphql_compose schema to the last gqcc:generate snapshot (`drush graphql-compose-codegen:diff`). Requires the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:diff.",
+      "Compare the live graphql_compose schema to the last gqcc:generate snapshot (`drush graphql-compose-codegen:diff`). Uses the configured module binding; unbound sites require the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:diff.",
     inputSchema: { type: "object", properties: LIST_PROPS },
   },
   {
     name: "drupal_codegen_generate",
     description:
-      "Return TypeScript/GraphQL scaffold artefacts from graphql_compose_codegen as text (`drush graphql-compose-codegen:generate --dry-run`). Never writes on the Drupal host (no --output-dir). Copy artefacts locally. Requires the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:generate.",
+      "Return TypeScript/GraphQL scaffold artefacts from graphql_compose_codegen as text (`drush graphql-compose-codegen:generate --dry-run`). Never writes on the Drupal host (no --output-dir). Copy artefacts locally. Uses the configured module binding; unbound sites require the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:generate.",
     inputSchema: { type: "object", properties: LIST_PROPS },
   },
 ];

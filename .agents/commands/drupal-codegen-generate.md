@@ -1,11 +1,11 @@
 ---
-description: "Return TypeScript/GraphQL scaffold artefacts from graphql_compose_codegen as text (`drush graphql-compose-codegen:generate --dry-run`). Never writes on the Drupal host (no --output-dir). Copy artefacts locally. Requires the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:generate."
+description: "Return TypeScript/GraphQL scaffold artefacts from graphql_compose_codegen as text (`drush graphql-compose-codegen:generate --dry-run`). Never writes on the Drupal host (no --output-dir). Copy artefacts locally. Uses the configured module binding; unbound sites require the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:generate."
 argument-hint: "[site] [bundles] [skipFields]"
 ---
 
 Call the MCP tool `drupal_codegen_generate`.
 
-Return TypeScript/GraphQL scaffold artefacts from graphql_compose_codegen as text (`drush graphql-compose-codegen:generate --dry-run`). Never writes on the Drupal host (no --output-dir). Copy artefacts locally. Requires the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:generate.
+Return TypeScript/GraphQL scaffold artefacts from graphql_compose_codegen as text (`drush graphql-compose-codegen:generate --dry-run`). Never writes on the Drupal host (no --output-dir). Copy artefacts locally. Uses the configured module binding; unbound sites require the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:generate.
 
 Parse the arguments supplied with this command into this tool's parameters:
 

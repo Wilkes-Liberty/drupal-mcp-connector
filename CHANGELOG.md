@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Codegen and governed SQL compatibility commands can use module-owned Tool API
+  actions through explicit bindings (#317). Configured calls validate fresh
+  schemas and never fall back to SSH on failure. Core and third-party commands
+  remain available; unbound sites retain their existing migration path.
+
 ## [2.18.0] - 2026-09-16
 
 ### Fixed

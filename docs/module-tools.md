@@ -70,6 +70,37 @@ Sites without `bindings` retain the previous config transport during migration.
 Review and configure all three bindings together before validating the new path.
 The module registry itself remains opt-in.
 
+### Codegen and governed SQL
+
+The following compatibility bindings use the same registry. Configure them on
+sites that use these commands; an existing `bindings` object activates strict
+binding resolution, so an absent mapping refuses the command.
+
+| Binding | Public command | Inbound scope | Capability | Drupal action |
+|---|---|---|---|---|
+| `codegenInspect` | `drupal_codegen_inspect` | `mcp_config` | `configRead` | `graphql_compose_codegen_inspect` |
+| `codegenDiff` | `drupal_codegen_diff` | `mcp_config` | `configRead` | `graphql_compose_codegen_diff` |
+| `codegenPreview` | `drupal_codegen_generate` | `mcp_config` | `configRead` | `graphql_compose_codegen_preview` |
+| `sqlQuery` | `drupal_drush_sql_query` | `mcp_admin` | `rawSql` | `mcp_sentinel_sql_query` |
+
+All four require operation `read`. Map each binding to a configured alias and
+copy its exact wire name from the source catalog. Inbound connector scopes and
+outbound Drupal credential scopes are separate: Codegen's Drupal actions require
+`mcp_config_read`; SQL requires `mcp_read` plus explicit source `allow_raw_sql`.
+Retain the local SQL opt-in `drushSsh.rawSql: "governed"`. A bound call needs no
+SSH host, key or connection; other Drush commands still require their SSH setup.
+
+Codegen translates `skipFields` to the module's `skip_fields`. Its response keeps
+`output`, `command` and `wroteFiles: false`; `output` now contains the module's
+structured result serialized as JSON, and `command` identifies the module binding.
+Generation is a preview and never writes files on Drupal. SQL keeps its existing
+`rows`, `row_count`, `truncated` and `profile` response fields. Invalid responses
+and source refusals fail without trying a legacy command.
+
+Unbound sites retain their existing Drush adapters during migration. This does
+not remove core or third-party integrations such as taxonomy, node/media tools,
+or the general Drush administration commands.
+
 `operation` is `read`, `write` or `delete`. `capabilities` is required and lists additional connector gates: `publish`, `configRead`, `configWrite`, `graphql`, or `rawSql`. Raw SQL retains the explicit governed-SQL opt-in. These gates only tighten permissions; they do not grant Drupal access. A read-only connector refuses writes regardless of a source tool's description.
 
 Non-loopback HTTPS deployments must also permit the intended inbound OAuth scope through their existing resource-server configuration. Do not broaden a CRM credential into a generic content-editor credential merely to satisfy a transport's default scope.
