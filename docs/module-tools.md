@@ -112,3 +112,11 @@ Core and third-party integrations remain in the connector, including taxonomy,
 Scheduler, Redirect, Paragraphs and Metatag reports. Their availability does not
 depend on upstream accepting Tool API plugins. Sentinel's entity draft/revision
 transport and generic relationship correctness remain security infrastructure.
+
+### Nullable input schemas
+
+Providers may express nullable types with `oneOf` and sibling constraints such as
+`maxLength`. The registry accepts this JSON Schema form without coercing values
+or dropping unknown properties. Type, length, enum and required-field validation
+remain active. Unknown schema keywords and unresolved external references still
+make an action unavailable.

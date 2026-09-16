@@ -67,7 +67,9 @@ function allowed(entry, identity, sites, grants) {
 function validator(schema) {
   if (!schema || schema.type !== "object") throw new Error("Object schema required.");
   bounded(schema, 65536);
-  const ajv = new Ajv({ strict: true, allErrors: false, ownProperties: true });
+  // Providers may put constraints beside nullable oneOf types. strictTypes
+  // rejects that valid JSON Schema shape; runtime type checks still apply.
+  const ajv = new Ajv({ strict: true, strictTypes: false, allErrors: false, ownProperties: true });
   addFormats(ajv);
   const check = ajv.compile(schema);
   if (check.$async) throw new Error("Async schemas are unavailable.");

@@ -116,6 +116,35 @@ describe("module-owned tool registry", () => {
     expect(call.mock.calls.find((args) => args[1] === "tool_api.asset")[3].retryRejected).toBe(false);
   });
 
+  it("accepts nullable composed types while enforcing every input constraint", async () => {
+    const composed = {
+      type: "object", required: ["id"], additionalProperties: false,
+      properties: {
+        id: { type: "integer", minimum: 1 },
+        label: { oneOf: [{ type: "string" }, { type: "null" }], maxLength: 4 },
+        count: { oneOf: [{ type: "integer" }, { type: "null" }], minimum: 1 },
+      },
+    };
+    list.mockResolvedValue({ tools: [{ ...remote("tool_api.asset"), inputSchema: composed, outputSchema: composed }] });
+    const definitions = await registry.list(context());
+    expect(definitions).toHaveLength(1);
+    const definition = definitions[0];
+    for (const args of [{ id: 1 }, { id: 1, label: null, count: null }, { id: 1, label: "test", count: 2 }]) {
+      const result = await registry.call(definition.name, parameters(definition, args), context());
+      expect(result.isError).toBe(false);
+      expect(result.structuredContent.result).toEqual(args);
+    }
+    call.mockClear();
+    for (const args of [
+      { id: 1, label: "longer" }, { id: 1, label: 2 },
+      { id: 1, count: "2" }, { id: 1, count: 0 },
+      { id: 1, count: 1.5 }, { id: 1, owner: 2 }, {},
+    ]) {
+      expect((await registry.call(definition.name, parameters(definition, args), context())).isError).toBe(true);
+    }
+    expect(call).not.toHaveBeenCalled();
+  });
+
   it("denies discovery and direct calls for the wrong scope before source reads", async () => {
     const ctx = { ...context(), identity: { scopes: ["mcp_read"], sites: ["stage"] } };
     expect(await registry.list(ctx)).toEqual([]);
