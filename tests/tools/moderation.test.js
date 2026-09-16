@@ -8,6 +8,10 @@ const backend = {
   deleteEntity: vi.fn(),
   rawQuery: vi.fn(),
   resourcePath: vi.fn((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`),
+  toCanonical: vi.fn((data) => node({
+    id: data.id,
+    fields: { moderation_state: data.attributes?.moderation_state },
+  })),
 };
 vi.mock("../../src/lib/backends/index.js", () => ({ resolveBackend: vi.fn(async () => backend) }));
 vi.mock("../../src/lib/config.js", () => ({
@@ -35,13 +39,54 @@ beforeEach(() => {
   Object.values(backend).forEach((f) => {
     if (typeof f.mockReset === "function") f.mockReset();
   });
+  backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
+  backend.toCanonical.mockImplementation((data) => node({
+    id: data.id,
+    fields: { moderation_state: data.attributes?.moderation_state },
+  }));
+  backend.rawQuery.mockImplementation(async ({ path }) => {
+    if (String(path).endsWith("/mcp-translations")) throw new Error("Drupal 404 inventory unavailable");
+    throw new Error(
+      "Drupal 400 on PATCH /jsonapi/node/article/n1: The selected entity (n1) " +
+      "does not match the ID in the payload (00000000-0000-4000-a000-000000000001).",
+    );
+  });
 });
 
 describe("moderation tools", () => {
   it("set_moderation_state writes moderation_state via updateEntity", async () => {
+    backend.getEntity.mockResolvedValue(node({
+      fields: { moderation_state: "draft", drupal_internal__vid: 10 },
+    }));
     backend.updateEntity.mockResolvedValue(node());
     await handlers.drupal_set_moderation_state({ type: "article", id: "n1", state: "published" });
     expect(backend.updateEntity).toHaveBeenCalledWith({ entityType: "node", bundle: "article", id: "n1", attributes: { moderation_state: "published" } });
+  });
+
+  it("set_moderation_state without langcode continues a working copy via mcp-draft", async () => {
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        return node({ fields: { drupal_internal__vid: 11, moderation_state: "draft" } });
+      }
+      return node({ fields: { drupal_internal__vid: 10, moderation_state: "published" } });
+    });
+    backend.rawQuery.mockImplementation(async ({ path, options }) => {
+      if (String(path).endsWith("/mcp-translations")) throw new Error("Drupal 404 inventory unavailable");
+      if (String(path).endsWith("/mcp-draft") && options?.headers?.["X-MCP-Draft-Preflight"] === "1") {
+        return { meta: { draft_preflight: true, live: "10", working: "11" } };
+      }
+      if (String(path).endsWith("/mcp-draft")) {
+        return { data: { type: "node--article", id: "n1", attributes: { moderation_state: "needs_review" } } };
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    const out = await handlers.drupal_set_moderation_state({ type: "article", id: "n1", state: "needs_review" });
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    const drafts = backend.rawQuery.mock.calls.filter((c) => String(c[0].path).endsWith("/mcp-draft"));
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0][0].options.headers["X-MCP-Draft-Preflight"]).toBe("1");
+    expect(drafts[1][0].options.headers["X-MCP-Draft-Preflight"]).toBe("0");
+    expect(out.fields.moderation_state).toBe("needs_review");
   });
 
   it("set_moderation_state requires a state", async () => {

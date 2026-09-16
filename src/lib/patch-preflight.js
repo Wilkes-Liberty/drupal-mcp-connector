@@ -61,16 +61,6 @@ export const PATCH_WORKING_COPY_STALE_MESSAGE =
   "Re-read rel:working-copy and retry, or resolve the conflict in Drupal. See connector #166.";
 
 /**
- * Operator message for a core working-copy 400.
- * A resolvable working copy gets a new draft revision (#166) — this message is only
- * for the invisible-row case (#201).
- * @returns {string}
- */
-export function patchBlockedMessage() {
-  return PATCH_BLOCKED_MESSAGE;
-}
-
-/**
  * Thrown when the core working-copy PATCH guard rejects a canonical write
  * (or its probe) and no working copy is addressable (#201).
  */
@@ -387,18 +377,21 @@ export async function preflightPatchWritable({
 /**
  * Resolve the PATCH target, then run the same probe the real write will use.
  * Callers inherit #166 targeting by going through this before dryRun or write.
+ * `langcode` always resolves Sentinel inventory and draft-preflights, even
+ * when the entity is unmoderated (media translations).
  *
  * @param {object} backend
- * @param {{entityType: string, bundle: string, id: string, existing?: ?object, attributes?: object}} args
+ * @param {{entityType: string, bundle: string, id: string, existing?: ?object, attributes?: object, relationships?: object, langcode?: string}} args
  * @returns {Promise<{resourceVersion: ?string, workingCopy: ?object, liveVid: ?number|string, workingVid: ?number|string}>}
  */
 export async function prepareGuardedPatch(backend, {
   entityType, bundle, id, existing, attributes, relationships, langcode,
 }) {
-  const target = shouldPreflightPatch({ existing, attributes })
+  const needsPreflight = shouldPreflightPatch({ existing, attributes });
+  const target = (needsPreflight || langcode)
     ? await resolveWorkingCopyPatchTarget(backend, { entityType, bundle, id, existing })
     : { resourceVersion: undefined, workingCopy: null, liveVid: null, workingVid: null };
-  if (shouldPreflightPatch({ existing, attributes }) && !target.resourceVersion) {
+  if (needsPreflight && !target.resourceVersion) {
     // Canonical path (no distinct working copy). The id-mismatch probe never
     // reaches Sentinel's save-time stale-default check; refuse here when the
     // possiblyPatchBlocked fingerprint is already readable (#273).

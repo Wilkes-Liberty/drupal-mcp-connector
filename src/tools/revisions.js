@@ -11,8 +11,8 @@
  *     full chronological history enumeration requires the Drush bridge.
  *   - drupal_get_revision fetches one specific version (by vid or alias).
  *   - drupal_revert_revision is a GOVERNED WRITE: it reads the target revision
- *     and replays its editable attributes through updateEntity to make them the
- *     new current revision (assertWriteAllowed gates it; internal/immutable
+ *     and replays its editable attributes through prepareGuardedPatch /
+ *     updateEntityGuarded (assertWriteAllowed gates it; internal/immutable
  *     bookkeeping fields are never written back).
  *
  * Reads are redacted per the site's security policy.
@@ -27,6 +27,7 @@ import {
   assertDraftLangcode, readDraftTranslation, readNodeDraftInventory, readTranslationInventory,
 } from "../lib/sentinel-draft.js";
 import { omitLiveComputedMetatag } from "../lib/entity-response.js";
+import { changedAheadOfRevision, prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
 
 // Attributes that describe the entity's identity / revision bookkeeping / paths.
 // These are read-only or server-managed and must NOT be replayed on a revert.
@@ -122,20 +123,6 @@ function summarizeRevision(resource) {
     title: attrs.get("title") ?? null,
     links: resource.links ?? null,
   };
-}
-
-/**
- * Whether the default revision's `changed` is later than its own
- * `revision_timestamp` — the readable fingerprint of a #201 node.
- * @param {?object} summary
- * @returns {boolean}
- */
-function changedAheadOfRevision(summary) {
-  if (!summary?.changed || !summary?.revisionTimestamp) return false;
-  const changed = Date.parse(summary.changed);
-  const rev = Date.parse(summary.revisionTimestamp);
-  if (!Number.isFinite(changed) || !Number.isFinite(rev)) return false;
-  return changed > rev;
 }
 
 const LIST_REVISIONS_BASE_NOTE =
@@ -287,10 +274,11 @@ async function getRevision({ site: siteName, type, id, version, langcode }) {
 
 /**
  * Revert an entity to a prior revision (GOVERNED WRITE). Reads the target
- * revision, then replays its editable attributes through updateEntity so they
- * become the new current revision. Internal/immutable bookkeeping fields
- * (drupal_internal__*, revision metadata, computed path, timestamps) are
- * stripped before the write so only restorable content is sent.
+ * revision, then replays its editable attributes through prepareGuardedPatch
+ * / updateEntityGuarded so they become the new current revision. Internal /
+ * immutable bookkeeping fields (drupal_internal__*, revision metadata,
+ * computed path, timestamps) are stripped before the write so only
+ * restorable content is sent.
  *
  * This does not delete any history — the revert produces a NEW revision whose
  * content matches the target, preserving the audit trail.
@@ -329,7 +317,19 @@ async function revertRevision({ site: siteName, type, id, version }) {
     )
   );
 
-  await backend.updateEntity({ entityType: "node", bundle: type, id, attributes });
+  let existing = null;
+  try {
+    existing = (await backend.getEntity({ entityType: "node", bundle: type, id })) ?? null;
+  } catch {
+    existing = null;
+  }
+  const patchTarget = await prepareGuardedPatch(backend, {
+    entityType: "node", bundle: type, id, existing, attributes,
+  });
+  await updateEntityGuarded(backend, {
+    entityType: "node", bundle: type, id, attributes,
+    ...(patchTarget.draftRevision ? { draftRevision: patchTarget.draftRevision } : {}),
+  });
 
   return {
     success: true,

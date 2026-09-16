@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Remaining writes use `prepareGuardedPatch`.** `langcode` always resolves
+  Sentinel inventory and draft-preflights, including unmoderated media.
+  `drupal_update_media` + `langcode`, unscoped `drupal_set_moderation_state`,
+  and `drupal_revert_revision` share the same preflight / `writeDraft` path
+  as node updates. `revisions.js` uses the shared `changedAheadOfRevision`.
 - **One Sentinel HTTP client and fail-closed inventory policy.** Draft,
   translation, and inventory requests share `src/lib/sentinel-draft.js`
   (paths, If-Match, lang/state headers, missing-endpoint classifiers,
