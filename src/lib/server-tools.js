@@ -23,7 +23,7 @@
  */
 
 import fetch from "node-fetch";
-import { createHash } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { authHeadersAsync, clientHeaders, CLIENT_NAME, CLIENT_VERSION } from "./config.js";
 import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial, getDataFlowContext } from "./data-flow.js";
 import { clearToken } from "./oauth.js";
@@ -56,6 +56,9 @@ let rpcId = 0;
  * server reports the session is gone (expiry).
  */
 const sessions = new Map();
+// Ephemeral cache identity only, never a persisted password verifier. A keyed
+// digest also prevents offline guessing if a diagnostic exposes a cache key.
+const sessionIdentityKey = randomBytes(32);
 
 /**
  * Resolve a site's server-tools endpoint, or throw a clear, actionable error
@@ -281,7 +284,7 @@ async function requestServerTool(site, method, params, options) {
     params,
   };
 
-  const sessionKey = createHash("sha256").update(JSON.stringify([
+  const sessionKey = createHmac("sha256", sessionIdentityKey).update(JSON.stringify([
     site._name, endpoint, await authHeadersAsync(site), getDataFlowContext()?.principalKey ?? null,
   ])).digest("hex");
   let sessionId = await ensureSession(site, endpoint, sessionKey);
