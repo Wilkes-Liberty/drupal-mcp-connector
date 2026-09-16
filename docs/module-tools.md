@@ -21,7 +21,7 @@ Extend an existing site's `serverTools` object. Keep its credential in the exist
       "namespace": "staging_relationships",
       "tools": {
         "record_activity": {
-          "name": "tool_api.example_record_activity",
+          "name": "tool_api__example_record_activity",
           "scope": "relationship_write",
           "operation": "write",
           "capabilities": []
@@ -33,6 +33,42 @@ Extend an existing site's `serverTools` object. Keep its credential in the exist
 ```
 
 This exposes `drupal_module_write_staging_relationships__record_activity` only if the source lists the approved tool and caller policy permits it. The operation in the name comes from operator configuration, never the remote annotation. This keeps write classification consistent with transport and relay actor requirements. The namespace and alias together must be unique across configured sites.
+
+Copy `name` from the installed source's advertised catalog. Bridge versions may
+use different derivative separators; the connector does not rewrite them.
+
+## Compatibility bindings
+
+An existing command can retain its public name while its implementation lives
+in Drupal. Add `serverTools.bindings` to map a supported compatibility operation
+to an alias in the same site's `serverTools.modules.tools` object:
+
+```json
+{
+  "bindings": {
+    "configGet": "get_config",
+    "configList": "list_config",
+    "configSet": "set_config"
+  }
+}
+```
+
+These three aliases must have scope `mcp_config`. Get/list require operation
+`read` and capability `configRead`; set requires operation `write` and capability
+`configWrite`. Each alias's `name` is the exact approved source tool name, not a
+connector constant. Existing config-set clients still pass `value`; the
+compatibility adapter supplies that map as the module's `data` argument.
+
+Configured bindings use fresh discovery and the same schema, caller, site and
+source checks as ordinary module calls. Missing mappings, changed schemas and
+refusals never trigger a legacy-tool or SSH fallback. Config reports use these
+bindings too. The install verifier resolves the same local mapping but sends
+its negative probe directly to the source, so a local catalog filter cannot be
+mistaken for evidence of source authorization.
+
+Sites without `bindings` retain the previous config transport during migration.
+Review and configure all three bindings together before validating the new path.
+The module registry itself remains opt-in.
 
 `operation` is `read`, `write` or `delete`. `capabilities` is required and lists additional connector gates: `publish`, `configRead`, `configWrite`, `graphql`, or `rawSql`. Raw SQL retains the explicit governed-SQL opt-in. These gates only tighten permissions; they do not grant Drupal access. A read-only connector refuses writes regardless of a source tool's description.
 
@@ -67,4 +103,12 @@ Static slash-command generation continues to describe built-in tools. Runtime mo
 
 ## Migration status
 
-The generic registry does not by itself migrate existing built-in module commands. The remaining migration covers code generation, Scheduler, Redirect, Paragraphs, Sentinel configuration/SQL, and module-specific report sources. Compatibility routing and Drupal-side adapters must be validated before retiring existing implementations. Sentinel's entity draft/revision transport and generic relationship correctness remain security infrastructure.
+The generic registry does not by itself migrate existing commands. Specialized
+actions from modules maintained by this project move into their owning modules:
+CRM, GraphQL Compose Codegen, and MCP Sentinel. Compatibility routing and
+Drupal-side adapters must be validated before retiring old implementations.
+
+Core and third-party integrations remain in the connector, including taxonomy,
+Scheduler, Redirect, Paragraphs and Metatag reports. Their availability does not
+depend on upstream accepting Tool API plugins. Sentinel's entity draft/revision
+transport and generic relationship correctness remain security infrastructure.

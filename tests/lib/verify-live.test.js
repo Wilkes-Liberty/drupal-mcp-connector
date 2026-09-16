@@ -87,6 +87,28 @@ const statusOf = (result, id) => result.checks.find((c) => c.id === id)?.status;
 const findingsOf = (result, id) => result.checks.find((c) => c.id === id)?.findings ?? [];
 
 describe("verifyLive — a healthy governed target", () => {
+  it("probes the configured module binding at the source, not a hard-coded name", async () => {
+    const calls = [];
+    const result = await run({ serverTools: {
+      url: "/mcp", bindings: { configSet: "set_config" },
+      modules: { namespace: "fixture", tools: { set_config: {
+        name: "tool_api__custom_config_write", operation: "write", scope: "mcp_config", capabilities: ["configWrite"],
+      } } },
+    } }, {}, async (_site, name) => {
+      calls.push(name);
+      return refusingCallTool();
+    });
+    expect(calls).toEqual(["tool_api__custom_config_write"]);
+    expect(statusOf(result, "entitlement_filtering")).toBe("pass");
+  });
+
+  it("does not count a missing binding as evidence of a source refusal", async () => {
+    let called = false;
+    const result = await run({ serverTools: { url: "/mcp", bindings: {} } }, {}, async () => { called = true; });
+    expect(called).toBe(false);
+    expect(statusOf(result, "entitlement_filtering")).not.toBe("pass");
+  });
+
   it("passes every live check", async () => {
     const result = await run();
     const notPassing = result.checks.filter((c) => c.status !== "pass").map((c) => `${c.id}: ${c.findings.join(" ")}`);

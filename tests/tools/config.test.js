@@ -12,17 +12,36 @@ vi.mock("../../src/lib/config.js", () => ({
 }));
 
 const callServerTool = vi.fn();
+const callBoundModuleTool = vi.fn();
 vi.mock("../../src/lib/server-tools.js", () => ({
   callServerTool: (...args) => callServerTool(...args),
+  callBoundModuleTool: (...args) => callBoundModuleTool(...args),
   SERVER_TOOLS: { configGet: "config_get", configList: "config_list", configSet: "config_set" },
 }));
 
 import { handlers } from "../../src/tools/config.js";
 import { SecurityError } from "../../src/lib/security.js";
 
-beforeEach(() => callServerTool.mockReset());
+beforeEach(() => {
+  callServerTool.mockReset();
+  callBoundModuleTool.mockReset();
+});
 
 describe("config tools — governed via server-tool bridge", () => {
+  it("uses an explicit module binding without replaying failures through the legacy tool", async () => {
+    SITES.dev.serverTools.bindings = { configSet: "approved_write" };
+    vi.mocked(callBoundModuleTool).mockRejectedValue(new SecurityError("Refused"));
+    try {
+      await expect(handlers.drupal_config_set({ site: "dev", name: "system.site", value: { name: "X" } })).rejects.toThrow("Refused");
+      expect(callBoundModuleTool).toHaveBeenCalledWith(SITES.dev, "configSet", { name: "system.site", data: { name: "X" } }, {
+        operation: "write", scope: "mcp_config", capabilities: ["configWrite"],
+      });
+      expect(callServerTool).not.toHaveBeenCalled();
+    } finally {
+      delete SITES.dev.serverTools.bindings;
+    }
+  });
+
   it("config_get on a config tier (mcp_config) calls the server tool", async () => {
     callServerTool.mockResolvedValue({ content: [{ type: "text", text: "{}" }] });
     await handlers.drupal_config_get({ site: "dev", name: "system.site" });

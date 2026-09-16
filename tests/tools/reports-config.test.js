@@ -4,6 +4,7 @@ const h = vi.hoisted(() => ({
   site: null,
   sec: null,
   callServerTool: vi.fn(),
+  callBoundModuleTool: vi.fn(),
   sshDrush: vi.fn(),
 }));
 
@@ -14,7 +15,7 @@ vi.mock("../../src/lib/security.js", async (orig) => {
 });
 vi.mock("../../src/lib/server-tools.js", async (orig) => {
   const actual = await orig();
-  return { ...actual, callServerTool: h.callServerTool };
+  return { ...actual, callServerTool: h.callServerTool, callBoundModuleTool: h.callBoundModuleTool };
 });
 vi.mock("../../src/tools/drush.js", () => ({
   sshDrush: h.sshDrush,
@@ -34,10 +35,22 @@ beforeEach(() => {
   h.site = { _name: "d", baseUrl: "https://example.com" };
   h.sec = { allowConfigRead: true };
   h.callServerTool.mockReset();
+  h.callBoundModuleTool.mockReset();
   h.sshDrush.mockReset();
 });
 
 describe("reports-config", () => {
+  it("does not fall back to SSH or legacy tools after an explicit binding fails", async () => {
+    h.site.serverTools = { url: "/mcp", bindings: {} };
+    h.site.drushSsh = { host: "h" };
+    h.callBoundModuleTool.mockRejectedValue(new Error("Bound tool refused"));
+    const result = await handlers.drupal_audit_config_best_practices({});
+    expect(h.callBoundModuleTool).toHaveBeenCalled();
+    expect(h.callServerTool).not.toHaveBeenCalled();
+    expect(h.sshDrush).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).toContain("Bound tool refused");
+  });
+
   it("definition names match handler keys", () => {
     expect(definitions.map((d) => d.name).sort()).toEqual(Object.keys(handlers).sort());
   });

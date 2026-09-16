@@ -22,7 +22,17 @@ import {
   assertConfigScope,
   hasScope,
 } from "../lib/security.js";
-import { callServerTool, SERVER_TOOLS } from "../lib/server-tools.js";
+import { callServerTool, callBoundModuleTool, SERVER_TOOLS } from "../lib/server-tools.js";
+
+/** Compatibility names use an approved module binding when configured. */
+async function configTool(site, binding, args, operation, capability) {
+  if (site.serverTools?.bindings !== undefined) {
+    return callBoundModuleTool(site, binding, args, {
+      operation, scope: "mcp_config", capabilities: [capability],
+    });
+  }
+  return callServerTool(site, new Map(Object.entries(SERVER_TOOLS)).get(binding), args);
+}
 
 // ---------------------------------------------------------------------------
 // Config tools (governed via the server-tool bridge)
@@ -38,7 +48,7 @@ async function configGet({ site: siteName, name }) {
   const site = getSiteConfig(siteName);
   assertConfigScope(site, `config:get ${name}`);
   assertConfigReadAllowed(resolveSecurityConfig(site));
-  return callServerTool(site, SERVER_TOOLS.configGet, { name });
+  return configTool(site, "configGet", { name }, "read", "configRead");
 }
 
 /**
@@ -52,7 +62,7 @@ async function configList({ site: siteName, prefix }) {
   assertConfigScope(site, "config:list");
   assertConfigReadAllowed(resolveSecurityConfig(site));
   const args = prefix ? { prefix } : {};
-  return callServerTool(site, SERVER_TOOLS.configList, args);
+  return configTool(site, "configList", args, "read", "configRead");
 }
 
 /**
@@ -73,7 +83,7 @@ async function configSet({ site: siteName, name, value }) {
   assertConfigScope(site, `config:set ${name}`);
   assertNotReadOnly(sec, `config:set ${name}`);
   assertConfigWriteAllowed(sec);
-  return callServerTool(site, SERVER_TOOLS.configSet, { name, data: value });
+  return configTool(site, "configSet", { name, data: value }, "write", "configWrite");
 }
 
 // ---------------------------------------------------------------------------

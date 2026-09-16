@@ -46,7 +46,7 @@ function entries(sites) {
       if (result.has(name) || result.size >= MAX_TOOLS) {
         throw new SecurityError("Duplicate module namespace or excessive tool policy entries.");
       }
-      result.set(name, { name, site, policy });
+      result.set(name, { name, alias, site, policy });
     }
   }
   return result;
@@ -136,12 +136,41 @@ export function isModuleTool(name) {
   return typeof name === "string" && name.startsWith(PREFIX);
 }
 
+/** Resolves a local binding without granting access or contacting its provider. */
+export function resolveModuleBinding(site, binding, required) {
+  const bindings = new Map(Object.entries(site.serverTools?.bindings ?? {}));
+  const alias = bindings.get(binding);
+  const entry = [...entries([site]).values()].find((item) => item.alias === alias);
+  if (!entry || entry.policy.operation !== required.operation ||
+      entry.policy.scope !== required.scope ||
+      !required.capabilities.every((cap) => entry.policy.capabilities.includes(cap))) {
+    throw new SecurityError("Module binding is missing or does not satisfy the operation contract.");
+  }
+  return entry;
+}
+
 /**
  * Build a registry without cross-request catalog or authorization caches.
  * Transport injection lets unrelated fixture providers prove generic dispatch.
  */
 export function createModuleToolRegistry({ list = listServerTools, call = callServerTool } = {}) {
-  return {
+  const registry = {
+    /** Invoke a locally bound compatibility operation through normal discovery. */
+    async callBinding(site, binding, args, required, context = {}) {
+      const entry = resolveModuleBinding(site, binding, required);
+      const ctx = { ...context, sites: [site] };
+      const definition = (await registry.list(ctx)).find((item) => item.name === entry.name);
+      if (!definition) throw new SecurityError("Bound module tool is unavailable for this caller.");
+      const result = await registry.call(entry.name, {
+        arguments: args,
+        catalogRevision: definition.inputSchema.properties.catalogRevision.const,
+      }, ctx);
+      if (result.isError) throw new SecurityError("Bound module tool refused the request; no fallback was attempted.");
+      // Compatibility callers consume the original Tool API result, not the
+      // module registry's result/target envelope. Keep the established shape.
+      const data = result.structuredContent.result;
+      return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
+    },
     async list(context = {}) {
       const sites = context.sites ?? listResolvableSiteConfigs();
       const identity = context.identity === undefined ? getRequestIdentity() : context.identity;
@@ -206,4 +235,5 @@ export function createModuleToolRegistry({ list = listServerTools, call = callSe
       }
     },
   };
+  return registry;
 }

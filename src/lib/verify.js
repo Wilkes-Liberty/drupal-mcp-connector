@@ -738,7 +738,13 @@ export async function verifyLive(site, { transport, callTool = null, contentTarg
    */
   const attemptConfigWrite = async () => {
     try {
-      await callTool(site, CONFIG_SET_TOOL, { name: "system.site", data: { name: "verification probe" } });
+      // The negative probe must reach source authorization, not merely prove
+      // that the connector hides out-of-tier tools from discovery.
+      const tool = site.serverTools?.bindings === undefined ? CONFIG_SET_TOOL
+        : (await import("./module-tools.js")).resolveModuleBinding(site, "configSet", {
+          operation: "write", scope: "mcp_config", capabilities: ["configWrite"],
+        }).policy.name;
+      await callTool(site, tool, { name: "system.site", data: { name: "verification probe" } });
       return { served: true, outcome: "served", detail: "accepted" };
     } catch (err) {
       // Not every throw is a refusal — see classifyBridgeError.
