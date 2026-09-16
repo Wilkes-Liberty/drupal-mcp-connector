@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Nullable module inputs (#320).** The generic registry accepts composed nullable
+  schemas while retaining runtime type, length, required and unknown-field checks.
+
 ### Added
 - **Module compatibility bindings (#317).** Existing config commands and reports
   can use locally approved module tools through generic discovery and schema
@@ -92,8 +96,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.15.2] - 2026-09-11
 
 ### Fixed
-- **Nullable module inputs (#320).** The generic registry accepts composed nullable
-  schemas while retaining runtime type, length, required and unknown-field checks.
 - **Discover and continue translation-only forward revisions (#297).** When core's
   working-copy alias is absent or echoes live, node revision listing and guarded
   updates consult Sentinel's translation inventory. Existing unpublished languages
