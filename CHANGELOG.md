@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Module-owned tools (#317).** An opt-in registry discovers typed Drupal MCP
+  tools and routes them through explicit site, scope and operation policy. Module
+  actions need no dedicated JavaScript handler. Catalog revisions, schema checks,
+  bounded results and refusal without a valid source prevent silent fallbacks.
+
 ### Changed
+- Server-tool sessions are bounded and isolated by endpoint, credential and caller.
+  Module writes do not automatically retry after an authentication/session refusal.
 - **Remaining writes use `prepareGuardedPatch`.** `langcode` always resolves
   Sentinel inventory and draft-preflights, including unmoderated media.
   `drupal_update_media` + `langcode`, unscoped `drupal_set_moderation_state`,

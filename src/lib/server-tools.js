@@ -23,8 +23,9 @@
  */
 
 import fetch from "node-fetch";
+import { createHmac, randomBytes } from "node:crypto";
 import { authHeadersAsync, clientHeaders, CLIENT_NAME, CLIENT_VERSION } from "./config.js";
-import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial } from "./data-flow.js";
+import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial, getDataFlowContext } from "./data-flow.js";
 import { clearToken } from "./oauth.js";
 
 /**
@@ -50,11 +51,14 @@ const MCP_PROTOCOL_VERSION = "2025-06-18";
 let rpcId = 0;
 
 /**
- * Per-site MCP session cache, keyed by site._name. Holds the `Mcp-Session-Id`
+ * MCP session cache, keyed by site, endpoint, credentials and principal. Holds the `Mcp-Session-Id`
  * issued by the server's `initialize` response; cleared and re-acquired when the
  * server reports the session is gone (expiry).
  */
 const sessions = new Map();
+// Ephemeral cache identity only, never a persisted password verifier. A keyed
+// digest also prevents offline guessing if a diagnostic exposes a cache key.
+const sessionIdentityKey = randomBytes(32);
 
 /**
  * Resolve a site's server-tools endpoint, or throw a clear, actionable error
@@ -156,7 +160,7 @@ function parseSse(text) {
  * @returns {Promise<string>} The issued MCP session id.
  * @throws {Error} on transport failure, a JSON-RPC error, or a missing session id.
  */
-async function initializeSession(site, endpoint) {
+async function initializeSession(site, endpoint, key) {
   const payload = {
     jsonrpc: "2.0",
     id: ++rpcId,
@@ -173,6 +177,8 @@ async function initializeSession(site, endpoint) {
       method: "POST",
       headers: await baseHeaders(site, null),
       body: JSON.stringify(payload),
+      size: 262144,
+      signal: AbortSignal.timeout(15000),
     });
 
   let res = await post();
@@ -205,12 +211,15 @@ async function initializeSession(site, endpoint) {
       method: "POST",
       headers: await baseHeaders(site, sessionId),
       body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+      size: 262144,
+      signal: AbortSignal.timeout(15000),
     });
   } catch {
     // Notification is advisory; proceed with the established session.
   }
 
-  sessions.set(site._name, sessionId);
+  if (sessions.size >= 128) sessions.delete(sessions.keys().next().value);
+  sessions.set(key, sessionId);
   return sessionId;
 }
 
@@ -220,9 +229,9 @@ async function initializeSession(site, endpoint) {
  * @param {string} endpoint Fully-qualified endpoint URL.
  * @returns {Promise<string>} The active MCP session id.
  */
-async function ensureSession(site, endpoint) {
-  const cached = sessions.get(site._name);
-  return cached || initializeSession(site, endpoint);
+async function ensureSession(site, endpoint, key) {
+  const cached = sessions.get(key);
+  return cached || initializeSession(site, endpoint, key);
 }
 
 /**
@@ -253,16 +262,32 @@ function isSessionError(res, body) {
  * @returns {Promise<*>} The tool's structured result.
  * @throws {Error} on transport failure, JSON-RPC error, or tool error.
  */
-export async function callServerTool(site, toolName, args = {}) {
+export async function callServerTool(site, toolName, args = {}, options = {}) {
+  return requestServerTool(site, "tools/call", { name: toolName, arguments: args }, options);
+}
+
+/** Fetch one page of the authenticated module tool catalog. */
+export async function listServerTools(site, cursor) {
+  return requestServerTool(site, "tools/list", cursor === undefined ? {} : { cursor }, {
+    maxBytes: 262144, preserveErrors: true,
+  });
+}
+
+/** Shared bounded MCP request transport; retries only explicit auth/session rejection. */
+async function requestServerTool(site, method, params, options) {
+  const toolName = params.name ?? method;
   const endpoint = resolveEndpoint(site);
   const payload = {
     jsonrpc: "2.0",
     id: ++rpcId,
-    method: "tools/call",
-    params: { name: toolName, arguments: args },
+    method,
+    params,
   };
 
-  let sessionId = await ensureSession(site, endpoint);
+  const sessionKey = createHmac("sha256", sessionIdentityKey).update(JSON.stringify([
+    site._name, endpoint, await authHeadersAsync(site), getDataFlowContext()?.principalKey ?? null,
+  ])).digest("hex");
+  let sessionId = await ensureSession(site, endpoint, sessionKey);
   let refreshedAuth = false;
   let reinitedSession = false;
   let paid = false;
@@ -275,21 +300,22 @@ export async function callServerTool(site, toolName, args = {}) {
       method: "POST",
       headers: await baseHeaders(site, sessionId),
       body: JSON.stringify(payload),
+      ...(options.maxBytes ? { size: options.maxBytes, signal: AbortSignal.timeout(15000) } : {}),
     });
     const { body, rawText } = await readBody(res);
 
     // OAuth sites: a 401 may mean the token expired server-side. Refresh once.
-    if (res.status === 401 && site.oauth && !refreshedAuth) {
+    if (res.status === 401 && site.oauth && !refreshedAuth && options.retryRejected !== false) {
       refreshedAuth = true;
       clearToken(site);
       continue;
     }
 
     // Session expired/unknown: re-initialise once and replay.
-    if (isSessionError(res, body) && !reinitedSession) {
+    if (isSessionError(res, body) && !reinitedSession && options.retryRejected !== false) {
       reinitedSession = true;
-      sessions.delete(site._name);
-      sessionId = await ensureSession(site, endpoint);
+      sessions.delete(sessionKey);
+      sessionId = await ensureSession(site, endpoint, sessionKey);
       continue;
     }
 
@@ -308,7 +334,7 @@ export async function callServerTool(site, toolName, args = {}) {
 
     // MCP tools/call result: { content: [...], isError?: boolean }.
     const result = body?.result;
-    if (result?.isError) {
+    if (result?.isError && !options.preserveErrors) {
       const detail = extractTextContent(result) || "tool reported an error";
       const mapped = sourceBudgetDenial(detail);
       if (mapped) throw mapped;

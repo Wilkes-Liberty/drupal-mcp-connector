@@ -212,3 +212,42 @@ describe("callServerTool", () => {
     expect(toolCall[1].headers[HEADER_DECLARED_DESTINATION]).toBe("content-agent:production");
   });
 });
+
+describe("module catalog transport", () => {
+  it("uses tools/list with an opaque empty cursor and bounded response", async () => {
+    const { listServerTools } = await import("../../src/lib/server-tools.js");
+    const site = plainSite();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk()[0])
+      .mockResolvedValueOnce(initOk()[1])
+      .mockResolvedValueOnce(toolOk({ tools: [], nextCursor: "next" }));
+    expect(await listServerTools(site, "")).toEqual({ tools: [], nextCursor: "next" });
+    const options = vi.mocked(fetch).mock.calls.at(-1)[1];
+    expect(JSON.parse(options.body)).toMatchObject({ method: "tools/list", params: { cursor: "" } });
+    expect(options.size).toBe(262144);
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("does not retry an opted-out write after session rejection", async () => {
+    const site = plainSite();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk()[0])
+      .mockResolvedValueOnce(initOk()[1])
+      .mockResolvedValueOnce(mcpRes({ status: 404, text: "session missing" }));
+    await expect(callServerTool(site, "tool_api.example_write", {}, { retryRejected: false })).rejects.toThrow();
+    expect(vi.mocked(fetch).mock.calls.filter(([, options]) => JSON.parse(options.body).method === "tools/call")).toHaveLength(1);
+  });
+
+  it("does not share sessions after a source credential changes", async () => {
+    const site = plainSite({ apiToken: "first-synthetic-token" });
+    for (const session of ["first", "second"]) {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(initOk(session)[0])
+        .mockResolvedValueOnce(initOk(session)[1])
+        .mockResolvedValueOnce(toolOk({ content: [] }));
+    }
+    await callServerTool(site, "tool_api.example", {});
+    await callServerTool({ ...site, apiToken: "second-synthetic-token" }, "tool_api.example", {});
+    expect(vi.mocked(fetch).mock.calls.filter(([, options]) => JSON.parse(options.body).method === "initialize")).toHaveLength(2);
+  });
+});

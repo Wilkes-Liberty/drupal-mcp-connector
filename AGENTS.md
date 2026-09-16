@@ -50,7 +50,9 @@ targeted tests while iterating (`npx vitest run tests/tools/nodes.test.js`).
   `_target: { name, baseUrl, source }` (`hint` | `default` | `grant`). Reads may
   omit `site` and default to `defaultSite`. Writes must pass `site` when more
   than one site is configured.
-- New tools: implement + `definitions` + `handlers` in the right module; add
+- Drupal module-owned actions: use the generic registry in `src/lib/module-tools.js`
+  and keep domain implementations in Drupal; see `docs/module-tools.md`.
+- New built-in tools: implement + `definitions` + `handlers` in the right module; add
   tests. After tool description/schema changes run `npm run generate:commands`.
 - JSDoc on exported functions.
 - Conventional Commits (`feat:`, `fix:`, `docs:`, …).

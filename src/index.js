@@ -58,6 +58,7 @@ import {
 
 // Tools — aggregated (single source of truth, side-effect-free) and per-tool prompts
 import { allDefinitions, allHandlers, definitionsByName } from "./tools/index.js";
+import { createModuleToolRegistry, isModuleTool } from "./lib/module-tools.js";
 import { buildToolPrompts, getToolPromptMessages } from "./lib/tool-prompts.js";
 
 // Apply config/secrets.map (or the shipped example table) before any site
@@ -104,6 +105,18 @@ const RESOURCES = [
   },
 ];
 
+const moduleTools = createModuleToolRegistry();
+
+async function discoverableTools() {
+  const sites = listResolvableSiteConfigs();
+  const identity = getRequestIdentity();
+  const governed = await filterDiscoverableTools(allDefinitions, sites);
+  return [
+    ...filterToolsByPrincipal(governed, sites, identity),
+    ...await moduleTools.list({ sites, identity }),
+  ];
+}
+
 /**
  * Resolve a resource URI to its JSON payload. URIs are matched in order; the
  * templated forms (content-types, security-policy) capture the site name and
@@ -114,13 +127,6 @@ const RESOURCES = [
  * @returns {Promise<object>} The resource data (later JSON-serialized).
  * @throws {Error} If the URI matches no known resource.
  */
-async function discoverableTools() {
-  const sites = listResolvableSiteConfigs();
-  const identity = getRequestIdentity();
-  const governed = await filterDiscoverableTools(allDefinitions, sites);
-  return filterToolsByPrincipal(governed, sites, identity);
-}
-
 async function readResource(uri) {
   const identity = getRequestIdentity();
   const sites = listResolvableSiteConfigs();
@@ -295,7 +301,9 @@ const buildConnectorServer = createConnectorServerFactory({
   tools: {
     definitions: allDefinitions,
     list: discoverableTools,
-    call: callTool,
+    call: (name, args, context) => isModuleTool(name)
+      ? moduleTools.call(name, args, context)
+      : callTool(name, args, context),
   },
   resources: {
     definitions: RESOURCES,

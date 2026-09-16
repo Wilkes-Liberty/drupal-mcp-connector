@@ -32,6 +32,11 @@ export const DESTRUCTIVE_PREFIXES = ["drupal_delete_", "drupal_drush_module_disa
  *   prefixes are checked first so they take precedence over plain write.
  */
 export function inferOperation(toolName) {
+  // Only the local module registry generates these names from approved policy.
+  // A forged name cannot resolve a handler; unknown reserved names are conservative.
+  if (toolName.startsWith("drupal_module_")) {
+    return /^drupal_module_(read|write|delete)_/.exec(toolName)?.[1] ?? "delete";
+  }
   if (DESTRUCTIVE_PREFIXES.some((p) => toolName.startsWith(p))) return "delete";
   if (WRITE_PREFIXES.some((p) => toolName.startsWith(p)))       return "write";
   if (toolName === "drupal_graphql")                            return "graphql";
