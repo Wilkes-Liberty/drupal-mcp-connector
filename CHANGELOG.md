@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-09-16
+
 ### Fixed
 - **Nullable module inputs (#320).** The generic registry accepts composed nullable
   schemas while retaining runtime type, length, required and unknown-field checks.
