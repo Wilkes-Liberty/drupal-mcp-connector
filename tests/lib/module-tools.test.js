@@ -45,6 +45,62 @@ const parameters = (definition, args = { id: 1 }) => ({
 });
 
 describe("module-owned tool registry", () => {
+  it("routes a configured compatibility binding through the module contract", async () => {
+    const site = state.sites[0];
+    site.serverTools.bindings = { readRecord: "relationship" };
+    const result = await registry.callBinding(site, "readRecord", { id: 1 }, {
+      operation: "read", scope: "module_access", capabilities: [],
+    }, context());
+    expect(result.structuredContent).toEqual({ id: 1 });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call.mock.calls[0][1]).toBe("tool_api.relationship");
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses missing bindings and insufficient configured capability contracts", async () => {
+    const site = state.sites[0];
+    const required = { operation: "read", scope: "module_access", capabilities: ["configRead"] };
+    await expect(registry.callBinding(site, "readRecord", {}, required, context())).rejects.toThrow(/binding/);
+    site.serverTools.bindings = { readRecord: "relationship" };
+    await expect(registry.callBinding(site, "readRecord", {}, required, context())).rejects.toThrow(/contract/);
+    await expect(registry.callBinding(site, "readRecord", {}, { ...required, capabilities: [], operation: "write" }, context())).rejects.toThrow(/contract/);
+    await expect(registry.callBinding(site, "readRecord", {}, { ...required, capabilities: [], scope: "another_scope" }, context())).rejects.toThrow(/contract/);
+    expect(list).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("refuses a binding removed after discovery without calling a replacement", async () => {
+    const site = state.sites[0];
+    site.serverTools.bindings = { readRecord: "relationship" };
+    list.mockResolvedValueOnce({ tools: [remote("tool_api.relationship")] }).mockResolvedValue({ tools: [] });
+    await expect(registry.callBinding(site, "readRecord", { id: 1 }, {
+      operation: "read", scope: "module_access", capabilities: [],
+    }, context())).rejects.toThrow(/no fallback/);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("retains caller scope and target grants when a compatibility binding is used", async () => {
+    const site = state.sites[0];
+    site.serverTools.bindings = { readRecord: "relationship" };
+    for (const identity of [{ scopes: [], sites: ["stage"] }, { scopes: ["module_access"], sites: ["other"] }]) {
+      await expect(registry.callBinding(site, "readRecord", { id: 1 }, {
+        operation: "read", scope: "module_access", capabilities: [],
+      }, { ...context(), identity })).rejects.toThrow(/unavailable/);
+    }
+    expect(list).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("propagates source failure for a binding without treating it as success", async () => {
+    const site = state.sites[0];
+    site.serverTools.bindings = { readRecord: "relationship" };
+    call.mockResolvedValue({ content: [], structuredContent: { success: false } });
+    await expect(registry.callBinding(site, "readRecord", { id: 1 }, {
+      operation: "read", scope: "module_access", capabilities: [],
+    }, context())).rejects.toThrow(/refused/);
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
   it("discovers and invokes unrelated providers without domain-specific handlers", async () => {
     const definitions = await registry.list(context());
     expect(definitions).toHaveLength(2);

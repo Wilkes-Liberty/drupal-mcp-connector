@@ -20,7 +20,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveSecurityConfig, assertConfigReadAllowed } from "../lib/security.js";
 import { gatedReport } from "../lib/reports-support.js";
-import { callServerTool, SERVER_TOOLS, toolResultData } from "../lib/server-tools.js";
+import { callServerTool, callBoundModuleTool, SERVER_TOOLS, toolResultData } from "../lib/server-tools.js";
 import { runPrivileged, serverToolsConfigured, drushConfigured } from "../lib/audit-sources.js";
 import { sshDrush, parseDrush } from "./drush.js";
 
@@ -65,6 +65,11 @@ function configSourceAvailable(site) {
  * @returns {Promise<*>} Parsed config object (or null/text).
  */
 async function readConfig(site, name) {
+  if (site.serverTools?.bindings !== undefined) {
+    return toolResultData(await callBoundModuleTool(site, "configGet", { name }, {
+      operation: "read", scope: "mcp_config", capabilities: ["configRead"],
+    }));
+  }
   if (serverToolsConfigured(site)) {
     try { return toolResultData(await callServerTool(site, SERVER_TOOLS.configGet, { name })); }
     catch (err) { if (!drushConfigured(site)) throw err; }
@@ -82,6 +87,11 @@ async function readConfig(site, name) {
  * @returns {Promise<string[]>} Config object names.
  */
 async function listConfigNames(site, prefix) {
+  if (site.serverTools?.bindings !== undefined) {
+    return pickConfigNames(toolResultData(await callBoundModuleTool(site, "configList", { prefix }, {
+      operation: "read", scope: "mcp_config", capabilities: ["configRead"],
+    })));
+  }
   if (serverToolsConfigured(site)) {
     try { return pickConfigNames(toolResultData(await callServerTool(site, SERVER_TOOLS.configList, { prefix }))); }
     catch (err) { if (!drushConfigured(site)) throw err; }

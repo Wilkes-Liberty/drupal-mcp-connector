@@ -28,6 +28,14 @@ import { authHeadersAsync, clientHeaders, CLIENT_NAME, CLIENT_VERSION } from "./
 import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial, getDataFlowContext } from "./data-flow.js";
 import { clearToken } from "./oauth.js";
 
+/** Calls a configured module binding through the registry, without fallback. */
+export async function callBoundModuleTool(site, binding, args, required) {
+  // Load at invocation: built-in tool definitions are also consumed by the
+  // registry's dispatch middleware, so a static import would create a cycle.
+  const { createModuleToolRegistry } = await import("./module-tools.js");
+  return createModuleToolRegistry().callBinding(site, binding, args, required);
+}
+
 /**
  * Canonical server-side tool names for governed config operations.
  *

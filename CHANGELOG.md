@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Module compatibility bindings (#317).** Existing config commands and reports
+  can use locally approved module tools through generic discovery and schema
+  validation. Configured bindings never fall back after a refusal. The live
+  verifier probes the configured source tool directly.
 - **Module-owned tools (#317).** An opt-in registry discovers typed Drupal MCP
   tools and routes them through explicit site, scope and operation policy. Module
   actions need no dedicated JavaScript handler. Catalog revisions, schema checks,
