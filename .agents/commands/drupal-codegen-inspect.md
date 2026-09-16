@@ -1,11 +1,11 @@
 ---
-description: "List node and paragraph bundles and extra fields from graphql_compose_codegen (`drush graphql-compose-codegen:inspect`). Requires the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:inspect. Does not write files."
+description: "List node and paragraph bundles and extra fields from graphql_compose_codegen (`drush graphql-compose-codegen:inspect`). Uses the configured module binding; unbound sites require the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:inspect. Does not write files."
 argument-hint: "[site] [bundles] [skipFields]"
 ---
 
 Call the MCP tool `drupal_codegen_inspect`.
 
-List node and paragraph bundles and extra fields from graphql_compose_codegen (`drush graphql-compose-codegen:inspect`). Requires the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:inspect. Does not write files.
+List node and paragraph bundles and extra fields from graphql_compose_codegen (`drush graphql-compose-codegen:inspect`). Uses the configured module binding; unbound sites require the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:inspect. Does not write files.
 
 Parse the arguments supplied with this command into this tool's parameters:
 

@@ -1,11 +1,11 @@
 ---
-description: "Compare the live graphql_compose schema to the last gqcc:generate snapshot (`drush graphql-compose-codegen:diff`). Requires the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:diff."
+description: "Compare the live graphql_compose schema to the last gqcc:generate snapshot (`drush graphql-compose-codegen:diff`). Uses the configured module binding; unbound sites require the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:diff."
 argument-hint: "[site] [bundles] [skipFields]"
 ---
 
 Call the MCP tool `drupal_codegen_diff`.
 
-Compare the live graphql_compose schema to the last gqcc:generate snapshot (`drush graphql-compose-codegen:diff`). Requires the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:diff.
+Compare the live graphql_compose schema to the last gqcc:generate snapshot (`drush graphql-compose-codegen:diff`). Uses the configured module binding; unbound sites require the module and drushSsh. Missing command fails loud. If allowedCommands is set, include graphql-compose-codegen:diff.
 
 Parse the arguments supplied with this command into this tool's parameters:
 
