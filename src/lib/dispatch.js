@@ -18,6 +18,7 @@ import { inferOperation } from "./operations.js";
 import { assertSourceGovernance, GovernanceError, GOVERNANCE_DIAGNOSTIC_TOOLS } from "./governance.js";
 import {
   assertPrincipalEntitlement, callerTargetHints, getRequestIdentity,
+  principalHasScope, resolveAuthoritativeTarget,
 } from "./principal.js";
 import { assertExplicitSiteForWrite, withResolvedTarget } from "./site-target.js";
 import { buildDataFlowContext, consumeBudgetIfEnforced, runWithDataFlow } from "./data-flow.js";
@@ -62,6 +63,15 @@ export function resolveCallTarget(toolName, rawArgs, context = {}) {
 
   const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
   if (identity) {
+    if (context.moduleTool) {
+      if (!principalHasScope(identity, context.moduleTool.scope)) {
+        throw new SecurityError("Not entitled to invoke this module tool.");
+      }
+      return resolveAuthoritativeTarget(rawArgs, identity,
+        context.sites ?? listResolvableSiteConfigs(), {
+          grants: context.grants, defaultSite: context.defaultSite,
+        });
+    }
     return assertPrincipalEntitlement({
       toolName,
       args: rawArgs,

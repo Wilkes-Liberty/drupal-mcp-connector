@@ -37,8 +37,10 @@ function surface(onToolCall = () => {}) {
   };
 }
 
-async function startServer({ onToolCall = () => {}, onBuild = () => {}, legacyMode = "serve" } = {}) {
-  const baseFactory = createConnectorServerFactory(surface(onToolCall));
+async function startServer({ onToolCall = () => {}, onBuild = () => {}, legacyMode = "serve", toolSurface } = {}) {
+  const testSurface = surface(onToolCall);
+  if (toolSurface) testSurface.tools = toolSurface;
+  const baseFactory = createConnectorServerFactory(testSurface);
   const buildServer = (context) => {
     onBuild(context);
     return baseFactory(context);
@@ -84,6 +86,35 @@ function captureFetch(traffic) {
 }
 
 describe("MCP transport integration", () => {
+  it.each(["2025-11-25", "2026-07-28"])("preserves dynamically discovered object schemas and results over %s", async (version) => {
+    const name = "drupal_module_read_stage__example";
+    const outputSchema = {
+      type: "object", required: ["result", "_target"],
+      properties: {
+        result: { type: "object", required: ["id"], properties: { id: { type: "integer" } } },
+        _target: { type: "object", properties: { name: { type: "string" } } },
+      },
+    };
+    const structuredContent = { result: { id: 7 }, _target: { name: "stage" } };
+    let enabled = true;
+    const url = await startServer({ toolSurface: {
+      definitions: [],
+      list: async () => enabled ? [{ name, inputSchema: { type: "object" }, outputSchema }] : [],
+      call: async () => enabled
+        ? { content: [{ type: "text", text: JSON.stringify(structuredContent) }], structuredContent }
+        : { content: [{ type: "text", text: "Tool disabled" }], isError: true },
+    } });
+    const client = new Client({ name: "dynamic-client", version: "1.0.0" },
+      { versionNegotiation: { mode: version === "2025-11-25" ? "legacy" : { pin: version } } });
+    closers.push(() => client.close());
+    await client.connect(httpTransport(url));
+    expect((await client.listTools()).tools[0].outputSchema).toEqual(outputSchema);
+    expect((await client.callTool({ name, arguments: {} })).structuredContent).toEqual(structuredContent);
+    enabled = false;
+    expect((await client.listTools()).tools).toEqual([]);
+    expect((await client.callTool({ name, arguments: {} })).isError).toBe(true);
+  });
+
   it("negotiates 2026-07-28 with server/discover and serves stateless requests", async () => {
     const builds = [];
     const traffic = [];

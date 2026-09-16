@@ -31,6 +31,11 @@ The connector speaks **two Drupal backends interchangeably** — Drupal core's *
 
 ## Dual-Protocol Backends
 
+Drupal modules can also supply their own typed MCP actions through an opt-in
+[module-tool registry](docs/module-tools.md). The module owns business rules and
+schemas; the connector discovers and forwards approved tools under Sentinel and
+connector policy. Existing built-in tools remain available during migration.
+
 Each site declares which backend(s) it exposes via the `api` key:
 
 ```json

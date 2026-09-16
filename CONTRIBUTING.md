@@ -43,6 +43,11 @@ for every new tool and every bug fix.
 
 ## Adding a New Tool
 
+For actions owned by a Drupal module, define a Tool API plugin in that module
+and expose it through the [module registry](docs/module-tools.md). Keep its
+business rules and schemas in Drupal; a new module action does not need a
+JavaScript handler here. The following steps apply to built-in connector tools.
+
 All tools follow the same three-part pattern (see [docs/architecture.md](docs/architecture.md),
 and [docs/tools-reference.md](docs/tools-reference.md) for naming conventions):
 

@@ -68,6 +68,8 @@
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "graphql": "^17.0.0",
     "jose": "^6.2.9",
     "node-fetch": "^3.3.2",
