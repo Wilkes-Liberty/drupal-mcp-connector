@@ -452,6 +452,49 @@ describe("prepareGuardedPatch (#166)", () => {
     expect(out.workingVid).toBeNull();
     expect(out.resourceVersion).toBeUndefined();
   });
+
+  it("resolves inventory and draft-preflights when langcode is set on unmoderated media", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async () => null),
+      rawQuery: vi.fn(async ({ path, options }) => {
+        if (String(path).endsWith("/mcp-translations")) {
+          return {
+            meta: {
+              defaultLangcode: "en",
+              live: {
+                vid: "40",
+                translations: [{ langcode: "en", default: true, status: true, name: "Still" }],
+              },
+              working: {
+                vid: "41",
+                translations: [
+                  { langcode: "en", default: true, status: true, name: "Still" },
+                  { langcode: "es", default: false, status: false, name: "Imagen" },
+                ],
+              },
+            },
+          };
+        }
+        if (String(path).endsWith("/mcp-draft") && options?.headers?.["X-MCP-Draft-Preflight"] === "1") {
+          return { meta: { draft_preflight: true, live: "40", working: "41", langcode: "es" } };
+        }
+        throw new Error(`unexpected ${path}`);
+      }),
+    });
+    const out = await prepareGuardedPatch(backend, {
+      entityType: "media", bundle: "image", id: "m1",
+      existing: { fields: { name: "Still" } },
+      attributes: { name: "Imagen" },
+      langcode: "es",
+    });
+    expect(out.liveVid).toBe(40);
+    expect(out.workingVid).toBe(41);
+    expect(out.draftRevision).toEqual({ liveVid: 40, workingVid: 41 });
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    const draft = backend.rawQuery.mock.calls.find(([call]) => String(call.path).endsWith("/mcp-draft"));
+    expect(draft[0].options.headers["X-MCP-Draft-Preflight"]).toBe("1");
+    expect(draft[0].options.headers["X-MCP-Draft-Langcode"]).toBe("es");
+  });
 });
 
 describe("resolveWorkingCopyPatchTarget (#166)", () => {

@@ -177,8 +177,11 @@ describe("media tools (migrated)", () => {
   });
 
   it("update_media with langcode PATCHes mcp-draft instead of canonical JSON:API (#296)", async () => {
-    backend.rawQuery.mockImplementation(async ({ path }) => {
+    backend.rawQuery.mockImplementation(async ({ path, options }) => {
       if (String(path).endsWith("/mcp-translations")) return mediaInventory();
+      if (options?.headers?.["X-MCP-Draft-Preflight"] === "1") {
+        return { meta: { draft_preflight: true, live: "40", working: "41", langcode: "es" } };
+      }
       return {
         data: {
           type: "media--image", id: MEDIA_UUID,
@@ -194,7 +197,11 @@ describe("media tools (migrated)", () => {
       },
     });
     expect(backend.updateEntity).not.toHaveBeenCalled();
-    const patch = backend.rawQuery.mock.calls.find((c) => String(c[0].path).endsWith("/mcp-draft"));
+    const drafts = backend.rawQuery.mock.calls.filter((c) => String(c[0].path).endsWith("/mcp-draft"));
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0][0].options.headers["X-MCP-Draft-Preflight"]).toBe("1");
+    expect(drafts[1][0].options.headers["X-MCP-Draft-Preflight"]).toBe("0");
+    const patch = drafts[1];
     expect(patch[0].path).toBe(`/jsonapi/media/image/${MEDIA_UUID}/mcp-draft`);
     expect(patch[0].options.method).toBe("PATCH");
     expect(patch[0].options.headers["X-MCP-Draft-Langcode"]).toBe("es");
@@ -202,7 +209,7 @@ describe("media tools (migrated)", () => {
     const body = JSON.parse(patch[0].options.body);
     expect(body.data.attributes.name).toBe("Imagen aeroespacial");
     expect(body.data.relationships.field_media_image.data.meta.alt).toBe("Avión");
-    expect(out._revisions).toEqual({ live: "40", working: 42 });
+    expect(out._revisions).toEqual({ live: 40, working: 42 });
   });
 
   it("update_media with langcode refuses when the language is not an unpublished draft", async () => {

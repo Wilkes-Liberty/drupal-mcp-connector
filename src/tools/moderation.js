@@ -67,25 +67,23 @@ async function setModerationState({ site: siteName, type, id, state, langcode })
   const attributes = { moderation_state: state };
   assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
-  if (langcode) {
-    const targetLang = assertDraftLangcode(langcode);
-    let existing = null;
-    try {
-      existing = (await backend.getEntity({ entityType: "node", bundle: type, id })) ?? null;
-    } catch {
-      existing = null;
-    }
-    const patchTarget = await prepareGuardedPatch(backend, {
-      entityType: "node", bundle: type, id, existing, attributes, langcode: targetLang,
-    });
-    const patched = await updateEntityGuarded(backend, {
-      entityType: "node", bundle: type, id, attributes, langcode: targetLang,
-      ...(patchTarget.draftRevision ? { draftRevision: patchTarget.draftRevision } : {}),
-    });
-    return redactCanonicalEntity(patched, sec, "node");
+  const targetLang = langcode ? assertDraftLangcode(langcode) : undefined;
+  let existing = null;
+  try {
+    existing = (await backend.getEntity({ entityType: "node", bundle: type, id })) ?? null;
+  } catch {
+    existing = null;
   }
-  const entity = await backend.updateEntity({ entityType: "node", bundle: type, id, attributes });
-  return redactCanonicalEntity(entity, sec, "node");
+  const patchTarget = await prepareGuardedPatch(backend, {
+    entityType: "node", bundle: type, id, existing, attributes,
+    ...(targetLang ? { langcode: targetLang } : {}),
+  });
+  const patched = await updateEntityGuarded(backend, {
+    entityType: "node", bundle: type, id, attributes,
+    ...(targetLang ? { langcode: targetLang } : {}),
+    ...(patchTarget.draftRevision ? { draftRevision: patchTarget.draftRevision } : {}),
+  });
+  return redactCanonicalEntity(patched, sec, "node");
 }
 
 /**

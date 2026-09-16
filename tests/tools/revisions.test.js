@@ -175,7 +175,13 @@ describe("revisions tools", () => {
   });
 
   it("revert_revision reads the target revision then updateEntity to restore its attributes", async () => {
-    backend.rawQuery.mockResolvedValue(rawResource({ attributes: { drupal_internal__vid: 42 } }));
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).includes("resourceVersion=id%3A42")) {
+        return rawResource({ attributes: { drupal_internal__vid: 42 } });
+      }
+      if (String(path).endsWith("/mcp-translations")) throw new Error("Drupal 404 inventory unavailable");
+      throw new Error("unexpected " + path);
+    });
     backend.updateEntity.mockResolvedValue({ id: "n1", entityType: "node", bundle: "article" });
     const out = await handlers.drupal_revert_revision({ type: "article", id: "n1", version: 42 });
 
@@ -192,6 +198,32 @@ describe("revisions tools", () => {
     expect(arg.attributes).not.toHaveProperty("path");
     expect(out.success).toBe(true);
     expect(out.revertedFrom).toBe(42);
+  });
+
+  it("revert_revision of a moderated node probes the write before updateEntity", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: "n1", status: true,
+      fields: { moderation_state: "published", drupal_internal__vid: 50 },
+    });
+    backend.rawQuery.mockImplementation(async ({ path, options }) => {
+      if (String(path).includes("resourceVersion=id%3A42")) {
+        return rawResource({ attributes: { drupal_internal__vid: 42 } });
+      }
+      if (String(path).endsWith("/mcp-translations")) throw new Error("Drupal 404 inventory unavailable");
+      if (options?.method === "PATCH") {
+        throw new Error(
+          "Drupal 400 on PATCH /jsonapi/node/article/n1: The selected entity (n1) " +
+          "does not match the ID in the payload (00000000-0000-4000-a000-000000000001).",
+        );
+      }
+      throw new Error("unexpected " + path);
+    });
+    backend.updateEntity.mockResolvedValue({ id: "n1", entityType: "node", bundle: "article" });
+    const out = await handlers.drupal_revert_revision({ type: "article", id: "n1", version: 42 });
+    expect(out.success).toBe(true);
+    expect(backend.updateEntity).toHaveBeenCalledOnce();
+    const probe = backend.rawQuery.mock.calls.find((c) => c[0].options?.method === "PATCH");
+    expect(probe[0].path).toBe("/jsonapi/node/article/n1");
   });
 
   it("revert_revision is a governed write — blocked when update not allowed", async () => {

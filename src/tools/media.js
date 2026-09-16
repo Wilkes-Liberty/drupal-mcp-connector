@@ -15,9 +15,9 @@ import {
   assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
 } from "../lib/security.js";
 import {
-  assertDraftLangcode, assertInventoryDraftLanguage, readDraftTranslation,
-  readTranslationInventory, writeDraft,
+  assertDraftLangcode, readDraftTranslation, readTranslationInventory,
 } from "../lib/sentinel-draft.js";
+import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
 import { entityRevisionId } from "../lib/write-revision.js";
 
 /**
@@ -138,26 +138,22 @@ async function updateMedia({ site: siteName, type, id, name, status, fields = {}
   const backend = await resolveBackend(site);
   if (langcode) {
     const targetLang = assertDraftLangcode(langcode);
-    const inventory = await readTranslationInventory(backend, { entityType: "media", bundle: type, id });
-    assertInventoryDraftLanguage(inventory, targetLang);
-    const liveVid = inventory.live?.vid;
-    const workingVid = inventory.working?.vid;
-    if (!liveVid || !workingVid || String(workingVid) === String(liveVid)) {
-      throw new Error(
-        "No unpublished working translation for this language. " +
-        "Create it with drupal_create_translation first; a canonical langcode PATCH is not attempted.",
-      );
-    }
-    const result = await writeDraft(backend, {
-      entityType: "media", bundle: type, id, attributes, langcode: targetLang,
+    const patchTarget = await prepareGuardedPatch(backend, {
+      entityType: "media", bundle: type, id, attributes,
       ...(relationships ? { relationships } : {}),
-      draftRevision: { liveVid, workingVid },
+      langcode: targetLang,
+    });
+    const result = await updateEntityGuarded(backend, {
+      entityType: "media", bundle: type, id, attributes,
+      ...(relationships ? { relationships } : {}),
+      langcode: targetLang,
+      ...(patchTarget.draftRevision ? { draftRevision: patchTarget.draftRevision } : {}),
     });
     const redacted = redactCanonicalEntity(result, sec, "media");
-    const working = entityRevisionId(result) ?? workingVid;
+    const working = entityRevisionId(result) ?? patchTarget.workingVid;
     return {
       ...redacted,
-      _revisions: { live: liveVid, working },
+      _revisions: { live: patchTarget.liveVid, working },
     };
   }
   // #171: pre-read so an unrequested published-state flip is reported, not silent.
