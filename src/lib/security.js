@@ -387,7 +387,7 @@ export function hasScope(site, scope) {
  * @param {object} site Resolved site config.
  * @returns {boolean}
  */
-export function isGovernedSetup(site) {
+function isGovernedSetup(site) {
   return site?.requireGovernance === true || Boolean(site?.oauth);
 }
 
@@ -721,23 +721,6 @@ export function redactCanonicalEntity(entity, secConfig, entityType) {
     BASE_PROPS.filter((p) => fieldsToRedact.has(p)).map((p) => [p, "[REDACTED]"])
   );
   return { ...entity, fields: redactedFields, ...baseOverrides };
-}
-
-/**
- * Redact a full JSON:API response by redacting each item under `.data`.
- * @param {?object} response JSON:API response with a `data` object or array.
- * @param {object} secConfig Resolved security config.
- * @param {string} entityType Entity type for the response data.
- * @returns {?object} New response; original is not mutated.
- */
-export function redactResponse(response, secConfig, entityType) {
-  if (!response?.data) return response;
-  return {
-    ...response,
-    data: Array.isArray(response.data)
-      ? response.data.map((r) => redactResource(r, secConfig, entityType))
-      : redactResource(response.data, secConfig, entityType),
-  };
 }
 
 // ---------------------------------------------------------------------------

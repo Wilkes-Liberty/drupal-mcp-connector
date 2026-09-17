@@ -18,11 +18,11 @@
 import nodeFetch from "node-fetch";
 
 /** Default per-request timeout (ms). */
-export const DEFAULT_TIMEOUT_MS = 5000;
+const DEFAULT_TIMEOUT_MS = 5000;
 /** Default number of concurrent in-flight checks. */
-export const DEFAULT_CONCURRENCY = 5;
+const DEFAULT_CONCURRENCY = 5;
 /** Default hard ceiling on URLs checked in one call. */
-export const DEFAULT_MAX_LINKS = 200;
+const DEFAULT_MAX_LINKS = 200;
 
 /**
  * Hostnames that must never be probed regardless of allowlist — loopback and

@@ -15,6 +15,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getDefaultSiteName, getInboundGrants } from "./config.js";
 import { inferOperation } from "./operations.js";
+import { POLICY_DIGEST } from "./policy-promotion.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
 
 const identityStore = new AsyncLocalStorage();
@@ -23,7 +24,6 @@ const identityStore = new AsyncLocalStorage();
 export const TARGET_HINT_KEYS = Object.freeze(["site", "environment", "tenant", "target"]);
 
 const ACTOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const POLICY_DIGEST = /^[0-9a-f]{64}$/i;
 
 function tableHasKeys(table) {
   return Object.keys(table).some((key) => {
@@ -129,7 +129,7 @@ function grantNameList(values) {
  * @param {object|null} actors
  * @returns {object|null}
  */
-export function normalizeActors(actors) {
+function normalizeActors(actors) {
   if (!actors || typeof actors !== "object" || Array.isArray(actors)) return null;
   const entries = [];
   for (const [rawKey, value] of Object.entries(actors)) {
@@ -201,7 +201,7 @@ export function resolveActor({ identity = null, actors = null } = {}) {
  * @param {object|null} policies
  * @returns {object|null}
  */
-export function normalizePolicies(policies) {
+function normalizePolicies(policies) {
   if (!policies || typeof policies !== "object" || Array.isArray(policies)) return null;
   const entries = [];
   for (const [rawKey, value] of Object.entries(policies)) {

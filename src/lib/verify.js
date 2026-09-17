@@ -30,9 +30,9 @@ import { resolveInboundAuthConfig, resolveInboundAuthMode } from "./http-auth.js
  * and does not fail it: a verifier a secure install can never pass is a
  * verifier people stop running.
  */
-export const PASS = "pass";
-export const FAIL = "fail";
-export const SKIPPED = "skipped";
+const PASS = "pass";
+const FAIL = "fail";
+const SKIPPED = "skipped";
 export const NOT_APPLICABLE = "n/a";
 
 /** Every static check, in report order. */

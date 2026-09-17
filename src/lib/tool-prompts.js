@@ -29,7 +29,7 @@ export const promptNameToToolName = (name) => name.replace(/-/g, "_");
  * @param {object} spec - A JSON-Schema property spec.
  * @returns {string} e.g. "string", "boolean (true/false)", "object (pass as JSON)".
  */
-export function typeHint(spec) {
+function typeHint(spec) {
   const t = Array.isArray(spec?.type) ? spec.type[0] : spec?.type;
   switch (t) {
     case "boolean":       return "boolean (true/false)";
@@ -84,7 +84,7 @@ export function buildToolPrompts(definitions) {
  * @param {object} args - Arguments supplied to the prompt (all strings per MCP).
  * @returns {string} A user-role instruction message body.
  */
-export function renderToolInstruction(def, args = {}) {
+function renderToolInstruction(def, args = {}) {
   const params   = paramList(def.inputSchema);
   const required = params.filter((p) => p.required);
   const optional = params.filter((p) => !p.required);

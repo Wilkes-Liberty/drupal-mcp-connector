@@ -18,19 +18,13 @@
 
 import fetch from "node-fetch";
 import { authHeadersAsync, clientHeaders } from "./config.js";
+import { DIAGNOSTIC_TOOLS } from "./principal.js";
 
 /** How long a passing verification stays fresh before it must be re-proven. */
 export const OK_TTL_MS = 60_000;
 
 /** How long a failed verification is held before the next attempt re-checks. */
 export const FAIL_TTL_MS = 5_000;
-
-/** Tools that stay discoverable and callable while governance is failing —
- * the diagnostic surface an operator needs to see WHY it is failing. */
-export const GOVERNANCE_DIAGNOSTIC_TOOLS = new Set([
-  "drupal_list_sites",
-  "drupal_governance_status",
-]);
 
 /** Denial for a governed path whose source-governance contract is not verified. */
 export class GovernanceError extends Error {
@@ -203,5 +197,5 @@ export async function filterDiscoverableTools(definitions, sites) {
   const verdicts = await Promise.all(sites.map(async (site) =>
     !requiresGovernance(site) || (await verifySourceGovernance(site)).ok));
   if (verdicts.some(Boolean)) return definitions;
-  return definitions.filter((d) => GOVERNANCE_DIAGNOSTIC_TOOLS.has(d.name));
+  return definitions.filter((d) => DIAGNOSTIC_TOOLS.has(d.name));
 }

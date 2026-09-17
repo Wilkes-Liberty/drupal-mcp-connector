@@ -348,7 +348,7 @@ function callerApprovalHint(args = {}) {
  * @param {unknown} raw
  * @returns {string[]|{invalid: true, reason: string}}
  */
-export function normalizeApprovalRequiredTools(raw) {
+function normalizeApprovalRequiredTools(raw) {
   if (raw === null || raw === undefined) return [];
   if (Array.isArray(raw)) {
     return [...new Set(
@@ -415,7 +415,7 @@ export class EdgeStartupError extends Error {
  * @param {Record<string, string|string[]>} [headers]
  * @returns {Record<string, string>}
  */
-export function fanDownHeaders(headers = {}) {
+function fanDownHeaders(headers = {}) {
   const entries = [];
   for (const [name, value] of Object.entries(forwardHeaders(headers))) {
     const key = String(name).toLowerCase();

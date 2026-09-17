@@ -31,15 +31,6 @@ export const USAGE_DECISIONS = Object.freeze(["allow", "deny"]);
  */
 export const RECEIPT_OUTCOMES = Object.freeze(["ok", "failed", "unknown"]);
 
-/** Reconciliation states over one request / decision / receipt chain. */
-export const RECONCILE_STATES = Object.freeze([
-  "settled",
-  "denied",
-  "missing",
-  "duplicate",
-  "uncertain",
-]);
-
 const PHASE_SET = new Set(USAGE_PHASES);
 const DECISION_SET = new Set(USAGE_DECISIONS);
 const OUTCOME_SET = new Set(RECEIPT_OUTCOMES);

@@ -11,11 +11,11 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { SEAL_PREFIX } from "./policy-promotion.js";
 
-export const POLICY_BUNDLE_VERSION = 1;
+const POLICY_BUNDLE_VERSION = 1;
 
-export const DEFAULT_BUNDLE_TTL = 86400 * 30;
+const DEFAULT_BUNDLE_TTL = 86400 * 30;
 
-export const EMERGENCY_DENY = "*";
+const EMERGENCY_DENY = "*";
 
 export const EMERGENCY_DIGEST = "emergency-deny";
 
@@ -43,7 +43,7 @@ function normalize(value) {
  * @param {object} claims
  * @returns {string}
  */
-export function canonicalJson(claims) {
+function canonicalJson(claims) {
   return JSON.stringify(normalize(claims));
 }
 

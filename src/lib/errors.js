@@ -25,14 +25,3 @@ export function toolResult(data) {
     content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
   };
 }
-
-/**
- * Wrap a plain string message (for confirmations, warnings, etc.).
- * @param {string} text Message text.
- * @returns {{content: Array<{type: string, text: string}>}}
- */
-export function toolMessage(text) {
-  return {
-    content: [{ type: "text", text }],
-  };
-}
