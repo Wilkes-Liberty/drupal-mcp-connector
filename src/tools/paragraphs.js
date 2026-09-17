@@ -57,7 +57,7 @@ import {
  * @param {number|string|null|undefined} [revisionId] Current revision id.
  * @returns {{type: string, id: string, meta?: {target_revision_id: number}}}
  */
-export function embedRef(bundle, id, revisionId) {
+function embedRef(bundle, id, revisionId) {
   return embedParagraphRef(bundle, id, revisionId);
 }
 

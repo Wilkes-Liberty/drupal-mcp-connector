@@ -5,7 +5,7 @@ import {
   resolveNodeTranslationPair,
   supportsSentinelDraft,
   writeDraft,
-} from "../../src/lib/draft-write.js";
+} from "../../src/lib/sentinel-draft.js";
 
 const input = {
   entityType: "node", bundle: "page", id: "example-uuid",
@@ -79,7 +79,7 @@ describe("governed draft continuation", () => {
 
 describe("governed translation create", () => {
   it("POSTs paragraph translations with the pinned revision If-Match", async () => {
-    const { createTranslationDraft } = await import("../../src/lib/draft-write.js");
+    const { createTranslationDraft } = await import("../../src/lib/sentinel-draft.js");
     const b = backend({ data: { id: "p-uuid", type: "paragraph--text_block" } });
     b.resourcePath = () => "/jsonapi/paragraph/text_block";
     await createTranslationDraft(b, {
@@ -94,7 +94,7 @@ describe("governed translation create", () => {
   });
 
   it("rewrites Sentinel's live-only working-revision 409 (#282)", async () => {
-    const { createTranslationDraft, rewriteTranslationWorkingRevisionError } = await import("../../src/lib/draft-write.js");
+    const { createTranslationDraft, rewriteTranslationWorkingRevisionError } = await import("../../src/lib/sentinel-draft.js");
     const b = backend();
     b.rawQuery.mockRejectedValue(new Error(
       "Drupal 409 on POST /jsonapi/node/page/x/mcp-draft/translations: A working revision exists. Reload and send both revision IDs.",
@@ -108,7 +108,7 @@ describe("governed translation create", () => {
   });
 
   it("POSTs translations with live-only If-Match when there is no working copy", async () => {
-    const { createTranslationDraft } = await import("../../src/lib/draft-write.js");
+    const { createTranslationDraft } = await import("../../src/lib/sentinel-draft.js");
     const b = backend({ data: { id: input.id, type: "node--page", attributes: { title: "Artículos", langcode: "es" } } });
     await createTranslationDraft(b, {
       ...input, langcode: "es", attributes: { title: "Artículos", langcode: "es" },
@@ -123,7 +123,7 @@ describe("governed translation create", () => {
   });
 
   it("POSTs media translations on the same live/working surface as nodes (#296)", async () => {
-    const { createTranslationDraft } = await import("../../src/lib/draft-write.js");
+    const { createTranslationDraft } = await import("../../src/lib/sentinel-draft.js");
     const b = backend({ data: { id: "media-uuid", type: "media--image" } });
     b.resourcePath = () => "/jsonapi/media/image";
     await createTranslationDraft(b, {

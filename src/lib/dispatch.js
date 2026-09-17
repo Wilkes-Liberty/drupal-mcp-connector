@@ -15,10 +15,10 @@ import { resolveSecurityConfig, assertNotReadOnly,
 import { toolError, toolResult } from "./errors.js";
 import { BackendCapabilityError, BackendResolutionError } from "./backends/errors.js";
 import { inferOperation } from "./operations.js";
-import { assertSourceGovernance, GovernanceError, GOVERNANCE_DIAGNOSTIC_TOOLS } from "./governance.js";
+import { assertSourceGovernance, GovernanceError } from "./governance.js";
 import {
-  assertPrincipalEntitlement, callerTargetHints, getRequestIdentity,
-  principalHasScope, resolveAuthoritativeTarget,
+  assertPrincipalEntitlement, callerTargetHints, DIAGNOSTIC_TOOLS,
+  getRequestIdentity, principalHasScope, resolveAuthoritativeTarget,
 } from "./principal.js";
 import { assertExplicitSiteForWrite, withResolvedTarget } from "./site-target.js";
 import { buildDataFlowContext, consumeBudgetIfEnforced, runWithDataFlow } from "./data-flow.js";
@@ -55,7 +55,7 @@ export function listResolvableSiteConfigs() {
  * @returns {?{site: object, source: string, name: string}}
  * @throws {SecurityError}
  */
-export function resolveCallTarget(toolName, rawArgs, context = {}) {
+function resolveCallTarget(toolName, rawArgs, context = {}) {
   if (toolName === "drupal_list_sites") return null;
   if (toolName === "drupal_governance_status" && callerTargetHints(rawArgs).length === 0) {
     return null;
@@ -157,7 +157,7 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
   const assertCallAllowed = async () => {
     // Source-governance gate (#176). The diagnostic tools stay callable while
     // governance fails — they are how an operator learns which condition failed.
-    if (!GOVERNANCE_DIAGNOSTIC_TOOLS.has(toolName)) {
+    if (!DIAGNOSTIC_TOOLS.has(toolName)) {
       await assertSourceGovernance(site);
     }
 
@@ -188,7 +188,7 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
     await assertCallAllowed();
     // Charge only after governance and policy gates pass, so an outage or a
     // local deny cannot exhaust the window. Diagnostics do not consume.
-    if (!GOVERNANCE_DIAGNOSTIC_TOOLS.has(toolName)) {
+    if (!DIAGNOSTIC_TOOLS.has(toolName)) {
       consumeBudgetIfEnforced("chained_action");
     }
     return handler(nextArgs);

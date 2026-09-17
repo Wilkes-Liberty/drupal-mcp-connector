@@ -39,7 +39,7 @@ const SAMPLE_CAP = 500;
  * @param {unknown} err
  * @returns {boolean}
  */
-export function isUnfilterableModerationState(err) {
+function isUnfilterableModerationState(err) {
   const msg = String(err?.message || "");
   if (!/moderation_state/i.test(msg)) return false;
   return /not found/i.test(msg) || /not filterable/i.test(msg) || /invalid filter/i.test(msg);

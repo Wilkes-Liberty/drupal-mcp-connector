@@ -36,12 +36,6 @@ export const EXECUTION_IDS = Object.freeze([
   "receiptId",
 ]);
 
-export const RECONCILE_STATES = Object.freeze([
-  "settled",
-  "incomplete",
-  "mismatched",
-]);
-
 const DEFAULT_MAX_RECORDS = 10_000;
 
 const FORBIDDEN_EXPORT_KEYS = new Set([

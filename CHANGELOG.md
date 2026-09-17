@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Remove leftover Sentinel facades.** `draft-write.js` and
+  `node-draft-inventory.js` were re-exports of `sentinel-draft.js`. Tests
+  import the client directly. Unused exports (`toolMessage`, `redactResponse`)
+  are gone; `DIAGNOSTIC_TOOLS` and `POLICY_DIGEST` each live in one place.
+
 ## [2.19.0] - 2026-09-16
 
 ### Added

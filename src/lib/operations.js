@@ -12,7 +12,7 @@
 
 import { graphqlHasMutation } from "./security.js";
 
-export const WRITE_PREFIXES = ["drupal_create_", "drupal_update_", "drupal_upload_",
+const WRITE_PREFIXES = ["drupal_create_", "drupal_update_", "drupal_upload_",
   "drupal_block_",  "drupal_drush_cache", "drupal_drush_cron",
   "drupal_drush_config_export", "drupal_drush_config_import",
   "drupal_drush_updatedb", "drupal_drush_module_enable",
@@ -22,7 +22,7 @@ export const WRITE_PREFIXES = ["drupal_create_", "drupal_update_", "drupal_uploa
   // Governed config write (also gated inside the handler by the config-write cap):
   "drupal_config_set"];
 
-export const DESTRUCTIVE_PREFIXES = ["drupal_delete_", "drupal_drush_module_disable"];
+const DESTRUCTIVE_PREFIXES = ["drupal_delete_", "drupal_drush_module_disable"];
 
 /**
  * Classify a tool's operation intent from its name prefix.
