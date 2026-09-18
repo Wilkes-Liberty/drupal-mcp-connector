@@ -68,7 +68,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 
 ## Features
 
-### 120 Tools Across 26 Modules
+### 123 Tools Across 27 Modules
 
 | Module | Tools |
 |--------|-------|
@@ -77,6 +77,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 | **Users** | List, get, create, update, block/unblock, role management (PII-gated) |
 | **Media** | List types, CRUD, file upload, orphaned-media detection |
 | **GraphQL** | Execute a query, schema introspection (mutation-gated) |
+| **Codegen** | Optional graphql_compose_codegen inspect/diff/generate (generate is `--dry-run` text) |
 | **Entities** | Generic CRUD for *any* Drupal entity type (paragraphs, commerce, webforms, …) |
 | **Site** | Site info, content-type discovery, configured-site listing |
 | **Reports** | Content summary, stale content, field completeness, SEO/accessibility audits, taxonomy usage, user activity, revision hotspots (10 read-only reports) |
@@ -308,7 +309,7 @@ an operator channel: keep the agent's credentials off it, and pin
 | [OAuth client_credentials](docs/oauth-client-credentials.md) | Production OAuth deploy: scope→role mapping, JSON:API writes, config persistence, secret handling, troubleshooting |
 | [Architecture](docs/architecture.md) | Backend abstraction, canonical model, and how to extend it |
 | [GraphQL Setup](docs/graphql-local-setup.md) | GraphQL Compose backend + local TLS notes |
-| [Tools Reference](docs/tools-reference.md) | Full reference for all 120 tools |
+| [Tools Reference](docs/tools-reference.md) | Full reference for all 123 tools |
 | [Security Guide](docs/security.md) | Presets, entity access control, field redaction |
 | [Security Hardening](docs/security-hardening.md) | Optional transport, identity, and secrets controls |
 | [Verification](docs/verification.md) | Prove a secure install: static + live checks, negative probes, evidence artefact, managed residuals |
