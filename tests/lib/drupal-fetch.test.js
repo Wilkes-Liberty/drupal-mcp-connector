@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 vi.mock("node-fetch", () => ({ default: vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) })) }));
 import fetch from "node-fetch";
-import { drupalFetch, drupalGraphqlFetch, drupalUploadFile } from "../../src/lib/drupal-fetch.js";
+import { drupalFetch, drupalGraphqlFetch, drupalUploadFile, DRUPAL_FETCH_TIMEOUT_MS } from "../../src/lib/drupal-fetch.js";
 import { CLIENT_VERSION } from "../../src/lib/config.js";
 import { clearToken } from "../../src/lib/oauth.js";
 import {
@@ -155,5 +155,78 @@ describe("drupalFetch northbound data-flow (#179)", () => {
       if (previousRoot === undefined) delete process.env.MCP_UPLOAD_ROOT;
       else process.env.MCP_UPLOAD_ROOT = previousRoot;
     }
+  });
+});
+
+function hangingFetch(_url, opts) {
+  return new Promise((_, reject) => {
+    const abort = () => {
+      const err = new Error("The operation was aborted");
+      err.name = "AbortError";
+      reject(err);
+    };
+    if (opts?.signal?.aborted) {
+      abort();
+      return;
+    }
+    opts?.signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function uploadFixture() {
+  const file = join(tmpdir(), "mcp-connector-upload-timeout.png");
+  writeFileSync(file, "x");
+  return file;
+}
+
+describe("drupalFetch northbound HTTP timeout", () => {
+  it("attaches AbortSignal.timeout(30s) on JSON:API, GraphQL, and upload", async () => {
+    const fake = new AbortController().signal;
+    const spy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(fake);
+    const file = uploadFixture();
+    const previousRoot = process.env.MCP_UPLOAD_ROOT;
+    process.env.MCP_UPLOAD_ROOT = tmpdir();
+    try {
+      await drupalFetch({ _name: "t", baseUrl: "https://x" }, "/jsonapi/node/article");
+      await drupalGraphqlFetch({ _name: "t", baseUrl: "https://x" }, { query: "{ ping }" });
+      await drupalUploadFile({ _name: "t", baseUrl: "https://x" }, "media", "image", "field_media_image", file);
+      expect(spy).toHaveBeenCalledTimes(3);
+      expect(spy).toHaveBeenCalledWith(DRUPAL_FETCH_TIMEOUT_MS);
+      expect(vi.mocked(fetch).mock.calls.map(([, opts]) => opts.signal)).toEqual([fake, fake, fake]);
+    } finally {
+      spy.mockRestore();
+      if (previousRoot === undefined) delete process.env.MCP_UPLOAD_ROOT;
+      else process.env.MCP_UPLOAD_ROOT = previousRoot;
+    }
+  });
+
+  it("surfaces a timeout when the default signal aborts JSON:API, GraphQL, and upload", async () => {
+    vi.mocked(fetch).mockImplementation(hangingFetch);
+    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => originalTimeout(20));
+    const file = uploadFixture();
+    const previousRoot = process.env.MCP_UPLOAD_ROOT;
+    process.env.MCP_UPLOAD_ROOT = tmpdir();
+    try {
+      await expect(drupalFetch({ _name: "t", baseUrl: "https://x" }, "/jsonapi/node/article"))
+        .rejects.toThrow(`Drupal request timed out after ${DRUPAL_FETCH_TIMEOUT_MS / 1000}s`);
+      await expect(drupalGraphqlFetch({ _name: "t", baseUrl: "https://x" }, { query: "{ ping }" }))
+        .rejects.toThrow(/timed out after 30s/);
+      await expect(drupalUploadFile({ _name: "t", baseUrl: "https://x" }, "media", "image", "field_media_image", file))
+        .rejects.toThrow(/timed out after 30s/);
+    } finally {
+      spy.mockRestore();
+      if (previousRoot === undefined) delete process.env.MCP_UPLOAD_ROOT;
+      else process.env.MCP_UPLOAD_ROOT = previousRoot;
+    }
+  });
+
+  it("honors a caller signal on drupalFetch without remapping the abort", async () => {
+    vi.mocked(fetch).mockImplementation(hangingFetch);
+    await expect(drupalFetch(
+      { _name: "t", baseUrl: "https://x" },
+      "/jsonapi/node/article",
+      { signal: AbortSignal.timeout(20) }
+    )).rejects.toMatchObject({ name: "AbortError" });
   });
 });

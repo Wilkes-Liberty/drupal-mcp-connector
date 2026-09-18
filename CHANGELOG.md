@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Northbound Drupal HTTP timeouts.** JSON:API, GraphQL, and file-upload
+  `node-fetch` calls abort after 30s (`AbortSignal.timeout`), matching the
+  Drush SSH bound. A hung Drupal host no longer stalls the MCP process.
+
 ## [2.19.1] - 2026-09-17
 
 ### Changed
