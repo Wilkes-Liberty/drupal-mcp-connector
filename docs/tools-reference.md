@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for all 120 tools across 26 modules.
+Complete reference for all 123 tools across 27 modules.
 
 > **Tip:** Call `drupal_list_entity_types` first on an unfamiliar site to discover available resource types, and `drupal_security_info` to see the active access policy.
 
@@ -28,6 +28,7 @@ Complete reference for all 120 tools across 26 modules.
 - [Entities (Generic)](#entities-generic) — 8 tools
 - [Reports](#reports) — 10 tools
 - [Configuration & Governance](#configuration--governance) — 4 tools
+- [GraphQL Compose Codegen](#graphql-compose-codegen) — 3 tools
 - [Drush](#drush) — 15 tools
 - [Revisions](#revisions) — 3 tools
 - [Moderation](#moderation) — 3 tools
@@ -46,7 +47,7 @@ Complete reference for all 120 tools across 26 modules.
 - [Reports — Content Quality](#reports--content-quality) — 8 tools
 - [Audit (Composite)](#audit-composite) — 1 tool
 
-**Total: 120 tools across 26 modules.**
+**Total: 123 tools across 27 modules.**
 
 ---
 

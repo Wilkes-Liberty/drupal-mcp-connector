@@ -7,11 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.19.1] - 2026-09-17
+
 ### Changed
-- **Remove leftover Sentinel facades.** `draft-write.js` and
+- **Remove leftover Sentinel facades (#328).** `draft-write.js` and
   `node-draft-inventory.js` were re-exports of `sentinel-draft.js`. Tests
   import the client directly. Unused exports (`toolMessage`, `redactResponse`)
   are gone; `DIAGNOSTIC_TOOLS` and `POLICY_DIGEST` each live in one place.
+- README and docs now report **123 tools across 27 modules** and **128 prompts**
+  (one per tool plus 5 workflow prompts). Codegen (`drupal_codegen_*`) shipped
+  in 2.16.0 but was missing from the public counts and the npm project page.
 
 ## [2.19.0] - 2026-09-16
 
@@ -1685,6 +1690,9 @@ The connector is now **dual-protocol**: every tool runs against an abstract back
 - User tools gained explicit PII-access assertions.
 - Whole tree lint-clean (`npm run lint`) with object-injection sinks rewritten to safe lookups.
 
+[2.19.1]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.19.1
+[2.19.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.19.0
+[2.18.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.18.0
 [2.17.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.17.0
 [2.16.0]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.16.0
 [2.15.2]: https://github.com/Wilkes-Liberty/drupal-mcp-connector/releases/tag/v2.15.2
