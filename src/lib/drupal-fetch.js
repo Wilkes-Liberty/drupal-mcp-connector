@@ -1,5 +1,6 @@
 /**
  * Authenticated HTTP wrappers for Drupal JSON:API and file uploads.
+ * Northbound node-fetch calls share a 30s abort timeout (`DRUPAL_FETCH_TIMEOUT_MS`).
  */
 
 import fetch from "node-fetch";
@@ -21,6 +22,28 @@ import {
 } from "./validate.js";
 
 const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
+
+/** Default northbound Drupal HTTP timeout in milliseconds. Matches `sshDrush`. */
+export const DRUPAL_FETCH_TIMEOUT_MS = 30_000;
+
+/**
+ * node-fetch with the shared abort timeout. A caller `signal` wins.
+ * @param {string} url Fully-qualified request URL.
+ * @param {object} [options] node-fetch options (method, body, headers, signal).
+ * @returns {Promise<object>} node-fetch Response.
+ * @throws {Error} when the default timeout fires (`AbortError` remapped).
+ */
+async function timedDrupalFetch(url, options = {}) {
+  const signal = options.signal ?? AbortSignal.timeout(DRUPAL_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal });
+  } catch (err) {
+    if (err?.name === "AbortError" && !options.signal) {
+      throw new Error(`Drupal request timed out after ${DRUPAL_FETCH_TIMEOUT_MS / 1000}s`);
+    }
+    throw err;
+  }
+}
 
 /**
  * Read a 2xx body once. Prefers text() so byte accounting can see the payload;
@@ -61,7 +84,7 @@ export async function drupalFetch(site, path, options = {}) {
     consumeBudgetIfEnforced("request", 1, { retry: isRetry || paid });
     if (collection) consumeBudgetIfEnforced("page", 1, { retry: isRetry || paid });
     paid = true;
-    return fetch(url, {
+    return timedDrupalFetch(url, {
       ...options,
       headers: {
         "Content-Type": JSON_API_CONTENT_TYPE,
@@ -115,7 +138,7 @@ export async function drupalGraphqlFetch(site, body) {
   const url = `${site.baseUrl}${endpoint}`;
 
   consumeBudgetIfEnforced("request");
-  const res = await fetch(url, {
+  const res = await timedDrupalFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -173,7 +196,7 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
   const url = `${site.baseUrl}/jsonapi/${encodeURIComponent(entityType)}/${encodeURIComponent(bundle)}/${encodeURIComponent(fieldName)}`;
 
   consumeBudgetIfEnforced("request");
-  const res = await fetch(url, {
+  const res = await timedDrupalFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/octet-stream",
