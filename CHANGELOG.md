@@ -72,6 +72,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source-side control. Two stubs under `.agents/commands/` were regenerated.
 
 ### Fixed
+- **Error details keep the URL paths the caller supplied (#357).** The error
+  cleaning added for #343 and #345 replaced every slash-led path of two or more
+  segments with `[path]`, so "The alias /about/team is already in use" arrived
+  as "The alias [path] is already in use". A path is now redacted only when it
+  looks like a filesystem path: it starts with a filesystem root (`/var`,
+  `/tmp`, `/home`, …), has a segment that marks a code tree or a file directory
+  (`vendor`, `modules`, `core`, `files`, …), or has a server-side file extension
+  (`.php`, `.yml`, `.log`, …). `/about/team`, `/node/12/edit` and
+  `/jsonapi/node/article/<id>` are kept. Windows drive and UNC paths,
+  `file://` and `phar://` URIs, and a filesystem path straight after a colon
+  (`include_path=.:/usr/share/php`) were not redacted before and now are.
+  Stream-wrapper redaction is unchanged. `docs/security.md` lists the rules and
+  their limits.
 - **`dryRun` says what it checked (#336).** A preview could return without a
   refusal and the real write then failed with a field-access 403. The core PATCH
   probe sends no fields, and core rejects its id before it checks field access
@@ -142,8 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remove the next. An OAuth error document surfaces `error` and
   `error_description`, never `hint`. An empty or unreadable body reports the
   status with `(empty response body)` or `(response body could not be read)`.
-  A Drupal path of two or more segments inside a detail, such as
-  `/about/team`, is redacted along with filesystem paths. Successful responses
+  Path redaction was narrowed afterwards; see #357. Successful responses
   are unchanged. Every matcher on these messages has a regression test in
   `tests/lib/fetch-error-matchers.test.js`.
 - **GraphQL errors on a 200 response are cleaned and bounded (#356).** GraphQL

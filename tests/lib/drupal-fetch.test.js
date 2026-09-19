@@ -404,6 +404,15 @@ describe("drupalFetch failure message (#345)", () => {
       .toBe("Drupal 500 on GET /jsonapi/node/article/n1: the server returned an HTML page, not shown");
   });
 
+  it("keeps a site-relative URL path the caller supplied (#357)", async () => {
+    const message = await failWith(422, JSON.stringify({
+      errors: [{ detail: "alias: The alias /about/team is already in use in this language." }],
+    }), "application/vnd.api+json");
+    expect(message).toBe(
+      "Drupal 422 on GET /jsonapi/node/article/n1: alias: The alias /about/team is already in use in this language."
+    );
+  });
+
   it("strips markup, redacts server paths and removes a backtrace inside a detail", async () => {
     const message = await failWith(500, JSON.stringify({
       errors: [
