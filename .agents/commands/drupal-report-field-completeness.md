@@ -1,11 +1,11 @@
 ---
-description: "Score how completely optional fields are filled in for a content type. Finds nodes missing summaries, images, meta descriptions, tags, etc."
+description: "Score how completely optional fields are filled in for a content type. Finds nodes missing summaries, images, meta descriptions, tags, etc. Reads scalar and entity-reference fields; a reference with no target is empty. Sampling-bounded — flags 'approximate' when the scan hits sampleSize. An absent field is not an empty one: JSON:API leaves out a field this account may not view. A node that omits the key is counted as `absent` and stays out of completenessPercent. A field you name that is absent from every sampled node is listed in `notVisible` and not scored (it may be denied to this account, not exist on the content type, or be misspelled). Default field guesses that are absent are dropped."
 argument-hint: "<type> [site] [fields] [sampleSize]"
 ---
 
 Call the MCP tool `drupal_report_field_completeness`.
 
-Score how completely optional fields are filled in for a content type. Finds nodes missing summaries, images, meta descriptions, tags, etc.
+Score how completely optional fields are filled in for a content type. Finds nodes missing summaries, images, meta descriptions, tags, etc. Reads scalar and entity-reference fields; a reference with no target is empty. Sampling-bounded — flags 'approximate' when the scan hits sampleSize. An absent field is not an empty one: JSON:API leaves out a field this account may not view. A node that omits the key is counted as `absent` and stays out of completenessPercent. A field you name that is absent from every sampled node is listed in `notVisible` and not scored (it may be denied to this account, not exist on the content type, or be misspelled). Default field guesses that are absent are dropped.
 
 Parse the arguments supplied with this command into this tool's parameters:
 
