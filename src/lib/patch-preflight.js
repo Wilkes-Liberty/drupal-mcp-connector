@@ -24,6 +24,7 @@
 
 import { entityLooksModerated, hasExplicitModerationState } from "./moderation-default.js";
 import { entityRevisionId } from "./write-revision.js";
+import { httpStatusOf } from "./error-status.js";
 import { writeDraft, readNodeDraftInventory, assertInventoryDraftLanguage } from "./sentinel-draft.js";
 import { PREFLIGHT_NONE, PREFLIGHT_CORE_GUARD, PREFLIGHT_SENTINEL_DRAFT } from "./dry-run-checks.js";
 
@@ -301,7 +302,7 @@ const ID_MISMATCH_RE = /does not match the ID in the payload/i;
  */
 export function isProbePassedWithoutSave(err) {
   const msg = String(err?.message || "");
-  return ID_MISMATCH_RE.test(msg) || /Drupal 422\b/.test(msg);
+  return ID_MISMATCH_RE.test(msg) || httpStatusOf(err) === 422;
 }
 
 /**
