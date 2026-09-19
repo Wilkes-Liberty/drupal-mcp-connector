@@ -13,10 +13,31 @@ export const ERROR_DETAIL_MAX_CHARS = 400;
 /** Longest HTML `<title>` surfaced to the caller, in characters. */
 const HTML_TITLE_MAX_CHARS = 80;
 
-/** Bodies are cut to this many characters before any parsing or matching. */
-const BODY_SCAN_MAX_CHARS = 65536;
+/**
+ * Text is cut to this many characters before any pattern runs over it. The
+ * tag pattern is quadratic on a run of `<` with no `>`, so the bound also caps
+ * the work a hostile body can cause.
+ */
+const BODY_SCAN_MAX_CHARS = 16384;
 
 const TRUNCATED_SUFFIX = "… [truncated]";
+
+/**
+ * Remove markup. Tags are removed until none is left, so a tag cannot be
+ * rebuilt from the pieces around a removed one (`<scr<b>ipt>`), and any angle
+ * bracket that remains is dropped.
+ * @param {string} text Untrusted text.
+ * @returns {string} Text with no `<` or `>`.
+ */
+function stripTags(text) {
+  let out = text;
+  let previous;
+  do {
+    previous = out;
+    out = out.replace(/<[^>]*>/g, "");
+  } while (out !== previous);
+  return out.replace(/[<>]/g, "");
+}
 
 /**
  * Strip markup and control characters, cut a backtrace, redact server paths,
@@ -27,14 +48,11 @@ const TRUNCATED_SUFFIX = "… [truncated]";
  */
 export function cleanErrorText(text, max = ERROR_DETAIL_MAX_CHARS) {
   if (typeof text !== "string") return "";
-  const cleaned = text
-    .slice(0, BODY_SCAN_MAX_CHARS)
+  const cleaned = stripTags(text.slice(0, BODY_SCAN_MAX_CHARS))
     // A PHP or Drupal backtrace is never for the caller: cut from its marker on.
     .replace(/(?:stack trace|backtrace|call stack):[\s\S]*$/i, "[stack trace removed]")
-    // ANSI colour sequences, then markup.
+    // ANSI colour sequences.
     .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
-    .replace(/<[^>]*>/g, "")
-    .replace(/[<>]/g, "")
     // Drupal stream-wrapper URIs name files other users uploaded.
     .replace(/\b(public|private|temporary|s3|assets):\/\/[^\s"'),;]+/gi, "$1://[path]")
     // Absolute filesystem paths of two or more segments. A URL path is left

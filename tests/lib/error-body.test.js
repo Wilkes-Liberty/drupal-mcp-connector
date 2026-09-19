@@ -16,6 +16,16 @@ describe("cleanErrorText", () => {
     expect(cleanErrorText("cannot move public://2026-09/report final.pdf")).toBe("cannot move public://[path] final.pdf");
   });
 
+  it("removes nested tag fragments and stays fast on a run of unclosed brackets", () => {
+    const nested = cleanErrorText("<scr<b>ipt>alert(1)</scr</b>ipt> <<i>script>x<</i>/script>");
+    // The word may survive as plain text; no bracket may, so no tag can.
+    expect(nested).not.toMatch(/[<>]/);
+    expect(nested).toBe("iptalert(1)ipt scriptx/script");
+    const started = Date.now();
+    expect(cleanErrorText("<a".repeat(200000))).not.toMatch(/[<>]/);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
   it("bounds the length", () => {
     const out = cleanErrorText("z".repeat(5000));
     expect(out.length).toBe(ERROR_DETAIL_MAX_CHARS + "… [truncated]".length);
