@@ -139,6 +139,12 @@ export async function callGovernedServerTool(site, binding, args = {}) {
 /** MCP protocol version advertised on the handshake and every subsequent POST. */
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 
+/** MCP server-tool POST timeout. Handshake, catalog, and tools/call share this. */
+export const SERVER_TOOL_TIMEOUT_MS = 15_000;
+
+/** Default MCP response body cap (bytes). Caller `maxBytes` overrides. */
+export const SERVER_TOOL_MAX_BYTES = 262_144;
+
 // Monotonic JSON-RPC request id. A simple counter keeps ids unique per process
 // without relying on Math.random()/Date.now().
 let rpcId = 0;
@@ -337,8 +343,8 @@ async function initializeSession(site, endpoint, key) {
       method: "POST",
       headers: await baseHeaders(site, null),
       body: JSON.stringify(payload),
-      size: 262144,
-      signal: AbortSignal.timeout(15000),
+      size: SERVER_TOOL_MAX_BYTES,
+      signal: AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
     });
 
   let res = await post();
@@ -374,8 +380,8 @@ async function initializeSession(site, endpoint, key) {
       method: "POST",
       headers: await baseHeaders(site, sessionId),
       body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
-      size: 262144,
-      signal: AbortSignal.timeout(15000),
+      size: SERVER_TOOL_MAX_BYTES,
+      signal: AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
     });
   } catch {
     // Notification is advisory; proceed with the established session.
@@ -432,11 +438,11 @@ export async function callServerTool(site, toolName, args = {}, options = {}) {
 /** Fetch one page of the authenticated module tool catalog. */
 export async function listServerTools(site, cursor) {
   return requestServerTool(site, "tools/list", cursor === undefined ? {} : { cursor }, {
-    maxBytes: 262144, preserveErrors: true,
+    maxBytes: SERVER_TOOL_MAX_BYTES, preserveErrors: true,
   });
 }
 
-/** Shared bounded MCP request transport; retries only explicit auth/session rejection. */
+/** Shared bounded MCP request transport; size + abort are always attached. */
 async function requestServerTool(site, method, params, options) {
   const toolName = params.name ?? method;
   const endpoint = resolveEndpoint(site);
@@ -463,7 +469,8 @@ async function requestServerTool(site, method, params, options) {
       method: "POST",
       headers: await baseHeaders(site, sessionId),
       body: JSON.stringify(payload),
-      ...(options.maxBytes ? { size: options.maxBytes, signal: AbortSignal.timeout(15000) } : {}),
+      size: options.maxBytes ?? SERVER_TOOL_MAX_BYTES,
+      signal: AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
     });
     const { body, rawText } = await readBody(res);
 

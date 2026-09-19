@@ -15,6 +15,9 @@ import fetch from "node-fetch";
 /** Re-acquire this many ms before the stated expiry to absorb clock skew. */
 const EXPIRY_SKEW_MS = 60_000;
 
+/** Token-endpoint abort timeout. Matches Drupal/Drush outbound HTTP. */
+export const OAUTH_TOKEN_TIMEOUT_MS = 30_000;
+
 /**
  * Per-site token cache, keyed by site._name. A value is either a resolved
  * { token, expiresAt, refreshToken } entry or an in-flight Promise of one
@@ -67,20 +70,31 @@ function buildBody(oauth, useRefresh, refreshToken) {
  * @param {boolean} useRefresh Whether to use the refresh_token grant.
  * @param {?string} refreshToken Refresh token for the refresh grant.
  * @returns {Promise<{token: string, expiresAt: number, refreshToken: ?string}>}
- * @throws {OAuthError} on a non-2xx response or a missing access_token.
+ * @throws {OAuthError} on a non-2xx response, a missing access_token, or a timeout.
  */
 async function requestToken(site, useRefresh, refreshToken) {
   const { oauth } = site;
   const url = `${site.baseUrl}${oauth.tokenUrl || "/oauth/token"}`;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json",
-    },
-    body: buildBody(oauth, useRefresh, refreshToken),
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      body: buildBody(oauth, useRefresh, refreshToken),
+      signal: AbortSignal.timeout(OAUTH_TOKEN_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err?.name === "AbortError" || err?.name === "TimeoutError") {
+      throw new OAuthError(
+        `OAuth token request to ${site._name} timed out after ${OAUTH_TOKEN_TIMEOUT_MS / 1000}s.`
+      );
+    }
+    throw err;
+  }
 
   if (!res.ok) {
     throw new OAuthError(

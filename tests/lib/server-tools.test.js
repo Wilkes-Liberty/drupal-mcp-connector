@@ -8,6 +8,8 @@ import {
   resolveServerToolName,
   serverToolCandidates,
   SERVER_TOOL_IDS,
+  SERVER_TOOL_TIMEOUT_MS,
+  SERVER_TOOL_MAX_BYTES,
 } from "../../src/lib/server-tools.js";
 
 // Transport tests need a wire name, not a resolved one.
@@ -68,6 +70,21 @@ const initOk = (sessionId = "sess-1") => [
 ];
 const toolOk = (result) => mcpRes({ json: { jsonrpc: "2.0", id: 2, result } });
 
+function hangingFetch(_url, opts) {
+  return new Promise((_, reject) => {
+    const abort = () => {
+      const err = new Error("The operation was aborted");
+      err.name = "AbortError";
+      reject(err);
+    };
+    if (opts?.signal?.aborted) {
+      abort();
+      return;
+    }
+    opts?.signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
 beforeEach(() => { vi.mocked(fetch).mockReset(); resetDataFlowBudgets(); });
 
 describe("callServerTool", () => {
@@ -108,6 +125,43 @@ describe("callServerTool", () => {
       method: "tools/call",
       params: { name: CONFIG_GET, arguments: { name: "system.site" } },
     });
+    expect(toolOpts.size).toBe(SERVER_TOOL_MAX_BYTES);
+    expect(toolOpts.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("always attaches size and AbortSignal.timeout on tools/call, even without maxBytes", async () => {
+    const site = plainSite();
+    const fake = new AbortController().signal;
+    const spy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(fake);
+    try {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(initOk("sess-t")[0])
+        .mockResolvedValueOnce(initOk("sess-t")[1])
+        .mockResolvedValueOnce(toolOk({ content: [] }));
+      await callServerTool(site, CONFIG_GET, {});
+      const toolCall = vi.mocked(fetch).mock.calls.find(([, o]) => JSON.parse(o.body).method === "tools/call");
+      expect(toolCall[1].size).toBe(SERVER_TOOL_MAX_BYTES);
+      expect(toolCall[1].signal).toBe(fake);
+      expect(spy).toHaveBeenCalledWith(SERVER_TOOL_TIMEOUT_MS);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("aborts a hung tools/call so callGovernedServerTool cannot hang unbounded", async () => {
+    const site = plainSite();
+    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) =>
+      originalTimeout(ms === SERVER_TOOL_TIMEOUT_MS ? 20 : ms));
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk("sess-hang")[0])
+      .mockResolvedValueOnce(initOk("sess-hang")[1])
+      .mockImplementation(hangingFetch);
+    try {
+      await expect(callServerTool(site, CONFIG_GET, {})).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("reuses a cached session across calls (one initialize)", async () => {
@@ -236,7 +290,7 @@ describe("module catalog transport", () => {
     expect(await listServerTools(site, "")).toEqual({ tools: [], nextCursor: "next" });
     const options = vi.mocked(fetch).mock.calls.at(-1)[1];
     expect(JSON.parse(options.body)).toMatchObject({ method: "tools/list", params: { cursor: "" } });
-    expect(options.size).toBe(262144);
+    expect(options.size).toBe(SERVER_TOOL_MAX_BYTES);
     expect(options.signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -328,6 +382,9 @@ describe("governed config tool names are resolved from the source catalog", () =
     const bodies = vi.mocked(fetch).mock.calls.map(([, o]) => JSON.parse(o.body));
     expect(bodies.map((b) => b.method)).toEqual(["initialize", "notifications/initialized", "tools/list", "tools/call"]);
     expect(bodies[3].params).toEqual({ name: "tool_api__mcp_sentinel_config_get", arguments: { name: "system.site" } });
+    const toolCall = vi.mocked(fetch).mock.calls.find(([, o]) => JSON.parse(o.body).method === "tools/call");
+    expect(toolCall[1].size).toBe(SERVER_TOOL_MAX_BYTES);
+    expect(toolCall[1].signal).toBeInstanceOf(AbortSignal);
 
     vi.mocked(fetch).mockReset();
     vi.mocked(fetch).mockResolvedValueOnce(catalog(["tool_api__unrelated"]));

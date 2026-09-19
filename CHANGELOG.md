@@ -74,6 +74,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source-side control. Two stubs under `.agents/commands/` were regenerated.
 
 ### Fixed
+- **Remaining northbound HTTP timeouts.** Server-tool `tools/call` (including
+  governed config), the OAuth token POST, and the Sentinel readiness GET now
+  abort with `AbortSignal.timeout` so a hung Drupal/Sentinel host cannot stall
+  the MCP process. `requestServerTool` always attaches the 256 KiB body cap and
+  a 15s abort; those were previously gated on `maxBytes`, so `callGovernedServerTool`
+  could hang unbounded. Token acquisition fails as `OAuthError` after 30s.
+  A hung readiness probe stays `sentinel_unreachable`.
 - **Server-tool bridge errors no longer relay the response body or raw tool
   text (#362).** `src/lib/server-tools.js` put four untrusted strings into its
   errors with no cleaning and no bound: the body of a non-2xx `tools/call` or

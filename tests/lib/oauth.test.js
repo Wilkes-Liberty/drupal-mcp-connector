@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("node-fetch", () => ({ default: vi.fn() }));
 import fetch from "node-fetch";
-import { getAccessToken, clearToken, OAuthError } from "../../src/lib/oauth.js";
+import { getAccessToken, clearToken, OAuthError, OAUTH_TOKEN_TIMEOUT_MS } from "../../src/lib/oauth.js";
 
 function tokenResponse(body, { ok = true, status = 200 } = {}) {
   return { ok, status, json: async () => body, text: async () => JSON.stringify(body) };
@@ -21,6 +21,21 @@ function oauthSite(name, overrides = {}) {
       ...overrides,
     },
   };
+}
+
+function hangingFetch(_url, opts) {
+  return new Promise((_, reject) => {
+    const abort = () => {
+      const err = new Error("The operation was aborted");
+      err.name = "AbortError";
+      reject(err);
+    };
+    if (opts?.signal?.aborted) {
+      abort();
+      return;
+    }
+    opts?.signal?.addEventListener("abort", abort, { once: true });
+  });
 }
 
 beforeEach(() => {
@@ -139,6 +154,35 @@ describe("getAccessToken", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(OAuthError);
       expect(String(err.message)).not.toContain("shh");
+    }
+  });
+
+  it("attaches AbortSignal.timeout on the token POST", async () => {
+    const fake = new AbortController().signal;
+    const spy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(fake);
+    try {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        tokenResponse({ access_token: "tok-timeout", expires_in: 3600 })
+      );
+      await getAccessToken(oauthSite("s-timeout"));
+      expect(spy).toHaveBeenCalledWith(OAUTH_TOKEN_TIMEOUT_MS);
+      expect(vi.mocked(fetch).mock.calls[0][1].signal).toBe(fake);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("fails with OAuthError when the token POST times out", async () => {
+    vi.mocked(fetch).mockImplementation(hangingFetch);
+    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => originalTimeout(20));
+    try {
+      await expect(getAccessToken(oauthSite("s-hang"))).rejects.toThrow(OAuthError);
+      await expect(getAccessToken(oauthSite("s-hang-2"))).rejects.toThrow(
+        `OAuth token request to s-hang-2 timed out after ${OAUTH_TOKEN_TIMEOUT_MS / 1000}s.`
+      );
+    } finally {
+      spy.mockRestore();
     }
   });
 

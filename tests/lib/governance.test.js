@@ -10,6 +10,7 @@ import {
   clearGovernanceCache,
   filterDiscoverableTools,
   OK_TTL_MS,
+  READINESS_TIMEOUT_MS,
 } from "../../src/lib/governance.js";
 
 const governedSite = (over = {}) => ({
@@ -32,6 +33,21 @@ const notReady = (reason = "no_designated_consumer") => ({
   json: async () => ({ contract_ready: false, reason }),
 });
 const httpStatus = (status) => ({ ok: false, status, json: async () => ({}) });
+
+function hangingFetch(_url, opts) {
+  return new Promise((_, reject) => {
+    const abort = () => {
+      const err = new Error("The operation was aborted");
+      err.name = "AbortError";
+      reject(err);
+    };
+    if (opts?.signal?.aborted) {
+      abort();
+      return;
+    }
+    opts?.signal?.addEventListener("abort", abort, { once: true });
+  });
+}
 
 beforeEach(() => {
   vi.mocked(fetch).mockReset();
@@ -78,6 +94,34 @@ describe("verifySourceGovernance", () => {
     const result = await verifySourceGovernance(governedSite());
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("not_authorized_for_governance");
+  });
+
+  it("attaches AbortSignal.timeout on the readiness GET", async () => {
+    const fake = new AbortController().signal;
+    const spy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(fake);
+    try {
+      vi.mocked(fetch).mockResolvedValueOnce(ready());
+      await verifySourceGovernance(governedSite({ _name: "gov-timeout" }));
+      expect(spy).toHaveBeenCalledWith(READINESS_TIMEOUT_MS);
+      const [, opts] = vi.mocked(fetch).mock.calls[0];
+      expect(opts.method).toBe("GET");
+      expect(opts.signal).toBe(fake);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("treats a hung readiness probe as unreachable", async () => {
+    vi.mocked(fetch).mockImplementation(hangingFetch);
+    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => originalTimeout(20));
+    try {
+      const result = await verifySourceGovernance(governedSite({ _name: "gov-hang" }));
+      expect(result.ok).toBe(false);
+      expect(result.reason).toBe("sentinel_unreachable");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("treats a network failure as unreachable", async () => {
