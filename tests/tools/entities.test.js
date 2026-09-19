@@ -336,4 +336,56 @@ describe("#166 entity_update targets an addressable working copy", () => {
     expect(backend.rawQuery.mock.calls[1][0].path).toContain("/mcp-draft");
     expect(out._revisions).toEqual({ live: 1500, working: 1510 });
   });
+
+  // #336: the three preflight outcomes, through the generic entity tool.
+  it("entity_update dryRun on an existing draft reports the fields as checked", async () => {
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => (
+      resourceVersion === "rel:working-copy" ? draft : live
+    ));
+    backend.rawQuery.mockResolvedValueOnce({ meta: { draft_preflight: true, live: 1500, working: 1510 } });
+    const out = await handlers.drupal_entity_update({
+      entityType: "node", bundle: "article", id, attributes: { title: "CTA" }, dryRun: true,
+    });
+    const sent = JSON.parse(backend.rawQuery.mock.calls[0][0].options.body);
+    expect(sent.data.attributes.title).toBe("CTA");
+    expect(out.checks).toMatchObject({ serverPreflight: "sentinel_draft", fieldAccess: "checked", entityValidation: "checked" });
+    expect(out).not.toHaveProperty("caveat");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("entity_update dryRun on a moderated target with no draft says the fields were not evaluated", async () => {
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => (
+      resourceVersion === "rel:working-copy" ? null : live
+    ));
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) throw new Error("Drupal 404 inventory unavailable");
+      throw new Error(`Drupal 400 on PATCH ${path}: The selected entity does not match the ID in the payload (probe).`);
+    });
+    const out = await handlers.drupal_entity_update({
+      entityType: "node", bundle: "article", id, attributes: { title: "CTA", field_restricted: "x" }, dryRun: true,
+    });
+    const probe = backend.rawQuery.mock.calls.map(([q]) => q).find((q) => q.options?.method === "PATCH");
+    expect(JSON.parse(probe.options.body).data).not.toHaveProperty("attributes");
+    expect(out.checks).toMatchObject({
+      serverPreflight: "core_patch_guard", entityAccess: "checked", revisionGuard: "checked",
+      fieldAccess: "not_checked", entityValidation: "not_checked",
+    });
+    expect(out.caveat).toMatch(/field access/i);
+    expect(out).not.toHaveProperty("writable");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("entity_update dryRun on an unmoderated target says no server-side check ran", async () => {
+    backend.getEntity.mockResolvedValue({
+      id, entityType: "taxonomy_term", bundle: "tags", title: null, status: true,
+      fields: { name: "Tag" }, relationships: {}, _backend: "jsonapi",
+    });
+    const out = await handlers.drupal_entity_update({
+      entityType: "taxonomy_term", bundle: "tags", id, attributes: { name: "Renamed" }, dryRun: true,
+    });
+    expect(out.checks).toMatchObject({ serverPreflight: "none", entityAccess: "not_checked", fieldAccess: "not_checked" });
+    expect(out.caveat).toMatch(/NOT checked/);
+    expect(backend.rawQuery).not.toHaveBeenCalled();
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
 });

@@ -387,13 +387,13 @@ export async function preflightPatchWritable({
  * `langcode` always resolves Sentinel inventory and draft-preflights, even
  * when the entity is unmoderated (media translations).
  *
- * @param {object} backend
- * @param {{entityType: string, bundle: string, id: string, existing?: ?object, attributes?: object, relationships?: object, langcode?: string}} args
  * The returned `preflight` names the server-side check that ran, so a dryRun
  * preview can state what it covered (#336; see dry-run-checks.js):
- * `sentinel_draft` evaluated the real payload, `core_patch_guard` carried no
- * fields, `none` means Drupal evaluated nothing.
+ * `sentinel_draft` evaluated the submitted fields, `core_patch_guard` carried
+ * no fields, `none` means Drupal evaluated nothing.
  *
+ * @param {object} backend
+ * @param {{entityType: string, bundle: string, id: string, existing?: ?object, attributes?: object, relationships?: object, langcode?: string}} args
  * @returns {Promise<{resourceVersion: ?string, workingCopy: ?object, liveVid: ?number|string, workingVid: ?number|string, preflight: string}>}
  */
 export async function prepareGuardedPatch(backend, {
