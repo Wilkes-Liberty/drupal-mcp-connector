@@ -80,8 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/tmp`, `/home`, …), has a segment that marks a code tree or a file directory
   (`vendor`, `modules`, `core`, `files`, …), or has a server-side file extension
   (`.php`, `.yml`, `.log`, …). `/about/team`, `/node/12/edit` and
-  `/jsonapi/node/article/<id>` are kept. Windows drive and UNC paths and
-  `file://` and `phar://` URIs were not redacted before and now are.
+  `/jsonapi/node/article/<id>` are kept. Windows drive and UNC paths,
+  `file://` and `phar://` URIs, and a filesystem path straight after a colon
+  (`include_path=.:/usr/share/php`) were not redacted before and now are.
   Stream-wrapper redaction is unchanged. `docs/security.md` lists the rules and
   their limits.
 - **`dryRun` says what it checked (#336).** A preview could return without a

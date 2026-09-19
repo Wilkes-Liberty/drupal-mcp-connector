@@ -55,7 +55,7 @@ function stripTags(text) {
 const FILESYSTEM_ROOTS = new Set([
   "var", "home", "srv", "usr", "opt", "tmp", "etc", "app", "mnt", "private", "users", "data", "code",
   "workspace", "builds", "run", "proc", "sys", "lib", "bin", "root", "www", "sites", "vendor", "web",
-  "docroot", "html",
+  "docroot", "html", "dev", "sbin", "boot", "lib64", "snap", "nix", "volumes",
 ]);
 
 /** Segments, at any depth, that mark a code tree, a web root or a file directory. */
@@ -110,13 +110,15 @@ export function cleanErrorText(text, max = ERROR_DETAIL_MAX_CHARS) {
     // Local-file URIs.
     .replace(/\b(file|phar):\/\/[^\s"'),;]+/gi, "$1://[path]")
     // Windows drive paths (`C:\dir`, `C:/dir`) and UNC paths (`\\host\share`).
-    .replace(/(?<!\w)[A-Za-z]:[\\/](?![\\/])[^\s"'),;|*?]*/g, "[path]")
+    .replace(/(?<!\w)[A-Za-z]:(?:\\+|\/(?!\/))[^\s"'),;|*?]*/g, "[path]")
     .replace(/(?<![\w\\])\\\\[\w.$-]+\\[^\s"'),;|*?]*/g, "[path]")
     // Slash-led paths. A filesystem path is redacted; a site-relative URL path
     // is kept, because the caller sent it and has to read it back (#357). The
     // path part of an absolute URL never matches: its slash follows a word
-    // character, a colon or another slash.
-    .replace(/(?<![\w:/.\]])\/[\w.@%+~/-]+/g, (match) => (isFilesystemPath(match) ? "[path]" : match))
+    // character, another slash, or the colon of `scheme://`. A path straight
+    // after any other colon (`include_path=.:/usr/share/php`,
+    // `internal:/about/team`) is judged like the rest.
+    .replace(/(?:(?<![\w:/.\]])|(?<=:)(?!\/\/))\/[\w.@%+~/-]+/g, (match) => (isFilesystemPath(match) ? "[path]" : match))
     .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();

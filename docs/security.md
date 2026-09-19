@@ -272,7 +272,7 @@ Field redaction covers successful responses. The detail of a failed Drupal reque
 
 A slash-led path of two or more segments is redacted when it looks like a filesystem path:
 
-- its first segment is a filesystem root: `/var`, `/home`, `/srv`, `/usr`, `/opt`, `/tmp`, `/etc`, `/app`, `/mnt`, `/private`, `/Users`, `/data`, `/code`, `/workspace`, `/builds`, `/run`, `/proc`, `/sys`, `/lib`, `/bin`, `/root`, `/www`, `/sites`, `/vendor`, `/web`, `/docroot`, `/html`; or
+- its first segment is a filesystem root: `/var`, `/home`, `/srv`, `/usr`, `/opt`, `/tmp`, `/etc`, `/app`, `/mnt`, `/private`, `/Users`, `/data`, `/code`, `/workspace`, `/builds`, `/run`, `/proc`, `/sys`, `/lib`, `/bin`, `/root`, `/www`, `/sites`, `/vendor`, `/web`, `/docroot`, `/html`, `/dev`, `/sbin`, `/boot`, `/lib64`, `/snap`, `/nix`, `/Volumes`; or
 - any segment marks a code tree, a web root or a file directory: `vendor`, `node_modules`, `core`, `modules`, `themes`, `profiles`, `sites`, `src`, `lib`, `docroot`, `public_html`, `htdocs`, `files`, `private`, `tmp`; or
 - any segment has a server-side file extension: `.php`, `.inc`, `.module`, `.install`, `.theme`, `.engine`, `.yml`, `.yaml`, `.twig`, `.log`, `.sql`, `.sh`, `.env`, `.ini`, `.conf`, `.json`, `.lock`, `.phar`. The extension can sit before another one, as in `.env.local` or `dump.sql.gz`.
 
@@ -281,6 +281,8 @@ Segments compare case-insensitively. These are redacted whatever their shape:
 - Windows drive paths (`C:\inetpub\...`, `C:/xampp/...`) and UNC paths (`\\host\share\...`);
 - `file://` and `phar://` URIs, which become `file://[path]` and `phar://[path]`;
 - Drupal stream-wrapper URIs (`public://`, `private://`, `temporary://`, `s3://`, `assets://`), which become `<scheme>://[path]`.
+
+A path is judged wherever it starts: after a space, a quote, a bracket, `=` or a colon (`include_path=.:/usr/share/php`, `internal:/about/team`). The path part of an absolute URL (`https://example.org/about/team`) is never touched.
 
 Any other slash-led path is kept. `/about/team`, `/node/12/edit` and `/old/page?x=1` are site-relative URL paths that the caller supplied, and a message such as "The alias /about/team is already in use" is useless without them (#357).
 
