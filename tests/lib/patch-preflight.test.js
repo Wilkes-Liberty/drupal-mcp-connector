@@ -95,7 +95,7 @@ describe("preflightPatchWritable (#201)", () => {
       existing: { fields: { moderation_state: "published" } },
       attributes: { title: "T", moderation_state: "draft" },
     });
-    expect(out).toEqual({ probed: true, writable: true });
+    expect(out).toEqual({ probed: true, revisionGuardPassed: true, payloadEvaluated: false });
     expect(backend.rawQuery).toHaveBeenCalledTimes(1);
     const arg = backend.rawQuery.mock.calls[0][0];
     expect(arg.path).toBe("/jsonapi/node/article/n1");
@@ -188,7 +188,7 @@ describe("preflightPatchWritable (#201)", () => {
       backend, entityType: "node", bundle: "article", id: "n1",
       attributes: { moderation_state: "draft" },
     });
-    expect(out).toEqual({ probed: true, writable: true });
+    expect(out).toEqual({ probed: true, revisionGuardPassed: true, payloadEvaluated: false });
   });
 
   it("treats a deserialize 422 as the guard having passed with no save", async () => {
@@ -199,7 +199,7 @@ describe("preflightPatchWritable (#201)", () => {
       backend, entityType: "node", bundle: "article", id: "n1",
       attributes: { moderation_state: "draft" },
     });
-    expect(out).toEqual({ probed: true, writable: true });
+    expect(out).toEqual({ probed: true, revisionGuardPassed: true, payloadEvaluated: false });
   });
 
   it("probes the working-copy URL when resourceVersion is set (#166)", async () => {
@@ -210,7 +210,7 @@ describe("preflightPatchWritable (#201)", () => {
       attributes: { title: "T", moderation_state: "draft" },
       resourceVersion: "rel:working-copy",
     });
-    expect(out).toEqual({ probed: true, writable: true });
+    expect(out).toEqual({ probed: true, revisionGuardPassed: true, payloadEvaluated: false });
     expect(backend.rawQuery.mock.calls[0][0].path).toBe(
       "/jsonapi/node/article/n1?resourceVersion=rel%3Aworking-copy",
     );
@@ -451,6 +451,31 @@ describe("prepareGuardedPatch (#166)", () => {
     expect(out.liveVid).toBeNull();
     expect(out.workingVid).toBeNull();
     expect(out.resourceVersion).toBeUndefined();
+    // #336: no server-side check ran, and the target says so.
+    expect(out.preflight).toBe("none");
+  });
+
+  it("reports the core guard probe, which carries no fields, as core_patch_guard (#336)", async () => {
+    const backend = backendStub();
+    const out = await prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "article", id: "n1",
+      existing: { fields: { moderation_state: "draft", drupal_internal__vid: 4 } },
+      attributes: { title: "T", field_restricted: "x" },
+    });
+    expect(out.preflight).toBe("core_patch_guard");
+    const probe = backend.rawQuery.mock.calls.map(([q]) => q).find((q) => q.options?.method === "PATCH");
+    expect(JSON.parse(probe.options.body).data).not.toHaveProperty("attributes");
+  });
+
+  it("reports none when the backend cannot issue the probe (#336)", async () => {
+    const backend = backendStub();
+    delete backend.rawQuery;
+    const out = await prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "article", id: "n1",
+      existing: { fields: { moderation_state: "draft", drupal_internal__vid: 4 } },
+      attributes: { title: "T" },
+    });
+    expect(out.preflight).toBe("none");
   });
 
   it("resolves inventory and draft-preflights when langcode is set on unmoderated media", async () => {
@@ -490,6 +515,8 @@ describe("prepareGuardedPatch (#166)", () => {
     expect(out.liveVid).toBe(40);
     expect(out.workingVid).toBe(41);
     expect(out.draftRevision).toEqual({ liveVid: 40, workingVid: 41 });
+    // #336: the draft endpoint received the real attributes.
+    expect(out.preflight).toBe("sentinel_draft");
     expect(backend.updateEntity).not.toHaveBeenCalled();
     const draft = backend.rawQuery.mock.calls.find(([call]) => String(call.path).endsWith("/mcp-draft"));
     expect(draft[0].options.headers["X-MCP-Draft-Preflight"]).toBe("1");

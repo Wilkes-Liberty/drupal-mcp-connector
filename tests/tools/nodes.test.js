@@ -402,6 +402,10 @@ describe("nodes tools (migrated)", () => {
     expect(out.attributes.title).toBe("T");
     expect(out.attributes.moderation_state).toBe("draft");
     expect(backend.createEntity).not.toHaveBeenCalled();
+    // #336: a create preview never contacts Drupal, and says so.
+    expect(out.checks).toMatchObject({ serverPreflight: "none", fieldAccess: "not_checked", entityValidation: "not_checked" });
+    expect(out.caveat).toMatch(/NOT checked/);
+    expect(out).not.toHaveProperty("writable");
   });
 
   it("update_node dryRun returns a preview and does not write", async () => {
@@ -409,12 +413,17 @@ describe("nodes tools (migrated)", () => {
     expect(out).toMatchObject({ dryRun: true, operation: "update", entityType: "node", bundle: "article", id: "n1" });
     expect(out.attributes.title).toBe("New");
     expect(backend.updateEntity).not.toHaveBeenCalled();
+    // #336: an unmoderated target gets no server-side check at all.
+    expect(out.checks).toMatchObject({ serverPreflight: "none", revisionGuard: "not_checked", fieldAccess: "not_checked" });
+    expect(out.caveat).toMatch(/NOT checked/);
   });
 
   it("delete_node dryRun returns a preview and does not delete", async () => {
     const out = await handlers.drupal_delete_node({ type: "article", id: "n1", dryRun: true });
     expect(out).toMatchObject({ dryRun: true, operation: "delete", entityType: "node", bundle: "article", id: "n1" });
     expect(backend.deleteEntity).not.toHaveBeenCalled();
+    expect(out.checks).toMatchObject({ serverPreflight: "none", entityAccess: "not_checked" });
+    expect(out.caveat).toMatch(/delete access/i);
   });
 
   it("delete_node calls deleteEntity and returns success", async () => {
@@ -738,6 +747,24 @@ describe("#166 iterative working-copy PATCH", () => {
     expect(backend.updateEntity).not.toHaveBeenCalled();
     expect(backend.rawQuery.mock.calls[0][0].path).toContain("/mcp-draft");
     expect(backend.rawQuery.mock.calls[0][0].path).not.toBe("/jsonapi/node/article/n1");
+    // #336: the draft endpoint evaluated the real fields, so the preview may say so.
+    expect(out.checks).toMatchObject({ serverPreflight: "sentinel_draft", fieldAccess: "checked", entityValidation: "checked" });
+    expect(out).not.toHaveProperty("caveat");
+  });
+
+  it("dryRun on a moderated node with no draft says the core probe did not evaluate the fields (#336)", async () => {
+    mockNoWorkingCopy();
+    const out = await handlers.drupal_update_node({ type: "article", id: "n1", title: "First draft", dryRun: true });
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(out.checks).toMatchObject({
+      serverPreflight: "core_patch_guard", revisionGuard: "checked",
+      fieldAccess: "not_checked", entityValidation: "not_checked",
+    });
+    expect(out.caveat).toMatch(/field access/i);
+    expect(out).not.toHaveProperty("writable");
+    // The probe carried no attributes: it cannot have evaluated the title.
+    const probe = backend.rawQuery.mock.calls.find(([q]) => q.options?.method === "PATCH" && q.path === "/jsonapi/node/article/n1");
+    expect(JSON.parse(probe[0].options.body).data).not.toHaveProperty("attributes");
   });
 
   it("dryRun fails when the working-copy probe 400s — it does not report success", async () => {

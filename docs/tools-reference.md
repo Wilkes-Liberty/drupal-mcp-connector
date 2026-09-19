@@ -150,8 +150,8 @@ attribute so you can see what would be persisted.
 
 `drupal_create_node`, `drupal_update_node`, and `drupal_delete_node` all accept an
 optional `dryRun` boolean (default `false`). When `true`, the tool validates the
-request and returns a preview of exactly what would be written. Create and delete
-previews do not touch Drupal. On a **moderated** `update`, `dryRun` also issues a
+request and returns a preview of the payload it would send. Drupal does not
+evaluate a create or delete preview. On a **moderated** `update`, `dryRun` also issues a
 non-saving preflight. With an existing draft, Sentinel's `/mcp-draft` endpoint
 validates the real fields and live/working revision preconditions (#166;
 Sentinel d.o #3621022). The real write creates an unpublished continuation;
@@ -167,6 +167,27 @@ Use this (and
 `drupal_list_revisions.possiblyPatchBlocked`) **before** creating dependent
 paragraphs; preflight inside the host update cannot un-orphan work that
 already happened.
+
+**What a dryRun checks.** A preview that returns without a refusal is not proof
+the write will succeed. Every dryRun result carries a `checks` block that names
+each check as `checked` or `not_checked`, and a `caveat` sentence when anything
+was left out. `checked` means the check ran and passed; a failed check fails
+the dryRun instead.
+
+| `checks.serverPreflight` | When | Entity access | Revision guard | Field access | Entity validation |
+|---|---|---|---|---|---|
+| `sentinel_draft` | update of a node with an existing draft, a `langcode` translation draft, `drupal_create_translation` | checked | checked | checked | checked |
+| `core_patch_guard` | update of any other moderated target | checked | checked | **not checked** | **not checked** |
+| `none` | update of an unmoderated target (users, terms, media, paragraphs, unmoderated nodes), every create, every delete | not checked | not checked | **not checked** | **not checked** |
+
+The core probe sends no fields and a non-matching `data.id`. Core checks the
+working-copy guard, then rejects the id, and only after that would it evaluate
+field access and validation. So on `core_patch_guard` and `none` the real write
+can still fail with a field-access 403 ("not allowed to PATCH the selected
+field") or a validation 422. Only Sentinel's non-saving draft endpoint receives
+the real fields, so only `sentinel_draft` predicts those refusals.
+`connectorPolicy` is always `checked`: the connector's own allowlist and publish
+gate ran.
 
 ```json
 {
@@ -185,12 +206,21 @@ Returns a preview envelope instead of a created entity:
   "operation": "create",
   "entityType": "node",
   "bundle": "article",
-  "attributes": { "title": "My New Article", "body": { "value": "<p>Article body HTML</p>", "format": "full_html" } }
+  "attributes": { "title": "My New Article", "body": { "value": "<p>Article body HTML</p>", "format": "full_html" } },
+  "checks": {
+    "serverPreflight": "none",
+    "connectorPolicy": "checked",
+    "entityAccess": "not_checked",
+    "revisionGuard": "not_checked",
+    "fieldAccess": "not_checked",
+    "entityValidation": "not_checked"
+  },
+  "caveat": "Drupal did not evaluate this write. Entity access, field access and entity validation were NOT checked. …"
 }
 ```
 
 For `update` the preview also includes the target `id`; for `delete` it returns
-`{ dryRun: true, operation: "delete", entityType, bundle, id }`.
+`{ dryRun: true, operation: "delete", entityType, bundle, id, checks, caveat }`.
 
 ### URL aliases
 
@@ -369,6 +399,12 @@ dryRun the same as the saving write (#273). Core revision selectors are read-onl
 not a PATCH target. When `true`, the tool validates the request and returns a
 preview of the write without committing it.
 
+The result carries the same `checks` block and `caveat` as the node tools (see
+[What a dryRun checks](#preview-writes-with-dryrun)). Most generic-entity
+previews are `serverPreflight: "none"`: users, profiles, taxonomy terms, media
+and paragraphs are unmoderated, and Drupal never evaluates a create preview. For those,
+field access and entity validation are **not** checked.
+
 ```json
 {
   "entityType": "paragraph",
@@ -387,12 +423,14 @@ Returns a preview envelope:
   "entityType": "paragraph",
   "bundle": "text",
   "attributes": { "field_text": { "value": "<p>Hello world</p>", "format": "full_html" } },
-  "relationships": {}
+  "relationships": {},
+  "checks": { "serverPreflight": "none", "connectorPolicy": "checked", "entityAccess": "not_checked", "revisionGuard": "not_checked", "fieldAccess": "not_checked", "entityValidation": "not_checked" },
+  "caveat": "Drupal did not evaluate this write. Entity access, field access and entity validation were NOT checked. …"
 }
 ```
 
 For `update` the preview also includes the target `id`; for `delete` it returns
-`{ dryRun: true, operation: "delete", entityType, bundle, id }`.
+`{ dryRun: true, operation: "delete", entityType, bundle, id, checks, caveat }`.
 
 ---
 
@@ -406,7 +444,7 @@ Read-only audit and analysis tools. All respect the security config.
 | `drupal_report_stale_content` | `type`, `days` | Content not updated in N days. Default: 180 days. |
 | `drupal_report_content_by_author` | `type` | Node count per author UUID, sorted by most prolific. |
 | `drupal_report_recently_published` | `type`, `limit` | Most recently published content. |
-| `drupal_report_field_completeness` | `type` | % of nodes with optional fields populated. Finds SEO gaps. |
+| `drupal_report_field_completeness` | `type` | % of nodes with optional fields populated. Finds SEO gaps. Reads scalar and entity-reference fields. Each row has `populated`, `empty`, `absent` and `completenessPercent`; a node that omits the key is `absent` and stays out of the percentage. A field you name that is absent from every sampled node is listed in `notVisible` with a `notVisibleNote` and is not scored: it may be denied to this account, not exist on the content type, or be misspelled. `approximate` is true when the scan hits `sampleSize`. |
 | `drupal_report_taxonomy_usage` | `vocabulary` | How many nodes reference each term. Finds orphaned terms. |
 | `drupal_report_revision_hotspots` | `type` | Nodes with most revisions — spots churn. Requires D9.3+. |
 | `drupal_report_user_activity` | `inactiveDays` | Active/blocked/inactive user summary. |
@@ -600,6 +638,25 @@ Introspect the fields of an entity type + bundle before writing. Built on schema
   "bundle": "article"
 }
 ```
+
+**Fields this account may not view.** When Drupal denies view access to a
+field, JSON:API leaves it out of the resource with no marker. An empty field
+keeps its key, with a `null` value. So a view-denied field is not in `fields`,
+and it looks like a field that does not exist. The tool already reads the
+bundle's `field_config` for `translatable`; it uses the same response to find
+these fields, with no extra request:
+
+- `fieldDefinitions` is `"available"` or `"unavailable"`.
+- When available, `notVisible` lists `{ name, translatable }` for each field
+  that `field_config` defines but the sampled entity does not carry, and
+  `notVisibleNote` explains it. They are most likely denied to this account.
+  They may also be disabled or renamed in JSON:API.
+- When unavailable, `notVisible` is omitted and `note` says denied fields
+  cannot be detected.
+- Nothing is claimed when no entity was sampled.
+
+The list covers configurable fields only (the first 50 `field_config` rows) and
+one sampled entity, so it may be incomplete. Base fields are not covered.
 
 ---
 
@@ -801,7 +858,7 @@ Additional read-only audit tools that complement the [Reports](#reports) module.
 | Tool | Required params | Description |
 |------|----------------|-------------|
 | `drupal_report_unpublished` | — | List unpublished/draft content of a type (default `article`). Returns titles, last-changed dates, and paths — surfaces forgotten drafts. |
-| `drupal_report_missing_field` | `field` | Find entities where a given field is empty (scalar or entity-reference). Bounded by `sampleSize`. |
+| `drupal_report_missing_field` | `field` | Find entities where a given field is empty (scalar or entity-reference). Bounded by `sampleSize`. A field absent from every sampled entity is reported as `notVisible`, not as missing everywhere. |
 | `drupal_report_orphaned_references` | — | Find entities whose entity-reference fields point at targets that no longer exist. A 404 is an orphan; 401/403 and policy-denied types are `unverifiable`, not missing. Bounded by `sampleSize`. |
 
 ### drupal_report_missing_field
@@ -813,6 +870,26 @@ Additional read-only audit tools that complement the [Reports](#reports) module.
   "sampleSize": 100
 }
 ```
+
+**Absent is not empty.** JSON:API keeps the key of an empty field and leaves
+out a field the account may not view. The report reads the keys it already has;
+it makes no extra request per entity.
+
+- The field is absent from **every** sampled entity: the result is
+  `notVisible: true`, `totalMissing: null` and no findings. The field may be
+  denied to this account, not exist on the bundle, or be misspelled. The report
+  cannot tell whether any value is missing, so it counts none.
+- The field is absent from **some** entities: each finding carries `reason`,
+  `"empty"` (key present, no value) or `"absent"` (key missing, possibly
+  access-denied). `totalEmpty` and `totalAbsent` give the split, and `note`
+  says how many entities omit the field.
+- Promoted base attributes (`title`, `status`, `langcode`, `created`,
+  `changed`, `path`) always read as present. A denied base attribute cannot be
+  told from an empty one.
+
+Reports run by an account that node access restricts still see fewer entities
+than exist, with no signal from Drupal. `scanned` is the number this account
+could read.
 
 ---
 
@@ -873,7 +950,7 @@ Read-only, backend-neutral content-quality audits. Each samples via the configur
 | `drupal_report_readability` | — | Flesch Reading Ease per body plus structural issues (no H2s, multiple H1s). |
 | `drupal_report_orphan_pages` | — | Published pages with no inbound internal links from the sampled set. |
 | `drupal_report_pii_exposure` | — | Emails / US SSNs / phone numbers in published bodies; matched values are masked in the output. |
-| `drupal_report_seo_meta_coverage` | — | Per-field structured-meta coverage (metatag, meta description) and nodes missing all meta. |
+| `drupal_report_seo_meta_coverage` | — | Per-field structured-meta coverage (metatag, meta description) and nodes missing all meta. Reads scalar and entity-reference fields. A field absent from every sampled node has `coverage: null` and, when you named it, is listed in `notVisible`. When no checked field is visible, `nodesMissingAllMeta` is null and no node is flagged. |
 
 ### drupal_report_pii_exposure
 

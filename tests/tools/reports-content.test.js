@@ -184,5 +184,40 @@ describe("reports-content", () => {
       expect(res.fields.field_meta_tags.populated).toBe(1);
       expect(res.nodesMissingAllMeta).toBe(1);
     });
+
+    it("reads a relationship meta field (#341)", async () => {
+      backend.listEntities.mockResolvedValue(page([
+        node({ id: "1", fields: {}, relationships: { field_social_image: { id: "m1" } } }),
+        node({ id: "2", fields: {}, relationships: { field_social_image: null } }),
+      ]));
+      const res = await handlers.drupal_report_seo_meta_coverage({ type: "page", fields: ["field_social_image"] });
+      expect(res.fields.field_social_image).toMatchObject({ present: true, populated: 1, coverage: 0.5 });
+      expect(res.nodesMissingAllMeta).toBe(1);
+    });
+
+    it("reports a field absent from every node as unknown coverage, not 0 (#341)", async () => {
+      backend.listEntities.mockResolvedValue(page([
+        node({ id: "1", fields: { field_meta_description: "d" } }),
+        node({ id: "2", fields: { field_meta_description: "" } }),
+      ]));
+      const res = await handlers.drupal_report_seo_meta_coverage({ type: "page", fields: ["field_meta_description", "field_denied"] });
+      expect(res.fields.field_denied).toEqual({ present: false, populated: 0, coverage: null });
+      expect(res.notVisible).toEqual(["field_denied"]);
+      expect(res.notVisibleNote).toMatch(/absent from every sampled/);
+      expect(res.nodesMissingAllMeta).toBe(1);
+    });
+
+    it("flags no node when none of the meta fields is visible (#341)", async () => {
+      backend.listEntities.mockResolvedValue(page([
+        node({ id: "1", fields: {} }),
+        node({ id: "2", fields: {} }),
+      ]));
+      const res = await handlers.drupal_report_seo_meta_coverage({ type: "page" });
+      expect(res.nodesMissingAllMeta).toBeNull();
+      expect(res.findings).toEqual([]);
+      expect(res.note).toMatch(/None of the checked meta fields/);
+      // Default guesses are not listed as notVisible.
+      expect(res.notVisible).toBeUndefined();
+    });
   });
 });

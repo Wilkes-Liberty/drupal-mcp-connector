@@ -32,6 +32,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `.agents/commands/` were regenerated.
 
 ### Fixed
+- **`dryRun` says what it checked (#336).** A preview could return without a
+  refusal and the real write then failed with a field-access 403. The core PATCH
+  probe sends no fields, and core rejects its id before it checks field access
+  or validation. Drupal never evaluated an unmoderated update, a create or a
+  delete preview. Every `dryRun` result on `drupal_create_node`, `drupal_update_node`,
+  `drupal_delete_node`, `drupal_entity_create`, `drupal_entity_update`,
+  `drupal_entity_delete` and `drupal_create_translation` now carries a `checks`
+  block (`serverPreflight`, `connectorPolicy`, `entityAccess`, `revisionGuard`,
+  `fieldAccess`, `entityValidation`, each `checked` or `not_checked`) and a
+  `caveat` when anything was not checked. `fieldAccess` and `entityValidation`
+  are `checked` only when Sentinel's non-saving draft endpoint evaluated the
+  real payload. No new probe was added, and existing preview fields are
+  unchanged. Tool descriptions, `docs/tools-reference.md` and the README state
+  the limit. Seven stubs under `.agents/commands/` were regenerated. The
+  internal `preflightPatchWritable` result drops `writable: true` for
+  `revisionGuardPassed` and `payloadEvaluated: false`.
 - **Config tools call the wire name the source advertises (#335).** Without
   `serverTools.bindings`, `drupal_config_get` / `_list` / `_set` and the config
   reports called `tool_api.mcp_sentinel_config_*`. Current `mcp_server`
@@ -49,6 +65,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or not the tool was advertised. `verifyLive` takes a new `listTools`
   dependency; without it the probe cannot pass. This applies to a configured
   `configSet` binding too.
+- **A field the account may not view is no longer reported as empty (#337).**
+  JSON:API leaves a view-denied field out of the resource and keeps the key of
+  an empty one. `drupal_report_missing_field` counted every entity as missing a
+  field it could not see. When the field is absent from every sampled entity
+  the report now returns `notVisible: true`, `totalMissing: null` and no
+  findings, and says the field may be denied, not on the bundle, or misspelled.
+  When only some entities omit it, each finding carries `reason` (`empty` or
+  `absent`) and the result adds `totalEmpty` and `totalAbsent`.
+  `drupal_describe_fields` reports `fieldDefinitions` (`available` or
+  `unavailable`) and, when `field_config` is readable, lists fields defined for
+  the bundle but absent from the sampled entity as `notVisible`. No request was
+  added per entity. Tool descriptions and `docs/tools-reference.md` state the
+  limit. Two stubs under `.agents/commands/` were regenerated.
 - **Northbound Drupal HTTP timeouts.** JSON:API, GraphQL, and file-upload
   `node-fetch` calls abort after 30s (`AbortSignal.timeout`), matching the
   Drush SSH bound. A hung Drupal host no longer stalls the MCP process.
@@ -59,6 +88,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markup and control characters stripped, server paths and stream-wrapper URIs
   redacted, and a 400-character bound. An HTML page or a JSON body with no
   error detail is never shown. New helper: `src/lib/error-body.js`.
+- **Field reports score reference fields and name fields they cannot see (#341).**
+  `drupal_report_field_completeness` skipped entity-reference fields and dropped
+  a requested field that was absent from every sampled node. It now reads
+  references, counts a node that omits the key as `absent`, lists such a
+  requested field in `notVisible`, and sets `approximate` from `sampleSize`. A
+  link value counts as populated. `drupal_report_seo_meta_coverage` follows the
+  same rules: `coverage: null` for an absent field, and no node flagged when no
+  checked field is visible. Two stubs under `.agents/commands/` were regenerated.
 
 ## [2.19.1] - 2026-09-17
 

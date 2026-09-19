@@ -15,7 +15,9 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
-import { collectEntities, fieldValue, daysSince } from "../lib/reports-support.js";
+import {
+  collectEntities, fieldValue, fieldPresence, isEmptyFieldValue, requestedFieldNames, FIELDS_NOT_VISIBLE_NOTE, daysSince,
+} from "../lib/reports-support.js";
 import { bodyHtml, extractAnchors, classifyLink, normalizePath } from "../lib/audit-support.js";
 import {
   assertDraftLangcode, isMissingTranslationEndpoint, readTranslationInventory, supportsSentinelDraft,
@@ -554,7 +556,13 @@ const DEFAULT_META_FIELDS = ["field_meta_tags", "field_metatag", "metatag", "fie
  * Report structured-meta (SEO) coverage for a content type: how many sampled
  * nodes populate each meta field (metatag module, meta description, etc.).
  * Complements drupal_report_seo_audit's heuristic checks with explicit
- * per-field coverage.
+ * per-field coverage. Reads scalar and relationship fields.
+ *
+ * An absent key is not an empty value (#341). A field whose key is absent from
+ * every sampled node has `present: false` and `coverage: null` (unknown, not
+ * 0); when the caller named it, it is also listed in `notVisible`. When none of
+ * the checked fields is visible on any node the report flags no node, because
+ * JSON:API leaves a field the account may not view out of the response.
  *
  * @param {object} args - { site?, type?, fields?, sampleSize? }.
  * @returns {Promise<object>} Per-field coverage and nodes missing all meta.
@@ -565,7 +573,9 @@ async function seoMetaCoverage({ site: siteName, type, fields, sampleSize = 100 
   assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
   const contentType = type || "article";
-  const metaFields = fields && fields.length ? fields : DEFAULT_META_FIELDS;
+  const named = requestedFieldNames(fields);
+  const requested = named.length > 0;
+  const metaFields = requested ? named : DEFAULT_META_FIELDS;
   const nodes = await collectEntities(
     backend,
     { entityType: "node", bundle: contentType, sort: [{ field: "changed", dir: "desc" }] },
@@ -578,11 +588,22 @@ async function seoMetaCoverage({ site: siteName, type, fields, sampleSize = 100 
     let any = false;
     for (const f of metaFields) {
       const stat = coverage.get(f);
-      const v = fieldValue(n, [f]);
-      if (v !== undefined) stat.present = true;
-      if (!isEmpty(v)) { stat.populated++; any = true; }
+      const { present, value } = fieldPresence(n, f);
+      if (present) stat.present = true;
+      if (present && !isEmptyFieldValue(value)) { stat.populated++; any = true; }
     }
     if (!any) missingAll.push({ id: n.id, title: n.title, path: n.url });
+  }
+
+  const anyVisible = metaFields.some((f) => coverage.get(f).present);
+  const unknown = nodes.length > 0 && !anyVisible;
+  const notVisible = metaFields.filter((f) => !coverage.get(f).present);
+  const notes = [];
+  if (unknown) {
+    notes.push(
+      "None of the checked meta fields is present on any sampled node (the keys are missing, not empty). " +
+      "They may be denied to this account or not exist on this content type, so no node was counted as missing meta."
+    );
   }
 
   return {
@@ -594,28 +615,15 @@ async function seoMetaCoverage({ site: siteName, type, fields, sampleSize = 100 
       return [f, {
         present: stat.present,
         populated: stat.populated,
-        coverage: nodes.length ? Number((stat.populated / nodes.length).toFixed(2)) : 0,
+        coverage: stat.present ? Number((stat.populated / nodes.length).toFixed(2)) : (nodes.length ? null : 0),
       }];
     })),
-    nodesMissingAllMeta: missingAll.length,
-    findings: missingAll,
+    ...(requested && nodes.length ? { notVisible } : {}),
+    ...(requested && nodes.length && notVisible.length ? { notVisibleNote: FIELDS_NOT_VISIBLE_NOTE } : {}),
+    nodesMissingAllMeta: unknown ? null : missingAll.length,
+    ...(notes.length ? { note: notes.join(" ") } : {}),
+    findings: unknown ? [] : missingAll,
   };
-}
-
-/**
- * Whether a field value counts as empty (scalar, {value} object, array, ref).
- * @param {*} v Field value.
- * @returns {boolean}
- */
-function isEmpty(v) {
-  if (v === undefined || v === null || v === "") return true;
-  if (Array.isArray(v)) return v.length === 0;
-  if (typeof v === "object") {
-    if ("value" in v) return v.value === undefined || v.value === null || v.value === "";
-    if ("id" in v) return !v.id;
-    return Object.keys(v).length === 0;
-  }
-  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -714,7 +722,7 @@ export const definitions = [
   },
   {
     name: "drupal_report_seo_meta_coverage",
-    description: "Report structured-meta (SEO) coverage for a content type: how many sampled nodes populate each meta field (metatag, meta description). Complements drupal_report_seo_audit with explicit per-field coverage.",
+    description: "Report structured-meta (SEO) coverage for a content type: how many sampled nodes populate each meta field (metatag, meta description). Complements drupal_report_seo_audit with explicit per-field coverage. Reads scalar and entity-reference fields. A field absent from every sampled node has `present: false` and `coverage: null` (unknown, not 0), and is listed in `notVisible` when you named it. When none of the checked fields is visible, no node is flagged and `nodesMissingAllMeta` is null: JSON:API leaves out a field this account may not view.",
     inputSchema: {
       type: "object",
       properties: {

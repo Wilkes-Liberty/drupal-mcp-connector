@@ -1,11 +1,11 @@
 ---
-description: "Find entities of a content type where a given field is empty (e.g. a missing meta description, image, or summary). Works for scalar fields and entity-reference fields. Sampling-bounded — flags 'approximate' when the scan is capped."
+description: "Find entities of a content type where a given field is empty (e.g. a missing meta description, image, or summary). Works for scalar fields and entity-reference fields. Sampling-bounded — flags 'approximate' when the scan is capped. An absent field is not an empty one: JSON:API leaves out a field this account may not view. When the field is absent from every sampled entity the result is `notVisible: true` with no findings (the field may be denied to this account, not exist on the bundle, or be misspelled) instead of every entity counted as missing. Otherwise each finding has `reason` 'empty' (key present, no value) or 'absent' (key missing, possibly access-denied)."
 argument-hint: "<field> [site] [type] [sampleSize]"
 ---
 
 Call the MCP tool `drupal_report_missing_field`.
 
-Find entities of a content type where a given field is empty (e.g. a missing meta description, image, or summary). Works for scalar fields and entity-reference fields. Sampling-bounded — flags 'approximate' when the scan is capped.
+Find entities of a content type where a given field is empty (e.g. a missing meta description, image, or summary). Works for scalar fields and entity-reference fields. Sampling-bounded — flags 'approximate' when the scan is capped. An absent field is not an empty one: JSON:API leaves out a field this account may not view. When the field is absent from every sampled entity the result is `notVisible: true` with no findings (the field may be denied to this account, not exist on the bundle, or be misspelled) instead of every entity counted as missing. Otherwise each finding has `reason` 'empty' (key present, no value) or 'absent' (key missing, possibly access-denied).
 
 Parse the arguments supplied with this command into this tool's parameters:
 

@@ -18,6 +18,7 @@ import {
 } from "../lib/err-relationships.js";
 import { attachWrittenRevisionPair, readWrittenRevision } from "../lib/write-revision.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
+import { dryRunChecks, PREFLIGHT_NONE } from "../lib/dry-run-checks.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
   redactCanonicalEntity, getSecuritySummary,
@@ -71,7 +72,12 @@ async function createEntity({ site: siteName, entityType, bundle, attributes = {
   assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
-  if (dryRun) return { dryRun: true, operation: "create", entityType, bundle, attributes, relationships: resolvedRelationships };
+  if (dryRun) {
+    return {
+      dryRun: true, operation: "create", entityType, bundle, attributes, relationships: resolvedRelationships,
+      ...dryRunChecks({ operation: "create", preflight: PREFLIGHT_NONE }),
+    };
+  }
   const created = await backend.createEntity({ entityType, bundle, attributes, relationships: resolvedRelationships });
   if (entityType === "paragraph") {
     const revisionId = await resolveParagraphRevisionId(backend, created, bundle);
@@ -125,6 +131,7 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
     return {
       dryRun: true, operation: "update", entityType, bundle, id,
       attributes: safeAttributes, relationships: resolvedRelationships,
+      ...dryRunChecks({ operation: "update", preflight: patchTarget.preflight }),
     };
   }
   const result = await updateEntityGuarded(backend, {
@@ -157,7 +164,12 @@ async function deleteEntity({ site: siteName, entityType, bundle, id, dryRun = f
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertDeleteAllowed(sec, entityType, bundle, id);
-  if (dryRun) return { dryRun: true, operation: "delete", entityType, bundle, id };
+  if (dryRun) {
+    return {
+      dryRun: true, operation: "delete", entityType, bundle, id,
+      ...dryRunChecks({ operation: "delete", preflight: PREFLIGHT_NONE }),
+    };
+  }
   const backend = await resolveBackend(site);
   await backend.deleteEntity({ entityType, bundle, id });
   return { success: true, deletedId: id, entityType, bundle };
@@ -277,14 +289,14 @@ export const definitions = [
         bundle:        { type: "string" },
         attributes:    { type: "object", description: "Field values keyed by Drupal machine name" },
         relationships: { type: "object", description: "Relationship data keyed by field name" },
-        dryRun:        { type: "boolean", default: false, description: "Validate and return a preview of the create without committing." },
+        dryRun:        { type: "boolean", default: false, description: "Return a preview of the payload without committing. Drupal does not evaluate the write: entity access, field access and entity validation are NOT checked, so the real create can still fail with a 403 or a validation 422. The result's `checks` block and `caveat` say what was and was not checked." },
         returning:     RETURNING_SCHEMA,
       },
     },
   },
   {
     name: "drupal_entity_update",
-    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision). Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved. On moderated targets a non-saving PATCH preflight runs first (including dryRun) against the same URL the write will hit. An addressable node draft uses Sentinel's governed draft endpoint with live/working revision preconditions (#166); a stray revision with no addressable working copy still fails with revision-surgery language (#201). Preflight does not un-orphan paragraphs already created — probe the host before creating dependents.",
+    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision). Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved. On moderated targets a non-saving PATCH preflight runs first (including dryRun) against the same URL the write will hit. An addressable node draft uses Sentinel's governed draft endpoint with live/working revision preconditions (#166); a stray revision with no addressable working copy still fails with revision-surgery language (#201). Preflight does not un-orphan paragraphs already created — probe the host before creating dependents. A dryRun that returns without a refusal is not proof the write will succeed: field access and entity validation are checked only when Sentinel's draft endpoint ran, and the result's `checks` block says which checks ran.",
     inputSchema: {
       type: "object", required: ["entityType", "bundle", "id"],
       properties: {
@@ -295,7 +307,7 @@ export const definitions = [
         langcode:      { type: "string", description: "Target language for an unpublished working translation (nodes). Continues that translation via Sentinel." },
         attributes:    { type: "object" },
         relationships: { type: "object" },
-        dryRun:        { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. An existing node draft uses Sentinel's non-saving draft endpoint with the real payload and revision preconditions. Otherwise an id-mismatch core PATCH probes writability without saving. A published node with no distinct working copy whose changed timestamp is later than revision_timestamp (possiblyPatchBlocked) fails dryRun the same as the real write (#273). Any refusal fails the dryRun." },
+        dryRun:        { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, run the server-side preflight when one applies, and return a preview without the real write. The result's `checks` block says what was checked; `caveat` names what was not. Only an existing node draft (or a langcode translation draft) is checked with the real payload: Sentinel's non-saving draft endpoint applies the submitted fields through field access and validates the entity (`serverPreflight: sentinel_draft`). On other moderated targets an id-mismatch core PATCH with no fields checks entity update access and core's working-copy guard only; field access and entity validation are NOT checked (`core_patch_guard`), so the real write can still fail with a field-access 403 or a 422. Unmoderated targets get no server-side check at all (`none`). A published node with no distinct working copy whose changed timestamp is later than revision_timestamp (possiblyPatchBlocked) fails dryRun the same as the real write (#273). Any refusal fails the dryRun." },
         returning:     RETURNING_SCHEMA,
       },
     },
@@ -310,7 +322,7 @@ export const definitions = [
         entityType: { type: "string" },
         bundle:     { type: "string" },
         id:         { type: "string" },
-        dryRun:     { type: "boolean", default: false, description: "Validate and return a preview of the delete without committing." },
+        dryRun:     { type: "boolean", default: false, description: "Return a preview of the delete without committing. Drupal does not evaluate the delete: Drupal's delete access for the entity is NOT checked, only the connector's own policy. The result's `checks` block says so." },
       },
     },
   },

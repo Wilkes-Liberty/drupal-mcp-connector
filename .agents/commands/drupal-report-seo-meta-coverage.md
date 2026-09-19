@@ -1,11 +1,11 @@
 ---
-description: "Report structured-meta (SEO) coverage for a content type: how many sampled nodes populate each meta field (metatag, meta description). Complements drupal_report_seo_audit with explicit per-field coverage."
+description: "Report structured-meta (SEO) coverage for a content type: how many sampled nodes populate each meta field (metatag, meta description). Complements drupal_report_seo_audit with explicit per-field coverage. Reads scalar and entity-reference fields. A field absent from every sampled node has `present: false` and `coverage: null` (unknown, not 0), and is listed in `notVisible` when you named it. When none of the checked fields is visible, no node is flagged and `nodesMissingAllMeta` is null: JSON:API leaves out a field this account may not view."
 argument-hint: "[site] [type] [fields] [sampleSize]"
 ---
 
 Call the MCP tool `drupal_report_seo_meta_coverage`.
 
-Report structured-meta (SEO) coverage for a content type: how many sampled nodes populate each meta field (metatag, meta description). Complements drupal_report_seo_audit with explicit per-field coverage.
+Report structured-meta (SEO) coverage for a content type: how many sampled nodes populate each meta field (metatag, meta description). Complements drupal_report_seo_audit with explicit per-field coverage. Reads scalar and entity-reference fields. A field absent from every sampled node has `present: false` and `coverage: null` (unknown, not 0), and is listed in `notVisible` when you named it. When none of the checked fields is visible, no node is flagged and `nodesMissingAllMeta` is null: JSON:API leaves out a field this account may not view.
 
 Parse the arguments supplied with this command into this tool's parameters:
 

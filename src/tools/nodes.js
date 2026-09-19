@@ -18,6 +18,7 @@ import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA, omit
 import { resolveErrRelationships, relationshipsWereSent, paragraphPinsFromEntity } from "../lib/err-relationships.js";
 import { attachWrittenRevisionPair, readWrittenRevision } from "../lib/write-revision.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
+import { dryRunChecks, PREFLIGHT_NONE } from "../lib/dry-run-checks.js";
 import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } from "../lib/sentinel-draft.js";
 import { paragraphResourceVersion } from "./paragraphs.js";
 import { assertBodySummaryWritable, attachSummaryDeprecation } from "../lib/body-summary.js";
@@ -412,7 +413,10 @@ async function createNode({ site: siteName, type, title, body, summary, format, 
   assertPublishAllowed(sec, attributes);
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
   if (dryRun) {
-    const preview = { dryRun: true, operation: "create", entityType: "node", bundle: type, attributes, relationships: resolvedRelationships };
+    const preview = {
+      dryRun: true, operation: "create", entityType: "node", bundle: type, attributes, relationships: resolvedRelationships,
+      ...dryRunChecks({ operation: "create", preflight: PREFLIGHT_NONE }),
+    };
     return summaryWrite.deprecated && bodyAttr ? attachSummaryDeprecation(preview) : preview;
   }
   // Alias handling: an explicit `path.alias` is set as a manual alias; otherwise
@@ -497,6 +501,7 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
     const preview = {
       dryRun: true, operation: "update", entityType: "node", bundle: type, id,
       attributes, relationships: resolvedRelationships,
+      ...dryRunChecks({ operation: "update", preflight: patchTarget.preflight }),
     };
     return summaryWrite.deprecated && bodyAttr ? attachSummaryDeprecation(preview) : preview;
   }
@@ -556,7 +561,12 @@ async function deleteNode({ site: siteName, type, id, dryRun = false }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertDeleteAllowed(sec, "node", type, id);
-  if (dryRun) return { dryRun: true, operation: "delete", entityType: "node", bundle: type, id };
+  if (dryRun) {
+    return {
+      dryRun: true, operation: "delete", entityType: "node", bundle: type, id,
+      ...dryRunChecks({ operation: "delete", preflight: PREFLIGHT_NONE }),
+    };
+  }
   const backend = await resolveBackend(site);
   await backend.deleteEntity({ entityType: "node", bundle: type, id });
   return { success: true, deletedId: id };
@@ -627,14 +637,14 @@ export const definitions = [
         moderationState: { type: "string", description: "Moderation state for content_moderation types, e.g. 'draft' or 'published'. Takes precedence over status." },
         fields:  { type: "object", description: "Scalar/attribute field values keyed by Drupal machine name. Formatted text: a string or { value, format?, summary? }. format must be in the field's allowed_formats; a single allowed format is used when omitted. Do NOT put entity-reference fields here — Drupal rejects them as attributes; use `relationships`." },
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value: { field_resource_type: { data: { type: 'taxonomy_term--resource_type', id: '<uuid>' } } }. Multi-value: { field_tags: { data: [{ type: 'taxonomy_term--tags', id: '<uuid>' }] } }." },
-        dryRun:  { type: "boolean", default: false, description: "Validate and return a preview of the write without committing." },
+        dryRun:  { type: "boolean", default: false, description: "Return a preview of the payload without committing. Drupal does not evaluate the write: entity access, field access and entity validation are NOT checked, so the real create can still fail with a 403 or a validation 422. The result's `checks` block and `caveat` say what was and was not checked." },
         returning: RETURNING_SCHEMA,
       },
     },
   },
   {
     name: "drupal_update_node",
-    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Pass langcode to continue an unpublished working translation (Sentinel X-MCP-Draft-Langcode); this does not PATCH canonical langcode and will not create a missing translation — use drupal_create_translation first. Entity-reference fields go in `relationships`, not `fields`. Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved (an unresolved identifier persists as an empty field). On moderated targets a non-saving PATCH preflight runs first — including on dryRun — against the same URL the write will hit. Existing node drafts use Sentinel's governed draft endpoint with verified live/working revision preconditions; translation-only drafts are discovered through Sentinel inventory (#297). Pass explicit langcode to continue an unpublished translation. Published languages are not converted into drafts; dryRun uses the same target. workingCopy:null from drupal_list_revisions is not proof the node is writable (possiblyPatchBlocked / #201). Preflight here does not un-orphan paragraphs already created; probe the host before creating dependents.",
+    description: "Update an existing node. Only include fields you want to change. For moderated content types, use moderationState (e.g. 'published') rather than status. When the target is published and moderated and you omit moderationState, the connector defaults the write to moderation_state 'draft' (forward revision) so live default revisions are not mutated by accident. Pass langcode to continue an unpublished working translation (Sentinel X-MCP-Draft-Langcode); this does not PATCH canonical langcode and will not create a missing translation — use drupal_create_translation first. Entity-reference fields go in `relationships`, not `fields`. Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved (an unresolved identifier persists as an empty field). On moderated targets a non-saving PATCH preflight runs first — including on dryRun — against the same URL the write will hit. Existing node drafts use Sentinel's governed draft endpoint with verified live/working revision preconditions; translation-only drafts are discovered through Sentinel inventory (#297). Pass explicit langcode to continue an unpublished translation. Published languages are not converted into drafts; dryRun uses the same target. workingCopy:null from drupal_list_revisions is not proof the node is writable (possiblyPatchBlocked / #201). Preflight here does not un-orphan paragraphs already created; probe the host before creating dependents. A dryRun that returns without a refusal is not proof the write will succeed: field access and entity validation are checked only when Sentinel's draft endpoint ran, and the result's `checks` block says which checks ran.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
@@ -650,7 +660,7 @@ export const definitions = [
         langcode: { type: "string", description: "Target language for an unpublished working translation (e.g. 'es'). Continues that translation via Sentinel; does not create a missing translation and does not PATCH canonical langcode." },
         fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Formatted text: a string or { value, format?, summary? }. format must be in the field's allowed_formats; a single allowed format is used when omitted. Entity-reference fields go in `relationships`, not here." },
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }. Paragraph / ERR items must carry meta.target_revision_id — the connector injects it when missing, and fails the write if it cannot. Image alt on a translation uses the existing file UUID plus meta.alt; replacing the file is refused." },
-        dryRun:  { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, and (on moderated targets) run the core PATCH-guard probe against Drupal, then return a preview without the real write. An existing node draft uses Sentinel's non-saving draft endpoint with the real payload and revision preconditions. Otherwise an id-mismatch core PATCH probes writability without saving. A published node with no distinct working copy whose changed timestamp is later than revision_timestamp (possiblyPatchBlocked) fails dryRun the same as the real write (#273). Any refusal fails the dryRun." },
+        dryRun:  { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, run the server-side preflight when one applies, and return a preview without the real write. The result's `checks` block says what was checked; `caveat` names what was not. Only an existing node draft (or a langcode translation draft) is checked with the real payload: Sentinel's non-saving draft endpoint applies the submitted fields through field access and validates the entity (`serverPreflight: sentinel_draft`). On other moderated targets an id-mismatch core PATCH with no fields checks entity update access and core's working-copy guard only; field access and entity validation are NOT checked (`core_patch_guard`), so the real write can still fail with a field-access 403 or a 422. Unmoderated targets get no server-side check at all (`none`). A published node with no distinct working copy whose changed timestamp is later than revision_timestamp (possiblyPatchBlocked) fails dryRun the same as the real write (#273). Any refusal fails the dryRun." },
         returning: RETURNING_SCHEMA,
       },
     },
@@ -664,7 +674,7 @@ export const definitions = [
         site: { type: "string" },
         type: { type: "string" },
         id:   { type: "string", description: "Node UUID" },
-        dryRun: { type: "boolean", default: false, description: "Validate and return a preview of the delete without committing." },
+        dryRun: { type: "boolean", default: false, description: "Return a preview of the delete without committing. Drupal does not evaluate the delete: Drupal's delete access for the entity is NOT checked, only the connector's own policy. The result's `checks` block says so." },
       },
     },
   },

@@ -13,7 +13,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed, assertEntityTypeAllowed } from "../lib/security.js";
-import { collectEntities, fieldValue } from "../lib/reports-support.js";
+import { collectEntities, fieldPresence } from "../lib/reports-support.js";
 
 /** Author base fields that only ever point at `user`. */
 const AUTHOR_BASE_FIELDS = new Set(["uid", "revision_uid"]);
@@ -75,24 +75,6 @@ function isEmptyValue(value) {
     return Object.keys(value).length === 0;
   }
   return false;
-}
-
-/**
- * Read a field value from a canonical entity, looking in `fields` first and then
- * `relationships` (so a single `field` argument works for both scalar fields and
- * entity-reference fields).
- * @param {object} entity Canonical entity.
- * @param {string} field Field machine name.
- * @returns {{value: *, present: boolean}} The resolved value and whether the key existed at all.
- */
-function readField(entity, field) {
-  const fromField = fieldValue(entity, [field]);
-  if (fromField !== undefined) return { value: fromField, present: true };
-  const rels = new Map(Object.entries(entity.relationships ?? {}));
-  if (rels.has(field)) {
-    return { value: rels.get(field), present: true };
-  }
-  return { value: undefined, present: false };
 }
 
 /**
@@ -158,6 +140,14 @@ async function unpublished({ site: siteName, type, limit = 50 }) {
  * Sampling-bounded: flags `approximate` when the scan hits the sample cap while
  * more results remain.
  *
+ * An absent key is not an empty value (#337). JSON:API leaves a field out of
+ * the resource when the account may not view it, and keeps the key with an
+ * empty value when the field is merely empty. When the key is absent from
+ * EVERY sampled entity the report cannot know whether any value is missing,
+ * so it returns `notVisible: true` with no findings instead of flagging every
+ * entity. When only some entities omit the key, each finding carries a
+ * `reason` of `empty` or `absent`. No extra request is made per entity.
+ *
  * @param {object} args - { site?, type?, field, sampleSize? }. `field` is required.
  * @returns {Promise<object>} Per-entity findings plus scan metadata.
  * @throws {Error} If no field is supplied.
@@ -176,24 +166,43 @@ async function missingField({ site: siteName, type, field, sampleSize = 100 }) {
     sampleSize
   );
   const findings = [];
+  let totalAbsent = 0;
   for (const e of entities) {
-    const { value } = readField(e, field);
-    if (isEmptyValue(value)) {
-      findings.push({ id: e.id, title: e.title, field, status: e.status ? "published" : "unpublished", path: e.url });
+    const { present, value } = fieldPresence(e, field);
+    if (!present) totalAbsent++;
+    if (!present || isEmptyValue(value)) {
+      findings.push({
+        id: e.id, title: e.title, field, reason: present ? "empty" : "absent",
+        status: e.status ? "published" : "unpublished", path: e.url,
+      });
     }
   }
   const approximate = entities.length >= sampleSize;
+  const notes = [];
+  if (approximate) notes.push("Result is sampling-bounded; more entities may exist beyond the sample cap.");
+  const base = { contentType, field, scanned: entities.length, sampled: entities.length, sampleSize, approximate };
+
+  if (entities.length > 0 && totalAbsent === entities.length) {
+    notes.unshift(
+      `"${field}" is absent from every sampled entity (the key is missing, not empty). ` +
+      "It may be denied to this account or not exist on this bundle, or the name may be wrong. " +
+      "Drupal leaves a field the account may not view out of the response with no marker, so this report cannot tell whether any value is missing. " +
+      "No entity was counted as missing the field."
+    );
+    return { ...base, notVisible: true, totalMissing: null, totalEmpty: 0, totalAbsent, note: notes.join(" "), findings: [] };
+  }
+  if (totalAbsent > 0) {
+    notes.push(
+      `${totalAbsent} sampled ${totalAbsent === 1 ? "entity omits" : "entities omit"} "${field}" entirely (reason "absent"). ` +
+      "Drupal leaves a field the account may not view out of the response, so those may be access-denied rather than empty."
+    );
+  }
   return {
-    contentType,
-    field,
-    scanned: entities.length,
-    sampled: entities.length,
-    sampleSize,
-    approximate,
+    ...base,
     totalMissing: findings.length,
-    note: approximate
-      ? "Result is sampling-bounded; more entities may exist beyond the sample cap."
-      : undefined,
+    totalEmpty: findings.length - totalAbsent,
+    totalAbsent,
+    note: notes.length ? notes.join(" ") : undefined,
     findings,
   };
 }
@@ -330,7 +339,7 @@ export const definitions = [
   },
   {
     name: "drupal_report_missing_field",
-    description: "Find entities of a content type where a given field is empty (e.g. a missing meta description, image, or summary). Works for scalar fields and entity-reference fields. Sampling-bounded — flags 'approximate' when the scan is capped.",
+    description: "Find entities of a content type where a given field is empty (e.g. a missing meta description, image, or summary). Works for scalar fields and entity-reference fields. Sampling-bounded — flags 'approximate' when the scan is capped. An absent field is not an empty one: JSON:API leaves out a field this account may not view. When the field is absent from every sampled entity the result is `notVisible: true` with no findings (the field may be denied to this account, not exist on the bundle, or be misspelled) instead of every entity counted as missing. Otherwise each finding has `reason` 'empty' (key present, no value) or 'absent' (key missing, possibly access-denied).",
     inputSchema: {
       type: "object", required: ["field"],
       properties: {

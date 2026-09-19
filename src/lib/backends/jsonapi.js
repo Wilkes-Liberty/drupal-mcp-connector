@@ -804,6 +804,8 @@ export class JsonApiBackend extends Backend {
    * Describe a bundle's fields by sampling one entity and inferring attribute
    * types from its values. JSON:API has no schema endpoint, so an empty bundle
    * yields a `note` and empty maps.
+   * JSON:API leaves a field the account may not view out of the resource, so
+   * such a field is not in the result; an empty field keeps its key (#337).
    * @param {string} entityType
    * @param {string} bundle
    * @returns {Promise<{entityType: string, bundle: string, resourceType?: string, note?: string, attributes: object, relationships: object}>}
