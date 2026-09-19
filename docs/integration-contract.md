@@ -146,13 +146,28 @@ the MCP Streamable-HTTP session handshake per site — `initialize` (reading the
 that session id — caching the session and transparently re-initialising it on server-side
 expiry. JSON and `text/event-stream` (SSE) responses are both handled. The `tools/call`
 payload is `{ "method": "tools/call", "params": { "name", "arguments" } }`, authenticated
-with the **same OAuth bearer** as JSON:API (a 401 triggers one token-refresh retry). `mcp_server_tool_bridge` exposes Tool-API
-tools under the derivative name `tool_api.<mcp_tool_config id>`, so the governed
-config tools (mcp_sentinel's `McpConfigGet`/`List`/`Set` plugins, registered as
-`mcp_sentinel_config_get` / `_list` / `_set`) surface to the connector as
-`tool_api.mcp_sentinel_config_get` / `_list` / `_set`. Those three tools must be
-registered and enabled as `mcp_tool_config` entities on the Drupal site — they are
-**not** exposed by default. Config caps on the connector side (`allowConfigRead` /
+with the **same OAuth bearer** as JSON:API (a 401 triggers one token-refresh retry).
+
+`mcp_server_tool_bridge` exposes each Tool-API tool under a wire name built from
+the `tool_api` base id and the `mcp_tool_config` id. Current `mcp_server`
+releases (2.0.0-beta2 and later) join the two with a double underscore, so the
+governed config tools (mcp_sentinel's `McpConfigGet`/`List`/`Set` plugins,
+registered as `mcp_sentinel_config_get` / `_list` / `_set`) are advertised as
+`tool_api__mcp_sentinel_config_get` / `_list` / `_set`. Older bridge releases
+joined them with a dot (`tool_api.mcp_sentinel_config_get`).
+
+The connector does not hard-code either form. On a site without
+`serverTools.bindings` it reads the source's `tools/list` before each config
+call and uses the name the catalog lists, preferring the double-underscore form
+when both appear. If the catalog lists neither, the call fails closed with a
+"not advertised by the source" error and nothing is sent. Sites with
+`serverTools.bindings` name the tool themselves (see
+[module-tools.md](module-tools.md)).
+
+Those three tools must be registered and enabled as `mcp_tool_config` entities
+on the Drupal site — they are **not** exposed by default. A source that filters
+discovery by entitlement also leaves them out of `tools/list` for an account
+that lacks the scope they require. Config caps on the connector side (`allowConfigRead` /
 `allowConfigWrite`, set by preset — e.g. `config-editor`) are a complementary
 client-side gate; **the Drupal-side policy remains authoritative.**
 

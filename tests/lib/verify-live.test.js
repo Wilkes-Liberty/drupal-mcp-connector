@@ -75,10 +75,18 @@ const refusingCallTool = async () => {
  * actually reached (see the content-edit probe). */
 const CONTENT_TARGET = "11111111-2222-4333-8444-555555555555";
 
-const run = (over = {}, transportOverrides = {}, callTool = refusingCallTool) =>
+/** A source catalog that advertises the given wire names in one page. */
+const advertising = (...names) => async () => ({ tools: names.map((name) => ({ name })) });
+
+/** The current bridge joins `tool_api` and the tool id with a double underscore. */
+const CONFIG_SET = "tool_api__mcp_sentinel_config_set";
+const listsConfigSet = advertising("tool_api__mcp_sentinel_config_get", CONFIG_SET);
+
+const run = (over = {}, transportOverrides = {}, callTool = refusingCallTool, listTools = listsConfigSet) =>
   verifyLive(site(over), {
     transport: scriptedTransport(transportOverrides),
     callTool,
+    listTools,
     contentTarget: CONTENT_TARGET,
     now: () => new Date("2026-08-15T12:00:00Z"),
   });
@@ -97,7 +105,7 @@ describe("verifyLive — a healthy governed target", () => {
     } }, {}, async (_site, name) => {
       calls.push(name);
       return refusingCallTool();
-    });
+    }, advertising("tool_api__custom_config_write"));
     expect(calls).toEqual(["tool_api__custom_config_write"]);
     expect(statusOf(result, "entitlement_filtering")).toBe("pass");
   });
@@ -225,9 +233,9 @@ describe("verifyLive — entitlement filtering and target resolution", () => {
     };
     await run({}, {}, spy);
     expect(calls.length).toBeGreaterThan(0);
-    // The bridge exposes the governed config tools under their tool_api name;
-    // a hand-rolled JSON-RPC body with a different name proves nothing.
-    expect(calls[0].toolName).toBe("tool_api.mcp_sentinel_config_set");
+    // The name comes from the source catalog; a hand-rolled JSON-RPC body
+    // with a different name proves nothing.
+    expect(calls.map((c) => c.toolName)).toEqual([CONFIG_SET]);
     expect(calls[0].args).toHaveProperty("name");
     expect(calls[0].args).toHaveProperty("data");
   });
@@ -344,6 +352,7 @@ describe("verifyLive — a bridge error is not automatically a refusal", () => {
     verifyLive(withSite(over), {
       transport: scriptedTransport(),
       callTool,
+      listTools: listsConfigSet,
       now: () => new Date("2026-08-15T12:00:00Z"),
     });
 
@@ -393,6 +402,71 @@ describe("verifyLive — a bridge error is not automatically a refusal", () => {
     const skipped = await runWith(throwing("Server-tool session initialize failed 503: unavailable"));
     const skippedProbe = skipped.checks.find((c) => c.id === "probe_config_change");
     expect(skippedProbe.observed).toMatchObject({ outcome: "unexercised" });
+  });
+});
+
+describe("verifyLive — the config probe must find the tool before a refusal counts", () => {
+  /**
+   * A call to a name the source does not publish also fails. Without a catalog
+   * check the probe reads that failure as a refusal and passes without the
+   * source ever evaluating a config write (#335).
+   */
+  const toolRefusal = async () => {
+    throw new Error("Server-tool tool_api__mcp_sentinel_config_set reported an error: denied by policy");
+  };
+  const probe = (result) => result.checks.find((c) => c.id === "probe_config_change");
+
+  it("passes on a real refusal of the advertised double-underscore name", async () => {
+    const calls = [];
+    const result = await run({}, {}, async (_site, name) => { calls.push(name); return toolRefusal(); });
+    expect(calls).toEqual([CONFIG_SET]);
+    expect(probe(result).status).toBe("pass");
+    expect(probe(result).observed).toMatchObject({ advertised: true, tool: CONFIG_SET, outcome: "refused" });
+  });
+
+  it("uses the dotted name when that is what an older bridge advertises", async () => {
+    const calls = [];
+    const result = await run({}, {}, async (_site, name) => { calls.push(name); return toolRefusal(); },
+      advertising("tool_api.mcp_sentinel_config_set"));
+    expect(calls).toEqual(["tool_api.mcp_sentinel_config_set"]);
+    expect(probe(result).status).toBe("pass");
+  });
+
+  it("does NOT pass when the tool is absent from the catalog, even if the call looks refused", async () => {
+    const result = await run({}, {}, toolRefusal, advertising("tool_api__unrelated"));
+    expect(probe(result).status).toBe("skipped");
+    expect(statusOf(result, "entitlement_filtering")).toBe("skipped");
+    expect(probe(result).findings.join(" ")).toMatch(/not advertised by the source/);
+    expect(probe(result).observed).toMatchObject({ advertised: false, outcome: "unexercised" });
+    expect(result.summary.ok).toBe(false);
+  });
+
+  it("still fails when a write to an unadvertised name is served", async () => {
+    const result = await run({}, {}, async () => ({ ok: true }), advertising());
+    expect(probe(result).status).toBe("fail");
+    expect(probe(result).observed).toMatchObject({ advertised: false, served: true });
+  });
+
+  it("does not pass when the catalog cannot be read", async () => {
+    const unreadable = async () => { throw new Error("Server-tool call tools/list failed 500: boom"); };
+    const result = await run({}, {}, toolRefusal, unreadable);
+    expect(probe(result).status).toBe("skipped");
+    expect(probe(result).findings.join(" ")).toMatch(/catalog could not be read/);
+
+    const none = await run({}, {}, toolRefusal, null);
+    expect(probe(none).status).toBe("skipped");
+    expect(none.summary.ok).toBe(false);
+  });
+
+  it("applies the same rule to a configured binding the source does not advertise", async () => {
+    const result = await run({ serverTools: {
+      url: "/mcp", bindings: { configSet: "set_config" },
+      modules: { namespace: "fixture", tools: { set_config: {
+        name: "tool_api__custom_config_write", operation: "write", scope: "mcp_config", capabilities: ["configWrite"],
+      } } },
+    } }, {}, toolRefusal, listsConfigSet);
+    expect(probe(result).status).toBe("skipped");
+    expect(probe(result).observed).toMatchObject({ advertised: false });
   });
 });
 

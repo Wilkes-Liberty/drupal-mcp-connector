@@ -2,7 +2,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("node-fetch", () => ({ default: vi.fn() }));
 import fetch from "node-fetch";
-import { callServerTool, SERVER_TOOLS } from "../../src/lib/server-tools.js";
+import {
+  callServerTool,
+  callGovernedServerTool,
+  resolveServerToolName,
+  serverToolCandidates,
+  SERVER_TOOL_IDS,
+} from "../../src/lib/server-tools.js";
+
+// Transport tests need a wire name, not a resolved one.
+const CONFIG_GET = "tool_api__mcp_sentinel_config_get";
+const CONFIG_LIST = "tool_api__mcp_sentinel_config_list";
 import { clearToken } from "../../src/lib/oauth.js";
 import {
   HEADER_DECLARED_DESTINATION,
@@ -68,7 +78,7 @@ describe("callServerTool", () => {
       .mockResolvedValueOnce(initOk("sess-1")[1])        // notifications/initialized
       .mockResolvedValueOnce(toolOk({ content: [{ type: "text", text: "{}" }] })); // tools/call
 
-    await callServerTool(site, SERVER_TOOLS.configGet, { name: "system.site" });
+    await callServerTool(site, CONFIG_GET, { name: "system.site" });
 
     // Sequence: token, initialize, notifications/initialized, tools/call.
     const calls = vi.mocked(fetch).mock.calls;
@@ -94,7 +104,7 @@ describe("callServerTool", () => {
     expect(JSON.parse(toolOpts.body)).toMatchObject({
       jsonrpc: "2.0",
       method: "tools/call",
-      params: { name: SERVER_TOOLS.configGet, arguments: { name: "system.site" } },
+      params: { name: CONFIG_GET, arguments: { name: "system.site" } },
     });
   });
 
@@ -106,8 +116,8 @@ describe("callServerTool", () => {
       .mockResolvedValueOnce(toolOk({ content: [] }))
       .mockResolvedValueOnce(toolOk({ content: [] }));
 
-    await callServerTool(site, SERVER_TOOLS.configList, {});
-    await callServerTool(site, SERVER_TOOLS.configList, {});
+    await callServerTool(site, CONFIG_LIST, {});
+    await callServerTool(site, CONFIG_LIST, {});
 
     const methods = vi.mocked(fetch).mock.calls.map(([, o]) => JSON.parse(o.body).method);
     // initialize, notifications/initialized, tools/call, tools/call — no second initialize.
@@ -122,7 +132,7 @@ describe("callServerTool", () => {
       .mockResolvedValueOnce(initOk("sess-3")[1])
       .mockResolvedValueOnce(mcpRes({ sse }));
 
-    const out = await callServerTool(site, SERVER_TOOLS.configGet, {});
+    const out = await callServerTool(site, CONFIG_GET, {});
     expect(out.structuredContent).toEqual({ a: 1 });
   });
 
@@ -136,7 +146,7 @@ describe("callServerTool", () => {
       .mockResolvedValueOnce(initOk("sess-b")[1])
       .mockResolvedValueOnce(toolOk({ content: [{ type: "text", text: "ok" }] }));
 
-    await callServerTool(site, SERVER_TOOLS.configGet, {});
+    await callServerTool(site, CONFIG_GET, {});
 
     const calls = vi.mocked(fetch).mock.calls;
     const methods = calls.map(([, o]) => JSON.parse(o.body).method);
@@ -156,7 +166,7 @@ describe("callServerTool", () => {
       .mockResolvedValueOnce(tokenRes("tok-2"))          // token refresh
       .mockResolvedValueOnce(toolOk({ content: [] }));   // tools/call replay
 
-    await callServerTool(site, SERVER_TOOLS.configGet, { name: "x" });
+    await callServerTool(site, CONFIG_GET, { name: "x" });
 
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls.length).toBe(6);
@@ -206,7 +216,7 @@ describe("callServerTool", () => {
       site: { security: { declaredCeiling: "internal" } },
       correlationId: "corr-st",
     });
-    await runWithDataFlow(flow, () => callServerTool(site, SERVER_TOOLS.configGet, { name: "system.site" }));
+    await runWithDataFlow(flow, () => callServerTool(site, CONFIG_GET, { name: "system.site" }));
     const toolCall = vi.mocked(fetch).mock.calls.find(([, opts]) =>
       JSON.parse(opts.body).method === "tools/call");
     expect(toolCall[1].headers[HEADER_DECLARED_DESTINATION]).toBe("content-agent:production");
@@ -249,5 +259,79 @@ describe("module catalog transport", () => {
     await callServerTool(site, "tool_api.example", {});
     await callServerTool({ ...site, apiToken: "second-synthetic-token" }, "tool_api.example", {});
     expect(vi.mocked(fetch).mock.calls.filter(([, options]) => JSON.parse(options.body).method === "initialize")).toHaveLength(2);
+  });
+});
+
+describe("governed config tool names are resolved from the source catalog", () => {
+  const listing = (...names) => vi.fn(async () => ({ tools: names.map((name) => ({ name })) }));
+
+  it("knows the Tool API ids and offers the double-underscore wire name first", () => {
+    expect(SERVER_TOOL_IDS).toEqual({
+      configGet: "mcp_sentinel_config_get",
+      configList: "mcp_sentinel_config_list",
+      configSet: "mcp_sentinel_config_set",
+    });
+    expect(serverToolCandidates("mcp_sentinel_config_set")).toEqual([
+      "tool_api__mcp_sentinel_config_set",
+      "tool_api.mcp_sentinel_config_set",
+    ]);
+  });
+
+  it("uses the double-underscore name a current bridge advertises", async () => {
+    const list = listing("tool_api__mcp_sentinel_config_get", "tool_api__other");
+    await expect(resolveServerToolName(plainSite(), "configGet", { list })).resolves.toBe("tool_api__mcp_sentinel_config_get");
+  });
+
+  it("uses the dotted name when that is the one the catalog lists", async () => {
+    const list = listing("tool_api.mcp_sentinel_config_get");
+    await expect(resolveServerToolName(plainSite(), "configGet", { list })).resolves.toBe("tool_api.mcp_sentinel_config_get");
+  });
+
+  it("prefers the double-underscore name when the catalog lists both", async () => {
+    const list = listing("tool_api.mcp_sentinel_config_set", "tool_api__mcp_sentinel_config_set");
+    await expect(resolveServerToolName(plainSite(), "configSet", { list })).resolves.toBe("tool_api__mcp_sentinel_config_set");
+  });
+
+  it("finds the tool on a later catalog page", async () => {
+    const list = vi.fn()
+      .mockResolvedValueOnce({ tools: [{ name: "tool_api__other" }], nextCursor: "p2" })
+      .mockResolvedValueOnce({ tools: [{ name: "tool_api__mcp_sentinel_config_list" }] });
+    await expect(resolveServerToolName(plainSite(), "configList", { list })).resolves.toBe("tool_api__mcp_sentinel_config_list");
+    expect(list.mock.calls[1][1]).toBe("p2");
+  });
+
+  it("fails closed when the source advertises neither name", async () => {
+    const list = listing("tool_api__mcp_sentinel_config_get_extra", "mcp_sentinel_config_get");
+    await expect(resolveServerToolName(plainSite(), "configGet", { list }))
+      .rejects.toThrow(/not advertised by the source/);
+  });
+
+  it("fails closed on an unknown binding, a malformed catalog and a repeated cursor", async () => {
+    await expect(resolveServerToolName(plainSite(), "toString", { list: listing() })).rejects.toThrow(/Unknown server tool/);
+    await expect(resolveServerToolName(plainSite(), "configGet", { list: vi.fn(async () => ({})) }))
+      .rejects.toThrow(/catalog/i);
+    const looping = vi.fn(async () => ({ tools: [], nextCursor: "same" }));
+    await expect(resolveServerToolName(plainSite(), "configGet", { list: looping })).rejects.toThrow(/catalog/i);
+  });
+
+  it("calls the advertised name, and makes no call when the tool is not advertised", async () => {
+    const site = plainSite();
+    const catalog = (names) => toolOk({ tools: names.map((name) => ({ name })) });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk("sess-r")[0])
+      .mockResolvedValueOnce(initOk("sess-r")[1])
+      .mockResolvedValueOnce(catalog(["tool_api__mcp_sentinel_config_get"]))
+      .mockResolvedValueOnce(toolOk({ content: [{ type: "text", text: "{}" }] }));
+    await callGovernedServerTool(site, "configGet", { name: "system.site" });
+    const bodies = vi.mocked(fetch).mock.calls.map(([, o]) => JSON.parse(o.body));
+    expect(bodies.map((b) => b.method)).toEqual(["initialize", "notifications/initialized", "tools/list", "tools/call"]);
+    expect(bodies[3].params).toEqual({ name: "tool_api__mcp_sentinel_config_get", arguments: { name: "system.site" } });
+
+    vi.mocked(fetch).mockReset();
+    vi.mocked(fetch).mockResolvedValueOnce(catalog(["tool_api__unrelated"]));
+    await expect(callGovernedServerTool(site, "configSet", { name: "system.site", data: {} }))
+      .rejects.toThrow(/not advertised by the source/);
+    const methods = vi.mocked(fetch).mock.calls.map(([, o]) => JSON.parse(o.body).method);
+    expect(methods).toEqual(["tools/list"]);
   });
 });

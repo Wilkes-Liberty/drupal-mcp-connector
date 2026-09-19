@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 import { CLIENT_VERSION } from "./config.js";
 import { resolveInboundAuthConfig, resolveInboundAuthMode } from "./http-auth.js";
+import { advertisedServerToolNames, serverToolCandidates, SERVER_TOOL_IDS } from "./server-tools.js";
 
 /** Check outcome vocabulary.
  *
@@ -473,9 +474,6 @@ export const LIVE_CHECKS = [
 /** A page size no governed profile should ever serve in one response. */
 const MASS_READ_LIMIT = 5000;
 
-/** The governed config-write tool, under the bridge's derivative name. */
-const CONFIG_SET_TOOL = "tool_api.mcp_sentinel_config_set";
-
 /** Joins a base URL and a path without doubling or dropping the separator. */
 function joinUrl(baseUrl, path) {
   return `${String(baseUrl).replace(/\/+$/, "")}/${String(path).replace(/^\/+/, "")}`;
@@ -593,11 +591,13 @@ function liveCheck(id, title, findings, observed = null, { skipped = false, notA
  * non-production environment first.
  *
  * @param {object} site Resolved site config (with oauth.clientSecret resolved).
- * @param {{transport: Function, now?: () => Date}} deps
+ * @param {{transport: Function, callTool?: Function, listTools?: Function, now?: () => Date}} deps
  *   `transport` is fetch-shaped and injectable so this is testable offline.
+ *   `callTool` and `listTools` are the bridge client's `tools/call` and
+ *   `tools/list`; without `listTools` the config probe cannot pass.
  * @returns {Promise<object>} Evidence document. Never contains secrets or payloads.
  */
-export async function verifyLive(site, { transport, callTool = null, contentTarget = null, contentTargetType = null, now = () => new Date() }) {
+export async function verifyLive(site, { transport, callTool = null, listTools = null, contentTarget = null, contentTargetType = null, now = () => new Date() }) {
   const baseUrl = String(site?.baseUrl ?? "");
   const checks = [];
   const httpsOk = baseUrl.startsWith("https://") || isLoopback(baseUrl);
@@ -724,7 +724,7 @@ export async function verifyLive(site, { transport, callTool = null, contentTarg
 
   // --- entitlement filtering ----------------------------------------------
   // Through the connector's own bridge client, so the probe exercises the real
-  // contract: an MCP session, the governed tool's `tool_api.*` name and its
+  // contract: an MCP session, the governed tool's advertised wire name and its
   // argument shape, and a refusal surfaced as a tool/JSON-RPC error rather
   // than an HTTP status. A hand-rolled JSON-RPC body would "pass" for the
   // wrong reason — the server would reject it as malformed, not as denied.
@@ -732,25 +732,67 @@ export async function verifyLive(site, { transport, callTool = null, contentTarg
   const holdsConfigScope = scopes.includes("mcp_config");
 
   /**
-   * Attempts a governed config write. Returns {served, detail}: `served` true
-   * means the write was accepted, which for an out-of-tier principal is the
-   * finding.
+   * Attempts a governed config write. Returns {served, outcome, detail,
+   * advertised, tool}: `served` true means the write was accepted, which for an
+   * out-of-tier principal is the finding.
+   *
+   * The source catalog is read first. A call to a name the source does not
+   * publish fails too, and that failure is indistinguishable from a refusal, so
+   * a refusal only counts for a tool the catalog lists. An unadvertised name is
+   * still attempted, because a served write is a finding either way; anything
+   * short of served is then `unexercised`, never a pass.
    */
   const attemptConfigWrite = async () => {
+    let candidates;
     try {
       // The negative probe must reach source authorization, not merely prove
       // that the connector hides out-of-tier tools from discovery.
-      const tool = site.serverTools?.bindings === undefined ? CONFIG_SET_TOOL
-        : (await import("./module-tools.js")).resolveModuleBinding(site, "configSet", {
+      candidates = site.serverTools?.bindings === undefined
+        ? serverToolCandidates(SERVER_TOOL_IDS.configSet)
+        : [(await import("./module-tools.js")).resolveModuleBinding(site, "configSet", {
           operation: "write", scope: "mcp_config", capabilities: ["configWrite"],
-        }).policy.name;
-      await callTool(site, tool, { name: "system.site", data: { name: "verification probe" } });
-      return { served: true, outcome: "served", detail: "accepted" };
+        }).policy.name];
     } catch (err) {
-      // Not every throw is a refusal — see classifyBridgeError.
       const { outcome, detail } = classifyBridgeError(err);
-      return { served: false, outcome, detail };
+      return { served: false, outcome, detail, advertised: false, tool: null };
     }
+
+    let names = null;
+    let catalogProblem = null;
+    if (typeof listTools !== "function") {
+      catalogProblem = "the source catalog could not be read: no tools/list reader was supplied.";
+    } else {
+      try {
+        names = await advertisedServerToolNames(site, listTools);
+      } catch (err) {
+        catalogProblem = `the source catalog could not be read: ${String(err?.message ?? err).slice(0, 200)}`;
+      }
+    }
+    const tool = names ? candidates.find((name) => names.has(name)) ?? null : null;
+    const advertised = tool !== null;
+
+    for (const name of advertised ? [tool] : candidates) {
+      try {
+        await callTool(site, name, { name: "system.site", data: { name: "verification probe" } });
+        return { served: true, outcome: "served", detail: "accepted", advertised, tool: name };
+      } catch (err) {
+        if (advertised) {
+          // Not every throw is a refusal — see classifyBridgeError.
+          const { outcome, detail } = classifyBridgeError(err);
+          return { served: false, outcome, detail, advertised, tool: name };
+        }
+      }
+    }
+    return {
+      served: false,
+      outcome: "unexercised",
+      advertised: false,
+      tool: null,
+      detail: catalogProblem ??
+        `the config write tool is not advertised by the source to this principal (looked for ${candidates.join(" and ")} in tools/list), ` +
+        "so a failed call cannot be told apart from a refusal. Check that the tool is registered and enabled; " +
+        "a source that filters discovery by entitlement hides it from this principal, so confirm the name with a principal that holds mcp_config.",
+    };
   };
 
   let configWrite = null;
