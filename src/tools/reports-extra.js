@@ -45,7 +45,7 @@ function isEntityTypeDenied(sec, entityType) {
  * @param {unknown} err
  * @returns {"missing"|"forbidden"|"failed"}
  */
-function classifyTargetError(err) {
+export function classifyTargetError(err) {
   const msg = String(err?.message || err || "");
   const statusMatch = msg.match(/\bDrupal (\d{3})\b/i);
   const status = statusMatch ? Number(statusMatch[1]) : NaN;

@@ -106,6 +106,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markup and control characters stripped, server paths and stream-wrapper URIs
   redacted, and a 400-character bound. An HTML page or a JSON body with no
   error detail is never shown. New helper: `src/lib/error-body.js`.
+- **JSON:API and GraphQL failures no longer return the raw response body (#345).**
+  `drupalFetch()` fell back to the whole body when it was not a JSON:API error
+  document, and `drupalGraphqlFetch()` always sent the whole body, so an HTML
+  error page from Drupal, PHP or a proxy reached the MCP client. Both now use
+  `describeErrorBody()`, like uploads since #343. The messages keep their
+  shape, `Drupal <status> on <method> <path>: <detail>` and
+  `GraphQL request failed <status>: <detail>`, and keep `errors[].detail` and
+  GraphQL `errors[].message`. The detail has markup and control characters
+  stripped, server paths and stream-wrapper URIs redacted and any backtrace
+  removed. One detail is cut to 400 characters and a list of details to 1,200.
+  Each detail is cleaned on its own, so a backtrace in one error does not
+  remove the next. An OAuth error document surfaces `error` and
+  `error_description`, never `hint`. An empty or unreadable body reports the
+  status with `(empty response body)` or `(response body could not be read)`.
+  A Drupal path of two or more segments inside a detail, such as
+  `/about/team`, is redacted along with filesystem paths. Successful responses
+  are unchanged. Every matcher on these messages has a regression test in
+  `tests/lib/fetch-error-matchers.test.js`.
 - **Field reports score reference fields and name fields they cannot see (#341).**
   `drupal_report_field_completeness` skipped entity-reference fields and dropped
   a requested field that was absent from every sampled node. It now reads

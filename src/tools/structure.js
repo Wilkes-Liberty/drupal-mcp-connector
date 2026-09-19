@@ -34,6 +34,15 @@ const INACCESSIBLE_PATH_RE = /\b422\b[\s\S]*inaccessible/i;
 const MENU_LINK_RETRY_DELAY_MS = 250;
 
 /**
+ * Whether an error is the transient "422 path inaccessible" menu-link race.
+ * @param {unknown} err The error thrown by the backend write.
+ * @returns {boolean}
+ */
+export function isInaccessiblePathError(err) {
+  return INACCESSIBLE_PATH_RE.test(String(err?.message));
+}
+
+/**
  * Resolve after `ms` milliseconds.
  * @param {number} ms Delay in milliseconds.
  * @returns {Promise<void>}
@@ -52,7 +61,7 @@ async function writeMenuLinkWithRetry(fn) {
   try {
     return await fn();
   } catch (err) {
-    if (!INACCESSIBLE_PATH_RE.test(String(err?.message))) throw err;
+    if (!isInaccessiblePathError(err)) throw err;
     await sleep(MENU_LINK_RETRY_DELAY_MS);
     return fn();
   }
