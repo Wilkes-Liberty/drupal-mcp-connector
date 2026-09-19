@@ -20,6 +20,7 @@ import {
   sanitizeUploadFilename,
   validateMachineName,
 } from "./validate.js";
+import { describeErrorBody } from "./error-body.js";
 
 const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
 
@@ -182,7 +183,9 @@ export async function drupalGraphqlFetch(site, body) {
  * @param {string} fieldName File field on the bundle (e.g. "field_media_image").
  * @param {string} filePath Local path to the file to upload.
  * @returns {Promise<object>} Parsed JSON:API File entity response.
- * @throws {Error} on any non-2xx response.
+ * @throws {Error} on any non-2xx response. The message keeps the HTTP status and a
+ *   cleaned, bounded detail from the body (see `describeErrorBody`); the raw body
+ *   and any HTML page are never included.
  */
 export async function drupalUploadFile(site, entityType, bundle, fieldName, filePath) {
   // #137: machine-name segments + path allowlist before any FS or network I/O.
@@ -213,10 +216,21 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
   });
 
   if (!res.ok) {
-    const body = await res.text();
+    let body;
+    try {
+      body = await res.text();
+    } catch {
+      throw new Error(`File upload failed ${res.status} (response body could not be read)`);
+    }
     const mapped = sourceBudgetDenial(body);
     if (mapped) throw mapped;
-    throw new Error(`File upload failed ${res.status}: ${body}`);
+    // The body is untrusted: it may be an HTML error page, or carry a server
+    // path or another user's filename. Only a cleaned, bounded detail is
+    // surfaced; the status is always kept (#343).
+    const detail = describeErrorBody(body, res.headers?.get?.("content-type") ?? null);
+    throw new Error(detail
+      ? `File upload failed ${res.status}: ${detail}`
+      : `File upload failed ${res.status} (empty response body)`);
   }
 
   return res.json();

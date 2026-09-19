@@ -52,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Northbound Drupal HTTP timeouts.** JSON:API, GraphQL, and file-upload
   `node-fetch` calls abort after 30s (`AbortSignal.timeout`), matching the
   Drush SSH bound. A hung Drupal host no longer stalls the MCP process.
+- **Upload failures no longer return the raw response body (#343).**
+  `drupal_upload_file` and `drupal_upload_file_and_create_media` threw
+  `File upload failed <status>: <body>`. The error now keeps the status and
+  surfaces Drupal's `errors[].detail` (or `title`, or a plain `message`), with
+  markup and control characters stripped, server paths and stream-wrapper URIs
+  redacted, and a 400-character bound. An HTML page or a JSON body with no
+  error detail is never shown. New helper: `src/lib/error-body.js`.
 
 ## [2.19.1] - 2026-09-17
 
