@@ -21,9 +21,10 @@ Complete reference for all 123 tools across 27 modules.
 > `File upload failed <status>: <detail>`. The detail is Drupal's
 > `errors[].detail` (or `title`), GraphQL's `errors[].message`, an OAuth
 > `error` and `error_description`, or a plain `message`. Markup and control
-> characters are stripped. Server paths (any absolute path of two or more
-> segments, so `/about/team` as well as `/var/www/html`) and stream-wrapper
-> URIs become `[path]`. A backtrace is removed. One detail is cut to 400
+> characters are stripped. Filesystem paths and stream-wrapper URIs become
+> `[path]`; a site-relative URL path such as `/about/team` or `/node/12/edit`
+> is kept (#357, see [security.md](security.md#error-detail-path-redaction)).
+> A backtrace is removed. One detail is cut to 400
 > characters and a list of details to 1,200 (400 for an upload). An HTML page,
 > or a JSON body with no error detail, is never returned: the error says so and
 > gives the page title. An empty body reports `(empty response body)`.
