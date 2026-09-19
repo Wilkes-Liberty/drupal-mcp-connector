@@ -53,6 +53,14 @@ import { parse } from "graphql";
  *
  *  globalRedactedFields string[]         stripped from every response, every type
  *
+ *  protectedModules    string[]          module machine names ADDED to the default
+ *                                        protected list (DEFAULT_PROTECTED_MODULES).
+ *                                        drupal_drush_module_disable refuses them (#346).
+ *  allowProtectedModuleUninstall string[] explicit opt-out: names REMOVED from the
+ *                                        protected list. The only way to shrink it.
+ *                                        A malformed value in either key refuses
+ *                                        every uninstall rather than being ignored.
+ *
  *  declaredCeiling     string            narrow-only X-MCP-Declared-Ceiling
  *                                        (public|internal|restricted). Invalid
  *                                        values are dropped, never widened.
@@ -244,6 +252,69 @@ const PRESETS = {
  * @param {object} site Site config (reads site.security).
  * @returns {object} Effective security config used by the assert/redact helpers.
  */
+/**
+ * Modules drupal_drush_module_disable refuses to uninstall, on every preset
+ * (#346). Uninstalling one removes a control the connector relies on, and
+ * Drupal drops the module's hook_schema tables on uninstall, so an audit log or
+ * stored keys go with it. Operators extend the list with
+ * `security.protectedModules` and shrink it only with the explicit
+ * `security.allowProtectedModuleUninstall`.
+ */
+export const DEFAULT_PROTECTED_MODULES = Object.freeze([
+  // Governance and integrity.
+  "mcp_sentinel", "audit_chain", "field_guard", "file_gate",
+  // Secrets and authentication.
+  "key", "encrypt", "simple_oauth", "consumers",
+  // The API and governed tool surface the connector talks to.
+  "jsonapi", "serialization", "mcp_server", "mcp_server_tool_bridge", "tool",
+  // The editorial gate that decides publication.
+  "content_moderation", "workflows",
+]);
+
+/** Drupal module machine name. Same rule as validateMachineName(), kept local to avoid an import cycle. */
+const MODULE_NAME_RE = /^[a-z][a-z0-9_]{0,127}$/;
+
+/**
+ * Read one module-list key from raw site security config.
+ * @param {object} raw site.security.
+ * @param {string} key Config key.
+ * @param {string[]} problems Collects a message per malformed key.
+ * @returns {string[]} The valid names (empty when the key is absent or malformed).
+ */
+function readModuleList(raw, key, problems) {
+  const value = new Map(Object.entries(raw)).get(key);
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    problems.push(`security.${key} must be an array of module machine names.`);
+    return [];
+  }
+  const valid = value.filter((name) => typeof name === "string" && MODULE_NAME_RE.test(name));
+  if (valid.length !== value.length) {
+    problems.push(
+      `security.${key} has ${value.length - valid.length} entr${value.length - valid.length === 1 ? "y that is" : "ies that are"} ` +
+      "not a module machine name (lowercase letters, digits and underscores)."
+    );
+    // A malformed opt-out never removes anything; a malformed extension still adds its valid names.
+    return key === "allowProtectedModuleUninstall" ? [] : valid;
+  }
+  return valid;
+}
+
+/**
+ * Resolve the effective protected-module list for a site.
+ * @param {object} raw site.security.
+ * @returns {{modules: string[], optOuts: string[], error: ?string}} `error` is
+ *   set when either key is malformed; callers must then refuse every uninstall.
+ */
+function resolveProtectedModules(raw) {
+  const problems = [];
+  const added = readModuleList(raw, "protectedModules", problems);
+  const optOuts = readModuleList(raw, "allowProtectedModuleUninstall", problems);
+  const removed = new Set(optOuts);
+  const modules = [...new Set([...DEFAULT_PROTECTED_MODULES, ...added])].filter((name) => !removed.has(name)).sort();
+  return { modules, optOuts: [...removed].sort(), error: problems.length ? problems.join(" ") : null };
+}
+
 /** Default when `security.preset` is omitted — least privilege, not open mode (#140). */
 export const DEFAULT_SECURITY_PRESET = "production-strict";
 
@@ -253,6 +324,8 @@ export function resolveSecurityConfig(site) {
   // Open mode requires `preset: "development"` (or another named preset).
   const presetName = raw.preset ?? DEFAULT_SECURITY_PRESET;
   const preset = PRESETS[presetName] ?? PRESETS[DEFAULT_SECURITY_PRESET];
+
+  const protectedModules = resolveProtectedModules(raw);
 
   // Merge: explicit keys in site.security override the preset
   return {
@@ -272,6 +345,10 @@ export function resolveSecurityConfig(site) {
     ],
     declaredCeiling:       raw.declaredCeiling ?? preset.declaredCeiling,
     readBudgets:           raw.readBudgets ?? preset.readBudgets ?? null,
+    // Not a preset value: the default list applies on every preset (#346).
+    protectedModules:        protectedModules.modules,
+    protectedModuleOptOuts:  protectedModules.optOuts,
+    protectedModulesError:   protectedModules.error,
   };
 }
 
@@ -426,6 +503,33 @@ export function assertDestructiveAllowed(secConfig, entityType, id) {
       "Destructive operations (delete) are disabled for this site. " +
       `Blocked: delete ${entityType} ${id}. ` +
       "To enable, set security.allowDestructive = true in your config."
+    );
+  }
+}
+
+/**
+ * Gate a module uninstall (drupal_drush_module_disable) against the site's
+ * protected-module list (#346). Fails closed: a security config that is
+ * malformed, or that never went through resolveSecurityConfig(), refuses every
+ * uninstall.
+ * @param {object} secConfig Resolved security config.
+ * @param {string} moduleName Module machine name, already validated.
+ * @returns {void}
+ * @throws {SecurityError} if the module is protected or the list cannot be trusted.
+ */
+export function assertModuleUninstallAllowed(secConfig, moduleName) {
+  if (secConfig?.protectedModulesError || !Array.isArray(secConfig?.protectedModules)) {
+    throw new SecurityError(
+      "Module uninstall is blocked because this site's protected-module config cannot be read. " +
+      `${secConfig?.protectedModulesError ?? "The protected-module list is missing."} ` +
+      "No module can be uninstalled through the connector until an operator fixes it."
+    );
+  }
+  if (secConfig.protectedModules.includes(moduleName)) {
+    throw new SecurityError(
+      `Module "${moduleName}" is protected and cannot be uninstalled through the connector. ` +
+      "Uninstalling it removes a control the connector relies on, and Drupal drops the module's tables on uninstall. " +
+      `To allow it, an operator must add "${moduleName}" to security.allowProtectedModuleUninstall for this site.`
     );
   }
 }
@@ -751,5 +855,8 @@ export function getSecuritySummary(site) {
     entityRules:           cfg.entityRules,
     globalRedactedFields:  cfg.globalRedactedFields,
     declaredCeiling:       cfg.declaredCeiling ?? null,
+    protectedModules:      cfg.protectedModules,
+    protectedModuleOptOuts: cfg.protectedModuleOptOuts,
+    ...(cfg.protectedModulesError ? { protectedModulesError: cfg.protectedModulesError } : {}),
   };
 }
