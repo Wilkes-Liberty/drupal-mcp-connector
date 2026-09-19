@@ -76,19 +76,32 @@ async function readOkBody(res) {
  * @param {object} res node-fetch Response with `ok === false`.
  * @param {string} prefix Message start, e.g. "Drupal 404 on GET /jsonapi/x".
  * @param {object} [options] Passed to `describeErrorBody`.
- * @returns {Promise<Error>} A source budget denial, or the described failure.
+ * @returns {Promise<Error>} A source budget denial, or the described failure
+ *   with the HTTP status on its `status` property. Callers that branch on the
+ *   status read it with `httpStatusOf()`, never from the message text (#355).
  */
 async function failedResponseError(res, prefix, options) {
   let body;
   try {
     body = await res.text();
   } catch {
-    return new Error(`${prefix} (response body could not be read)`);
+    return withStatus(new Error(`${prefix} (response body could not be read)`), res.status);
   }
   const mapped = sourceBudgetDenial(body);
   if (mapped) return mapped;
   const detail = describeErrorBody(body, res.headers?.get?.("content-type") ?? null, options);
-  return new Error(detail ? `${prefix}: ${detail}` : `${prefix} (empty response body)`);
+  return withStatus(new Error(detail ? `${prefix}: ${detail}` : `${prefix} (empty response body)`), res.status);
+}
+
+/**
+ * Set the HTTP status on an error.
+ * @param {Error} error Error to mark.
+ * @param {number} status HTTP status of the response.
+ * @returns {Error} The same error.
+ */
+function withStatus(error, status) {
+  error.status = status;
+  return error;
 }
 
 /**

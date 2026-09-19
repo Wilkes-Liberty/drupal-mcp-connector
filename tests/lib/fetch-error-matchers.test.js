@@ -288,3 +288,76 @@ describe("tool matchers", () => {
     expect(classifyTargetError(await fetchError(500, HTML_PAGE, { contentType: "text/html" }))).toBe("failed");
   });
 });
+
+// A status number inside the path or the detail is not the response status.
+// Each matcher below used to test the whole message for a bare number (#355).
+describe("matchers read the response status, not a number in the text", () => {
+  it("drupalFetch and drupalGraphqlFetch errors carry the status", async () => {
+    expect((await fetchError(500, jsonApiErrors(500, "Upstream answered 404."))).status).toBe(500);
+    expect((await fetchError(404, "")).status).toBe(404);
+    expect((await graphqlError(401, HTML_PAGE, "text/html")).status).toBe(401);
+  });
+
+  it("classifyTargetError does not read a 500 that mentions 404 as a missing target", async () => {
+    const upstream = await fetchError(500, jsonApiErrors(500, "Upstream answered 404 for the media source."), { path: "/jsonapi/media/image/x" });
+    expect(classifyTargetError(upstream)).toBe("failed");
+
+    const quoted = await fetchError(500, jsonApiErrors(500, "Subrequest failed: Drupal 404 on GET /jsonapi/file/file/f1"));
+    expect(classifyTargetError(quoted)).toBe("failed");
+
+    const idInPath = await fetchError(403, jsonApiErrors(403, "Access denied."), { path: "/jsonapi/node/article/404" });
+    expect(classifyTargetError(idInPath)).toBe("forbidden");
+  });
+
+  it("classifyTargetError reads a message with no status property only at its start", () => {
+    expect(classifyTargetError(new Error("Drupal 404 on GET /jsonapi/node/page/n1: Not Found"))).toBe("missing");
+    expect(classifyTargetError(new Error("Drupal 403 on GET /jsonapi/node/page/n1: Access denied"))).toBe("forbidden");
+    expect(classifyTargetError(new Error("Upstream answered 404 for the media source."))).toBe("failed");
+    expect(classifyTargetError(new Error("lookup failed: Drupal 404 on GET /jsonapi/x"))).toBe("failed");
+    expect(classifyTargetError(new Error("connect ECONNREFUSED 10.0.0.4:404"))).toBe("failed");
+  });
+
+  it("isAuthError does not read a 401 or 403 in the path or the detail as an auth failure", async () => {
+    const idInPath = await fetchError(404, jsonApiErrors(404, "The requested resource was not found."), { path: "/jsonapi/node/article/401" });
+    expect(isAuthError(idInPath)).toBe(false);
+
+    const detail = await fetchError(500, jsonApiErrors(500, "Node 401 could not be rendered."));
+    expect(isAuthError(detail)).toBe(false);
+
+    const tokenWord = await fetchError(500, jsonApiErrors(500, "Replacement token [node:403] could not be resolved."));
+    expect(isAuthError(tokenWord)).toBe(false);
+
+    const graphql = await graphqlError(500, JSON.stringify({ errors: [{ message: "Entity 401 failed to load." }] }));
+    expect(isAuthError(graphql)).toBe(false);
+
+    expect(isAuthError(new Error("connect ECONNREFUSED 10.0.0.4:401"))).toBe(false);
+  });
+
+  it("isProbePassedWithoutSave does not read a failure that mentions Drupal 422 as a passed probe", async () => {
+    const failed = await fetchError(500, jsonApiErrors(500, "Subrequest returned Drupal 422 while saving."), { method: "PATCH" });
+    expect(isProbePassedWithoutSave(failed)).toBe(false);
+
+    const denied = await fetchError(403, jsonApiErrors(403, "Denied. An earlier attempt ended in Drupal 422."), { method: "PATCH" });
+    expect(isProbePassedWithoutSave(denied)).toBe(false);
+  });
+
+  it("isInaccessiblePathError does not read a 422 in the path or the detail as the 422 race", async () => {
+    const forbidden = await fetchError(403, jsonApiErrors(403, "Menu link 422: the path '/about/team' is inaccessible."), { method: "POST" });
+    expect(isInaccessiblePathError(forbidden)).toBe(false);
+
+    const idInPath = await fetchError(500, jsonApiErrors(500, "The storage is inaccessible."), { method: "PATCH", path: "/jsonapi/menu_link_content/menu_link_content/422" });
+    expect(isInaccessiblePathError(idInPath)).toBe(false);
+  });
+
+  it("a draft or inventory failure that mentions Drupal 404 is not an absent endpoint", async () => {
+    const input = { entityType: "node", bundle: "page", id: "n1", attributes: { title: "T" }, draftRevision: { liveVid: "10", workingVid: "12" } };
+    respondWith(500, jsonApiErrors(500, "Subrequest failed: Drupal 404 on GET /jsonapi/file/file/f1"));
+    const draft = await writeDraft(backend, input, true).catch((err) => err);
+    expect(isMissingDraftEndpoint(draft)).toBe(false);
+    expect(draft.message).toContain("Drupal 500");
+
+    respondWith(403, jsonApiErrors(403, "Denied. The upstream said Drupal 405."));
+    const inventory = await readTranslationInventory(backend, { entityType: "node", bundle: "page", id: "n1" }).catch((err) => err);
+    expect(isMissingTranslationEndpoint(inventory)).toBe(false);
+  });
+});

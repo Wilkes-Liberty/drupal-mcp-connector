@@ -12,6 +12,7 @@ import { drupalFetch } from "../drupal-fetch.js";
 import { drupalGraphqlFetch } from "../drupal-fetch.js";
 import { clearToken } from "../oauth.js";
 import { describeGraphqlErrors } from "../error-body.js";
+import { httpStatusOf } from "../error-status.js";
 import { JsonApiBackend } from "./jsonapi.js";
 import { GraphqlBackend } from "./graphql.js";
 import { BackendResolutionError } from "./errors.js";
@@ -44,9 +45,11 @@ export function _clearBackendCache() {
  */
 export function isAuthError(err) {
   const msg = String(err?.message || "");
+  // The response status, never a bare "401" in the path or the detail (#355).
+  const status = httpStatusOf(err);
   return (
-    /\b401\b/.test(msg) ||
-    (/\b403\b/.test(msg) && /token|oauth|credential|scope/i.test(msg)) ||
+    status === 401 ||
+    (status === 403 && /token|oauth|credential|scope/i.test(msg)) ||
     /invalid_client|invalid_grant|unauthorized_client|invalid_token/i.test(msg) ||
     /\bunauthorized\b/i.test(msg)
   );
