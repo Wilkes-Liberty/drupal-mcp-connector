@@ -1,11 +1,11 @@
 ---
-description: "Set a Drupal configuration value via the governed server-side config tool. Audited and gated server-side; requires the config-editor (Developer) tier. Then export to YAML for a PR."
+description: "Set a Drupal configuration value via the governed server-side config tool. Audited and gated server-side; requires the config-editor (Developer) tier. Then export to YAML for a PR. Refused for `core.extension`, which lists installed modules and themes: use drupal_drush_module_enable or drupal_drush_module_disable instead. Only an operator can allow it, with `allowCoreExtensionChange` in site config (see drupal_security_info), and a value that removes a protected module is still refused."
 argument-hint: "<name> <value> [site]"
 ---
 
 Call the MCP tool `drupal_config_set`.
 
-Set a Drupal configuration value via the governed server-side config tool. Audited and gated server-side; requires the config-editor (Developer) tier. Then export to YAML for a PR.
+Set a Drupal configuration value via the governed server-side config tool. Audited and gated server-side; requires the config-editor (Developer) tier. Then export to YAML for a PR. Refused for `core.extension`, which lists installed modules and themes: use drupal_drush_module_enable or drupal_drush_module_disable instead. Only an operator can allow it, with `allowCoreExtensionChange` in site config (see drupal_security_info), and a value that removes a protected module is still refused.
 
 Parse the arguments supplied with this command into this tool's parameters:
 

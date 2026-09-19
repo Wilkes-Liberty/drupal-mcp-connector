@@ -427,7 +427,35 @@ The list is on by default. Two per-site keys under `security` change it:
 
 `drupal_security_info` shows the effective list as `protectedModules` and the opt-outs as `protectedModuleOptOuts`.
 
-The list covers this tool only. It does not cover a module removed by `drupal_drush_config_import` from a changed `core.extension`; keep `config:import` out of `drushSsh.allowedCommands` on sites where that matters.
+#### Changes to `core.extension`
+
+`core.extension` is the config object that lists installed modules and themes. Two other connector tools could change it, and so uninstall a module without going through the list above. Both are refused on every preset.
+
+- **`drupal_config_set` refuses `core.extension`.** A write there can install or uninstall any module or theme without running Drupal's install and uninstall steps. The refusal names `drupal_drush_module_enable` and `drupal_drush_module_disable`. The name check ignores surrounding space and case, because the source trims the name. Nothing is sent to the site. The check runs before the binding path and the unbound path split, so it covers both.
+- **`drupal_drush_config_import` refuses an import that changes `core.extension`.** `config:import` uninstalls every module the sync directory's `core.extension` no longer lists, and the bridge answers the prompt "yes". Before the import the tool runs `drush config:status --format=json`, a read-only command. If `core.extension` is among the changed objects, nothing is imported. The connector cannot read the sync directory, so it cannot say which modules would change; it refuses on "core.extension differs" alone. If the status cannot be read or understood, nothing is imported. When `drushSsh.allowedCommands` is set it must list `config:status` as well as `config:import`, or every import is refused. An import that leaves `core.extension` alone runs as before.
+
+One per-site key under `security` opens both:
+
+```json
+{ "preset": "config-editor", "allowCoreExtensionChange": true }
+```
+
+- It is `false` on every preset, `development` included. Only `true` opens it.
+- A value that is not `true` or `false` (the string `"true"`, `1`) keeps both refused, and the refusal says the value is malformed.
+- It opens no other gate. `readOnly`, `allowConfigWrite`, the `mcp_config` scope and `drushSsh.allowedCommands` still apply.
+- With the key set, `drupal_config_set` still checks the value against the protected list. A `module` key replaces the whole module map, so the tool first reads the current `core.extension` through the governed config read and refuses when a protected module that is installed now is missing from the new map. A dotted key such as `module.key` that names a protected module is refused. If the read is disabled, fails, or returns no module map, nothing is written. Name a module in `allowProtectedModuleUninstall` to take it out of this check.
+- With the key set, `drupal_drush_config_import` runs without the status read, as it did before. The connector cannot see which modules such an import removes, so the protected list does not apply to it. Set the key only on a site where the sync directory is reviewed before it is imported.
+
+`drupal_security_info` shows `allowCoreExtensionChange`, and `coreExtensionChangeError` when the value is malformed.
+
+What the connector cannot cover:
+
+- **A config import the connector does not run.** A deploy pipeline or a person who runs `drush config:import` or `drush deploy` on the server, or the config sync form in the Drupal UI, never passes through the connector.
+- **Another client.** Any client with the same Drupal credentials can call the site's config tool or JSON:API directly.
+- **The window between the status read and the import.** Someone who can write to the sync directory can change `core.extension` after the check. The check narrows the path; it does not close that race.
+- **A module-owned tool that writes config.** Its rules live in Drupal, not here.
+
+The source-side control covers the first two for governed writes. Add `core.extension` to `denied_config_types` on the MCP Sentinel policy profile that governs the agent. Sentinel then denies the write whichever client sends it, and reverts and refuses a governed save that reaches `Config::save()` directly. A `config:import` run by a person or a deploy on the server is outside Sentinel's agent policy too; protect that path with review of the sync directory and with who holds shell access.
 
 ---
 

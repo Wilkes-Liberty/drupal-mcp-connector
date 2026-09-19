@@ -48,6 +48,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependents is refused and names them. The handler also checks
   `allowDestructive` itself. `drupal_security_info` shows the effective list.
   One stub under `.agents/commands/` was regenerated.
+- **`core.extension` can no longer be changed through config tools by default (#349).**
+  The protected-module list covered `drupal_drush_module_disable` only. Two
+  other tools could still uninstall a module. `drupal_config_set` now refuses a
+  write to `core.extension` and names `drupal_drush_module_enable` and
+  `drupal_drush_module_disable`; the name check ignores surrounding space and
+  case, and covers the binding path and the unbound path.
+  `drupal_drush_config_import` now runs `drush config:status` first and imports
+  nothing when `core.extension` differs, or when the status cannot be read or
+  understood. The connector cannot read the sync directory, so it refuses on
+  "core.extension differs" and does not name the modules. **Operators:** if
+  `drushSsh.allowedCommands` is set and lists `config:import`, add
+  `config:status`, or every import is refused. An import that leaves
+  `core.extension` alone, and `drupal_config_set` on any other object, work as
+  before. New per-site key `security.allowCoreExtensionChange` (`true` or
+  `false`, default `false` on every preset) opens both; any other value keeps
+  both refused. With it set, `drupal_config_set` still reads the current module
+  list and refuses a value that removes or alters an installed protected module,
+  and `drupal_drush_config_import` runs unchecked. `drupal_security_info` shows
+  the key. `docs/security.md` lists what stays out of the connector's reach (an
+  import run on the server, another client, the window between the status read
+  and the import) and points to MCP Sentinel's `denied_config_types` as the
+  source-side control. Two stubs under `.agents/commands/` were regenerated.
 
 ### Fixed
 - **`dryRun` says what it checked (#336).** A preview could return without a

@@ -27,7 +27,8 @@ import { homedir }       from "os";
 import { join, resolve, normalize } from "path";
 import { getSiteConfig } from "../lib/config.js";
 import {
-  resolveSecurityConfig, assertNotReadOnly, assertDestructiveAllowed, assertModuleUninstallAllowed, SecurityError,
+  resolveSecurityConfig, assertNotReadOnly, assertDestructiveAllowed, assertModuleUninstallAllowed,
+  assertCoreExtensionChangeAllowed, isCoreExtensionConfig, SecurityError,
 } from "../lib/security.js";
 import { validateMachineName, validateSqlQuery, sanitizeSshArg } from "../lib/validate.js";
 
@@ -319,14 +320,93 @@ async function configExport({ site: siteName }) {
 }
 
 /**
+ * Read the config names `drush config:status` reports as changed.
+ *
+ * Drush prints nothing, `[]` or `{}` when active config matches the sync
+ * directory. Otherwise it prints an object keyed by config name, or a list of
+ * `{ name, state }` rows. Any other output is not understood.
+ * @param {string} output Trimmed stdout of `config:status --format=json`.
+ * @returns {?string[]} Changed config names, or null when the output is not understood.
+ */
+function changedConfigNames(output) {
+  if (!output) return [];
+  const data = parseDrush(output);
+  if (Array.isArray(data)) {
+    const names = data.map((row) => (row && typeof row === "object" ? row.name : undefined));
+    return names.every((name) => typeof name === "string" && name) ? names : null;
+  }
+  if (data && typeof data === "object") {
+    // Keyed by config name. A row's own `name` is read too, so an object keyed
+    // by row index cannot hide a config name from the check.
+    const rowNames = Object.values(data)
+      .map((row) => (row && typeof row === "object" ? row.name : undefined))
+      .filter((name) => typeof name === "string" && name);
+    return [...Object.keys(data), ...rowNames];
+  }
+  return null;
+}
+
+/**
+ * Refuse a config import that would change core.extension (#349).
+ *
+ * `config:import` uninstalls every module that core.extension in the sync
+ * directory no longer lists, and the bridge answers the prompt "yes". The
+ * connector cannot read the sync directory, so it cannot tell which modules
+ * those are. It reads `config:status`, a read-only command, and refuses when
+ * core.extension is among the changed objects. Fails closed: if the status
+ * cannot be read or understood, nothing is imported.
+ *
+ * The sync directory can change between this read and the import. The check
+ * narrows the path; it does not close a race with someone who can write there.
+ * @param {object} site Resolved site config.
+ * @param {object} sec Resolved security config.
+ * @returns {Promise<void>}
+ * @throws {SecurityError} if core.extension differs, or the status is unreadable.
+ */
+async function assertImportKeepsCoreExtension(site, sec) {
+  if (sec.allowCoreExtensionChange === true && !sec.coreExtensionChangeError) return;
+  const unchecked = "The config import was refused because core.extension could not be checked first. Nothing was imported.";
+  let output;
+  try {
+    output = await sshDrush(site, ["config:status", "--format=json"]);
+  } catch (err) {
+    if (err instanceof SecurityError) {
+      throw new SecurityError(
+        `${unchecked} The check runs \`drush config:status\`, a read-only command, and this site's ` +
+        "drushSsh.allowedCommands does not list it. An operator must add \"config:status\" to allowedCommands."
+      );
+    }
+    throw new SecurityError(`${unchecked} \`drush config:status\` failed: ${String(err?.message ?? err).slice(0, 300)}`);
+  }
+  const names = changedConfigNames(output);
+  if (!names) {
+    throw new SecurityError(`${unchecked} The output of \`drush config:status --format=json\` was not understood.`);
+  }
+  if (names.some(isCoreExtensionConfig)) {
+    assertCoreExtensionChangeAllowed(
+      sec,
+      "The config import was refused because core.extension differs between the site and the sync directory. " +
+      "Importing it installs and uninstalls modules, and can uninstall a protected one. " +
+      "The connector cannot read the sync directory, so it cannot tell which modules would change. Nothing was imported."
+    );
+  }
+}
+
+/**
  * Import config from the sync directory into the DB (`drush config:import`).
+ *
+ * Refused when core.extension differs, unless the operator set
+ * `security.allowCoreExtensionChange` (#349).
  * @param {object} args - { site? }.
  * @returns {Promise<{success: boolean, message: string}>}
- * @throws {SecurityError} If the site is read-only.
+ * @throws {SecurityError} If the site is read-only, core.extension differs, or
+ *   `config:status` cannot be read.
  */
 async function configImport({ site: siteName }) {
   const site = getSiteConfig(siteName);
-  assertNotReadOnly(resolveSecurityConfig(site), "drush config:import");
+  const sec = resolveSecurityConfig(site);
+  assertNotReadOnly(sec, "drush config:import");
+  await assertImportKeepsCoreExtension(site, sec);
   await sshDrush(site, ["config:import"]);
   return { success: true, message: "Configuration imported from sync directory." };
 }
@@ -608,7 +688,7 @@ export const definitions = [
   { name: "drupal_drush_status",           description: "Get Drupal site status via `drush status` — version, DB, file paths, active config.", inputSchema: { type: "object", properties: { site: { type: "string" } } } },
   { name: "drupal_drush_config_status",    description: "Check if active config is in sync with the sync directory. Returns out-of-sync items if any.", inputSchema: { type: "object", properties: { site: { type: "string" } } } },
   { name: "drupal_drush_config_export",    description: "Export active configuration to the sync directory. Requires write access.", inputSchema: { type: "object", properties: { site: { type: "string" } } } },
-  { name: "drupal_drush_config_import",    description: "Import configuration from the sync directory into the database. Requires write access. Confirm with user before running on production.", inputSchema: { type: "object", properties: { site: { type: "string" } } } },
+  { name: "drupal_drush_config_import",    description: "Import configuration from the sync directory into the database. Requires write access. Confirm with user before running on production. Reads `drush config:status` first and refuses the import when `core.extension` differs, because such an import installs and uninstalls modules and can remove a protected one; nothing is imported, and the status read must be allowed in `drushSsh.allowedCommands`. Use drupal_drush_module_enable or drupal_drush_module_disable for a module change. Only an operator can allow it, with `allowCoreExtensionChange` in site config (see drupal_security_info).", inputSchema: { type: "object", properties: { site: { type: "string" } } } },
   { name: "drupal_drush_updatedb",         description: "Run pending database updates via `drush updatedb`. Always run after deploying module updates.", inputSchema: { type: "object", properties: { site: { type: "string" } } } },
   { name: "drupal_drush_security_updates", description: "List modules with known security advisories via `drush pm:security`.", inputSchema: { type: "object", properties: { site: { type: "string" } } } },
   {

@@ -469,7 +469,7 @@ the server will deny. Requires a `serverTools` block on the site.
 |------|----------------|-----|-------------|
 | `drupal_config_get` | `name` | configRead + `mcp_config` | Read one config object (e.g. `system.site`). |
 | `drupal_config_list` | — | configRead + `mcp_config` | List config object names; optional `prefix`. |
-| `drupal_config_set` | `name`, `value` | configWrite + `mcp_config` | Set a config value (governed + audited server-side). |
+| `drupal_config_set` | `name`, `value` | configWrite + `mcp_config` | Set a config value (governed + audited server-side). Refuses `core.extension` unless the operator set `security.allowCoreExtensionChange`; see [Changes to core.extension](security.md#changes-to-coreextension). |
 | `drupal_mcp_whoami` | — | — | Report effective tier, preset, scopes, capabilities, and resolved `target` (`name`, `baseUrl`, `source`) for a site. |
 
 `drupal_config_set` requires the `config-editor` (Developer) tier or
@@ -521,7 +521,7 @@ Requires `drushSsh` config block. SSH key auth only — no passwords. An optiona
 | `drupal_drush_cache_rebuild` | ✅ | `drush cache:rebuild`. |
 | `drupal_drush_cron` | ✅ | `drush cron`. |
 | `drupal_drush_config_export` | ✅ | Export config to sync directory. |
-| `drupal_drush_config_import` | ✅ | Import config from sync directory. Confirm before prod. |
+| `drupal_drush_config_import` | ✅ | Import config from sync directory. Confirm before prod. Runs `config:status` first and imports nothing when `core.extension` differs or the status cannot be read; see [Changes to core.extension](security.md#changes-to-coreextension). |
 | `drupal_drush_updatedb` | ✅ | Run pending DB updates. |
 | `drupal_drush_module_enable` | ✅ | Enable a module. Machine name validated. |
 | `drupal_drush_module_disable` | ✅ | Uninstall a module. Irreversible. Confirm first. Refuses a protected module (governance, integrity, secrets, auth, API; see [Protected modules](security.md#protected-modules)) and an uninstall that would cascade to dependents. |
