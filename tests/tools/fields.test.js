@@ -115,6 +115,68 @@ describe("fields tools", () => {
     delete backend.listFieldTranslatability;
   });
 
+  // #337: JSON:API omits a view-denied field from the resource, so sampling
+  // cannot see it. Field API definitions the call already reads can.
+  it("lists fields that Field API defines but the sampled entity does not carry as notVisible", async () => {
+    backend.getEntitySchema.mockResolvedValue(sampledSchema());
+    backend.listFieldTranslatability = vi.fn(async () => ({
+      body: true, field_image: false, field_internal_notes: false, field_secret_ref: true,
+    }));
+    const out = await handlers.drupal_describe_fields({ site: "d", type: "node", bundle: "article" });
+    expect(out.fieldDefinitions).toBe("available");
+    expect(out.notVisible).toEqual([
+      { name: "field_internal_notes", translatable: false },
+      { name: "field_secret_ref", translatable: true },
+    ]);
+    expect(out.notVisibleNote).toMatch(/denied to this account/);
+    // They are listed apart: the sampled field list and its count are unchanged.
+    expect(out.fields.map((f) => f.name)).not.toContain("field_internal_notes");
+    expect(out.fieldCount).toBe(7);
+    expect(backend.listFieldTranslatability).toHaveBeenCalledTimes(1);
+    expect(backend.getEntitySchema).toHaveBeenCalledTimes(1);
+    delete backend.listFieldTranslatability;
+  });
+
+  it("does not list a defined field whose key is present with an empty value", async () => {
+    // The sampled type of a null attribute is still a key in the schema.
+    backend.getEntitySchema.mockResolvedValue(sampledSchema({
+      attributes: { title: "string", field_subtitle: "null" },
+      relationships: { field_image: "relationship" },
+    }));
+    backend.listFieldTranslatability = vi.fn(async () => ({ field_subtitle: true, field_image: false }));
+    const out = await handlers.drupal_describe_fields({ site: "d", type: "node", bundle: "article" });
+    expect(out.notVisible).toEqual([]);
+    expect(out).not.toHaveProperty("notVisibleNote");
+    delete backend.listFieldTranslatability;
+  });
+
+  it("says so when field definitions are unavailable, and claims nothing", async () => {
+    backend.getEntitySchema.mockResolvedValue(sampledSchema());
+    const bare = await handlers.drupal_describe_fields({ site: "d", type: "node", bundle: "article" });
+    expect(bare.fieldDefinitions).toBe("unavailable");
+    expect(bare).not.toHaveProperty("notVisible");
+    expect(bare.note).toMatch(/not visible|denied/i);
+
+    backend.listFieldTranslatability = vi.fn(async () => ({}));
+    const empty = await handlers.drupal_describe_fields({ site: "d", type: "node", bundle: "article" });
+    expect(empty.fieldDefinitions).toBe("unavailable");
+    expect(empty).not.toHaveProperty("notVisible");
+
+    backend.listFieldTranslatability = vi.fn(async () => { throw new Error("Drupal 403"); });
+    const denied = await handlers.drupal_describe_fields({ site: "d", type: "node", bundle: "article" });
+    expect(denied.fieldDefinitions).toBe("unavailable");
+    expect(denied).not.toHaveProperty("notVisible");
+    delete backend.listFieldTranslatability;
+  });
+
+  it("claims nothing about visibility when no entity was sampled", async () => {
+    backend.getEntitySchema.mockResolvedValue({ entityType: "node", bundle: "page", attributes: {}, relationships: {} });
+    backend.listFieldTranslatability = vi.fn(async () => ({ body: true }));
+    const out = await handlers.drupal_describe_fields({ site: "d", type: "node", bundle: "page" });
+    expect(out).not.toHaveProperty("notVisible");
+    delete backend.listFieldTranslatability;
+  });
+
   it("handles an empty schema (no entities sampled) gracefully", async () => {
     backend.getEntitySchema.mockResolvedValue({
       entityType: "node",
