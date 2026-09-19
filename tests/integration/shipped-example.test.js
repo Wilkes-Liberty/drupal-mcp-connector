@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { verifyStatic, isNeutralHost } from "../../src/lib/verify.js";
+import { configuredModuleTools, resolveModuleBinding } from "../../src/lib/module-tools.js";
 
 /**
  * The shipped example configuration is a claim: "this is what a secure,
@@ -78,5 +79,67 @@ describe("config/config.example.json — the shipped secure default", () => {
     const raw = readRepoFile("config/config.example.json");
     expect(raw).not.toMatch(/"clientSecret"\s*:/);
     expect(raw).not.toMatch(/"apiToken"\s*:/);
+  });
+
+  describe("the documented serverTools.modules and bindings example (#348)", () => {
+    // The example lives under a documentation key, so the static verifier never
+    // sees it. It is checked here against the registry's own validation.
+    const documented = () => JSON.parse(readRepoFile("config/config.example.json"))._server_tools?.example?.serverTools;
+    const exampleSite = () => ({
+      _name: "example",
+      baseUrl: "https://drupal.example.com",
+      security: { preset: "config-editor" },
+      drushSsh: { rawSql: "governed" },
+      serverTools: documented(),
+    });
+
+    /** What each compatibility command requires of its bound alias. */
+    const CONTRACTS = new Map([
+      ["configGet", { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }],
+      ["configList", { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }],
+      ["configSet", { operation: "write", scope: "mcp_config", capabilities: ["configWrite"] }],
+      ["codegenInspect", { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }],
+      ["codegenDiff", { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }],
+      ["codegenPreview", { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }],
+      ["sqlQuery", { operation: "read", scope: "mcp_admin", capabilities: ["rawSql"] }],
+    ]);
+
+    it("passes the module registry's own policy validation", () => {
+      expect(documented()?.url).toBe("/mcp");
+      const tools = configuredModuleTools([exampleSite()]);
+      expect(tools.length).toBeGreaterThanOrEqual(2 + CONTRACTS.size);
+      expect(new Set(tools.map((t) => t.namespace))).toEqual(new Set([documented().modules.namespace]));
+    });
+
+    it("documents all seven bindings, each satisfying its command's contract", () => {
+      expect(Object.keys(documented().bindings).sort()).toEqual([...CONTRACTS.keys()].sort());
+      for (const [binding, required] of CONTRACTS) {
+        expect(() => resolveModuleBinding(exampleSite(), binding, required), binding).not.toThrow();
+      }
+    });
+
+    it("shows two module-owned tools with every policy key", () => {
+      const bound = new Set(Object.values(documented().bindings));
+      const own = Object.entries(documented().modules.tools).filter(([alias]) => !bound.has(alias));
+      expect(own.length).toBe(2);
+      for (const [, policy] of own) {
+        expect(Object.keys(policy).sort()).toEqual(["capabilities", "name", "operation", "scope"]);
+      }
+      expect(new Set(own.map(([, policy]) => policy.operation))).toEqual(new Set(["read", "write"]));
+    });
+
+    it("uses neutral names and points at the docs and the stub installer", () => {
+      const block = JSON.stringify(JSON.parse(readRepoFile("config/config.example.json"))._server_tools);
+      expect(block).toMatch(/docs\/module-tools\.md/);
+      expect(block).toContain("npm run install:commands -- --modules");
+      expect(block).not.toMatch(/crm|client|customer|prod_/i);
+    });
+
+    it("points the drush SQL comment at the sqlQuery binding", () => {
+      const raw = JSON.parse(readRepoFile("config/config.example.json"));
+      const comment = raw.sites.development.drushSsh._comment;
+      expect(comment).toContain("serverTools.bindings.sqlQuery");
+      expect(comment).toContain("rawSql");
+    });
   });
 });

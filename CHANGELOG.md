@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configured tools, the missing ones are named and older stubs are kept. A
   plain `install:commands` never writes module stubs and leaves installed ones
   in place.
+- **Example config documents module tools and bindings (#348).**
+  `config/config.example.json` now has a `_server_tools.example` block with
+  `serverTools.modules` (a namespace, two module-owned tools) and all seven
+  `serverTools.bindings`, plus notes on each key. The `drushSsh` SQL note names
+  the `sqlQuery` binding. A test runs the example through the module registry's
+  validation.
 
 ### Changed
 - Prompts and command stubs show a parameter's allowed values when its schema
