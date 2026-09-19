@@ -451,9 +451,17 @@ async function disableModule({ site: siteName, moduleName }) {
     const list = cascadeList(failure);
     if (!list) throw failure;
     const dependents = list.filter((name) => name !== moduleName);
+    if (dependents.length === 0) {
+      // Drush 13 prompts only for a cascade. Older releases prompt on every
+      // uninstall, and the "no" answer cancels those too.
+      throw new SecurityError(
+        `Drush asked to confirm uninstalling "${moduleName}" alone and the bridge answers "no", so nothing was uninstalled. ` +
+        "This Drush release prompts on every uninstall; the cascade guard needs Drush 13 or later on the site."
+      );
+    }
     const guarded = dependents.filter((name) => sec.protectedModules.includes(name));
     throw new SecurityError(
-      `Uninstalling "${moduleName}" would also uninstall: ${dependents.join(", ") || "(Drush named no module)"}. ` +
+      `Uninstalling "${moduleName}" would also uninstall: ${dependents.join(", ")}. ` +
       "Nothing was uninstalled. " +
       (guarded.length ? `Protected: ${guarded.join(", ")}. ` : "") +
       "Uninstall each dependent by name first; each one goes through the protected-module check."

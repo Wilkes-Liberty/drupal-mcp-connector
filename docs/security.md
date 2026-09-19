@@ -423,7 +423,7 @@ The list is on by default. Two per-site keys under `security` change it:
 - A value that is not an array of module machine names in either key blocks every uninstall on that site until it is fixed. It is not ignored.
 - Neither key opens another gate. The tool still needs `readOnly: false`, `allowDestructive: true`, and `pm:uninstall` in `drushSsh.allowedCommands` when that list is set. `production-strict` is read-only, so the tool stays refused there.
 
-`pm:uninstall` also uninstalls every module that depends on the named one. The bridge answers that Drush prompt "no", so a cascading uninstall is cancelled and nothing is removed. The error names the dependents and marks the protected ones. Uninstall each dependent by name first; each name goes through the same check. A protected module cannot be removed through one of its dependencies.
+`pm:uninstall` also uninstalls every module that depends on the named one. The bridge answers that Drush prompt "no", so a cascading uninstall is cancelled and nothing is removed. The error names the dependents and marks the protected ones. Uninstall each dependent by name first; each name goes through the same check. A protected module cannot be removed through one of its dependencies. Drush 13 prompts only for a cascade. An older Drush prompts on every uninstall, so the tool refuses all of them there and says why.
 
 `drupal_security_info` shows the effective list as `protectedModules` and the opt-outs as `protectedModuleOptOuts`.
 
