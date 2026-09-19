@@ -18,8 +18,8 @@
  * Config (per site):
  *   "serverTools": { "url": "/mcp" }   // path is resolved against site.baseUrl
  *
- * Tools are NOT functional until the Drupal-side governed config tools ship;
- * until then the server returns a tool-not-found error, surfaced verbatim.
+ * The governed config tools work only when the source advertises them to this
+ * account in `tools/list`; otherwise the call fails closed before it is sent.
  */
 
 import fetch from "node-fetch";
@@ -37,19 +37,103 @@ export async function callBoundModuleTool(site, binding, args, required) {
 }
 
 /**
- * Canonical server-side tool names for governed config operations.
- *
- * Drupal's mcp_server_tool_bridge exposes every Tool-API tool through the MCP
- * protocol under the derivative name `tool_api.<mcp_tool_config id>`, so the
- * governed config tools registered against mcp_sentinel's McpConfigGet/List/Set
- * plugins surface as `tool_api.mcp_sentinel_config_*`. Keep the mapping here so
- * a server-side rename is a one-line change.
+ * Tool API ids of the governed config tools (mcp_sentinel's McpConfigGet/List/Set
+ * plugins). These are ids, not wire names: the bridge decides the wire name, so
+ * it is resolved from the source's `tools/list` (see resolveServerToolName).
  */
-export const SERVER_TOOLS = {
-  configGet:  "tool_api.mcp_sentinel_config_get",
-  configList: "tool_api.mcp_sentinel_config_list",
-  configSet:  "tool_api.mcp_sentinel_config_set",
-};
+export const SERVER_TOOL_IDS = Object.freeze({
+  configGet:  "mcp_sentinel_config_get",
+  configList: "mcp_sentinel_config_list",
+  configSet:  "mcp_sentinel_config_set",
+});
+
+/**
+ * Wire-name prefixes the Drupal tool bridge has used for a Tool API tool, in
+ * order of preference. Current mcp_server releases join the `tool_api` base id
+ * and the tool id with `__`; older ones used a dot.
+ */
+const WIRE_PREFIXES = ["tool_api__", "tool_api."];
+
+/** Upper bound on `tools/list` pages read while resolving a name. */
+const MAX_CATALOG_PAGES = 16;
+
+/**
+ * Wire names a bridge may advertise for a Tool API id, preferred first.
+ * @param {string} id Tool API id, e.g. `mcp_sentinel_config_set`.
+ * @returns {string[]} Candidate wire names.
+ */
+export function serverToolCandidates(id) {
+  return WIRE_PREFIXES.map((prefix) => `${prefix}${id}`);
+}
+
+/**
+ * Read every tool name the source advertises to this caller.
+ * @param {object} site Resolved site config.
+ * @param {Function} [list] Catalog page reader `(site, cursor) => {tools, nextCursor}`.
+ * @returns {Promise<Set<string>>} Advertised tool names.
+ * @throws {Error} on a malformed page, a repeated cursor, or too many pages.
+ */
+export async function advertisedServerToolNames(site, list = listServerTools) {
+  const names = new Set();
+  const seen = new Set();
+  let cursor;
+  for (let page = 0; page < MAX_CATALOG_PAGES; page++) {
+    const result = await list(site, cursor);
+    if (!Array.isArray(result?.tools)) {
+      throw new Error(`Server-tool catalog for site "${site._name}" is malformed: tools/list returned no tools array.`);
+    }
+    for (const tool of result.tools) {
+      if (typeof tool?.name === "string") names.add(tool.name);
+    }
+    if (result.nextCursor === undefined || result.nextCursor === null) return names;
+    if (typeof result.nextCursor !== "string" || seen.has(result.nextCursor)) {
+      throw new Error(`Server-tool catalog for site "${site._name}" returned an invalid or repeated cursor.`);
+    }
+    cursor = result.nextCursor;
+    seen.add(cursor);
+  }
+  throw new Error(`Server-tool catalog for site "${site._name}" exceeds ${MAX_CATALOG_PAGES} pages.`);
+}
+
+/**
+ * Resolve the wire name the source advertises for a governed config tool.
+ *
+ * Fails closed: when the catalog lists none of the candidate names, no name is
+ * guessed and nothing is called.
+ * @param {object} site Resolved site config.
+ * @param {string} binding Key of SERVER_TOOL_IDS (`configGet` | `configList` | `configSet`).
+ * @param {{list?: Function}} [deps] Injectable catalog page reader.
+ * @returns {Promise<string>} The advertised wire name.
+ * @throws {Error} if the binding is unknown or the tool is not advertised.
+ */
+export async function resolveServerToolName(site, binding, { list = listServerTools } = {}) {
+  const id = new Map(Object.entries(SERVER_TOOL_IDS)).get(binding);
+  if (!id) throw new Error(`Unknown server tool binding "${binding}".`);
+  const candidates = serverToolCandidates(id);
+  const advertised = await advertisedServerToolNames(site, list);
+  const name = candidates.find((candidate) => advertised.has(candidate));
+  if (!name) {
+    throw new Error(
+      `Server tool "${id}" is not advertised by the source for site "${site._name}" ` +
+      `(looked for ${candidates.join(" and ")} in tools/list). No call was made. ` +
+      "Register and enable it as an mcp_tool_config entity, check that this account holds the scope the tool requires, " +
+      "or map it under serverTools.bindings. See docs/integration-contract.md."
+    );
+  }
+  return name;
+}
+
+/**
+ * Call a governed config tool by the wire name the source advertises for it.
+ * @param {object} site Resolved site config.
+ * @param {string} binding Key of SERVER_TOOL_IDS.
+ * @param {object} [args] Tool arguments.
+ * @returns {Promise<*>} The tool's structured result.
+ * @throws {Error} if the tool is not advertised, or as callServerTool.
+ */
+export async function callGovernedServerTool(site, binding, args = {}) {
+  return callServerTool(site, await resolveServerToolName(site, binding), args);
+}
 
 /** MCP protocol version advertised on the handshake and every subsequent POST. */
 const MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -265,7 +349,7 @@ function isSessionError(res, body) {
  * OAuth sites clears and re-acquires the token then replays (same session); a
  * server-side session expiry re-initialises the session then replays.
  * @param {object} site Resolved site config (provides baseUrl + auth).
- * @param {string} toolName Server-side MCP tool name (see SERVER_TOOLS).
+ * @param {string} toolName Server-side MCP wire name (see resolveServerToolName).
  * @param {object} [args] Tool arguments object.
  * @returns {Promise<*>} The tool's structured result.
  * @throws {Error} on transport failure, JSON-RPC error, or tool error.

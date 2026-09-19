@@ -22,16 +22,20 @@ import {
   assertConfigScope,
   hasScope,
 } from "../lib/security.js";
-import { callServerTool, callBoundModuleTool, SERVER_TOOLS } from "../lib/server-tools.js";
+import { callGovernedServerTool, callBoundModuleTool } from "../lib/server-tools.js";
 
-/** Compatibility names use an approved module binding when configured. */
+/**
+ * Compatibility names use an approved module binding when configured. Without
+ * bindings, the wire name comes from the source's own tools/list; a tool the
+ * source does not advertise fails closed before any call.
+ */
 async function configTool(site, binding, args, operation, capability) {
   if (site.serverTools?.bindings !== undefined) {
     return callBoundModuleTool(site, binding, args, {
       operation, scope: "mcp_config", capabilities: [capability],
     });
   }
-  return callServerTool(site, new Map(Object.entries(SERVER_TOOLS)).get(binding), args);
+  return callGovernedServerTool(site, binding, args);
 }
 
 // ---------------------------------------------------------------------------

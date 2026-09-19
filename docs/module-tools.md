@@ -64,9 +64,14 @@ source checks as ordinary module calls. Missing mappings, changed schemas and
 refusals never trigger a legacy-tool or SSH fallback. Config reports use these
 bindings too. The install verifier resolves the same local mapping but sends
 its negative probe directly to the source, so a local catalog filter cannot be
-mistaken for evidence of source authorization.
+mistaken for evidence of source authorization. It checks that the bound name is
+in the source's `tools/list` first; a refusal of a name the source does not
+advertise is `skipped`, not a pass.
 
 Sites without `bindings` retain the previous config transport during migration.
+That transport resolves the config tool's wire name from the source's
+`tools/list` (`tool_api__<id>`, or `tool_api.<id>` on an older bridge) and fails
+closed when the source advertises neither.
 Review and configure all three bindings together before validating the new path.
 The module registry itself remains opt-in.
 

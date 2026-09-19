@@ -32,6 +32,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `.agents/commands/` were regenerated.
 
 ### Fixed
+- **Config tools call the wire name the source advertises (#335).** Without
+  `serverTools.bindings`, `drupal_config_get` / `_list` / `_set` and the config
+  reports called `tool_api.mcp_sentinel_config_*`. Current `mcp_server`
+  releases publish `tool_api__mcp_sentinel_config_*`. The connector now reads
+  the source's `tools/list` and uses the name it lists, accepting either form
+  and preferring the double underscore. If the source lists neither, the call
+  fails with "not advertised by the source" and nothing is sent. The
+  `SERVER_TOOLS` export in `src/lib/server-tools.js` is replaced by
+  `SERVER_TOOL_IDS` and `resolveServerToolName`. The bindings path is unchanged.
+- **The verifier's config probe can no longer pass on a missing tool (#335).**
+  `probe_config_change` and `entitlement_filtering` read the source catalog
+  first and score a refusal only for a tool the catalog lists. A tool that is
+  not advertised, or a catalog that cannot be read, is `skipped` with the
+  reason, and the run is not ok. A served write still fails the probe whether
+  or not the tool was advertised. `verifyLive` takes a new `listTools`
+  dependency; without it the probe cannot pass. This applies to a configured
+  `configSet` binding too.
 - **Northbound Drupal HTTP timeouts.** JSON:API, GraphQL, and file-upload
   `node-fetch` calls abort after 30s (`AbortSignal.timeout`), matching the
   Drush SSH bound. A hung Drupal host no longer stalls the MCP process.

@@ -20,7 +20,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveSecurityConfig, assertConfigReadAllowed } from "../lib/security.js";
 import { gatedReport } from "../lib/reports-support.js";
-import { callServerTool, callBoundModuleTool, SERVER_TOOLS, toolResultData } from "../lib/server-tools.js";
+import { callGovernedServerTool, callBoundModuleTool, toolResultData } from "../lib/server-tools.js";
 import { runPrivileged, serverToolsConfigured, drushConfigured } from "../lib/audit-sources.js";
 import { sshDrush, parseDrush } from "./drush.js";
 
@@ -71,7 +71,7 @@ async function readConfig(site, name) {
     }));
   }
   if (serverToolsConfigured(site)) {
-    try { return toolResultData(await callServerTool(site, SERVER_TOOLS.configGet, { name })); }
+    try { return toolResultData(await callGovernedServerTool(site, "configGet", { name })); }
     catch (err) { if (!drushConfigured(site)) throw err; }
   }
   return parseDrush(await sshDrush(site, ["config:get", name, "--format=json"]));
@@ -93,7 +93,7 @@ async function listConfigNames(site, prefix) {
     })));
   }
   if (serverToolsConfigured(site)) {
-    try { return pickConfigNames(toolResultData(await callServerTool(site, SERVER_TOOLS.configList, { prefix }))); }
+    try { return pickConfigNames(toolResultData(await callGovernedServerTool(site, "configList", { prefix }))); }
     catch (err) { if (!drushConfigured(site)) throw err; }
   }
   const out = await sshDrush(site, ["sql:query", `SELECT name FROM config WHERE collection = '' AND name LIKE '${prefix}%'`]);
