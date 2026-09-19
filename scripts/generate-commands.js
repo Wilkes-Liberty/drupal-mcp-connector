@@ -15,6 +15,10 @@
  * Driven from the same tool definitions as the server (src/tools/index.js), so the
  * command set never drifts from the tools. Run: `npm run generate:commands`.
  *
+ * Module-owned tools are discovered at runtime and have no committed stub. The
+ * installer writes them on request (`install:commands -- --modules`), using
+ * `moduleCommandFileName` and the `MODULE_STUB_MARKER` exported here.
+ *
  * Exports `renderCommandMarkdown`, `renderClaudeCommandMarkdown`,
  * `renderCodexSkillMarkdown`, `renderCodexToolsReference`, `CODEX_SKILL_NAME`,
  * `commandFileName`, `COMMANDS_DIR`, and `generate` for tests; the file-writing
@@ -25,7 +29,7 @@ import { mkdirSync, readdirSync, rmSync, writeFileSync, realpathSync } from "fs"
 import { pathToFileURL } from "url";
 
 import { allDefinitions } from "../src/tools/index.js";
-import { paramList, toolNameToPromptName } from "../src/lib/tool-prompts.js";
+import { isModuleDefinition, moduleCallNotes, toolNameToPromptName, toolParams } from "../src/lib/tool-prompts.js";
 import { isDestructiveTool } from "../src/lib/operations.js";
 
 /** Canonical, harness-agnostic command tree shipped in the repo and the npm package. */
@@ -34,6 +38,24 @@ export const COMMANDS_DIR = new URL("../.agents/commands/", import.meta.url);
 /** Map a tool definition to its command filename: `drupal_create_node` → `drupal-create-node.md`. */
 export function commandFileName(def) {
   return `${toolNameToPromptName(def.name)}.md`;
+}
+
+/** Trailing marker that tells the installer a stub belongs to a module-owned tool. */
+export const MODULE_STUB_MARKER = "<!-- drupal-mcp-connector:module-tool -->";
+
+const MODULE_TOOL_NAME = /^drupal_module_(?:read|write|delete)_([a-z][a-z0-9_]*?)__([a-z][a-z0-9_]*)$/;
+
+/**
+ * Command filename for a module-owned tool: `drupal-<namespace>-<alias>.md`. The
+ * operation is left out so the command reads as the module's action; the stub
+ * body still names the full tool.
+ *
+ * @param {object} def - A tool definition.
+ * @returns {?string} The filename, or null when the name is not a module tool.
+ */
+export function moduleCommandFileName(def) {
+  const match = MODULE_TOOL_NAME.exec(def?.name ?? "");
+  return match ? `drupal-${match[1]}-${match[2]}.md`.replace(/_/g, "-") : null;
 }
 
 /** Collapse to a single-line, double-quoted YAML scalar. */
@@ -60,10 +82,11 @@ function argumentHint(params) {
  * @returns {string} File contents (ends with a trailing newline).
  */
 export function renderCommandMarkdown(def, options = {}) {
-  const params   = paramList(def.inputSchema);
+  const params   = toolParams(def);
   const required = params.filter((p) => p.required);
   const optional = params.filter((p) => !p.required);
   const line = (p) => `- \`${p.name}\` (${p.hint})${p.description ? `: ${p.description}` : ""}`;
+  const isModule = isModuleDefinition(def);
   const argumentsPhrase = options.argumentsPhrase ?? "the arguments supplied with this command";
 
   const frontmatter = ["---", `description: ${yamlString(def.description)}`];
@@ -79,7 +102,7 @@ export function renderCommandMarkdown(def, options = {}) {
 
   body.push("");
   if (params.length === 0) {
-    body.push("This tool takes no arguments — call it directly.");
+    body.push(isModule ? "This tool takes no parameters." : "This tool takes no arguments — call it directly.");
   } else {
     body.push(`Parse ${argumentsPhrase} into this tool's parameters:`, "");
     if (required.length) {
@@ -98,6 +121,8 @@ export function renderCommandMarkdown(def, options = {}) {
       "object/array → parse JSON), then make the single tool call and summarize the result."
     );
   }
+
+  if (isModule) body.push("", ...moduleCallNotes(def, params.length > 0), "", MODULE_STUB_MARKER);
 
   return `${frontmatter.join("\n")}\n\n${body.join("\n")}\n`;
 }

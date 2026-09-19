@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Prompts for module-owned tools (#332).** Every module tool that discovery
+  returns for a request also gets a per-tool prompt
+  (`drupal-module-<operation>-<namespace>--<alias>`). Visibility follows the
+  tool: same caller scope, site grant and source checks, no cross-request
+  cache. The prompt lists the module's own parameters and explains the
+  `{ catalogRevision, arguments }` call shape without embedding a revision.
+  Write prompts say that module writes are not retried; delete prompts carry
+  the destructive warning.
+- **Opt-in slash stubs for module-owned tools (#332).**
+  `npm run install:commands -- --modules` discovers the module tools your local
+  config approves and writes `drupal-<namespace>-<alias>.md` stubs next to the
+  built-in ones (and adds them to the Codex catalog). A name that matches a
+  built-in command, or that two module tools share, is refused. If a source
+  returns nothing the run fails and writes nothing; if it returns only some
+  configured tools, the missing ones are named and older stubs are kept. A
+  plain `install:commands` never writes module stubs and leaves installed ones
+  in place.
+
+### Changed
+- Prompts and command stubs show a parameter's allowed values when its schema
+  has a short string `enum` (`one of: full, minimal`). Eight built-in stubs
+  under `.agents/commands/` were regenerated.
+
 ### Fixed
 - **Northbound Drupal HTTP timeouts.** JSON:API, GraphQL, and file-upload
   `node-fetch` calls abort after 30s (`AbortSignal.timeout`), matching the

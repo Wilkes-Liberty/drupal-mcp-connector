@@ -59,7 +59,7 @@ import {
 // Tools — aggregated (single source of truth, side-effect-free) and per-tool prompts
 import { allDefinitions, allHandlers, definitionsByName } from "./tools/index.js";
 import { createModuleToolRegistry, isModuleTool } from "./lib/module-tools.js";
-import { buildToolPrompts, getToolPromptMessages } from "./lib/tool-prompts.js";
+import { buildToolPrompts, createPromptSurface } from "./lib/tool-prompts.js";
 
 // Apply config/secrets.map (or the shipped example table) before any site
 // resolution. MCP clients spawn this file directly; the shell launcher is
@@ -313,17 +313,14 @@ const buildConnectorServer = createConnectorServerFactory({
     },
     read: readResource,
   },
-  prompts: {
-    definitions: ALL_PROMPTS,
-    list: async () => {
-      const identity = getRequestIdentity();
-      const tools = await discoverableTools();
-      return filterPromptsByPrincipal(ALL_PROMPTS, identity, tools);
-    },
-    get: (name, args) => WORKFLOW_PROMPT_NAMES.has(name)
-      ? getPromptMessages(name, args)
-      : getToolPromptMessages(name, args, definitionsByName),
-  },
+  prompts: createPromptSurface({
+    staticPrompts: ALL_PROMPTS,
+    discover: discoverableTools,
+    filter: (prompts, tools) => filterPromptsByPrincipal(prompts, getRequestIdentity(), tools),
+    workflowNames: WORKFLOW_PROMPT_NAMES,
+    workflowMessages: getPromptMessages,
+    definitionsByName,
+  }),
 });
 
 // ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@
  * JSON type.
  */
 
-import { isDestructiveTool } from "./operations.js";
+import { inferOperation, isDestructiveTool } from "./operations.js";
 import { SITE_PARAM } from "./site-target.js";
 
 /** Convert a tool name to its prompt/command name: `drupal_create_node` → `drupal-create-node`. */
@@ -31,6 +31,11 @@ export const promptNameToToolName = (name) => name.replace(/-/g, "_");
  */
 function typeHint(spec) {
   const t = Array.isArray(spec?.type) ? spec.type[0] : spec?.type;
+  // A short closed list is the most useful thing to show for a string choice.
+  if (Array.isArray(spec?.enum) && spec.enum.length > 0 && spec.enum.length <= 12 &&
+      spec.enum.every((v) => typeof v === "string" && v.length <= 40)) {
+    return `one of: ${spec.enum.join(", ")}`;
+  }
   switch (t) {
     case "boolean":       return "boolean (true/false)";
     case "number":
@@ -60,6 +65,51 @@ export function paramList(inputSchema) {
 }
 
 /**
+ * Whether a definition came from the module registry (src/lib/module-tools.js).
+ * Those names are reserved, so the prefix alone identifies them.
+ *
+ * @param {object} def - A tool definition.
+ * @returns {boolean}
+ */
+export const isModuleDefinition = (def) =>
+  typeof def?.name === "string" && def.name.startsWith("drupal_module_");
+
+/**
+ * Parameter catalog a person fills in for a tool. A module-owned tool wraps the
+ * module's schema in a `{ catalogRevision, arguments }` envelope, so its
+ * parameters are the properties of `arguments`, not of the envelope.
+ *
+ * @param {object} def - A tool definition.
+ * @returns {Array<{name:string, required:boolean, hint:string, description:string}>}
+ */
+export function toolParams(def) {
+  return paramList(isModuleDefinition(def) ? def.inputSchema?.properties?.arguments : def.inputSchema);
+}
+
+/**
+ * Call-shape guidance shared by module tool prompts and command stubs. The
+ * revision changes with the module's schema, so text never embeds its value.
+ *
+ * @param {object} def - A module tool definition.
+ * @param {boolean} hasParams - Whether the module declares any parameters.
+ * @returns {string[]} Lines to append to the instruction.
+ */
+export function moduleCallNotes(def, hasParams) {
+  const notes = [
+    "This is a module-owned tool. Its input has exactly two properties: `catalogRevision` and `arguments`.",
+    hasParams
+      ? "Put the parameters above inside `arguments`."
+      : "Pass an empty `arguments` object.",
+    "Copy `catalogRevision` from the constant in this tool's current input schema. " +
+    "If the call reports a changed schema, refresh the tool list and use the new value.",
+  ];
+  if (inferOperation(def.name) !== "read") {
+    notes.push("Do not retry a write after an uncertain result. Report it so the outcome can be checked first.");
+  }
+  return notes;
+}
+
+/**
  * Build one MCP prompt descriptor per tool definition.
  *
  * @param {Array<object>} definitions - Tool definitions ({name, description, inputSchema}).
@@ -69,7 +119,7 @@ export function buildToolPrompts(definitions) {
   return definitions.map((def) => ({
     name: toolNameToPromptName(def.name),
     description: `Invoke the ${def.name} tool. ${def.description}`.slice(0, 300),
-    arguments: paramList(def.inputSchema).map((p) => ({
+    arguments: toolParams(def).map((p) => ({
       name: p.name,
       description: p.description ? `${p.hint} — ${p.description}` : p.hint,
       required: p.required,
@@ -85,10 +135,11 @@ export function buildToolPrompts(definitions) {
  * @returns {string} A user-role instruction message body.
  */
 function renderToolInstruction(def, args = {}) {
-  const params   = paramList(def.inputSchema);
+  const params   = toolParams(def);
   const required = params.filter((p) => p.required);
   const optional = params.filter((p) => !p.required);
   const line = (p) => `- ${p.name} (${p.hint})${p.description ? `: ${p.description}` : ""}`;
+  const isModule = isModuleDefinition(def);
 
   const out = [`Call the MCP tool \`${def.name}\`.`, "", def.description];
 
@@ -98,7 +149,7 @@ function renderToolInstruction(def, args = {}) {
 
   out.push("");
   if (params.length === 0) {
-    out.push("This tool takes no arguments — call it directly.");
+    out.push(isModule ? "This tool takes no parameters." : "This tool takes no arguments — call it directly.");
   } else {
     if (required.length) {
       out.push("Required parameters (ask me for any that are missing — do not invent values):");
@@ -111,6 +162,8 @@ function renderToolInstruction(def, args = {}) {
       optional.forEach((p) => out.push(line(p)));
     }
   }
+
+  if (isModule) out.push("", ...moduleCallNotes(def, params.length > 0));
 
   const supplied = Object.entries(args ?? {}).filter(([, v]) => v !== undefined && v !== "");
   if (supplied.length) {
@@ -143,4 +196,54 @@ export function getToolPromptMessages(promptName, args = {}, definitionsByName) 
       text: `Call the MCP tool \`${toolName}\` to fulfill this request.` } }];
   }
   return [{ role: "user", content: { type: "text", text: renderToolInstruction(def, args) } }];
+}
+
+/**
+ * Compose the server's prompt surface from the static prompts and the module
+ * tools that live discovery returns for this request. Module prompts inherit
+ * discovery's caller, site and source checks; nothing is cached across requests.
+ *
+ * @param {object} options
+ * @param {Array<object>} options.staticPrompts - Workflow prompts plus built-in tool prompts.
+ * @param {() => Promise<Array<object>>} options.discover - Tools visible to the current request.
+ * @param {(prompts: Array<object>, tools: Array<object>) => Array<object>} options.filter
+ *   Principal filter for the static prompts.
+ * @param {Set<string>} options.workflowNames - Names of the hand-authored workflow prompts.
+ * @param {(name: string, args: object) => Array<object>} options.workflowMessages
+ * @param {Map<string,object>} options.definitionsByName - Built-in tool name → definition.
+ * @returns {{definitions: Array<object>, list: Function, describe: Function, get: Function}}
+ */
+export function createPromptSurface({
+  staticPrompts, discover, filter, workflowNames, workflowMessages, definitionsByName,
+}) {
+  const get = (name, args) => workflowNames.has(name)
+    ? workflowMessages(name, args)
+    : getToolPromptMessages(name, args, definitionsByName);
+
+  async function visible() {
+    const tools = await discover();
+    const taken = new Set(staticPrompts.map((prompt) => prompt.name));
+    // A reserved module name cannot match a built-in, but never let a remote
+    // catalog shadow a static prompt if that invariant is ever broken.
+    const moduleDefs = tools.filter((tool) =>
+      isModuleDefinition(tool) && !taken.has(toolNameToPromptName(tool.name)));
+    return { prompts: [...filter(staticPrompts, tools), ...buildToolPrompts(moduleDefs)], moduleDefs };
+  }
+
+  return {
+    definitions: staticPrompts,
+    get,
+    list: async () => (await visible()).prompts,
+    /** Resolve one prompt, or null when it is not visible to this request. */
+    async describe(name, args = {}) {
+      const { prompts, moduleDefs } = await visible();
+      const known = prompts.find((prompt) => prompt.name === name);
+      if (!known) return null;
+      const live = moduleDefs.find((def) => toolNameToPromptName(def.name) === name);
+      const messages = live
+        ? getToolPromptMessages(name, args, new Map([[live.name, live]]))
+        : get(name, args);
+      return { description: known.description, messages };
+    },
+  };
 }

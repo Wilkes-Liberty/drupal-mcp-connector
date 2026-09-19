@@ -133,6 +133,18 @@ function describe(entry, remote) {
   } };
 }
 
+/**
+ * Tool names the local policy configures, before any discovery or caller check.
+ * Tooling compares this with a live listing to tell "nothing configured" from
+ * "configured but not returned by the source".
+ *
+ * @param {Array<object>} sites - Resolved site configs.
+ * @returns {string[]} Sorted tool names.
+ */
+export function configuredModuleToolNames(sites) {
+  return [...entries(sites).keys()].sort();
+}
+
 /** Reserved module names never fall back to built-in handlers. */
 export function isModuleTool(name) {
   return typeof name === "string" && name.startsWith(PREFIX);

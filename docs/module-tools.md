@@ -130,7 +130,46 @@ Register a normal Tool API plugin and an enabled MCP bridge config in Drupal. Us
 
 Tests must cover direct invocation as well as discovery: wrong scope/site, denied records and fields, stale revisions, duplicate requests, removed plugins, malformed inputs and audit failures. The connector's fixture tests use two unrelated tool providers to prove that adding a module does not require a new JavaScript handler.
 
-Static slash-command generation continues to describe built-in tools. Runtime module tools are discovered over MCP; they are not silently installed as local command files. The private Drupal bridge retains its supported MCP 2025-06-18 transport; module support does not upgrade that wire protocol.
+Runtime module tools are discovered over MCP. The private Drupal bridge retains its supported MCP 2025-06-18 transport; module support does not upgrade that wire protocol.
+
+## Prompts and slash commands
+
+Each module tool that discovery returns for a request also has an MCP prompt,
+`drupal-module-<operation>-<namespace>--<alias>`. The prompt list is built from
+the same discovery as `tools/list`, so a caller sees a prompt only for a tool it
+can call. Nothing is cached between requests. The prompt lists the module's own
+parameters, tells the model to place them inside `arguments`, and tells it to
+copy `catalogRevision` from the tool's current input schema. No prompt or stub
+contains a revision value, because the value changes with the module's schema.
+
+Committed slash-command generation (`.agents/commands/`) describes built-in
+tools only. Module tools are never installed as local command files by default.
+An operator can ask for them:
+
+```bash
+# from the directory that holds config/config.json
+npm run install:commands -- --modules
+```
+
+This discovers the tools the local config approves, using the configured
+sources and credentials, and writes one stub per tool named
+`drupal-<namespace>-<alias>.md` (for example
+`/drupal-staging-relationships-record-activity`). For Codex the tools are added
+to the `drupal-mcp` skill catalog instead.
+
+- A stub name that matches a built-in command, or that two module tools share,
+  is refused and reported. Pick a different namespace or alias.
+- If tools are configured and no source returns any, the run fails and writes
+  nothing. If only some are returned, the missing names are printed and stubs
+  from earlier runs are kept, since the source may only be unreachable.
+- A complete `--modules` run removes stubs for tools that are no longer
+  configured. A plain `install:commands` leaves module stubs alone. The Codex
+  catalog is rebuilt on every run, so it lists module tools only after a
+  `--modules` run.
+- A stub is a convenience, not a grant. The call still passes every connector
+  and source check, and a stub for a tool the caller cannot see fails closed.
+- Stubs are written for the local operator's view of the catalog. Re-run after
+  changing `serverTools.modules`.
 
 ## Migration status
 

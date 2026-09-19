@@ -73,7 +73,9 @@ claude mcp remove drupal  # remove it
 
 Bare `/drupal-*` commands: MCP prompts appear as `/mcp__drupal__…`. For the
 short form, from a connector clone run `npm run install:commands` (writes
-`~/.claude/commands`). Do not commit a `.claude/` folder to this or any
+`~/.claude/commands`). Add `-- --modules` to also write
+`/drupal-<namespace>-<alias>` commands for module-owned tools
+([module-tools.md](module-tools.md#prompts-and-slash-commands)). Do not commit a `.claude/` folder to this or any
 consuming repo — see the README.
 
 For a remote endpoint instead of stdio: `claude mcp add --transport http drupal https://mcp.example.com/mcp --header "Authorization: Bearer $TOKEN"`.

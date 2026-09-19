@@ -18,6 +18,6 @@ Parse the arguments supplied with this command into this tool's parameters:
 - `attributes` (object (pass as JSON)): Field values keyed by Drupal machine name
 - `relationships` (object (pass as JSON)): Relationship data keyed by field name
 - `dryRun` (boolean (true/false)): Validate and return a preview of the create without committing.
-- `returning` (string): Response verbosity. "full" (default) returns the complete saved entity; "minimal" returns just identity + state (id, type, bundle, title, status, changed, url) — much smaller, recommended for bulk writes where the echoed body would dominate the response.
+- `returning` (one of: full, minimal): Response verbosity. "full" (default) returns the complete saved entity; "minimal" returns just identity + state (id, type, bundle, title, status, changed, url) — much smaller, recommended for bulk writes where the echoed body would dominate the response.
 
 If a required parameter is missing, ask before calling — do not invent values. Coerce each value to its JSON type (booleans → true/false, numbers → numeric, object/array → parse JSON), then make the single tool call and summarize the result.
