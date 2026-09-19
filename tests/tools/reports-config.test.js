@@ -4,6 +4,7 @@ const h = vi.hoisted(() => ({
   site: null,
   sec: null,
   callServerTool: vi.fn(),
+  rawCall: vi.fn(),
   callBoundModuleTool: vi.fn(),
   sshDrush: vi.fn(),
 }));
@@ -15,7 +16,9 @@ vi.mock("../../src/lib/security.js", async (orig) => {
 });
 vi.mock("../../src/lib/server-tools.js", async (orig) => {
   const actual = await orig();
-  return { ...actual, callServerTool: h.callServerTool, callBoundModuleTool: h.callBoundModuleTool };
+  // The reports resolve the governed tool by binding key; the raw client must
+  // never be reached with a hard-coded wire name.
+  return { ...actual, callGovernedServerTool: h.callServerTool, callBoundModuleTool: h.callBoundModuleTool, callServerTool: h.rawCall };
 });
 vi.mock("../../src/tools/drush.js", () => ({
   sshDrush: h.sshDrush,
@@ -35,6 +38,7 @@ beforeEach(() => {
   h.site = { _name: "d", baseUrl: "https://example.com" };
   h.sec = { allowConfigRead: true };
   h.callServerTool.mockReset();
+  h.rawCall.mockReset();
   h.callBoundModuleTool.mockReset();
   h.sshDrush.mockReset();
 });
@@ -93,6 +97,9 @@ describe("reports-config", () => {
       };
       h.callServerTool.mockImplementation((_site, _tool, args) => Promise.resolve(wrap(CONFIGS[args.name] ?? {})));
       const res = await handlers.drupal_audit_config_best_practices({});
+      // Resolved by binding key from the source catalog, never a fixed wire name.
+      expect(h.callServerTool.mock.calls.every(([, binding]) => binding === "configGet")).toBe(true);
+      expect(h.rawCall).not.toHaveBeenCalled();
       const ids = res.findings.map((f) => f.id);
       expect(ids).toContain("error_display");
       expect(ids).toContain("open_registration");
