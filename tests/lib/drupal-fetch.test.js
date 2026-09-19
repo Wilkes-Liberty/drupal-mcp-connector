@@ -541,8 +541,30 @@ describe("drupalGraphqlFetch failure message (#345)", () => {
       .rejects.toThrow("GraphQL request failed 500 (response body could not be read)");
   });
 
-  it("does not change a successful response that carries GraphQL errors", async () => {
-    const body = { data: null, errors: [{ message: "Field error at /var/www/html/x <b>bold</b>" }] };
+  it("cleans and bounds the errors of a 200 response and leaves data alone (#356)", async () => {
+    const data = { nodeArticles: { nodes: [{ title: "Kept <b>as is</b> /var/www/html/x" }] } };
+    const body = {
+      data,
+      errors: [{
+        message: "Field error at /var/www/html/x <b>bold</b> " + "y".repeat(20000),
+        path: ["nodeArticles", "nodes", 1],
+        extensions: { code: "INTERNAL", debugMessage: "secret", trace: [{ file: "/var/www/html/index.php" }] },
+      }],
+      extensions: { tracing: { file: "/var/www/html/index.php" } },
+    };
+    vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify(body) });
+    const json = await drupalGraphqlFetch(site, { query: "{ __typename }" });
+    expect(json.data).toEqual(data);
+    expect(json.errors).toHaveLength(1);
+    expect(json.errors[0].message.startsWith("Field error at [path] bold yyy")).toBe(true);
+    expect(json.errors[0].message.length).toBeLessThan(500);
+    expect(json.errors[0].path).toEqual(["nodeArticles", "nodes", 1]);
+    expect(json.errors[0].extensions).toEqual({ code: "INTERNAL" });
+    expect(JSON.stringify(json.errors)).not.toMatch(/secret|trace|var\/www/);
+  });
+
+  it("does not add an errors key to a clean 200 response", async () => {
+    const body = { data: { ok: true } };
     vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify(body) });
     await expect(drupalGraphqlFetch(site, { query: "{ __typename }" })).resolves.toEqual(body);
   });

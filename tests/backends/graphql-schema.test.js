@@ -86,3 +86,20 @@ describe("loadSchemaMap", () => {
     expect(map.entityForType("Unknown")).toBeNull();
   });
 });
+
+describe("loadSchemaMap when introspection fails (#356)", () => {
+  it("reports the server's cleaned errors, not a TypeError, and does not cache the failure", async () => {
+    _clearSchemaCache();
+    const failingSite = { _name: "introspection-off", baseUrl: "https://x" };
+    drupalGraphqlFetch.mockResolvedValueOnce({
+      data: null,
+      errors: [{ message: "<b>Introspection is disabled</b> in /var/www/html/web/sites/default/services.yml " + "y".repeat(20000) }],
+    });
+    const err = await loadSchemaMap(failingSite).catch((e) => e);
+    expect(err.message.startsWith("GraphQL introspection failed: Introspection is disabled in [path] yyy")).toBe(true);
+    expect(err.message.length).toBeLessThan(1300);
+
+    drupalGraphqlFetch.mockResolvedValueOnce({ data: null });
+    await expect(loadSchemaMap(failingSite)).rejects.toThrow("GraphQL introspection failed: the response has no schema");
+  });
+});

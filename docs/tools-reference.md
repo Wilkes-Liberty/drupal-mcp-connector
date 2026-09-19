@@ -331,6 +331,17 @@ Mutation documents also require `allowGraphqlMutations` (off outside
 | `drupal_graphql` | `query` | Execute a GraphQL query. Requires `allowGraphql`; mutations also need `allowGraphqlMutations`. Not entity-allowlist/redaction-gated. |
 | `drupal_graphql_introspect` | — | Inspect schema. Requires `allowGraphql`. Add `typeName` for detailed field info on a specific type. |
 
+**GraphQL errors on a 200 response (#356).** GraphQL reports a failed query as
+HTTP 200 with an `errors` array. `data` is returned as received. The errors are
+not: each `message` has markup and control characters stripped, filesystem paths
+and stream-wrapper URIs redacted, any backtrace removed, and is cut to 400
+characters. `extensions.trace`, `debugMessage`, `file`, `line` and any stack are
+dropped. At most 50 errors and 4,000 characters of message are kept; a last
+entry says how many were left out. With no `data`, `drupal_graphql` fails with
+`GraphQL errors: <messages>`, cut to 1,200 characters. With partial `data`, the
+messages are returned as `warnings`. `drupal_graphql_introspect` reports the
+server's errors for a failed type lookup instead of "Type not found".
+
 ### Example Query
 
 GraphQL Compose exposes per-bundle connection fields (e.g. `nodeArticles { nodes { … } }`):

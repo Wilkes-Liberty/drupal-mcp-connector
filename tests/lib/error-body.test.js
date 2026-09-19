@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { describeErrorBody, cleanErrorText, ERROR_DETAIL_MAX_CHARS, ERROR_DOCUMENT_MAX_CHARS } from "../../src/lib/error-body.js";
+import {
+  describeErrorBody, cleanErrorText, cleanGraphqlErrors, describeGraphqlErrors,
+  ERROR_DETAIL_MAX_CHARS, ERROR_DOCUMENT_MAX_CHARS, GRAPHQL_ERRORS_MAX_COUNT, GRAPHQL_ERRORS_MAX_CHARS,
+} from "../../src/lib/error-body.js";
 
 describe("cleanErrorText", () => {
   it("strips markup, control characters and terminal escapes, and collapses whitespace", () => {
@@ -134,5 +137,106 @@ describe("describeErrorBody", () => {
     expect(described).toContain("e49");
     expect(described).not.toContain("e50");
     expect(described).toMatch(/… \[truncated\]$/);
+  });
+});
+
+describe("cleanGraphqlErrors", () => {
+  const verbose = {
+    message: "Internal <b>error</b> in /var/www/html/web/modules/custom/a/a.module",
+    path: ["nodeArticles", "nodes", 3, "title"],
+    locations: [{ line: 2, column: 5, file: "/var/www/html/x.php" }],
+    extensions: {
+      code: "INTERNAL_SERVER_ERROR",
+      category: "internal",
+      debugMessage: "PDOException in /var/www/html/web/core/lib/Drupal.php",
+      file: "/var/www/html/web/core/lib/Drupal.php",
+      line: 12,
+      trace: [{ file: "/var/www/html/web/index.php", line: 19, call: "handle('secret')" }],
+    },
+    trace: ["#0 /var/www/html/web/index.php(19)"],
+    debugMessage: "secret",
+    stack: "Error: x\n at /app/src/y.js:1:1",
+  };
+
+  it("keeps message, path, locations and machine codes, and drops the rest", () => {
+    expect(cleanGraphqlErrors([verbose])).toEqual([{
+      message: "Internal error in [path]",
+      path: ["nodeArticles", "nodes", 3, "title"],
+      locations: [{ line: 2, column: 5 }],
+      extensions: { code: "INTERNAL_SERVER_ERROR", category: "internal" },
+    }]);
+    expect(JSON.stringify(cleanGraphqlErrors([verbose]))).not.toMatch(/var\/www|secret|trace|debugMessage|stack/);
+  });
+
+  it("cleans and bounds each message, and cuts a backtrace", () => {
+    const [long, traced] = cleanGraphqlErrors([
+      { message: "y".repeat(20000) },
+      { message: "Failed. Stack trace: #0 secret_function('pw')" },
+    ]);
+    expect(long.message.length).toBe(ERROR_DETAIL_MAX_CHARS + "… [truncated]".length);
+    expect(traced.message).toBe("Failed. [stack trace removed]");
+  });
+
+  it("bounds the number of errors and says how many were dropped", () => {
+    const out = cleanGraphqlErrors(Array.from({ length: 500 }, (_, i) => ({ message: `e${i}` })));
+    expect(out).toHaveLength(GRAPHQL_ERRORS_MAX_COUNT + 1);
+    expect(out.at(-1)).toEqual({ message: `${500 - GRAPHQL_ERRORS_MAX_COUNT} more errors not shown` });
+  });
+
+  it("bounds the total size of the messages", () => {
+    const out = cleanGraphqlErrors(Array.from({ length: 40 }, () => ({ message: "z".repeat(400) })));
+    const total = out.reduce((n, e) => n + e.message.length, 0);
+    expect(total).toBeLessThanOrEqual(GRAPHQL_ERRORS_MAX_CHARS + 40);
+    expect(out.at(-1).message).toMatch(/^\d+ more errors not shown$/);
+    expect(out.length).toBeLessThan(40);
+  });
+
+  it("keeps an entry for an error with no usable message, and reads a string entry", () => {
+    expect(cleanGraphqlErrors([{ message: { nested: "/var/www/x/y.php" } }, "plain <i>text</i>", null, 5])).toEqual([
+      { message: "GraphQL error with no message" },
+      { message: "plain text" },
+      { message: "GraphQL error with no message" },
+      { message: "GraphQL error with no message" },
+    ]);
+  });
+
+  it("drops a path or an extension value of the wrong type, and bounds the path", () => {
+    const [out] = cleanGraphqlErrors([{
+      message: "m",
+      path: ["ok", { evil: "/var/www/x/y.php" }, "<b>a</b>", ...Array.from({ length: 100 }, (_, i) => i)],
+      locations: "nope",
+      extensions: { code: { nested: true }, category: "c".repeat(500), classification: 7 },
+    }]);
+    expect(out.path.length).toBeLessThanOrEqual(32);
+    expect(out.path.slice(0, 3)).toEqual(["ok", "a", 0]);
+    expect(out.locations).toBeUndefined();
+    expect(out.extensions.code).toBeUndefined();
+    expect(out.extensions.category.length).toBeLessThanOrEqual(100 + "… [truncated]".length);
+    expect(out.extensions.classification).toBe(7);
+  });
+
+  it("reads an errors value that is not an array", () => {
+    expect(cleanGraphqlErrors("boom at /var/www/html/x.php")).toEqual([{ message: "boom at [path]" }]);
+    expect(cleanGraphqlErrors({ message: "one" })).toEqual([{ message: "one" }]);
+    expect(cleanGraphqlErrors(undefined)).toEqual([]);
+    expect(cleanGraphqlErrors([])).toEqual([]);
+  });
+
+  it("is stable when applied twice", () => {
+    const once = cleanGraphqlErrors([verbose, ...Array.from({ length: 80 }, () => ({ message: "z".repeat(900) }))]);
+    expect(cleanGraphqlErrors(once)).toEqual(once);
+  });
+});
+
+describe("describeGraphqlErrors", () => {
+  it("joins cleaned messages and bounds the text", () => {
+    expect(describeGraphqlErrors([{ message: "First <b>x</b>" }, { message: "in /var/www/html/y.php" }])).toBe("First x; in [path]");
+    const long = describeGraphqlErrors(Array.from({ length: 50 }, () => ({ message: "z".repeat(900) })));
+    expect(long.length).toBeLessThanOrEqual(ERROR_DOCUMENT_MAX_CHARS + "… [truncated]".length);
+  });
+
+  it("never returns an empty string for a non-empty errors value", () => {
+    expect(describeGraphqlErrors([{}])).toBe("GraphQL error with no message");
+    expect(describeGraphqlErrors([])).toBe("");
   });
 });
