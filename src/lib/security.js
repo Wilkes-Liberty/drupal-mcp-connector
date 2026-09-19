@@ -60,6 +60,11 @@ import { parse } from "graphql";
  *                                        protected list. The only way to shrink it.
  *                                        A malformed value in either key refuses
  *                                        every uninstall rather than being ignored.
+ *  allowCoreExtensionChange boolean      false on every preset. true lets
+ *                                        drupal_config_set write core.extension and
+ *                                        lets drupal_drush_config_import run when
+ *                                        core.extension differs (#349). Anything but
+ *                                        true or false keeps both refused.
  *
  *  declaredCeiling     string            narrow-only X-MCP-Declared-Ceiling
  *                                        (public|internal|restricted). Invalid
@@ -315,6 +320,35 @@ function resolveProtectedModules(raw) {
   return { modules, optOuts: [...removed].sort(), error: problems.length ? problems.join(" ") : null };
 }
 
+/** The config object that lists installed modules and themes. */
+export const CORE_EXTENSION_CONFIG = "core.extension";
+
+/**
+ * Whether a config name addresses core.extension. Surrounding space and case
+ * are ignored: a source that trims the name would otherwise be reached by a
+ * padded one.
+ * @param {*} name Config object name.
+ * @returns {boolean}
+ */
+export function isCoreExtensionConfig(name) {
+  return typeof name === "string" && name.trim().toLowerCase() === CORE_EXTENSION_CONFIG;
+}
+
+/**
+ * Resolve the explicit opt-in for changing core.extension (#349).
+ * @param {object} raw site.security.
+ * @returns {{allowed: boolean, error: ?string}} `error` is set when the value
+ *   is neither true nor false; the change then stays refused.
+ */
+function resolveCoreExtensionOptIn(raw) {
+  const value = new Map(Object.entries(raw)).get("allowCoreExtensionChange");
+  if (value === undefined || value === null) return { allowed: false, error: null };
+  if (typeof value !== "boolean") {
+    return { allowed: false, error: "security.allowCoreExtensionChange must be true or false." };
+  }
+  return { allowed: value, error: null };
+}
+
 /** Default when `security.preset` is omitted — least privilege, not open mode (#140). */
 export const DEFAULT_SECURITY_PRESET = "production-strict";
 
@@ -326,6 +360,7 @@ export function resolveSecurityConfig(site) {
   const preset = PRESETS[presetName] ?? PRESETS[DEFAULT_SECURITY_PRESET];
 
   const protectedModules = resolveProtectedModules(raw);
+  const coreExtension = resolveCoreExtensionOptIn(raw);
 
   // Merge: explicit keys in site.security override the preset
   return {
@@ -349,6 +384,9 @@ export function resolveSecurityConfig(site) {
     protectedModules:        protectedModules.modules,
     protectedModuleOptOuts:  protectedModules.optOuts,
     protectedModulesError:   protectedModules.error,
+    // Not a preset value either: strict on every preset (#349).
+    allowCoreExtensionChange: coreExtension.allowed,
+    coreExtensionChangeError: coreExtension.error,
   };
 }
 
@@ -532,6 +570,92 @@ export function assertModuleUninstallAllowed(secConfig, moduleName) {
       `To allow it, an operator must add "${moduleName}" to security.allowProtectedModuleUninstall for this site.`
     );
   }
+}
+
+/**
+ * Gate a change to core.extension (#349). The object lists installed modules
+ * and themes, so a write to it, or a config import that changes it, can
+ * uninstall a protected module without going through
+ * assertModuleUninstallAllowed(). Refused on every preset unless the operator
+ * set `security.allowCoreExtensionChange: true`. Fails closed: a malformed
+ * value, or a config that never went through resolveSecurityConfig(), refuses.
+ * @param {object} secConfig Resolved security config.
+ * @param {string} refusal What is being refused and why, as full sentences.
+ * @returns {void}
+ * @throws {SecurityError} unless the operator opted in.
+ */
+export function assertCoreExtensionChangeAllowed(secConfig, refusal) {
+  if (secConfig?.allowCoreExtensionChange === true && !secConfig.coreExtensionChangeError) return;
+  throw new SecurityError(
+    `${refusal} ` +
+    "To install or uninstall a module use drupal_drush_module_enable or drupal_drush_module_disable, " +
+    "which check the protected-module list. " +
+    (secConfig?.coreExtensionChangeError
+      ? `This site's opt-in cannot be read: ${secConfig.coreExtensionChangeError} It stays refused until an operator fixes it.`
+      : "To allow it, an operator must set security.allowCoreExtensionChange = true for this site.")
+  );
+}
+
+/**
+ * Check a drupal_config_set value for core.extension against the protected
+ * module list (#349). Runs only after assertCoreExtensionChangeAllowed().
+ *
+ * The value is a map of top-level keys, and the source also accepts a dotted
+ * key such as `module.devel`. A `module` key replaces the whole module map, so
+ * every protected module in `currentModules` must still be in it. A dotted key
+ * under `module.` that names a protected module is refused outright.
+ *
+ * @param {object} secConfig Resolved security config.
+ * @param {object} value The submitted map of config keys to values.
+ * @param {?string[]} currentModules Machine names installed now, or null when
+ *   the caller has not read them. Needed only when `value` has a `module` key.
+ * @returns {{needsCurrentModules: boolean}} `needsCurrentModules` is true when
+ *   the value replaces the module map and `currentModules` was not given; the
+ *   caller reads the list and calls again.
+ * @throws {SecurityError} if the write would remove or alter a protected
+ *   module, or the protected-module list cannot be trusted.
+ */
+export function assertCoreExtensionValueKeepsProtected(secConfig, value, currentModules = null) {
+  if (secConfig?.protectedModulesError || !Array.isArray(secConfig?.protectedModules)) {
+    throw new SecurityError(
+      "The write to core.extension is blocked because this site's protected-module config cannot be read. " +
+      `${secConfig?.protectedModulesError ?? "The protected-module list is missing."}`
+    );
+  }
+  const entries = value && typeof value === "object" && !Array.isArray(value) ? Object.entries(value) : [];
+  const protectedSet = new Set(secConfig.protectedModules);
+
+  const dotted = entries
+    .map(([key]) => /^module\.([^.]+)/.exec(key)?.[1])
+    .filter((name) => name !== undefined && protectedSet.has(name));
+  if (dotted.length) {
+    throw new SecurityError(
+      `The write to core.extension changes the entry of protected module${dotted.length === 1 ? "" : "s"} ` +
+      `${[...new Set(dotted)].sort().join(", ")}. Nothing was written. ` +
+      "To allow it, an operator must name the module in security.allowProtectedModuleUninstall for this site."
+    );
+  }
+
+  const moduleEntry = entries.find(([key]) => key === "module");
+  if (!moduleEntry) return { needsCurrentModules: false };
+  const next = moduleEntry[1];
+  if (!next || typeof next !== "object" || Array.isArray(next)) {
+    throw new SecurityError(
+      "The write to core.extension is refused: `module` must be a map of module machine names to weights. Nothing was written."
+    );
+  }
+  if (!Array.isArray(currentModules)) return { needsCurrentModules: true };
+
+  const kept = new Set(Object.keys(next));
+  const removed = currentModules.filter((name) => protectedSet.has(name) && !kept.has(name)).sort();
+  if (removed.length) {
+    throw new SecurityError(
+      `The write to core.extension would remove protected module${removed.length === 1 ? "" : "s"} ${removed.join(", ")}. ` +
+      "Nothing was written. " +
+      "To allow it, an operator must name the module in security.allowProtectedModuleUninstall for this site."
+    );
+  }
+  return { needsCurrentModules: false };
 }
 
 /**
@@ -858,5 +982,7 @@ export function getSecuritySummary(site) {
     protectedModules:      cfg.protectedModules,
     protectedModuleOptOuts: cfg.protectedModuleOptOuts,
     ...(cfg.protectedModulesError ? { protectedModulesError: cfg.protectedModulesError } : {}),
+    allowCoreExtensionChange: cfg.allowCoreExtensionChange,
+    ...(cfg.coreExtensionChangeError ? { coreExtensionChangeError: cfg.coreExtensionChangeError } : {}),
   };
 }

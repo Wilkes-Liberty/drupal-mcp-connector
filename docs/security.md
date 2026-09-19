@@ -58,6 +58,15 @@ that path. Prefer JSON:API entity tools when connector policy must hold.
 Mutation documents additionally require `allowGraphqlMutations` (also off
 outside `development`).
 
+The `errors` of a GraphQL response are untrusted text whatever the HTTP status.
+A non-2xx body goes through the same cleaning as a JSON:API failure. The
+`errors` array of a 200 response is cleaned in `drupalGraphqlFetch()` before any
+tool or backend reads it: `message`, `path`, `locations` and the short machine
+values `extensions.code`, `category` and `classification` are kept, and
+everything else (`extensions.trace`, `debugMessage`, `file`, `line`, a stack) is
+dropped. Messages are stripped of markup, have paths redacted and are bounded in
+length, count and total size (#356). `data` is not changed.
+
 ### Multi-site targeting
 
 Omitting `site` on a read still resolves to `defaultSite`. The response always
@@ -266,6 +275,33 @@ Fields are also excluded from `drupal_entity_create` and `drupal_entity_update` 
 | `field_ssn` | varies | Sensitive PII |
 | `field_dob` | varies | PII |
 
+### Error detail path redaction
+
+Field redaction covers successful responses. The detail of a failed Drupal request is cleaned separately (`src/lib/error-body.js`): markup and control characters are stripped, a backtrace is removed, the text is bounded, and paths are redacted to `[path]`. The same cleaning applies to the server-tool bridge: a failed `tools/call`, `tools/list` or session handshake, a JSON-RPC error message, a tool's error text, and every string of a module tool's failed result.
+
+A slash-led path of two or more segments is redacted when it looks like a filesystem path:
+
+- its first segment is a filesystem root: `/var`, `/home`, `/srv`, `/usr`, `/opt`, `/tmp`, `/etc`, `/app`, `/mnt`, `/private`, `/Users`, `/data`, `/code`, `/workspace`, `/builds`, `/run`, `/proc`, `/sys`, `/lib`, `/bin`, `/root`, `/www`, `/sites`, `/vendor`, `/web`, `/docroot`, `/html`, `/dev`, `/sbin`, `/boot`, `/lib64`, `/snap`, `/nix`, `/Volumes`; or
+- any segment marks a code tree, a web root or a file directory: `vendor`, `node_modules`, `core`, `modules`, `themes`, `profiles`, `sites`, `src`, `lib`, `docroot`, `public_html`, `htdocs`, `files`, `private`, `tmp`; or
+- any segment has a server-side file extension: `.php`, `.inc`, `.module`, `.install`, `.theme`, `.engine`, `.yml`, `.yaml`, `.twig`, `.log`, `.sql`, `.sh`, `.env`, `.ini`, `.conf`, `.json`, `.lock`, `.phar`. The extension can sit before another one, as in `.env.local` or `dump.sql.gz`.
+
+Segments compare case-insensitively. These are redacted whatever their shape:
+
+- Windows drive paths (`C:\inetpub\...`, `C:/xampp/...`) and UNC paths (`\\host\share\...`);
+- `file://` and `phar://` URIs, which become `file://[path]` and `phar://[path]`;
+- Drupal stream-wrapper URIs (`public://`, `private://`, `temporary://`, `s3://`, `assets://`), which become `<scheme>://[path]`.
+
+A path is judged wherever it starts: after a space, a quote, a bracket, `=` or a colon (`include_path=.:/usr/share/php`, `internal:/about/team`). The path part of an absolute URL (`https://example.org/about/team`) is never touched.
+
+Any other slash-led path is kept. `/about/team`, `/node/12/edit` and `/old/page?x=1` are site-relative URL paths that the caller supplied, and a message such as "The alias /about/team is already in use" is useless without them (#357).
+
+Limits of the rule:
+
+- A URL path that matches a rule is redacted too. `/admin/modules/uninstall`, `/sites/default/files/a.pdf` and `/home/welcome` all become `[path]`. The rule errs towards hiding a path.
+- A filesystem path that matches no rule is kept, for example `/project/uploads/a.pdf` under a root the list does not name.
+- A relative path (`modules/custom/example/example.module`) is not slash-led and is not redacted.
+- A path with a space is redacted up to the space.
+
 ---
 
 ## HTTPS Enforcement
@@ -427,7 +463,35 @@ The list is on by default. Two per-site keys under `security` change it:
 
 `drupal_security_info` shows the effective list as `protectedModules` and the opt-outs as `protectedModuleOptOuts`.
 
-The list covers this tool only. It does not cover a module removed by `drupal_drush_config_import` from a changed `core.extension`; keep `config:import` out of `drushSsh.allowedCommands` on sites where that matters.
+#### Changes to `core.extension`
+
+`core.extension` is the config object that lists installed modules and themes. Two other connector tools could change it, and so uninstall a module without going through the list above. Both are refused on every preset.
+
+- **`drupal_config_set` refuses `core.extension`.** A write there can install or uninstall any module or theme without running Drupal's install and uninstall steps. The refusal names `drupal_drush_module_enable` and `drupal_drush_module_disable`. The name check ignores surrounding space and case, because the source trims the name. Nothing is sent to the site. The check runs before the binding path and the unbound path split, so it covers both.
+- **`drupal_drush_config_import` refuses an import that changes `core.extension`.** `config:import` uninstalls every module the sync directory's `core.extension` no longer lists, and the bridge answers the prompt "yes". Before the import the tool runs `drush config:status --format=json`, a read-only command. If `core.extension` is among the changed objects, nothing is imported. The connector cannot read the sync directory, so it cannot say which modules would change; it refuses on "core.extension differs" alone. If the status cannot be read or understood, nothing is imported. When `drushSsh.allowedCommands` is set it must list `config:status` as well as `config:import`, or every import is refused. An import that leaves `core.extension` alone runs as before.
+
+One per-site key under `security` opens both:
+
+```json
+{ "preset": "config-editor", "allowCoreExtensionChange": true }
+```
+
+- It is `false` on every preset, `development` included. Only `true` opens it.
+- A value that is not `true` or `false` (the string `"true"`, `1`) keeps both refused, and the refusal says the value is malformed.
+- It opens no other gate. `readOnly`, `allowConfigWrite`, the `mcp_config` scope and `drushSsh.allowedCommands` still apply.
+- With the key set, `drupal_config_set` still checks the value against the protected list. A `module` key replaces the whole module map, so the tool first reads the current `core.extension` through the governed config read and refuses when a protected module that is installed now is missing from the new map. A dotted key such as `module.key` that names a protected module is refused. If the read is disabled, fails, or returns no module map, nothing is written. Name a module in `allowProtectedModuleUninstall` to take it out of this check.
+- With the key set, `drupal_drush_config_import` runs without the status read, as it did before. The connector cannot see which modules such an import removes, so the protected list does not apply to it. Set the key only on a site where the sync directory is reviewed before it is imported.
+
+`drupal_security_info` shows `allowCoreExtensionChange`, and `coreExtensionChangeError` when the value is malformed.
+
+What the connector cannot cover:
+
+- **A config import the connector does not run.** A deploy pipeline or a person who runs `drush config:import` or `drush deploy` on the server, or the config sync form in the Drupal UI, never passes through the connector.
+- **Another client.** Any client with the same Drupal credentials can call the site's config tool or JSON:API directly.
+- **The window between the status read and the import.** Someone who can write to the sync directory can change `core.extension` after the check. The check narrows the path; it does not close that race.
+- **A module-owned tool that writes config.** Its rules live in Drupal, not here.
+
+The source-side control covers the first two for governed writes. Add `core.extension` to `denied_config_types` on the MCP Sentinel policy profile that governs the agent. Sentinel then denies the write whichever client sends it, and reverts and refuses a governed save that reaches `Config::save()` directly. A `config:import` run by a person or a deploy on the server is outside Sentinel's agent policy too; protect that path with review of the sync directory and with who holds shell access.
 
 ---
 

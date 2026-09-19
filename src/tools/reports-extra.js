@@ -14,6 +14,7 @@ import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed, assertEntityTypeAllowed } from "../lib/security.js";
 import { collectEntities, fieldPresence } from "../lib/reports-support.js";
+import { httpStatusOf } from "../lib/error-status.js";
 
 /** Author base fields that only ever point at `user`. */
 const AUTHOR_BASE_FIELDS = new Set(["uid", "revision_uid"]);
@@ -41,17 +42,15 @@ function isEntityTypeDenied(sec, entityType) {
 /**
  * Classify a getEntity failure. Only a 404 (or an unaddressable ref) is an
  * orphan. Connector policy, Drupal 401/403, and other failures are
- * unverifiable — and must not share one reason.
+ * unverifiable — and must not share one reason. The response status decides
+ * (see `httpStatusOf`); a "404" in the path or the detail does not (#355).
  * @param {unknown} err
  * @returns {"missing"|"forbidden"|"failed"}
  */
-function classifyTargetError(err) {
-  const msg = String(err?.message || err || "");
-  const statusMatch = msg.match(/\bDrupal (\d{3})\b/i);
-  const status = statusMatch ? Number(statusMatch[1]) : NaN;
+export function classifyTargetError(err) {
+  const status = httpStatusOf(err);
   if (status === 404) return "missing";
   if (status === 401 || status === 403) return "forbidden";
-  if (/\b404\b/.test(msg) && !/\b40[13]\b/.test(msg)) return "missing";
   return "failed";
 }
 

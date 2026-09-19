@@ -29,7 +29,7 @@ import { resolveSecurityConfig, assertWriteAllowed, redactCanonicalEntity } from
  * @param {Error} err - The error thrown by the backend write.
  * @returns {boolean}
  */
-function looksLikeUnknownField(err) {
+export function looksLikeUnknownField(err) {
   const msg = String(err?.message || err || "");
   return /unknown|not exist|no field|invalid field|unrecognized|publish_on|unpublish_on/i.test(msg);
 }

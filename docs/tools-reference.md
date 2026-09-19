@@ -14,6 +14,32 @@ Complete reference for all 123 tools across 27 modules.
 > `source: "default"`. Writes require an explicit `site` when more than one
 > site is configured. `drupal_list_sites` and an unscoped
 > `drupal_governance_status` have no single target and omit `_target`.
+>
+> **Drupal HTTP errors (#343, #345).** A failed JSON:API request reports
+> `Drupal <status> on <method> <path>: <detail>`, a failed GraphQL request
+> `GraphQL request failed <status>: <detail>`, and a failed upload
+> `File upload failed <status>: <detail>`. The detail is Drupal's
+> `errors[].detail` (or `title`), GraphQL's `errors[].message`, an OAuth
+> `error` and `error_description`, or a plain `message`. Markup and control
+> characters are stripped. Filesystem paths and stream-wrapper URIs become
+> `[path]`; a site-relative URL path such as `/about/team` or `/node/12/edit`
+> is kept (#357, see [security.md](security.md#error-detail-path-redaction)).
+> A backtrace is removed. One detail is cut to 400
+> characters and a list of details to 1,200 (400 for an upload). An HTML page,
+> or a JSON body with no error detail, is never returned: the error says so and
+> gives the page title. An empty body reports `(empty response body)`.
+> The connector branches on the response status, never on a number inside the
+> path or the detail (#355).
+>
+> **Server-tool bridge errors (#362).** The config tools, and the tools behind
+> a `serverTools` binding, call Drupal's own MCP tools. A failed call reports
+> `Server-tool call <tool> failed <status>: <detail>`, a JSON-RPC error
+> `Server-tool <tool> error (<code>): <message>`, and a tool that ran and
+> refused `Server-tool <tool> reported an error: <text>`. The detail, the
+> message and the text are cleaned and cut the same way. An HTML page is never
+> returned. The status and the JSON-RPC code are kept. A module tool's failed
+> result keeps its shape; its strings are cleaned and the payload is bounded
+> (see [module-tools.md](module-tools.md)).
 
 ---
 
@@ -318,6 +344,17 @@ Mutation documents also require `allowGraphqlMutations` (off outside
 | `drupal_graphql` | `query` | Execute a GraphQL query. Requires `allowGraphql`; mutations also need `allowGraphqlMutations`. Not entity-allowlist/redaction-gated. |
 | `drupal_graphql_introspect` | — | Inspect schema. Requires `allowGraphql`. Add `typeName` for detailed field info on a specific type. |
 
+**GraphQL errors on a 200 response (#356).** GraphQL reports a failed query as
+HTTP 200 with an `errors` array. `data` is returned as received. The errors are
+not: each `message` has markup and control characters stripped, filesystem paths
+and stream-wrapper URIs redacted, any backtrace removed, and is cut to 400
+characters. `extensions.trace`, `debugMessage`, `file`, `line` and any stack are
+dropped. At most 50 errors and 4,000 characters of message are kept; a last
+entry says how many were left out. With no `data`, `drupal_graphql` fails with
+`GraphQL errors: <messages>`, cut to 1,200 characters. With partial `data`, the
+messages are returned as `warnings`. `drupal_graphql_introspect` reports the
+server's errors for a failed type lookup instead of "Type not found".
+
 ### Example Query
 
 GraphQL Compose exposes per-bundle connection fields (e.g. `nodeArticles { nodes { … } }`):
@@ -469,7 +506,7 @@ the server will deny. Requires a `serverTools` block on the site.
 |------|----------------|-----|-------------|
 | `drupal_config_get` | `name` | configRead + `mcp_config` | Read one config object (e.g. `system.site`). |
 | `drupal_config_list` | — | configRead + `mcp_config` | List config object names; optional `prefix`. |
-| `drupal_config_set` | `name`, `value` | configWrite + `mcp_config` | Set a config value (governed + audited server-side). |
+| `drupal_config_set` | `name`, `value` | configWrite + `mcp_config` | Set a config value (governed + audited server-side). Refuses `core.extension` unless the operator set `security.allowCoreExtensionChange`; see [Changes to core.extension](security.md#changes-to-coreextension). |
 | `drupal_mcp_whoami` | — | — | Report effective tier, preset, scopes, capabilities, and resolved `target` (`name`, `baseUrl`, `source`) for a site. |
 
 `drupal_config_set` requires the `config-editor` (Developer) tier or
@@ -521,7 +558,7 @@ Requires `drushSsh` config block. SSH key auth only — no passwords. An optiona
 | `drupal_drush_cache_rebuild` | ✅ | `drush cache:rebuild`. |
 | `drupal_drush_cron` | ✅ | `drush cron`. |
 | `drupal_drush_config_export` | ✅ | Export config to sync directory. |
-| `drupal_drush_config_import` | ✅ | Import config from sync directory. Confirm before prod. |
+| `drupal_drush_config_import` | ✅ | Import config from sync directory. Confirm before prod. Runs `config:status` first and imports nothing when `core.extension` differs or the status cannot be read; see [Changes to core.extension](security.md#changes-to-coreextension). |
 | `drupal_drush_updatedb` | ✅ | Run pending DB updates. |
 | `drupal_drush_module_enable` | ✅ | Enable a module. Machine name validated. |
 | `drupal_drush_module_disable` | ✅ | Uninstall a module. Irreversible. Confirm first. Refuses a protected module (governance, integrity, secrets, auth, API; see [Protected modules](security.md#protected-modules)) and an uninstall that would cascade to dependents. |
@@ -859,7 +896,7 @@ Additional read-only audit tools that complement the [Reports](#reports) module.
 |------|----------------|-------------|
 | `drupal_report_unpublished` | — | List unpublished/draft content of a type (default `article`). Returns titles, last-changed dates, and paths — surfaces forgotten drafts. |
 | `drupal_report_missing_field` | `field` | Find entities where a given field is empty (scalar or entity-reference). Bounded by `sampleSize`. A field absent from every sampled entity is reported as `notVisible`, not as missing everywhere. |
-| `drupal_report_orphaned_references` | — | Find entities whose entity-reference fields point at targets that no longer exist. A 404 is an orphan; 401/403 and policy-denied types are `unverifiable`, not missing. Bounded by `sampleSize`. |
+| `drupal_report_orphaned_references` | — | Find entities whose entity-reference fields point at targets that no longer exist. A 404 response is an orphan; 401/403, policy-denied types and any other failure (including a 500 whose text mentions 404) are `unverifiable`, not missing. Bounded by `sampleSize`. |
 
 ### drupal_report_missing_field
 

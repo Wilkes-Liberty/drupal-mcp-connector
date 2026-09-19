@@ -8,6 +8,7 @@
  */
 
 import { drupalGraphqlFetch } from "../drupal-fetch.js";
+import { describeGraphqlErrors } from "../error-body.js";
 import { graphqlTypeToEntity } from "./graphql-names.js";
 
 // Introspection is intentionally nested four `ofType` levels deep: a field type
@@ -150,9 +151,16 @@ class SchemaMap {
  * Build a SchemaMap from a raw introspection response.
  * @param {object} introspection The `{ data: { __schema } }` response.
  * @returns {SchemaMap}
+ * @throws {Error} When the response has no schema. The message carries the
+ *   server's cleaned, bounded errors (see `describeGraphqlErrors`).
  */
 function buildSchemaMap(introspection) {
-  const schema = introspection.data.__schema;
+  const schema = introspection?.data?.__schema;
+  if (!schema) {
+    // A 200 with `errors` and no schema (introspection off, access denied).
+    const detail = describeGraphqlErrors(introspection?.errors) || "the response has no schema";
+    throw new Error(`GraphQL introspection failed: ${detail}`);
+  }
   const typesByName = new Map(schema.types.map((t) => [t.name, t]));
   const queryType = typesByName.get(schema.queryType.name);
   const map = new SchemaMap();

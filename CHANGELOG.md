@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-09-19
+
 ### Added
 - **Prompts for module-owned tools (#332).** Every module tool that discovery
   returns for a request also gets a per-tool prompt
@@ -48,6 +50,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependents is refused and names them. The handler also checks
   `allowDestructive` itself. `drupal_security_info` shows the effective list.
   One stub under `.agents/commands/` was regenerated.
+- **`core.extension` can no longer be changed through config tools by default (#349).**
+  The protected-module list covered `drupal_drush_module_disable` only. Two
+  other tools could still uninstall a module. `drupal_config_set` now refuses a
+  write to `core.extension` and names `drupal_drush_module_enable` and
+  `drupal_drush_module_disable`; the name check ignores surrounding space and
+  case, and covers the binding path and the unbound path.
+  `drupal_drush_config_import` now runs `drush config:status` first and imports
+  nothing when `core.extension` differs, or when the status cannot be read or
+  understood. The connector cannot read the sync directory, so it refuses on
+  "core.extension differs" and does not name the modules. **Operators:** if
+  `drushSsh.allowedCommands` is set and lists `config:import`, add
+  `config:status`, or every import is refused. An import that leaves
+  `core.extension` alone, and `drupal_config_set` on any other object, work as
+  before. New per-site key `security.allowCoreExtensionChange` (`true` or
+  `false`, default `false` on every preset) opens both; any other value keeps
+  both refused. With it set, `drupal_config_set` still reads the current module
+  list and refuses a value that removes or alters an installed protected module,
+  and `drupal_drush_config_import` runs unchecked. `drupal_security_info` shows
+  the key. `docs/security.md` lists what stays out of the connector's reach (an
+  import run on the server, another client, the window between the status read
+  and the import) and points to MCP Sentinel's `denied_config_types` as the
+  source-side control. Two stubs under `.agents/commands/` were regenerated.
 
 ### Fixed
 - **Remaining northbound HTTP timeouts.** Server-tool `tools/call` (including
@@ -57,6 +81,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a 15s abort; those were previously gated on `maxBytes`, so `callGovernedServerTool`
   could hang unbounded. Token acquisition fails as `OAuthError` after 30s.
   A hung readiness probe stays `sentinel_unreachable`.
+- **Server-tool bridge errors no longer relay the response body or raw tool
+  text (#362).** `src/lib/server-tools.js` put four untrusted strings into its
+  errors with no cleaning and no bound: the body of a non-2xx `tools/call` or
+  `tools/list`, the body of a failed session handshake, a JSON-RPC
+  `error.message`, and the text of a tool result with `isError`. An HTML error
+  page, a server path or a backtrace reached the MCP client through the config
+  tools, the Drush-bound tools and the verifier's evidence. They now go through
+  `describeErrorBody()` and `cleanErrorText()`, as the JSON:API, GraphQL and
+  upload paths do. The prefix, the HTTP status and an integer JSON-RPC code are
+  unchanged (`Server-tool call <tool> failed <status>: …`,
+  `Server-tool <tool> error (<code>): …`,
+  `Server-tool <tool> reported an error: …`), so the verifier still classifies
+  them. A JSON-RPC error sent with a 4xx or 5xx reads
+  `failed <status>: JSON-RPC error <code>: <message>`. An empty body reads
+  `the server returned an empty body`. A JSON-RPC code that is not an integer
+  is no longer printed, and `error.data` is never read. A governed refusal's
+  text stays readable. Source budget codes are still looked for in the whole
+  text before it is cut.
+- **A module tool's failure is cleaned before it is relayed (#362).** The
+  module registry relays a failed result (`isError`, or `success: false`)
+  because the module's message is what the caller needs. It now goes through
+  the new `cleanErrorData()`: the shape, keys, codes, numbers and booleans
+  stay, every string is cleaned like any other error detail, and the payload
+  is bounded (400 characters a string, 4,000 in total, 50 entries a level, 6
+  levels). A successful result is not changed. A transport failure behind the
+  registry was already replaced by a fixed message and still is.
+- **The verifier reads the HTTP status from the response, not from its body
+  (#361).** `classifyBridgeError()` found the status of a failed bridge call
+  with a pattern that also matched the response body, so a 500 whose body held
+  "failed 403:" scored as a refusal and the config probe passed although the
+  tool never ran. The words "reported an error" and a quoted JSON-RPC code in a
+  body had the same effect. The bridge client now sets `status` on the error
+  for a non-2xx response, as `drupalFetch` does, and marks what failed
+  (`bridgeFailure`: `session`, `http`, `rpc` or `tool`, plus `rpcCode`). The
+  verifier reads those properties through `httpStatusOf()`. An error with no
+  marker is read only from the start of a documented message. A 401 or 403
+  from the token endpoint or the session handshake is no longer a refusal: no
+  tool was reached. A JSON-RPC error with no integer code is `skipped`.
+- **A server failure no longer passes `probe_mass_read` or `principal_auth`
+  (#361).** Any failed mass read passed, including a 5xx, a 404 and a request
+  that never answered. The probe now passes on 401, 403 or 429, or on another
+  4xx (not 404) that carries the source's refusal code; anything else is
+  `skipped`. `principal_auth` is `skipped` when the anonymous request fails
+  with a 5xx or no answer, instead of counting that as "anonymous access is
+  refused".
+- **Error details keep the URL paths the caller supplied (#357).** The error
+  cleaning added for #343 and #345 replaced every slash-led path of two or more
+  segments with `[path]`, so "The alias /about/team is already in use" arrived
+  as "The alias [path] is already in use". A path is now redacted only when it
+  looks like a filesystem path: it starts with a filesystem root (`/var`,
+  `/tmp`, `/home`, …), has a segment that marks a code tree or a file directory
+  (`vendor`, `modules`, `core`, `files`, …), or has a server-side file extension
+  (`.php`, `.yml`, `.log`, …). `/about/team`, `/node/12/edit` and
+  `/jsonapi/node/article/<id>` are kept. Windows drive and UNC paths,
+  `file://` and `phar://` URIs, and a filesystem path straight after a colon
+  (`include_path=.:/usr/share/php`) were not redacted before and now are.
+  Stream-wrapper redaction is unchanged. `docs/security.md` lists the rules and
+  their limits.
 - **`dryRun` says what it checked (#336).** A preview could return without a
   refusal and the real write then failed with a field-access 403. The core PATCH
   probe sends no fields, and core rejects its id before it checks field access
@@ -113,6 +195,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markup and control characters stripped, server paths and stream-wrapper URIs
   redacted, and a 400-character bound. An HTML page or a JSON body with no
   error detail is never shown. New helper: `src/lib/error-body.js`.
+- **JSON:API and GraphQL failures no longer return the raw response body (#345).**
+  `drupalFetch()` fell back to the whole body when it was not a JSON:API error
+  document, and `drupalGraphqlFetch()` always sent the whole body, so an HTML
+  error page from Drupal, PHP or a proxy reached the MCP client. Both now use
+  `describeErrorBody()`, like uploads since #343. The messages keep their
+  shape, `Drupal <status> on <method> <path>: <detail>` and
+  `GraphQL request failed <status>: <detail>`, and keep `errors[].detail` and
+  GraphQL `errors[].message`. The detail has markup and control characters
+  stripped, server paths and stream-wrapper URIs redacted and any backtrace
+  removed. One detail is cut to 400 characters and a list of details to 1,200.
+  Each detail is cleaned on its own, so a backtrace in one error does not
+  remove the next. An OAuth error document surfaces `error` and
+  `error_description`, never `hint`. An empty or unreadable body reports the
+  status with `(empty response body)` or `(response body could not be read)`.
+  Path redaction was narrowed afterwards; see #357. Successful responses
+  are unchanged. Every matcher on these messages has a regression test in
+  `tests/lib/fetch-error-matchers.test.js`.
+- **GraphQL errors on a 200 response are cleaned and bounded (#356).** GraphQL
+  reports a failed query as HTTP 200 with an `errors` array, so those errors
+  skipped the cleaning added for #345. `drupal_graphql` (the thrown message and
+  the `warnings` of a partial result), `drupal_graphql_introspect`, the GraphQL
+  backend, the backend probe and the SEO audit's metatag lookup joined
+  `errors[].message` as received, with no length limit. `drupalGraphqlFetch()`
+  now replaces the array with a cleaned form before any caller reads it:
+  `message`, `path`, `locations` and the machine values `extensions.code`,
+  `category` and `classification`. `extensions.trace`, `debugMessage`, `file`,
+  `line` and any stack are dropped. A message has markup and control characters
+  stripped, paths redacted, any backtrace removed, and is cut to 400 characters.
+  At most 50 errors and 4,000 characters of message are kept, and a last entry
+  says how many were left out. Thrown messages are cut to 1,200 characters.
+  `drupal_graphql_introspect` with a `typeName` now reports the server's errors
+  for a failed lookup instead of "Type not found in schema", and the GraphQL
+  backend's schema load reports them instead of a `TypeError`. `data` is
+  unchanged.
 - **Field reports score reference fields and name fields they cannot see (#341).**
   `drupal_report_field_completeness` skipped entity-reference fields and dropped
   a requested field that was absent from every sampled node. It now reads
@@ -121,6 +237,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   link value counts as populated. `drupal_report_seo_meta_coverage` follows the
   same rules: `coverage: null` for an absent field, and no node flagged when no
   checked field is visible. Two stubs under `.agents/commands/` were regenerated.
+- **A status number in an error's text is no longer read as the response status (#355).**
+  `drupal_report_orphaned_references` reported a reference as an orphan when the
+  lookup failed with a 500 whose detail mentioned "404". Four other matchers had
+  the same fault. A 404 on `/jsonapi/node/article/401` read as an authentication
+  failure and cleared the cached OAuth token. A failed PATCH probe whose detail
+  mentioned "Drupal 422" read as a passed working-copy check. A 403 or 500 that
+  mentioned "422" and "inaccessible" triggered the menu-link retry. A 500 on a
+  Sentinel draft or translation endpoint whose detail mentioned "Drupal 404" was
+  reported as a missing endpoint. Errors thrown by `drupalFetch()`,
+  `drupalGraphqlFetch()` and the upload helper now carry the HTTP status on a
+  `status` property, and all five matchers read it through `httpStatusOf()`
+  (`src/lib/error-status.js`). An error with no `status` is read only from the
+  status token at the start of a documented message (`Drupal <status> …`,
+  `GraphQL request failed <status>`, `File upload failed <status>`). The orphan
+  report no longer treats a bare "404" elsewhere in a message as a missing
+  target; such a failure counts as unverifiable.
 
 ## [2.19.1] - 2026-09-17
 

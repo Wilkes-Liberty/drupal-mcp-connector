@@ -16,6 +16,7 @@
  */
 
 import { drupalGraphqlFetch } from "./drupal-fetch.js";
+import { describeGraphqlErrors, ERROR_DETAIL_MAX_CHARS } from "./error-body.js";
 
 // Node paths are batched into aliased `route()` selections per request. Kept
 // modest so a single document stays small and one bad path can't sink a large
@@ -101,7 +102,7 @@ export async function fetchRenderedMetaDescriptions(site, entities) {
       // A schema-level error (no `route`, no `metatag` field, graphql_compose_metatags
       // absent) means we cannot determine descriptions — fail closed to
       // "unavailable" rather than reporting every node as missing.
-      return { source: "unavailable", reason: json.errors[0]?.message ?? "GraphQL error", byId };
+      return { source: "unavailable", reason: describeGraphqlErrors(json.errors[0], ERROR_DETAIL_MAX_CHARS), byId };
     }
 
     const data = json.data || {};

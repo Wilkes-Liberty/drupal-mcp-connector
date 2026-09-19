@@ -4,11 +4,19 @@
  * An error body is untrusted text. It can be a JSON:API error document, an
  * HTML error page from Drupal, PHP or a proxy, or plain text of any length. It
  * can carry a server file path, a filename another user supplied, or a stack
- * fragment. Only the part meant for the caller is surfaced (#343).
+ * fragment. Only the part meant for the caller is surfaced (#343, #345).
  */
 
-/** Longest detail string surfaced to the caller, in characters. */
+/** Longest single detail string surfaced to the caller, in characters. */
 export const ERROR_DETAIL_MAX_CHARS = 400;
+
+/**
+ * Longest joined detail for an error document that lists several errors, in
+ * characters. A JSON:API 422 names one violation per error, and a caller needs
+ * the whole list to correct its payload, so the request paths allow more than
+ * one detail's worth. Each detail is still cut to {@link ERROR_DETAIL_MAX_CHARS}.
+ */
+export const ERROR_DOCUMENT_MAX_CHARS = 1200;
 
 /** Longest HTML `<title>` surfaced to the caller, in characters. */
 const HTML_TITLE_MAX_CHARS = 80;
@@ -40,6 +48,50 @@ function stripTags(text) {
 }
 
 /**
+ * First segments that mark a filesystem path. Several are also plausible URL
+ * prefixes (`/home`, `/data`, `/web`); a match is redacted either way, so the
+ * rule errs towards hiding a path.
+ */
+const FILESYSTEM_ROOTS = new Set([
+  "var", "home", "srv", "usr", "opt", "tmp", "etc", "app", "mnt", "private", "users", "data", "code",
+  "workspace", "builds", "run", "proc", "sys", "lib", "bin", "root", "www", "sites", "vendor", "web",
+  "docroot", "html", "dev", "sbin", "boot", "lib64", "snap", "nix", "volumes",
+]);
+
+/** Segments, at any depth, that mark a code tree, a web root or a file directory. */
+const SERVER_TREE_SEGMENTS = new Set([
+  "vendor", "node_modules", "core", "modules", "themes", "profiles", "sites", "src", "lib", "docroot",
+  "public_html", "htdocs", "files", "private", "tmp",
+]);
+
+/** File extensions that mark a server-side file rather than a page. */
+const SERVER_FILE_EXTENSIONS = new Set([
+  "php", "inc", "module", "install", "theme", "engine", "yml", "yaml", "twig", "log", "sql", "sh", "env",
+  "ini", "conf", "json", "lock", "phar",
+]);
+
+/**
+ * Whether a slash-led path names something on the server's filesystem rather
+ * than a site-relative URL. A path is a filesystem path when it has two or
+ * more segments and
+ * - its first segment is a known filesystem root (`/var/...`, `/tmp/...`), or
+ * - any segment marks a code or server tree (`vendor`, `modules`, `files`), or
+ * - any segment carries a server-side file extension (`settings.php`,
+ *   `.env.local`, `dump.sql.gz`).
+ * Segments compare case-insensitively. Everything else (`/about/team`,
+ * `/node/12/edit`) is a URL path.
+ * @param {string} path Slash-led path, as matched in an error text.
+ * @returns {boolean}
+ */
+function isFilesystemPath(path) {
+  const segments = path.toLowerCase().split("/").filter(Boolean);
+  if (segments.length < 2) return false;
+  if (FILESYSTEM_ROOTS.has(segments[0])) return true;
+  return segments.some((segment) => SERVER_TREE_SEGMENTS.has(segment)
+    || segment.split(".").slice(1).some((part) => SERVER_FILE_EXTENSIONS.has(part)));
+}
+
+/**
  * Strip markup and control characters, cut a backtrace, redact server paths,
  * collapse whitespace, and bound the length.
  * @param {*} text Untrusted text.
@@ -55,14 +107,34 @@ export function cleanErrorText(text, max = ERROR_DETAIL_MAX_CHARS) {
     .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
     // Drupal stream-wrapper URIs name files other users uploaded.
     .replace(/\b(public|private|temporary|s3|assets):\/\/[^\s"'),;]+/gi, "$1://[path]")
-    // Absolute filesystem paths of two or more segments. A URL path is left
-    // alone: its slash follows a word character, a colon or another slash.
-    .replace(/(?<![\w:/.\]])\/[\w.@%+~/-]+/g, (match) => (match.indexOf("/", 1) === -1 ? match : "[path]"))
+    // Local-file URIs.
+    .replace(/\b(file|phar):\/\/[^\s"'),;]+/gi, "$1://[path]")
+    // Windows drive paths (`C:\dir`, `C:/dir`) and UNC paths (`\\host\share`).
+    .replace(/(?<!\w)[A-Za-z]:(?:\\+|\/(?!\/))[^\s"'),;|*?]*/g, "[path]")
+    .replace(/(?<![\w\\])\\\\[\w.$-]+\\[^\s"'),;|*?]*/g, "[path]")
+    // Slash-led paths. A filesystem path is redacted; a site-relative URL path
+    // is kept, because the caller sent it and has to read it back (#357). The
+    // path part of an absolute URL never matches: its slash follows a word
+    // character, another slash, or the colon of `scheme://`. A path straight
+    // after any other colon (`include_path=.:/usr/share/php`,
+    // `internal:/about/team`) is judged like the rest.
+    .replace(/(?:(?<![\w:/.\]])|(?<=:)(?!\/\/))\/[\w.@%+~/-]+/g, (match) => (isFilesystemPath(match) ? "[path]" : match))
     .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  if (cleaned.length <= max) return cleaned;
-  return cleaned.slice(0, max).trimEnd() + TRUNCATED_SUFFIX;
+  return boundText(cleaned, max);
+}
+
+/**
+ * Cut already-cleaned text to a length, marking the cut.
+ * @param {string} text Cleaned text.
+ * @param {number} max Character bound.
+ * @returns {string}
+ */
+function boundText(text, max) {
+  if (text.length <= max) return text;
+  if (text.endsWith(TRUNCATED_SUFFIX) && text.length <= max + TRUNCATED_SUFFIX.length) return text;
+  return text.slice(0, max).trimEnd() + TRUNCATED_SUFFIX;
 }
 
 /**
@@ -87,21 +159,61 @@ function looksLikeMarkupPage(body, contentType) {
 function jsonErrorDetails(parsed) {
   if (!parsed || typeof parsed !== "object") return null;
   if (Array.isArray(parsed.errors) && parsed.errors.length) {
-    // Drupal JSON:API surfaces errors in errors[].detail. `source`, `meta` and
-    // `links` are never read: with verbose errors on they hold a backtrace.
+    // Drupal JSON:API surfaces errors in errors[].detail, GraphQL in
+    // errors[].message. `source`, `meta`, `links`, `locations` and `extensions`
+    // are never read: with verbose errors on they hold a backtrace.
     return parsed.errors
-      .map((e) => (typeof e?.detail === "string" && e.detail) || (typeof e?.title === "string" && e.title) || "")
+      .map((e) => [e?.detail, e?.title, e?.message].find((value) => typeof value === "string" && value) || "")
       .filter(Boolean);
   }
+  const message = typeof parsed.message === "string" && parsed.message ? parsed.message : "";
+  // OAuth 2.0 error document (RFC 6749 §5.2): { "error": "<code>", "error_description": "…" }.
+  // `hint` is never read: it can name a key file on the server.
+  if (typeof parsed.error === "string" && parsed.error) {
+    const description = typeof parsed.error_description === "string" && parsed.error_description
+      ? parsed.error_description
+      : message;
+    return [description ? `${parsed.error}: ${description}` : parsed.error];
+  }
   // Drupal's non-JSON:API JSON errors: { "message": "…" }.
-  if (typeof parsed.message === "string" && parsed.message) return [parsed.message];
+  if (message) return [message];
   return null;
+}
+
+/** Most details of one error document that are cleaned, whatever the bound. */
+const ERROR_DETAILS_MAX_COUNT = 50;
+
+/**
+ * Clean each detail on its own and join them, so a backtrace or an oversized
+ * string in one error does not remove the errors after it. Cleaning stops once
+ * the bound is reached or {@link ERROR_DETAILS_MAX_COUNT} details were read, so
+ * a document with a very long `errors` array costs a bounded amount of work.
+ * @param {string[]} details Untrusted detail strings.
+ * @param {number} maxChars Bound for the joined text.
+ * @returns {string} Joined, bounded text, or "" when nothing is left.
+ */
+function joinCleanDetails(details, maxChars) {
+  const cleaned = [];
+  let length = 0;
+  for (const detail of details.slice(0, ERROR_DETAILS_MAX_COUNT)) {
+    const text = cleanErrorText(detail);
+    if (!text) continue;
+    cleaned.push(text);
+    length += text.length + 2;
+    if (length > maxChars) break;
+  }
+  if (!cleaned.length) return "";
+  const joined = boundText(cleaned.join("; "), maxChars);
+  const dropped = details.length > ERROR_DETAILS_MAX_COUNT && !joined.endsWith(TRUNCATED_SUFFIX);
+  return dropped ? joined + TRUNCATED_SUFFIX : joined;
 }
 
 /**
  * Describe an error response body for the caller.
  *
- * - JSON:API error document: `errors[].detail` (or `title`), joined with "; ".
+ * - JSON:API or GraphQL error document: `errors[].detail` (or `title`, or
+ *   `message`), each cleaned on its own, joined with "; ".
+ * - OAuth error document: `error` and `error_description`.
  * - `{ message }` JSON: the message.
  * - Other JSON: a fixed sentence. The body is not shown.
  * - HTML or XML page: a fixed sentence plus the page `<title>`. The body is
@@ -109,13 +221,17 @@ function jsonErrorDetails(parsed) {
  * - Plain text: the text.
  *
  * Every surfaced string has markup and control characters stripped, server
- * paths redacted, and is cut to {@link ERROR_DETAIL_MAX_CHARS}.
+ * paths redacted, and is cut to {@link ERROR_DETAIL_MAX_CHARS}. The joined
+ * details of an error document are cut to `options.maxChars`.
  *
  * @param {*} body Response body text.
  * @param {?string} [contentType] Response Content-Type header, when known.
+ * @param {object} [options]
+ * @param {number} [options.maxChars] Bound for the joined details of an error
+ *   document. Defaults to {@link ERROR_DETAIL_MAX_CHARS}; never below it.
  * @returns {string} Detail for the caller, or "" for an empty body.
  */
-export function describeErrorBody(body, contentType = null) {
+export function describeErrorBody(body, contentType = null, options = {}) {
   if (typeof body !== "string" || !body.trim()) return "";
 
   let parsed;
@@ -127,7 +243,10 @@ export function describeErrorBody(body, contentType = null) {
 
   if (isJson) {
     const details = jsonErrorDetails(parsed);
-    const text = details ? cleanErrorText(details.join("; ")) : "";
+    const maxChars = Number.isFinite(options.maxChars)
+      ? Math.max(ERROR_DETAIL_MAX_CHARS, Math.floor(options.maxChars))
+      : ERROR_DETAIL_MAX_CHARS;
+    const text = details ? joinCleanDetails(details, maxChars) : "";
     return text || "the server returned JSON with no error detail, not shown";
   }
 
@@ -140,4 +259,190 @@ export function describeErrorBody(body, contentType = null) {
   }
 
   return cleanErrorText(body) || "the server returned a body with no readable text, not shown";
+}
+
+/** Bound for the summed string length of one cleaned failure payload, in characters. */
+export const ERROR_DATA_MAX_CHARS = 4000;
+
+/** Most entries of one array or object kept in a cleaned failure payload. */
+export const ERROR_DATA_MAX_ENTRIES = 50;
+
+/** Deepest nesting kept in a cleaned failure payload. */
+export const ERROR_DATA_MAX_DEPTH = 6;
+
+/** Bound for one key of a cleaned failure payload, in characters. */
+const ERROR_DATA_KEY_MAX_CHARS = 100;
+
+/**
+ * Clean a structured failure payload a tool returned.
+ *
+ * A module tool's failure is application data the caller needs: a message, a
+ * code, the fields that failed. Its shape is kept. Every string in it is
+ * untrusted text, so each one goes through {@link cleanErrorText}. Keys are
+ * cleaned too. Numbers, booleans and null pass through. The summed string
+ * length, the entries per level and the depth are bounded; what is dropped is
+ * marked, never silently lost.
+ * @param {*} value Parsed failure payload, or its raw text.
+ * @returns {*} Cleaned payload with the same shape.
+ */
+export function cleanErrorData(value) {
+  return cleanErrorNode(value, 0, { chars: ERROR_DATA_MAX_CHARS });
+}
+
+/**
+ * Clean one node of a failure payload.
+ * @param {*} value Node.
+ * @param {number} depth Nesting depth of the node.
+ * @param {{chars: number}} budget Characters left for strings, shared by the walk.
+ * @returns {*} Cleaned node.
+ */
+function cleanErrorNode(value, depth, budget) {
+  if (typeof value === "string") {
+    if (budget.chars <= 0) return value ? TRUNCATED_SUFFIX.trim() : "";
+    const text = cleanErrorText(value, Math.min(ERROR_DETAIL_MAX_CHARS, budget.chars));
+    budget.chars -= text.length;
+    return text;
+  }
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "object") return null;
+  if (depth >= ERROR_DATA_MAX_DEPTH) return TRUNCATED_SUFFIX.trim();
+
+  if (Array.isArray(value)) {
+    const items = value.slice(0, ERROR_DATA_MAX_ENTRIES).map((item) => cleanErrorNode(item, depth + 1, budget));
+    if (value.length > ERROR_DATA_MAX_ENTRIES) items.push(TRUNCATED_SUFFIX.trim());
+    return items;
+  }
+  const cleaned = new Map();
+  const entries = Object.entries(value);
+  for (const [key, item] of entries.slice(0, ERROR_DATA_MAX_ENTRIES)) {
+    const name = cleanErrorText(key, ERROR_DATA_KEY_MAX_CHARS);
+    if (!name || cleaned.has(name)) continue;
+    cleaned.set(name, cleanErrorNode(item, depth + 1, budget));
+  }
+  if (entries.length > ERROR_DATA_MAX_ENTRIES) cleaned.set("_truncated", true);
+  return Object.fromEntries(cleaned);
+}
+
+/** Most GraphQL errors of one 200 response that are kept. */
+export const GRAPHQL_ERRORS_MAX_COUNT = 50;
+
+/** Bound for the summed message length of the kept GraphQL errors, in characters. */
+export const GRAPHQL_ERRORS_MAX_CHARS = 4000;
+
+/** Most `path` segments and `locations` entries kept on one GraphQL error. */
+const GRAPHQL_PATH_MAX_SEGMENTS = 32;
+const GRAPHQL_LOCATIONS_MAX_COUNT = 10;
+
+/** Longest `path` segment or `extensions` value, in characters. */
+const GRAPHQL_FIELD_MAX_CHARS = 100;
+
+/**
+ * Clean one short machine value of `extensions`.
+ * @param {*} value Untrusted value.
+ * @returns {string|number|undefined} The value, or undefined when it is not a
+ *   non-empty string or a finite number.
+ */
+function graphqlMachineValue(value) {
+  if (typeof value === "string") return cleanErrorText(value, GRAPHQL_FIELD_MAX_CHARS) || undefined;
+  return Number.isFinite(value) ? value : undefined;
+}
+
+const GRAPHQL_NO_MESSAGE = "GraphQL error with no message";
+const GRAPHQL_DROPPED_RE = /^\d+ more errors not shown$/;
+
+/**
+ * Clean one GraphQL error. Only `message`, `path`, `locations` and the machine
+ * values of `extensions` are read; nothing else is copied.
+ * @param {*} error One entry of a GraphQL `errors` array.
+ * @returns {{message: string, path?: Array<string|number>, locations?: Array<{line: number, column: number}>, extensions?: object}}
+ */
+function cleanGraphqlError(error) {
+  if (typeof error === "string") return { message: cleanErrorText(error) || GRAPHQL_NO_MESSAGE };
+  const out = { message: cleanErrorText(error?.message) || GRAPHQL_NO_MESSAGE };
+
+  if (Array.isArray(error?.path)) {
+    // A path segment is a response key (an alias the caller chose) or an index.
+    const path = error.path
+      .slice(0, GRAPHQL_PATH_MAX_SEGMENTS * 2)
+      .map((segment) => (Number.isInteger(segment) ? segment : cleanErrorText(segment, GRAPHQL_FIELD_MAX_CHARS)))
+      .filter((segment) => segment !== "")
+      .slice(0, GRAPHQL_PATH_MAX_SEGMENTS);
+    if (path.length) out.path = path;
+  }
+
+  if (Array.isArray(error?.locations)) {
+    // A location points into the caller's query document, not into the server.
+    const locations = error.locations
+      .slice(0, GRAPHQL_LOCATIONS_MAX_COUNT)
+      .filter((l) => Number.isInteger(l?.line) && Number.isInteger(l?.column))
+      .map((l) => ({ line: l.line, column: l.column }));
+    if (locations.length) out.locations = locations;
+  }
+
+  if (error?.extensions && typeof error.extensions === "object") {
+    // Only the short machine values a caller matches on. Everything else under
+    // `extensions` (`trace`, `debugMessage`, `file`, `line`, `exception`,
+    // `stacktrace`) is dropped.
+    const { code, category, classification } = error.extensions;
+    const extensions = Object.fromEntries(Object.entries({
+      code: graphqlMachineValue(code),
+      category: graphqlMachineValue(category),
+      classification: graphqlMachineValue(classification),
+    }).filter(([, value]) => value !== undefined));
+    if (Object.keys(extensions).length) out.extensions = extensions;
+  }
+  return out;
+}
+
+/**
+ * Clean the `errors` of a GraphQL response that arrived with a 2xx status.
+ *
+ * GraphQL reports a failed query as HTTP 200 with an `errors` array, so these
+ * errors never pass through {@link describeErrorBody}. With verbose errors on,
+ * a message can carry markup or a server path, and `extensions` can carry a
+ * backtrace (#356). Each message gets the {@link cleanErrorText} treatment. At
+ * most {@link GRAPHQL_ERRORS_MAX_COUNT} errors and
+ * {@link GRAPHQL_ERRORS_MAX_CHARS} characters of message are kept; a last entry
+ * says how many were dropped. The result is stable when cleaned again.
+ * @param {*} errors The `errors` value of a GraphQL response.
+ * @returns {Array<object>} Cleaned errors; empty when there is none.
+ */
+export function cleanGraphqlErrors(errors) {
+  // Any falsy value (`null`, `""`, `0`) means the response reports no error.
+  if (!errors) return [];
+  const list = Array.isArray(errors) ? errors : [errors];
+  if (!list.length) return [];
+
+  // A list that was cleaned before ends with the dropped-count entry. Count
+  // what it stands for, so cleaning twice does not lose the number.
+  const last = list.at(-1);
+  const lastMessage = typeof last?.message === "string" ? last.message : "";
+  const carried = GRAPHQL_DROPPED_RE.test(lastMessage) ? Number.parseInt(lastMessage, 10) : 0;
+  const source = carried ? list.slice(0, -1) : list;
+
+  const cleaned = [];
+  let chars = 0;
+  for (const error of source.slice(0, GRAPHQL_ERRORS_MAX_COUNT)) {
+    const entry = cleanGraphqlError(error);
+    if (cleaned.length && chars + entry.message.length > GRAPHQL_ERRORS_MAX_CHARS) break;
+    cleaned.push(entry);
+    chars += entry.message.length;
+  }
+  const dropped = source.length - cleaned.length + carried;
+  if (dropped > 0) cleaned.push({ message: `${dropped} more errors not shown` });
+  return cleaned;
+}
+
+/**
+ * Join the messages of a GraphQL `errors` value into one bounded string, for
+ * an error message or a report reason.
+ * @param {*} errors The `errors` value of a GraphQL response, cleaned or not.
+ * @param {number} [maxChars] Bound for the joined text.
+ * @returns {string} Joined text, or "" when there is no error.
+ */
+export function describeGraphqlErrors(errors, maxChars = ERROR_DOCUMENT_MAX_CHARS) {
+  const cleaned = cleanGraphqlErrors(errors);
+  if (!cleaned.length) return "";
+  return boundText(cleaned.map((e) => e.message).join("; "), maxChars);
 }

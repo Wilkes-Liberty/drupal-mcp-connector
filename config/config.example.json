@@ -206,6 +206,11 @@
     "example": { "preset": "development", "protectedModules": ["my_audit_module"], "allowProtectedModuleUninstall": [] }
   },
 
+  "_core_extension": {
+    "_comment": "core.extension lists installed modules and themes, so changing it can uninstall a protected module. On every preset drupal_config_set refuses a write to core.extension, and drupal_drush_config_import first runs `drush config:status` and imports nothing when core.extension differs or the status cannot be read. If drushSsh.allowedCommands is set it must list config:status as well as config:import. One optional per-site key under security opens both: allowCoreExtensionChange, true or false, default false. Any other value keeps both refused. With it set, drupal_config_set still refuses a value that removes or alters an installed protected module, and drupal_drush_config_import runs unchecked because the connector cannot read the sync directory. The key opens no other gate. A config import run outside the connector is out of its reach; add core.extension to denied_config_types on the MCP Sentinel policy profile for the source-side control. See docs/security.md#changes-to-coreextension.",
+    "example": { "preset": "config-editor", "allowCoreExtensionChange": false }
+  },
+
   "_mcp_client_registration": {
     "_comment": "Add under your MCP client's mcpServers config (stdio transport)",
     "drupal": {

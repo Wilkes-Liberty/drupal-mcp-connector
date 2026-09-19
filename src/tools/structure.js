@@ -20,6 +20,7 @@ import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, redactCanonicalEntity,
 } from "../lib/security.js";
 import { assertDraftLangcode } from "../lib/sentinel-draft.js";
+import { httpStatusOf } from "../lib/error-status.js";
 
 const MENU_LINK_TYPE = "menu_link_content";
 const BLOCK_TYPE = "block_content";
@@ -30,8 +31,17 @@ const BLOCK_TYPE = "block_content";
 // a transient path-validator/access-cache race (it warms during the first
 // attempt), so a single retry clears it. Prefer an `entity:node/<id>` target
 // over `internal:/<alias>` to avoid the alias-resolution step entirely.
-const INACCESSIBLE_PATH_RE = /\b422\b[\s\S]*inaccessible/i;
+const INACCESSIBLE_PATH_RE = /inaccessible/i;
 const MENU_LINK_RETRY_DELAY_MS = 250;
+
+/**
+ * Whether an error is the transient "422 path inaccessible" menu-link race.
+ * @param {unknown} err The error thrown by the backend write.
+ * @returns {boolean}
+ */
+export function isInaccessiblePathError(err) {
+  return httpStatusOf(err) === 422 && INACCESSIBLE_PATH_RE.test(String(err?.message));
+}
 
 /**
  * Resolve after `ms` milliseconds.
@@ -52,7 +62,7 @@ async function writeMenuLinkWithRetry(fn) {
   try {
     return await fn();
   } catch (err) {
-    if (!INACCESSIBLE_PATH_RE.test(String(err?.message))) throw err;
+    if (!isInaccessiblePathError(err)) throw err;
     await sleep(MENU_LINK_RETRY_DELAY_MS);
     return fn();
   }

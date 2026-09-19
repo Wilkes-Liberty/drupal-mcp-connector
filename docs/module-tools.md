@@ -123,7 +123,7 @@ Each discovered tool has an object schema with two properties:
 
 Calls fetch the catalog again and validate both the current contract and its revision. An unavailable, disabled, changed or unauthorized tool fails closed. There is no fallback to an entity write, SSH command or arbitrary URL.
 
-Results preserve structured module data under `result` and report the resolved `_target`. Successful results with an output schema are validated before disclosure. Tool failures remain failures, including the Tool API bridge's `success: false` result. The initial registry supports JSON/text results only; binary attachments and resource blocks are refused.
+Results preserve structured module data under `result` and report the resolved `_target`. Successful results with an output schema are validated before disclosure. Tool failures remain failures, including the Tool API bridge's `success: false` result. A failed result is relayed so the caller can read the module's message, code and failed fields. Its shape, keys, numbers and booleans are kept. Every string in it is cleaned like any other error detail: markup and control characters stripped, a backtrace removed, filesystem paths redacted to `[path]`. The payload is bounded: 400 characters a string, 4,000 in total, 50 entries a level, 6 levels; a cut is marked `… [truncated]`. A failed result is not checked against the output schema. A transport failure (a non-2xx response, a JSON-RPC error) is never relayed: the caller gets a fixed message. The initial registry supports JSON/text results only; binary attachments and resource blocks are refused.
 
 ## Bounds and failure handling
 

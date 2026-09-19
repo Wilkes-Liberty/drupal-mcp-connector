@@ -5,6 +5,7 @@ import { assertConfigReadAllowed, assertConfigWriteAllowed, getSecuritySummary }
 import { assertPublishAllowed, isPublishBearing } from "../../src/lib/security.js";
 import { assertConfigScope, hasScope } from "../../src/lib/security.js";
 import { DEFAULT_PROTECTED_MODULES, assertModuleUninstallAllowed } from "../../src/lib/security.js";
+import { assertCoreExtensionChangeAllowed, assertCoreExtensionValueKeepsProtected, isCoreExtensionConfig } from "../../src/lib/security.js";
 
 // allowGraphql required for any GraphQL path (#142); mutations need both flags.
 const allowMut = { allowGraphql: true, allowGraphqlMutations: true, readOnly: false };
@@ -394,5 +395,73 @@ describe("protected modules (#346)", () => {
     expect(s.protectedModules).not.toContain("tool");
     expect(s.protectedModules).toContain("mcp_sentinel");
     expect(s.protectedModuleOptOuts).toEqual(["tool"]);
+  });
+});
+
+describe("core.extension change opt-in (#349)", () => {
+  const resolve = (security) => resolveSecurityConfig({ _name: "s", security });
+
+  it("is off on every preset and when security is omitted", () => {
+    for (const preset of ["production-strict", "content-editor", "config-editor", "write-plane", "development"]) {
+      const cfg = resolve({ preset });
+      expect(cfg.allowCoreExtensionChange).toBe(false);
+      expect(cfg.coreExtensionChangeError).toBeNull();
+    }
+    expect(resolveSecurityConfig({ _name: "s" }).allowCoreExtensionChange).toBe(false);
+  });
+
+  it("is on only for an explicit true", () => {
+    expect(resolve({ allowCoreExtensionChange: true }).allowCoreExtensionChange).toBe(true);
+    expect(resolve({ allowCoreExtensionChange: false }).allowCoreExtensionChange).toBe(false);
+    expect(resolve({ allowCoreExtensionChange: null }).allowCoreExtensionChange).toBe(false);
+  });
+
+  it("treats any other value as malformed and stays off", () => {
+    for (const bad of ["true", "false", 1, 0, [], {}, "yes"]) {
+      const cfg = resolve({ allowCoreExtensionChange: bad });
+      expect(cfg.allowCoreExtensionChange).toBe(false);
+      expect(cfg.coreExtensionChangeError).toMatch(/must be true or false/);
+      expect(() => assertCoreExtensionChangeAllowed(cfg, "Refused.")).toThrow(/cannot be read/);
+    }
+  });
+
+  it("assertCoreExtensionChangeAllowed fails closed on a config that was never resolved", () => {
+    expect(() => assertCoreExtensionChangeAllowed(undefined, "Refused.")).toThrow(SecurityError);
+    expect(() => assertCoreExtensionChangeAllowed({}, "Refused.")).toThrow(SecurityError);
+    expect(() => assertCoreExtensionChangeAllowed({ allowCoreExtensionChange: "true" }, "Refused.")).toThrow(SecurityError);
+    expect(() => assertCoreExtensionChangeAllowed({ allowCoreExtensionChange: true, coreExtensionChangeError: "x" }, "Refused.")).toThrow(SecurityError);
+    expect(() => assertCoreExtensionChangeAllowed(resolve({ allowCoreExtensionChange: true }), "Refused.")).not.toThrow();
+  });
+
+  it("does not open any other gate", () => {
+    const cfg = resolve({ preset: "production-strict", allowCoreExtensionChange: true });
+    expect(cfg.readOnly).toBe(true);
+    expect(cfg.allowConfigWrite).toBe(false);
+    expect(cfg.protectedModules).toContain("mcp_sentinel");
+  });
+
+  it("is shown by getSecuritySummary", () => {
+    expect(getSecuritySummary({ _name: "s" }).allowCoreExtensionChange).toBe(false);
+    expect(getSecuritySummary({ _name: "s", security: { allowCoreExtensionChange: true } }).allowCoreExtensionChange).toBe(true);
+    expect(getSecuritySummary({ _name: "s", security: { allowCoreExtensionChange: "on" } }).coreExtensionChangeError).toMatch(/true or false/);
+  });
+
+  it("isCoreExtensionConfig ignores surrounding space and case, and nothing else", () => {
+    for (const name of ["core.extension", " core.extension ", "Core.Extension", "core.extension\n"]) {
+      expect(isCoreExtensionConfig(name)).toBe(true);
+    }
+    for (const name of ["core.extension.foo", "core.extensions", "xcore.extension", "system.site", "", null, undefined, 5, ["core.extension"]]) {
+      expect(isCoreExtensionConfig(name)).toBe(false);
+    }
+  });
+
+  it("assertCoreExtensionValueKeepsProtected asks for the current list only when the module map is replaced", () => {
+    const cfg = resolve({ allowCoreExtensionChange: true });
+    expect(assertCoreExtensionValueKeepsProtected(cfg, { theme: {} })).toEqual({ needsCurrentModules: false });
+    expect(assertCoreExtensionValueKeepsProtected(cfg, { module: { node: 0 } })).toEqual({ needsCurrentModules: true });
+    expect(assertCoreExtensionValueKeepsProtected(cfg, { module: { node: 0 } }, ["node", "devel"])).toEqual({ needsCurrentModules: false });
+    expect(() => assertCoreExtensionValueKeepsProtected(cfg, { module: { node: 0 } }, ["node", "key", "jsonapi"]))
+      .toThrow(/would remove protected modules jsonapi, key/);
+    expect(() => assertCoreExtensionValueKeepsProtected({}, { theme: {} })).toThrow(/protected-module list is missing/);
   });
 });

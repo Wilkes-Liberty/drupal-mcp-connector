@@ -16,6 +16,7 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { drupalGraphqlFetch } from "../lib/drupal-fetch.js";
+import { cleanGraphqlErrors, describeGraphqlErrors } from "../lib/error-body.js";
 import {
   resolveSecurityConfig, assertGraphqlAllowed, assertGraphqlMutationAllowed,
 } from "../lib/security.js";
@@ -30,7 +31,8 @@ import {
  * @param {object} args - { site?, query, variables?, operationName? }.
  * @returns {Promise<{data: object, warnings?: string[]}>} On a clean response,
  *   just `data`. When the server returns errors alongside partial `data`, the
- *   error messages are surfaced as `warnings` rather than thrown.
+ *   error messages are surfaced as `warnings` rather than thrown. Each message
+ *   is cleaned and the list is bounded (see `cleanGraphqlErrors`).
  * @throws {Error} If the response carries errors and no data at all.
  */
 async function runGraphql({ site: siteName, query, variables = {}, operationName }) {
@@ -41,10 +43,11 @@ async function runGraphql({ site: siteName, query, variables = {}, operationName
   const json = await drupalGraphqlFetch(site, { query, variables, operationName });
 
   if (json.errors?.length) {
-    const messages = json.errors.map((e) => e.message).join("; ");
-    if (!json.data) throw new Error(`GraphQL errors: ${messages}`);
+    // The messages are untrusted text: cleaned and bounded, like the detail of
+    // a non-2xx response (#356). `data` is returned as received.
+    if (!json.data) throw new Error(`GraphQL errors: ${describeGraphqlErrors(json.errors)}`);
     // Partial result — return data AND surface errors as a warning
-    return { data: json.data, warnings: json.errors.map((e) => e.message) };
+    return { data: json.data, warnings: cleanGraphqlErrors(json.errors).map((e) => e.message) };
   }
 
   return { data: json.data };
@@ -90,6 +93,8 @@ async function introspectGraphql({ site: siteName, typeName }) {
       }
     `;
     const json = await drupalGraphqlFetch(site, { query, variables: { name: typeName } });
+    // A failed lookup is not a missing type: report what the server said.
+    if (!json.data?.__type && json.errors?.length) throw new Error(describeGraphqlErrors(json.errors));
     if (!json.data?.__type) throw new Error(`Type '${typeName}' not found in schema.`);
     return json.data.__type;
   }
@@ -112,7 +117,7 @@ async function introspectGraphql({ site: siteName, typeName }) {
   `;
   const json = await drupalGraphqlFetch(site, { query });
   if (json.errors?.length) {
-    throw new Error(json.errors.map((e) => e.message).join("; "));
+    throw new Error(describeGraphqlErrors(json.errors));
   }
 
   const schema = json.data.__schema;

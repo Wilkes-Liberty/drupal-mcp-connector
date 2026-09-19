@@ -20,7 +20,7 @@ import {
   sanitizeUploadFilename,
   validateMachineName,
 } from "./validate.js";
-import { describeErrorBody } from "./error-body.js";
+import { describeErrorBody, cleanGraphqlErrors, ERROR_DOCUMENT_MAX_CHARS } from "./error-body.js";
 
 const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
 
@@ -66,6 +66,45 @@ async function readOkBody(res) {
 }
 
 /**
+ * Build the error for a non-2xx response.
+ *
+ * The body is untrusted: it may be an HTML error page from Drupal, PHP or a
+ * proxy, or carry a server path, another user's filename or a backtrace. Only a
+ * cleaned, bounded detail is surfaced (see `describeErrorBody`); the prefix,
+ * which holds the HTTP status, is always kept because callers match on it
+ * (#343, #345).
+ * @param {object} res node-fetch Response with `ok === false`.
+ * @param {string} prefix Message start, e.g. "Drupal 404 on GET /jsonapi/x".
+ * @param {object} [options] Passed to `describeErrorBody`.
+ * @returns {Promise<Error>} A source budget denial, or the described failure
+ *   with the HTTP status on its `status` property. Callers that branch on the
+ *   status read it with `httpStatusOf()`, never from the message text (#355).
+ */
+async function failedResponseError(res, prefix, options) {
+  let body;
+  try {
+    body = await res.text();
+  } catch {
+    return withStatus(new Error(`${prefix} (response body could not be read)`), res.status);
+  }
+  const mapped = sourceBudgetDenial(body);
+  if (mapped) return mapped;
+  const detail = describeErrorBody(body, res.headers?.get?.("content-type") ?? null, options);
+  return withStatus(new Error(detail ? `${prefix}: ${detail}` : `${prefix} (empty response body)`), res.status);
+}
+
+/**
+ * Set the HTTP status on an error.
+ * @param {Error} error Error to mark.
+ * @param {number} status HTTP status of the response.
+ * @returns {Error} The same error.
+ */
+function withStatus(error, status) {
+  error.status = status;
+  return error;
+}
+
+/**
  * Standard JSON:API request against a site.
  *
  * For OAuth2 sites, a 401 triggers a single retry: the cached token is cleared,
@@ -74,7 +113,10 @@ async function readOkBody(res) {
  * @param {string} path Path appended to site.baseUrl (e.g. "/jsonapi/node/article").
  * @param {object} [options] node-fetch options (method, body, extra headers).
  * @returns {Promise<object|null>} Parsed JSON body, or null for a 204 No Content.
- * @throws {Error} on any non-2xx response, with Drupal error detail when available.
+ * @throws {Error} on any non-2xx response. The message is
+ *   `Drupal <status> on <method> <path>: <detail>`, where the detail is the
+ *   cleaned, bounded `errors[].detail` text (see `describeErrorBody`). The raw
+ *   body and any HTML page are never included.
  */
 export async function drupalFetch(site, path, options = {}) {
   const url = `${site.baseUrl}${path}`;
@@ -107,18 +149,11 @@ export async function drupalFetch(site, path, options = {}) {
   }
 
   if (!res.ok) {
-    const body = await res.text();
-    const mapped = sourceBudgetDenial(body);
-    if (mapped) throw mapped;
-    let detail = body;
-    try {
-      const parsed = JSON.parse(body);
-      // Drupal JSON:API surfaces errors in errors[].detail
-      if (parsed.errors?.length) {
-        detail = parsed.errors.map((e) => e.detail || e.title).join("; ");
-      }
-    } catch { /* use raw body */ }
-    throw new Error(`Drupal ${res.status} on ${options.method || "GET"} ${path}: ${detail}`);
+    throw await failedResponseError(
+      res,
+      `Drupal ${res.status} on ${options.method || "GET"} ${path}`,
+      { maxChars: ERROR_DOCUMENT_MAX_CHARS },
+    );
   }
 
   if (res.status === 204) return null; // No Content (e.g. DELETE success)
@@ -131,8 +166,15 @@ export async function drupalFetch(site, path, options = {}) {
  * GraphQL request — posts a JSON body to the site's GraphQL endpoint.
  * @param {object} site Resolved site config (provides baseUrl + auth).
  * @param {object} body GraphQL request body, e.g. { query, variables }.
- * @returns {Promise<object>} Parsed GraphQL JSON response.
+ * @returns {Promise<object>} Parsed GraphQL JSON response. `data` is returned
+ *   as received. GraphQL reports a failed query as HTTP 200 with an `errors`
+ *   array; that array is replaced by its cleaned, bounded form (see
+ *   `cleanGraphqlErrors`): `message`, `path`, `locations` and the machine
+ *   values of `extensions` only (#356).
  * @throws {Error} on any non-2xx response (clears the OAuth token cache on 401).
+ *   The message is `GraphQL request failed <status>: <detail>`, where the detail
+ *   is the cleaned, bounded `errors[].message` text (see `describeErrorBody`).
+ *   The raw body and any HTML page are never included.
  */
 export async function drupalGraphqlFetch(site, body) {
   const endpoint = site.graphqlEndpoint || "/graphql";
@@ -155,14 +197,20 @@ export async function drupalGraphqlFetch(site, body) {
     // OAuth sites: a 401 likely means the token expired server-side. Clear the
     // cached token so the next request re-acquires, then surface the error.
     if (res.status === 401 && site.oauth) clearToken(site);
-    const text = await res.text();
-    const mapped = sourceBudgetDenial(text);
-    if (mapped) throw mapped;
-    throw new Error(`GraphQL request failed ${res.status}: ${text}`);
+    throw await failedResponseError(
+      res,
+      `GraphQL request failed ${res.status}`,
+      { maxChars: ERROR_DOCUMENT_MAX_CHARS },
+    );
   }
 
   const { json, text } = await readOkBody(res);
   accountNorthboundBody(json, text);
+  if (json && typeof json === "object" && !Array.isArray(json) && "errors" in json) {
+    json.errors = cleanGraphqlErrors(json.errors);
+    // An empty list is not an error; consumers test `json.errors` for truth.
+    if (!json.errors.length) delete json.errors;
+  }
   return json;
 }
 
@@ -216,21 +264,7 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
   });
 
   if (!res.ok) {
-    let body;
-    try {
-      body = await res.text();
-    } catch {
-      throw new Error(`File upload failed ${res.status} (response body could not be read)`);
-    }
-    const mapped = sourceBudgetDenial(body);
-    if (mapped) throw mapped;
-    // The body is untrusted: it may be an HTML error page, or carry a server
-    // path or another user's filename. Only a cleaned, bounded detail is
-    // surfaced; the status is always kept (#343).
-    const detail = describeErrorBody(body, res.headers?.get?.("content-type") ?? null);
-    throw new Error(detail
-      ? `File upload failed ${res.status}: ${detail}`
-      : `File upload failed ${res.status} (empty response body)`);
+    throw await failedResponseError(res, `File upload failed ${res.status}`);
   }
 
   return res.json();

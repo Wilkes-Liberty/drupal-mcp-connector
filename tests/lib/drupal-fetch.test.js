@@ -348,3 +348,240 @@ describe("drupalUploadFile failure message (#343)", () => {
       .rejects.toThrow("File upload failed 500 (response body could not be read)");
   });
 });
+
+describe("drupalFetch failure message (#345)", () => {
+  const site = { _name: "t", baseUrl: "https://x" };
+
+  async function failWith(status, body, contentType, options) {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status,
+      headers: { get: (name) => (name.toLowerCase() === "content-type" ? contentType ?? null : null) },
+      text: async () => body,
+    });
+    try {
+      await drupalFetch(site, "/jsonapi/node/article/n1", options);
+    } catch (err) {
+      return err.message;
+    }
+    throw new Error("expected the request to fail");
+  }
+
+  it("keeps the status, method, path and errors[].detail of a JSON:API error document", async () => {
+    const message = await failWith(422, JSON.stringify({
+      jsonapi: { version: "1.0" },
+      errors: [
+        {
+          title: "Unprocessable Entity", status: "422",
+          detail: "title: This value should not be null.",
+          source: { pointer: "/data/attributes/title", file: "/var/www/html/web/core/modules/jsonapi/src/Controller/EntityResource.php" },
+          meta: { trace: "#0 /var/www/html/web/core/lib/Drupal/Core/Entity/EntityBase.php(310): secret()" },
+        },
+        { title: "Forbidden" },
+      ],
+    }), "application/vnd.api+json", { method: "PATCH" });
+    expect(message).toBe("Drupal 422 on PATCH /jsonapi/node/article/n1: title: This value should not be null.; Forbidden");
+  });
+
+  it("defaults the method to GET", async () => {
+    const message = await failWith(404, JSON.stringify({ errors: [{ title: "Not Found", status: "404", detail: "The requested resource was not found." }] }));
+    expect(message).toBe("Drupal 404 on GET /jsonapi/node/article/n1: The requested resource was not found.");
+  });
+
+  it("never passes an HTML page through, by content type", async () => {
+    const html = "<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body><h1>Bad Gateway</h1>" +
+      "<pre>upstream sent invalid header while reading /var/run/php/php-fpm.sock</pre></body></html>";
+    const message = await failWith(502, html, "text/html; charset=UTF-8");
+    expect(message).toBe("Drupal 502 on GET /jsonapi/node/article/n1: the server returned an HTML page, not shown (title: 502 Bad Gateway)");
+    expect(message).not.toContain("upstream");
+    expect(message).not.toContain("<");
+  });
+
+  it("detects an HTML page without a content type, and a PHP html_errors dump", async () => {
+    expect(await failWith(500, "\n <html><body><p>The website encountered an unexpected error.</p></body></html>"))
+      .toBe("Drupal 500 on GET /jsonapi/node/article/n1: the server returned an HTML page, not shown");
+    expect(await failWith(500, "<br />\n<b>Fatal error</b>: Uncaught PDOException in /var/www/html/web/index.php:12"))
+      .toBe("Drupal 500 on GET /jsonapi/node/article/n1: the server returned an HTML page, not shown");
+  });
+
+  it("keeps a site-relative URL path the caller supplied (#357)", async () => {
+    const message = await failWith(422, JSON.stringify({
+      errors: [{ detail: "alias: The alias /about/team is already in use in this language." }],
+    }), "application/vnd.api+json");
+    expect(message).toBe(
+      "Drupal 422 on GET /jsonapi/node/article/n1: alias: The alias /about/team is already in use in this language."
+    );
+  });
+
+  it("strips markup, redacts server paths and removes a backtrace inside a detail", async () => {
+    const message = await failWith(500, JSON.stringify({
+      errors: [
+        { detail: "Could not write <em>private://hr/2026/jane-doe-resume.pdf</em> in /var/www/html/web/sites/default/files. Stack trace: #0 /var/www/html/web/core/lib/Drupal.php(12): boom()" },
+        { detail: "Second error." },
+      ],
+    }), "application/vnd.api+json");
+    // A backtrace in one detail does not swallow the next one.
+    expect(message).toBe(
+      "Drupal 500 on GET /jsonapi/node/article/n1: Could not write private://[path] in [path] [stack trace removed]; Second error."
+    );
+    expect(message).not.toContain("/var/www");
+    expect(message).not.toContain("jane-doe");
+    expect(message).not.toContain("boom()");
+    expect(message).not.toMatch(/[<>]/);
+  });
+
+  it("bounds one oversized detail and the whole message", async () => {
+    const one = await failWith(422, JSON.stringify({ errors: [{ detail: "x".repeat(20000) }] }), "application/vnd.api+json");
+    expect(one.length).toBeLessThan(600);
+    expect(one).toMatch(/… \[truncated\]$/);
+
+    const many = await failWith(422, JSON.stringify({
+      errors: Array.from({ length: 200 }, (_, i) => ({ detail: `field_${i}: ${"y".repeat(300)}` })),
+    }), "application/vnd.api+json");
+    expect(many.length).toBeLessThan(1400);
+    expect(many).toMatch(/… \[truncated\]$/);
+  });
+
+  it("keeps every detail of an ordinary multi-violation 422", async () => {
+    const details = Array.from({ length: 8 }, (_, i) => `field_example_${i}: This value should not be null, and the allowed values are listed in the field settings.`);
+    const message = await failWith(422, JSON.stringify({ errors: details.map((detail) => ({ detail })) }), "application/vnd.api+json", { method: "POST" });
+    for (const detail of details) expect(message).toContain(detail);
+  });
+
+  it("bounds a plain-text body and strips markup and control characters", async () => {
+    const message = await failWith(500, `Upstream <b>failed</b>\u0000\u001b[31m: ${"y".repeat(50000)}`, "text/plain");
+    expect(message.startsWith("Drupal 500 on GET /jsonapi/node/article/n1: Upstream failed")).toBe(true);
+    expect(message).not.toMatch(/[\u0000-\u001f<>]/);
+    expect(message.length).toBeLessThan(600);
+  });
+
+  it("does not echo a JSON body that is not an error document", async () => {
+    const message = await failWith(500, JSON.stringify({ debug: { dsn: "pgsql://user:pw@db/app" } }), "application/json");
+    expect(message).toBe("Drupal 500 on GET /jsonapi/node/article/n1: the server returned JSON with no error detail, not shown");
+  });
+
+  it("reads the message member of a plain Drupal JSON error", async () => {
+    const message = await failWith(403, JSON.stringify({ message: "The 'access content' permission is required." }), "application/json");
+    expect(message).toBe("Drupal 403 on GET /jsonapi/node/article/n1: The 'access content' permission is required.");
+  });
+
+  it("reads an OAuth error document", async () => {
+    const message = await failWith(403, JSON.stringify({
+      error: "insufficient_scope",
+      error_description: "The request requires higher privileges than provided by the access token.",
+      hint: "Check /var/www/html/keys/public.key",
+    }), "application/json");
+    expect(message).toBe(
+      "Drupal 403 on GET /jsonapi/node/article/n1: insufficient_scope: The request requires higher privileges than provided by the access token."
+    );
+  });
+
+  it("keeps the status when the body is empty", async () => {
+    expect(await failWith(503, "")).toBe("Drupal 503 on GET /jsonapi/node/article/n1 (empty response body)");
+    expect(await failWith(503, " \n ")).toBe("Drupal 503 on GET /jsonapi/node/article/n1 (empty response body)");
+  });
+
+  it("still fails with the status when the body cannot be read", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 500, text: async () => { throw new Error("socket hang up"); } });
+    await expect(drupalFetch(site, "/jsonapi/node/article/n1"))
+      .rejects.toThrow("Drupal 500 on GET /jsonapi/node/article/n1 (response body could not be read)");
+  });
+
+  it("does not change a successful response", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ data: { id: "n1", attributes: { body: "<p>/var/www/html</p>" } } }) });
+    await expect(drupalFetch(site, "/jsonapi/node/article/n1")).resolves.toEqual({ data: { id: "n1", attributes: { body: "<p>/var/www/html</p>" } } });
+    vi.mocked(fetch).mockResolvedValue({ ok: true, status: 204 });
+    await expect(drupalFetch(site, "/jsonapi/node/article/n1", { method: "DELETE" })).resolves.toBeNull();
+  });
+});
+
+describe("drupalGraphqlFetch failure message (#345)", () => {
+  const site = { _name: "t", baseUrl: "https://x" };
+
+  async function failWith(status, body, contentType) {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status,
+      headers: { get: (name) => (name.toLowerCase() === "content-type" ? contentType ?? null : null) },
+      text: async () => body,
+    });
+    try {
+      await drupalGraphqlFetch(site, { query: "{ __typename }" });
+    } catch (err) {
+      return err.message;
+    }
+    throw new Error("expected the request to fail");
+  }
+
+  it("never passes an HTML page through", async () => {
+    const html = "<html><head><title>Service Unavailable</title></head><body><pre>PDOException in /var/www/html/web/core/lib/Database.php</pre></body></html>";
+    const message = await failWith(503, html, "text/html");
+    expect(message).toBe("GraphQL request failed 503: the server returned an HTML page, not shown (title: Service Unavailable)");
+    expect(message).not.toContain("PDOException");
+  });
+
+  it("keeps errors[].message, cleaned and bounded", async () => {
+    const message = await failWith(400, JSON.stringify({
+      errors: [
+        { message: "Cannot query field \"nope\" on type \"Query\".", locations: [{ line: 1, column: 3 }], extensions: { trace: "#0 /var/www/html/vendor/webonyx/graphql-php/src/Executor.php" } },
+        { message: "Syntax Error: <b>Unexpected</b> Name in /var/www/html/web/modules/custom/x/x.module" },
+      ],
+    }), "application/json");
+    expect(message).toBe(
+      "GraphQL request failed 400: Cannot query field \"nope\" on type \"Query\".; Syntax Error: Unexpected Name in [path]"
+    );
+  });
+
+  it("bounds an oversized message", async () => {
+    const message = await failWith(500, JSON.stringify({ errors: [{ message: "z".repeat(20000) }] }), "application/json");
+    expect(message.length).toBeLessThan(600);
+    expect(message).toMatch(/… \[truncated\]$/);
+  });
+
+  it("does not echo a JSON body that carries no error message", async () => {
+    const message = await failWith(500, JSON.stringify({ data: null, extensions: { debug: "/var/www/html" } }), "application/json");
+    expect(message).toBe("GraphQL request failed 500: the server returned JSON with no error detail, not shown");
+  });
+
+  it("keeps the status when the body is empty or cannot be read", async () => {
+    expect(await failWith(502, "")).toBe("GraphQL request failed 502 (empty response body)");
+    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 500, text: async () => { throw new Error("socket hang up"); } });
+    await expect(drupalGraphqlFetch(site, { query: "{ __typename }" }))
+      .rejects.toThrow("GraphQL request failed 500 (response body could not be read)");
+  });
+
+  it("cleans and bounds the errors of a 200 response and leaves data alone (#356)", async () => {
+    const data = { nodeArticles: { nodes: [{ title: "Kept <b>as is</b> /var/www/html/x" }] } };
+    const body = {
+      data,
+      errors: [{
+        message: "Field error at /var/www/html/x <b>bold</b> " + "y".repeat(20000),
+        path: ["nodeArticles", "nodes", 1],
+        extensions: { code: "INTERNAL", debugMessage: "secret", trace: [{ file: "/var/www/html/index.php" }] },
+      }],
+      extensions: { tracing: { file: "/var/www/html/index.php" } },
+    };
+    vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify(body) });
+    const json = await drupalGraphqlFetch(site, { query: "{ __typename }" });
+    expect(json.data).toEqual(data);
+    expect(json.errors).toHaveLength(1);
+    expect(json.errors[0].message.startsWith("Field error at [path] bold yyy")).toBe(true);
+    expect(json.errors[0].message.length).toBeLessThan(500);
+    expect(json.errors[0].path).toEqual(["nodeArticles", "nodes", 1]);
+    expect(json.errors[0].extensions).toEqual({ code: "INTERNAL" });
+    expect(JSON.stringify(json.errors)).not.toMatch(/secret|trace|var\/www/);
+  });
+
+  it("does not add an errors key to a clean 200 response", async () => {
+    const body = { data: { ok: true } };
+    vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify(body) });
+    await expect(drupalGraphqlFetch(site, { query: "{ __typename }" })).resolves.toEqual(body);
+  });
+
+  it("does not turn an empty or null errors value into an error", async () => {
+    for (const errors of [[], null, "", 0, false]) {
+      vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ data: { ok: true }, errors }) });
+      await expect(drupalGraphqlFetch(site, { query: "{ __typename }" })).resolves.toEqual({ data: { ok: true } });
+    }
+  });
+});
