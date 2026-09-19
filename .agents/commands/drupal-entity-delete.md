@@ -18,6 +18,6 @@ Parse the arguments supplied with this command into this tool's parameters:
 
 **Optional:**
 - `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
-- `dryRun` (boolean (true/false)): Validate and return a preview of the delete without committing.
+- `dryRun` (boolean (true/false)): Return a preview of the delete without committing. Drupal does not evaluate the delete: Drupal's delete access for the entity is NOT checked, only the connector's own policy. The result's `checks` block says so.
 
 If a required parameter is missing, ask before calling — do not invent values. Coerce each value to its JSON type (booleans → true/false, numbers → numeric, object/array → parse JSON), then make the single tool call and summarize the result.

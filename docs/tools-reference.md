@@ -150,8 +150,8 @@ attribute so you can see what would be persisted.
 
 `drupal_create_node`, `drupal_update_node`, and `drupal_delete_node` all accept an
 optional `dryRun` boolean (default `false`). When `true`, the tool validates the
-request and returns a preview of exactly what would be written. Create and delete
-previews do not touch Drupal. On a **moderated** `update`, `dryRun` also issues a
+request and returns a preview of the payload it would send. Drupal does not
+evaluate a create or delete preview. On a **moderated** `update`, `dryRun` also issues a
 non-saving preflight. With an existing draft, Sentinel's `/mcp-draft` endpoint
 validates the real fields and live/working revision preconditions (#166;
 Sentinel d.o #3621022). The real write creates an unpublished continuation;
@@ -167,6 +167,27 @@ Use this (and
 `drupal_list_revisions.possiblyPatchBlocked`) **before** creating dependent
 paragraphs; preflight inside the host update cannot un-orphan work that
 already happened.
+
+**What a dryRun checks.** A preview that returns without a refusal is not proof
+the write will succeed. Every dryRun result carries a `checks` block that names
+each check as `checked` or `not_checked`, and a `caveat` sentence when anything
+was left out. `checked` means the check ran and passed; a failed check fails
+the dryRun instead.
+
+| `checks.serverPreflight` | When | Entity access | Revision guard | Field access | Entity validation |
+|---|---|---|---|---|---|
+| `sentinel_draft` | update of a node with an existing draft, a `langcode` translation draft, `drupal_create_translation` | checked | checked | checked | checked |
+| `core_patch_guard` | update of any other moderated target | checked | checked | **not checked** | **not checked** |
+| `none` | update of an unmoderated target (users, terms, media, paragraphs, unmoderated nodes), every create, every delete | not checked | not checked | **not checked** | **not checked** |
+
+The core probe sends no fields and a non-matching `data.id`. Core checks the
+working-copy guard, then rejects the id, and only after that would it evaluate
+field access and validation. So on `core_patch_guard` and `none` the real write
+can still fail with a field-access 403 ("not allowed to PATCH the selected
+field") or a validation 422. Only Sentinel's non-saving draft endpoint receives
+the real fields, so only `sentinel_draft` predicts those refusals.
+`connectorPolicy` is always `checked`: the connector's own allowlist and publish
+gate ran.
 
 ```json
 {
@@ -185,12 +206,21 @@ Returns a preview envelope instead of a created entity:
   "operation": "create",
   "entityType": "node",
   "bundle": "article",
-  "attributes": { "title": "My New Article", "body": { "value": "<p>Article body HTML</p>", "format": "full_html" } }
+  "attributes": { "title": "My New Article", "body": { "value": "<p>Article body HTML</p>", "format": "full_html" } },
+  "checks": {
+    "serverPreflight": "none",
+    "connectorPolicy": "checked",
+    "entityAccess": "not_checked",
+    "revisionGuard": "not_checked",
+    "fieldAccess": "not_checked",
+    "entityValidation": "not_checked"
+  },
+  "caveat": "Drupal did not evaluate this write. Entity access, field access and entity validation were NOT checked. …"
 }
 ```
 
 For `update` the preview also includes the target `id`; for `delete` it returns
-`{ dryRun: true, operation: "delete", entityType, bundle, id }`.
+`{ dryRun: true, operation: "delete", entityType, bundle, id, checks, caveat }`.
 
 ### URL aliases
 
@@ -369,6 +399,12 @@ dryRun the same as the saving write (#273). Core revision selectors are read-onl
 not a PATCH target. When `true`, the tool validates the request and returns a
 preview of the write without committing it.
 
+The result carries the same `checks` block and `caveat` as the node tools (see
+[What a dryRun checks](#preview-writes-with-dryrun)). Most generic-entity
+previews are `serverPreflight: "none"`: users, profiles, taxonomy terms, media
+and paragraphs are unmoderated, and Drupal never evaluates a create preview. For those,
+field access and entity validation are **not** checked.
+
 ```json
 {
   "entityType": "paragraph",
@@ -387,12 +423,14 @@ Returns a preview envelope:
   "entityType": "paragraph",
   "bundle": "text",
   "attributes": { "field_text": { "value": "<p>Hello world</p>", "format": "full_html" } },
-  "relationships": {}
+  "relationships": {},
+  "checks": { "serverPreflight": "none", "connectorPolicy": "checked", "entityAccess": "not_checked", "revisionGuard": "not_checked", "fieldAccess": "not_checked", "entityValidation": "not_checked" },
+  "caveat": "Drupal did not evaluate this write. Entity access, field access and entity validation were NOT checked. …"
 }
 ```
 
 For `update` the preview also includes the target `id`; for `delete` it returns
-`{ dryRun: true, operation: "delete", entityType, bundle, id }`.
+`{ dryRun: true, operation: "delete", entityType, bundle, id, checks, caveat }`.
 
 ---
 
