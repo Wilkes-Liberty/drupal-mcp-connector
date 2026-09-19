@@ -127,6 +127,34 @@ function jsonErrorDetails(parsed) {
   return null;
 }
 
+/** Most details of one error document that are cleaned, whatever the bound. */
+const ERROR_DETAILS_MAX_COUNT = 50;
+
+/**
+ * Clean each detail on its own and join them, so a backtrace or an oversized
+ * string in one error does not remove the errors after it. Cleaning stops once
+ * the bound is reached or {@link ERROR_DETAILS_MAX_COUNT} details were read, so
+ * a document with a very long `errors` array costs a bounded amount of work.
+ * @param {string[]} details Untrusted detail strings.
+ * @param {number} maxChars Bound for the joined text.
+ * @returns {string} Joined, bounded text, or "" when nothing is left.
+ */
+function joinCleanDetails(details, maxChars) {
+  const cleaned = [];
+  let length = 0;
+  for (const detail of details.slice(0, ERROR_DETAILS_MAX_COUNT)) {
+    const text = cleanErrorText(detail);
+    if (!text) continue;
+    cleaned.push(text);
+    length += text.length + 2;
+    if (length > maxChars) break;
+  }
+  if (!cleaned.length) return "";
+  const joined = boundText(cleaned.join("; "), maxChars);
+  const dropped = details.length > ERROR_DETAILS_MAX_COUNT && !joined.endsWith(TRUNCATED_SUFFIX);
+  return dropped ? joined + TRUNCATED_SUFFIX : joined;
+}
+
 /**
  * Describe an error response body for the caller.
  *
@@ -165,11 +193,7 @@ export function describeErrorBody(body, contentType = null, options = {}) {
     const maxChars = Number.isFinite(options.maxChars)
       ? Math.max(ERROR_DETAIL_MAX_CHARS, Math.floor(options.maxChars))
       : ERROR_DETAIL_MAX_CHARS;
-    // Each detail is cleaned on its own, so a backtrace or an oversized string
-    // in one error does not remove the errors after it.
-    const text = details
-      ? boundText(details.map((detail) => cleanErrorText(detail)).filter(Boolean).join("; "), maxChars)
-      : "";
+    const text = details ? joinCleanDetails(details, maxChars) : "";
     return text || "the server returned JSON with no error detail, not shown";
   }
 

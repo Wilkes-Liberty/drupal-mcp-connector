@@ -125,4 +125,14 @@ describe("describeErrorBody", () => {
     const plain = describeErrorBody("p".repeat(5000), "text/plain", { maxChars: ERROR_DOCUMENT_MAX_CHARS });
     expect(plain.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX_CHARS + 20);
   });
+
+  it("reads a bounded number of details from a very long errors array", () => {
+    const body = JSON.stringify({ errors: Array.from({ length: 5000 }, (_, i) => ({ detail: i < 4999 ? "<b></b>" : "last" })) });
+    expect(describeErrorBody(body)).toBe("the server returned JSON with no error detail, not shown");
+    const short = JSON.stringify({ errors: Array.from({ length: 80 }, (_, i) => ({ detail: `e${i}` })) });
+    const described = describeErrorBody(short, null, { maxChars: ERROR_DOCUMENT_MAX_CHARS });
+    expect(described).toContain("e49");
+    expect(described).not.toContain("e50");
+    expect(described).toMatch(/… \[truncated\]$/);
+  });
 });
