@@ -154,6 +154,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   link value counts as populated. `drupal_report_seo_meta_coverage` follows the
   same rules: `coverage: null` for an absent field, and no node flagged when no
   checked field is visible. Two stubs under `.agents/commands/` were regenerated.
+- **A status number in an error's text is no longer read as the response status (#355).**
+  `drupal_report_orphaned_references` reported a reference as an orphan when the
+  lookup failed with a 500 whose detail mentioned "404". Four other matchers had
+  the same fault. A 404 on `/jsonapi/node/article/401` read as an authentication
+  failure and cleared the cached OAuth token. A failed PATCH probe whose detail
+  mentioned "Drupal 422" read as a passed working-copy check. A 403 or 500 that
+  mentioned "422" and "inaccessible" triggered the menu-link retry. A 500 on a
+  Sentinel draft or translation endpoint whose detail mentioned "Drupal 404" was
+  reported as a missing endpoint. Errors thrown by `drupalFetch()`,
+  `drupalGraphqlFetch()` and the upload helper now carry the HTTP status on a
+  `status` property, and all five matchers read it through `httpStatusOf()`
+  (`src/lib/error-status.js`). An error with no `status` is read only from the
+  status token at the start of a documented message (`Drupal <status> …`,
+  `GraphQL request failed <status>`, `File upload failed <status>`). The orphan
+  report no longer treats a bare "404" elsewhere in a message as a missing
+  target; such a failure counts as unverifiable.
 
 ## [2.19.1] - 2026-09-17
 

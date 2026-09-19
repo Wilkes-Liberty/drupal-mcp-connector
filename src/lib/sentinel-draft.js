@@ -9,6 +9,7 @@
  */
 
 import { entityRevisionId } from "./write-revision.js";
+import { httpStatusOf } from "./error-status.js";
 
 const LANGCODE_RE = /^[a-z][a-z0-9_-]{0,11}$/;
 const MISSING_DRAFT_ENDPOINT =
@@ -19,7 +20,6 @@ const MISSING_TRANSLATION_ENDPOINT =
   "Update MCP Sentinel; no canonical langcode PATCH was attempted.";
 const MISSING_DRAFT_RE = /does not provide Sentinel's governed draft endpoint/;
 const MISSING_TRANSLATION_RE = /does not provide Sentinel's governed draft-translation endpoint/;
-const DRUPAL_ABSENCE_RE = /Drupal (404|405)\b/;
 
 /**
  * Whether a backend can issue Sentinel's JSON:API draft/translation routes.
@@ -70,7 +70,8 @@ export function isMissingTranslationEndpoint(error) {
  * @returns {Error}
  */
 function missingEndpointError(error, message) {
-  if (DRUPAL_ABSENCE_RE.test(String(error?.message))) {
+  const status = httpStatusOf(error);
+  if (status === 404 || status === 405) {
     return new Error(message, { cause: error });
   }
   return error instanceof Error ? error : new Error(String(error));

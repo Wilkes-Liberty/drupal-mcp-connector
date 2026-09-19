@@ -27,6 +27,8 @@ Complete reference for all 123 tools across 27 modules.
 > characters and a list of details to 1,200 (400 for an upload). An HTML page,
 > or a JSON body with no error detail, is never returned: the error says so and
 > gives the page title. An empty body reports `(empty response body)`.
+> The connector branches on the response status, never on a number inside the
+> path or the detail (#355).
 
 ---
 
@@ -872,7 +874,7 @@ Additional read-only audit tools that complement the [Reports](#reports) module.
 |------|----------------|-------------|
 | `drupal_report_unpublished` | — | List unpublished/draft content of a type (default `article`). Returns titles, last-changed dates, and paths — surfaces forgotten drafts. |
 | `drupal_report_missing_field` | `field` | Find entities where a given field is empty (scalar or entity-reference). Bounded by `sampleSize`. A field absent from every sampled entity is reported as `notVisible`, not as missing everywhere. |
-| `drupal_report_orphaned_references` | — | Find entities whose entity-reference fields point at targets that no longer exist. A 404 is an orphan; 401/403 and policy-denied types are `unverifiable`, not missing. Bounded by `sampleSize`. |
+| `drupal_report_orphaned_references` | — | Find entities whose entity-reference fields point at targets that no longer exist. A 404 response is an orphan; 401/403, policy-denied types and any other failure (including a 500 whose text mentions 404) are `unverifiable`, not missing. Bounded by `sampleSize`. |
 
 ### drupal_report_missing_field
 
