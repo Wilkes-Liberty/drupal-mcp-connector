@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 import { CLIENT_VERSION } from "./config.js";
 import { resolveInboundAuthConfig, resolveInboundAuthMode } from "./http-auth.js";
+import { httpStatusOf } from "./error-status.js";
 import { advertisedServerToolNames, serverToolCandidates, SERVER_TOOL_IDS } from "./server-tools.js";
 
 /** Check outcome vocabulary.
@@ -516,6 +517,41 @@ async function attempt(transport, url, init = {}) {
   }
 }
 
+/** Standard JSON-RPC codes: the call itself was wrong, so nothing decided. */
+const STANDARD_RPC_CODES = new Set([-32700, -32600, -32601, -32602, -32603]);
+
+// The bridge client's documented message shapes, anchored at the start. A tool
+// name holds no whitespace, so text after the prefix can never change which
+// shape a message is.
+const SESSION_FAILURE_RE = /^Server-tool session initialize /;
+const HTTP_FAILURE_RE = /^Server-tool call \S+ failed \d{3}(?!\w)/;
+const TOOL_ERROR_RE = /^Server-tool \S+ reported an error:/;
+const RPC_ERROR_RE = /^Server-tool \S+ error \((-?\d+)\):/;
+
+/**
+ * What failed in a bridge call, read from the error the bridge client threw.
+ *
+ * The client marks its errors (`bridgeFailure`, plus `status` or `rpcCode`), and
+ * those properties decide. An error with no marker is read from the start of a
+ * documented message only. The rest of a message is a response body or tool
+ * text: a status, a JSON-RPC code or the words "reported an error" found there
+ * describe nothing about this call (#361).
+ * @param {unknown} error Thrown value.
+ * @param {string} message Its message.
+ * @returns {{kind: "session"|"http"|"tool"|"rpc"|null, status?: ?number, code?: ?number}}
+ */
+function bridgeFailureOf(error, message) {
+  const marker = typeof error?.bridgeFailure === "string" ? error.bridgeFailure : null;
+  if (marker === "session" || (!marker && SESSION_FAILURE_RE.test(message))) return { kind: "session" };
+  if (marker === "http" || (!marker && HTTP_FAILURE_RE.test(message))) {
+    return { kind: "http", status: httpStatusOf(error) };
+  }
+  if (marker === "tool" || (!marker && TOOL_ERROR_RE.test(message))) return { kind: "tool" };
+  if (marker === "rpc") return { kind: "rpc", code: Number.isInteger(error.rpcCode) ? error.rpcCode : null };
+  const rpc = marker ? null : RPC_ERROR_RE.exec(message);
+  return rpc ? { kind: "rpc", code: Number(rpc[1]) } : { kind: null };
+}
+
 /**
  * Whether a thrown bridge error is a POLICY refusal or an unexercised probe.
  *
@@ -524,11 +560,17 @@ async function attempt(transport, url, init = {}) {
  * them mean the source decided:
  *
  *  - a tool-level error (the tool ran and refused)            → refused
- *  - a server-defined JSON-RPC error (-32000..-32099)         → refused
+ *  - a server-defined JSON-RPC error (not a standard code)    → refused
  *  - an HTTP 401/403 on the tools/call                        → refused
  *  - a standard JSON-RPC error (method not found, bad params) → unexercised
+ *  - a JSON-RPC error with no readable code                   → unexercised
  *  - any other HTTP status (400, 404, 5xx)                    → unexercised
- *  - no bridge configured, session init, network failure      → unexercised
+ *  - no bridge configured, session init, token, network       → unexercised
+ *
+ * The HTTP status comes from the error's `status` property (`httpStatusOf`),
+ * and only for a failure of the tools/call itself: the token endpoint and the
+ * session handshake answer 401 and 403 too, before any tool is reached. A
+ * status is never read from the response body.
  *
  * Scoring an unexercised probe as a refusal is how a verifier produces a green
  * document for an install that never proved anything.
@@ -539,32 +581,36 @@ async function attempt(transport, url, init = {}) {
 export function classifyBridgeError(error) {
   const message = String(error?.message ?? error);
   const detail = message.slice(0, 200);
+  const failure = bridgeFailureOf(error, message);
+  const refused =
+    failure.kind === "tool" ||
+    (failure.kind === "http" && (failure.status === 401 || failure.status === 403)) ||
+    (failure.kind === "rpc" && failure.code !== null && !STANDARD_RPC_CODES.has(failure.code));
+  return { outcome: refused ? "refused" : "unexercised", detail };
+}
 
-  // The tool ran and reported an error: the canonical governed refusal.
-  if (/ reported an error:/.test(message)) return { outcome: "refused", detail };
+/**
+ * Whether a status is a 4xx: the target answered and declined the request.
+ * @param {?number} status HTTP status, or null when there was no answer.
+ * @returns {boolean}
+ */
+function isClientErrorStatus(status) {
+  return Number.isInteger(status) && status >= 400 && status <= 499;
+}
 
-  // JSON-RPC error at the tools/call. Server-defined codes are decisions;
-  // the standard codes mean the call itself was wrong.
-  const rpc = message.match(/ error \((-?\d+)\):/);
-  if (rpc) {
-    const code = Number(rpc[1]);
-    const isStandard = [-32700, -32600, -32601, -32602, -32603].includes(code);
-    // A session-initialize error never reached the tool, whatever its code.
-    if (/session initialize/.test(message)) return { outcome: "unexercised", detail };
-    return isStandard ? { outcome: "unexercised", detail } : { outcome: "refused", detail };
-  }
-
-  // HTTP status on the tools/call: an authorisation status is a decision.
-  const http = message.match(/^Server-tool call .* failed (\d{3}):/);
-  if (http) {
-    const status = Number(http[1]);
-    return status === 401 || status === 403
-      ? { outcome: "refused", detail }
-      : { outcome: "unexercised", detail };
-  }
-
-  // Bridge not configured, session initialise failure, transport error.
-  return { outcome: "unexercised", detail };
+/**
+ * Whether a failed mass read is a refusal by the source.
+ *
+ * 401, 403 and 429 are decisions. Any other 4xx counts only when the body
+ * carries the source's own refusal code (e.g. `read_budget_exceeded`). A 404
+ * means the collection does not exist, and a 5xx or no answer means the request
+ * failed; none of those reached the read control.
+ * @param {{status: ?number, codes: string[]}} result Reduced transport attempt.
+ * @returns {boolean}
+ */
+function isMassReadRefusal({ status, codes }) {
+  if (status === 401 || status === 403 || status === 429) return true;
+  return isClientErrorStatus(status) && status !== 404 && codes.length > 0;
 }
 
 /** Builds a live check result, carrying what was observed. */
@@ -663,24 +709,31 @@ export async function verifyLive(site, { transport, callTool = null, listTools =
       tokenError = String(err?.message ?? err);
     }
     const anonymous = await attempt(transport, joinUrl(baseUrl, "/drupal-mcp/readiness"));
+    const authFindings = [];
+    if (!token) {
+      authFindings.push(
+        `the principal did not obtain a usable access token (status ${tokenStatus ?? "none"}` +
+          `${tokenError ? `, ${tokenError}` : ""}).`,
+      );
+    }
+    if (anonymous.ok) {
+      authFindings.push("a governed path answered an anonymous request; authentication is not being enforced.");
+    }
+    // A server failure or no answer is not a refusal: the anonymous request
+    // never reached an access decision, so the claim is not proven either way.
+    const anonymousUndecided = !anonymous.ok && !isClientErrorStatus(anonymous.status);
     checks.push(
       liveCheck(
         "principal_auth",
         "The principal authenticates, and anonymous access is refused",
-        (() => {
-          const findings = [];
-          if (!token) {
-            findings.push(
-              `the principal did not obtain a usable access token (status ${tokenStatus ?? "none"}` +
-                `${tokenError ? `, ${tokenError}` : ""}).`,
-            );
-          }
-          if (anonymous.ok) {
-            findings.push("a governed path answered an anonymous request; authentication is not being enforced.");
-          }
-          return findings;
-        })(),
+        authFindings,
         { tokenStatus, anonymousStatus: anonymous.status },
+        authFindings.length === 0 && anonymousUndecided
+          ? {
+            skipped: true,
+            skipReason: `the anonymous request was not refused, it failed (status ${anonymous.status ?? "none"}), which proves nothing about whether anonymous access is refused.`,
+          }
+          : {},
       ),
     );
   }
@@ -865,8 +918,16 @@ export async function verifyLive(site, { transport, callTool = null, listTools =
       (() => {
         const observed = { status: massRead.status, codes: massRead.codes, items: massRead.count };
         const title = `A ${MASS_READ_LIMIT}-item read is refused or bounded`;
-        // Refused outright: the control fired.
-        if (!massRead.ok) return liveCheck("probe_mass_read", title, [], observed);
+        // Refused outright: the control fired. Only a status the source chose
+        // counts. A 5xx, a 404 or no answer never reached the read control.
+        if (!massRead.ok) {
+          return isMassReadRefusal(massRead)
+            ? liveCheck("probe_mass_read", title, [], observed)
+            : liveCheck("probe_mass_read", title, [], observed, {
+              skipped: true,
+              skipReason: `the read failed (status ${massRead.status ?? "none"}), which is not a refusal and proves nothing about the read bound.`,
+            });
+        }
         // Served, but bounded well below what was asked for: also the control
         // firing — a cap is a bound, and reporting it as unbounded would train
         // operators to ignore the verifier.

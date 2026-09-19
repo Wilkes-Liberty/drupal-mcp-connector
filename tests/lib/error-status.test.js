@@ -38,4 +38,22 @@ describe("httpStatusOf", () => {
   it("does not let a status token in the detail override the prefix", () => {
     expect(httpStatusOf(new Error("Drupal 500 on GET /jsonapi/x: Drupal 404 on GET /jsonapi/y"))).toBe(500);
   });
+
+  it("reads the status that follows the tool name of a server-tool failure", () => {
+    expect(httpStatusOf(new Error("Server-tool call tool_api__x failed 403: forbidden"))).toBe(403);
+    expect(httpStatusOf(new Error("Server-tool session initialize failed 503: unavailable"))).toBe(503);
+    expect(httpStatusOf(new Error("Server-tool call tool_api__x failed 500: upstream call failed 403: denied"))).toBe(500);
+    expect(httpStatusOf(new Error("Server-tool call tool_api__x failed 500: Server-tool call y failed 401: no"))).toBe(500);
+  });
+
+  it("reads no status from a server-tool message that carries none", () => {
+    for (const message of [
+      "Server-tool tool_api__x reported an error: upstream failed 403: denied",
+      "Server-tool tool_api__x error (-32000): call y failed 403: denied",
+      "Server-tool call two words failed 403: no",
+      "proxy: Server-tool call x failed 403: no",
+    ]) {
+      expect(httpStatusOf(new Error(message))).toBe(null);
+    }
+  });
 });
