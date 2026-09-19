@@ -818,7 +818,7 @@ export async function verifyLive(site, { transport, callTool = null, listTools =
       configWrite.outcome === "unexercised"
         ? liveCheck("entitlement_filtering", "Out-of-tier operations are filtered for this principal", [], configWrite, {
           skipped: true,
-          skipReason: `the governed tool call never ran, so no policy decision was observed: ${configWrite.detail}`,
+          skipReason: `no policy decision on the governed tool call was observed, so nothing was proven: ${configWrite.detail}`,
         })
         : liveCheck(
           "entitlement_filtering",

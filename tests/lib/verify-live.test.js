@@ -437,6 +437,7 @@ describe("verifyLive — the config probe must find the tool before a refusal co
     expect(probe(result).status).toBe("skipped");
     expect(statusOf(result, "entitlement_filtering")).toBe("skipped");
     expect(probe(result).findings.join(" ")).toMatch(/not advertised by the source/);
+    expect(findingsOf(result, "entitlement_filtering").join(" ")).toMatch(/nothing was proven.*not advertised by the source/);
     expect(probe(result).observed).toMatchObject({ advertised: false, outcome: "unexercised" });
     expect(result.summary.ok).toBe(false);
   });
