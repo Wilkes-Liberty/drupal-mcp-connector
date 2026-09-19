@@ -174,6 +174,12 @@ describe("drupal_drush_module_disable protected modules (#346)", () => {
     await expect(disable("shared_lib")).rejects.toThrow(/Nothing was uninstalled/);
   });
 
+  it("reads a cascade list that wraps over lines and stops at the prompt", async () => {
+    state.exitCode = 75;
+    state.stdout = " The following extensions will be uninstalled: shared_lib, jsonapi,\n rest, views_json\n\n Do you want to continue?: no.\n";
+    await expect(disable("shared_lib")).rejects.toThrow(/would also uninstall: jsonapi, rest, views_json\. /);
+  });
+
   it("reads the cascade list from stderr too", async () => {
     state.exitCode = 75;
     state.stderr = " The following extensions will be uninstalled: devel, devel_generate\n [error] Cancelled.\n";

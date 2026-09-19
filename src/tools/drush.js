@@ -389,8 +389,12 @@ async function enableModule({ site: siteName, moduleName }) {
   return { success: true, message: `Module "${moduleName}" enabled.` };
 }
 
-/** Drush prints this before it asks to confirm a cascading uninstall. */
-const CASCADE_LIST_RE = /The following extensions will be uninstalled:\s*([a-z0-9_, ]+)/i;
+/**
+ * Drush prints this before it asks to confirm a cascading uninstall. The list
+ * may wrap over several lines. Case-sensitive on purpose: module names are
+ * lowercase, so the capture stops at the next sentence ("Do you want to…").
+ */
+const CASCADE_LIST_RE = /The following extensions will be uninstalled:\s*([a-z0-9_,\s]+)/;
 
 /**
  * Read the modules Drush said it would uninstall from a cancelled run.
