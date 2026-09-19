@@ -46,6 +46,8 @@ describe("entities tools (migrated)", () => {
   it("entity_create dryRun returns a preview and does not write", async () => {
     const out = await handlers.drupal_entity_create({ entityType: "paragraph", bundle: "text", attributes: { field_body: "x" }, dryRun: true });
     expect(out).toMatchObject({ dryRun: true, operation: "create", entityType: "paragraph", bundle: "text" });
+    expect(out.checks).toMatchObject({ serverPreflight: "none", fieldAccess: "not_checked", entityValidation: "not_checked" });
+    expect(out.caveat).toMatch(/NOT checked/);
     expect(out.attributes).toEqual({ field_body: "x" });
     expect(backend.createEntity).not.toHaveBeenCalled();
   });
@@ -98,6 +100,7 @@ describe("entities tools (migrated)", () => {
   it("entity_delete dryRun returns a preview and does not delete", async () => {
     const out = await handlers.drupal_entity_delete({ entityType: "paragraph", bundle: "text", id: "p1", dryRun: true });
     expect(out).toMatchObject({ dryRun: true, operation: "delete", entityType: "paragraph", bundle: "text", id: "p1" });
+    expect(out.checks).toMatchObject({ serverPreflight: "none", entityAccess: "not_checked" });
     expect(backend.deleteEntity).not.toHaveBeenCalled();
   });
 

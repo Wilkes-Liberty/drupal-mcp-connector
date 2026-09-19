@@ -32,6 +32,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `.agents/commands/` were regenerated.
 
 ### Fixed
+- **`dryRun` says what it checked (#336).** A preview could return without a
+  refusal and the real write then failed with a field-access 403. The core PATCH
+  probe sends no fields, and core rejects its id before it checks field access
+  or validation. Drupal never evaluated an unmoderated update, a create or a
+  delete preview. Every `dryRun` result on `drupal_create_node`, `drupal_update_node`,
+  `drupal_delete_node`, `drupal_entity_create`, `drupal_entity_update`,
+  `drupal_entity_delete` and `drupal_create_translation` now carries a `checks`
+  block (`serverPreflight`, `connectorPolicy`, `entityAccess`, `revisionGuard`,
+  `fieldAccess`, `entityValidation`, each `checked` or `not_checked`) and a
+  `caveat` when anything was not checked. `fieldAccess` and `entityValidation`
+  are `checked` only when Sentinel's non-saving draft endpoint evaluated the
+  real payload. No new probe was added, and existing preview fields are
+  unchanged. Tool descriptions, `docs/tools-reference.md` and the README state
+  the limit. Seven stubs under `.agents/commands/` were regenerated. The
+  internal `preflightPatchWritable` result drops `writable: true` for
+  `revisionGuardPassed` and `payloadEvaluated: false`.
 - **Northbound Drupal HTTP timeouts.** JSON:API, GraphQL, and file-upload
   `node-fetch` calls abort after 30s (`AbortSignal.timeout`), matching the
   Drush SSH bound. A hung Drupal host no longer stalls the MCP process.

@@ -157,6 +157,31 @@ describe("translations tools", () => {
     expect(out._revisions).toEqual({ live: "10", working: 12 });
   });
 
+  it("create_translation dryRun sends the real fields to the non-saving preflight and says what it checked (#336)", async () => {
+    const live = {
+      id: UUID, entityType: "node", bundle: "article", langcode: "en", status: true,
+      fields: { drupal_internal__vid: 10, moderation_state: "published" },
+    };
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => (
+      resourceVersion === "rel:working-copy" ? null : live
+    ));
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return { meta: { defaultLangcode: "en", live: { vid: "10" }, working: { vid: "10" } } };
+      }
+      return { meta: { draft_preflight: true, live: "10" } };
+    });
+    const out = await handlers.drupal_create_translation({
+      type: "article", id: UUID, langcode: "de", attributes: { title: "Hallo" }, dryRun: true,
+    });
+    const post = backend.rawQuery.mock.calls.find((c) => String(c[0].path).endsWith("/mcp-draft/translations"))[0];
+    expect(post.options.headers["X-MCP-Draft-Preflight"]).toBe("1");
+    expect(JSON.parse(post.options.body).data.attributes.title).toBe("Hallo");
+    expect(out.dryRun).toBe(true);
+    expect(out.checks).toMatchObject({ serverPreflight: "sentinel_draft", fieldAccess: "checked", entityValidation: "checked" });
+    expect(out).not.toHaveProperty("caveat");
+  });
+
   it("create_translation omits computed metatag that still shows live English (#283)", async () => {
     backend.getEntity.mockResolvedValue({
       id: UUID, status: true, fields: { drupal_internal__vid: 10, moderation_state: "published" },

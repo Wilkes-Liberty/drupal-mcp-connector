@@ -20,6 +20,6 @@ Parse the arguments supplied with this command into this tool's parameters:
 - `attributes` (object (pass as JSON)): Translated field values keyed by Drupal machine name
 - `relationships` (object (pass as JSON)): JSON:API relationships. Use for image alt (same file UUID, meta.alt).
 - `revisionId` (string): Paragraph revision id the host already pins. Required for Home-shaped non-default pins.
-- `dryRun` (boolean (true/false)): Validate without saving
+- `dryRun` (boolean (true/false)): Validate without saving. Sentinel's non-saving translation preflight receives the real fields, applies them through field access and validates the entity. The result's `checks` block says what was checked.
 
 If a required parameter is missing, ask before calling — do not invent values. Coerce each value to its JSON type (booleans → true/false, numbers → numeric, object/array → parse JSON), then make the single tool call and summarize the result.

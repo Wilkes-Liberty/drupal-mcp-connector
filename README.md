@@ -100,7 +100,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 | **Audit (composite)** | `drupal_audit_site_health` — scored content/links/config dashboard with a roll-up grade |
 | **Config & Governance** | Governed config get/list/set via the server-tool bridge; `drupal_mcp_whoami` tier/capability report |
 
-**Preview writes with `dryRun`.** The node and entity create/update/delete tools accept an optional `dryRun: true` flag that validates the request and returns a preview of exactly what would be written — without committing anything to Drupal.
+**Preview writes with `dryRun`.** The node and entity create/update/delete tools accept an optional `dryRun: true` flag that runs the connector's checks and returns a preview of the payload, without committing anything to Drupal. The result's `checks` block says what was checked. Field access and entity validation are checked only when Sentinel's non-saving draft endpoint ran; see [docs/tools-reference.md](docs/tools-reference.md#preview-writes-with-dryrun).
 
 ### MCP Resources
 Browsable, always-fresh context the client can read without calling a tool:

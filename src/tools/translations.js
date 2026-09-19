@@ -40,6 +40,7 @@ import {
   supportsSentinelDraft,
 } from "../lib/sentinel-draft.js";
 import { mapTranslationRow } from "../lib/translation-rows.js";
+import { dryRunChecks, PREFLIGHT_SENTINEL_DRAFT } from "../lib/dry-run-checks.js";
 
 const LIST_NOTE =
   "Live languages are those on the default revision. Working languages are the " +
@@ -175,6 +176,9 @@ async function createTranslation({
     return {
       dryRun: true, operation: "create_translation", entityType, bundle: type, id,
       langcode: targetLang, attributes: drafted, ...(relationships ? { relationships } : {}),
+      // createTranslationDraft throws unless the site confirmed a non-saving
+      // preflight of this exact payload, so the claim holds when we get here.
+      ...dryRunChecks({ operation: "create_translation", preflight: PREFLIGHT_SENTINEL_DRAFT }),
     };
   }
 
@@ -244,7 +248,7 @@ export const definitions = [
         attributes:    { type: "object", description: "Translated field values keyed by Drupal machine name" },
         relationships: { type: "object", description: "JSON:API relationships. Use for image alt (same file UUID, meta.alt)." },
         revisionId:    { type: "string", description: "Paragraph revision id the host already pins. Required for Home-shaped non-default pins." },
-        dryRun:        { type: "boolean", description: "Validate without saving" },
+        dryRun:        { type: "boolean", description: "Validate without saving. Sentinel's non-saving translation preflight receives the real fields, applies them through field access and validates the entity. The result's `checks` block says what was checked." },
       },
     },
   },

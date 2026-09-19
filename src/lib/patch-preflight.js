@@ -25,6 +25,7 @@
 import { entityLooksModerated, hasExplicitModerationState } from "./moderation-default.js";
 import { entityRevisionId } from "./write-revision.js";
 import { writeDraft, readNodeDraftInventory, assertInventoryDraftLanguage } from "./sentinel-draft.js";
+import { PREFLIGHT_NONE, PREFLIGHT_CORE_GUARD, PREFLIGHT_SENTINEL_DRAFT } from "./dry-run-checks.js";
 
 /** Stable error code for a core working-copy / not-latest-revision block. */
 export const PATCH_BLOCKED_CODE = "PATCH_BLOCKED";
@@ -315,6 +316,12 @@ export function isProbePassedWithoutSave(err) {
  * When `resourceVersion` is `rel:working-copy`, the probe hits that same
  * URL so dryRun cannot succeed when the real write would 400 (#166).
  *
+ * The probe body carries no attributes, and core rejects the id before it
+ * evaluates field access or validation. A passing probe therefore proves the
+ * route's entity update access and the working-copy guard, and nothing about
+ * the fields the real write will submit (#336). The result says so
+ * (`payloadEvaluated: false`) rather than claiming the target is writable.
+ *
  * @param {object} args
  * @param {object} args.backend Backend with `rawQuery` + `resourcePath`.
  * @param {string} args.entityType
@@ -323,7 +330,7 @@ export function isProbePassedWithoutSave(err) {
  * @param {?object} [args.existing]
  * @param {object} [args.attributes]
  * @param {?string} [args.resourceVersion]
- * @returns {Promise<{probed: boolean, writable?: boolean|string, skipped?: string}>}
+ * @returns {Promise<{probed: boolean, revisionGuardPassed?: boolean, payloadEvaluated?: boolean, skipped?: string}>}
  * @throws {PatchBlockedError|WorkingCopyStaleError} When the guard rejects the probe.
  */
 export async function preflightPatchWritable({
@@ -368,7 +375,7 @@ export async function preflightPatchWritable({
       throw new PatchBlockedError(cause);
     }
     if (isProbePassedWithoutSave(err)) {
-      return { probed: true, writable: true };
+      return { probed: true, revisionGuardPassed: true, payloadEvaluated: false };
     }
     throw err;
   }
@@ -382,7 +389,12 @@ export async function preflightPatchWritable({
  *
  * @param {object} backend
  * @param {{entityType: string, bundle: string, id: string, existing?: ?object, attributes?: object, relationships?: object, langcode?: string}} args
- * @returns {Promise<{resourceVersion: ?string, workingCopy: ?object, liveVid: ?number|string, workingVid: ?number|string}>}
+ * The returned `preflight` names the server-side check that ran, so a dryRun
+ * preview can state what it covered (#336; see dry-run-checks.js):
+ * `sentinel_draft` evaluated the real payload, `core_patch_guard` carried no
+ * fields, `none` means Drupal evaluated nothing.
+ *
+ * @returns {Promise<{resourceVersion: ?string, workingCopy: ?object, liveVid: ?number|string, workingVid: ?number|string, preflight: string}>}
  */
 export async function prepareGuardedPatch(backend, {
   entityType, bundle, id, existing, attributes, relationships, langcode,
@@ -391,6 +403,8 @@ export async function prepareGuardedPatch(backend, {
   const target = (needsPreflight || langcode)
     ? await resolveWorkingCopyPatchTarget(backend, { entityType, bundle, id, existing })
     : { resourceVersion: undefined, workingCopy: null, liveVid: null, workingVid: null };
+  // Set only after a check has run and passed; a refusal throws first.
+  target.preflight = PREFLIGHT_NONE;
   if (needsPreflight && !target.resourceVersion) {
     // Canonical path (no distinct working copy). The id-mismatch probe never
     // reaches Sentinel's save-time stale-default check; refuse here when the
@@ -427,6 +441,7 @@ export async function prepareGuardedPatch(backend, {
     } catch (err) {
       throw rewriteStaleCopyError(err);
     }
+    target.preflight = PREFLIGHT_SENTINEL_DRAFT;
     return target;
   }
   if (target.resourceVersion) {
@@ -438,13 +453,15 @@ export async function prepareGuardedPatch(backend, {
     } catch (err) {
       throw rewriteStaleCopyError(err);
     }
+    target.preflight = PREFLIGHT_SENTINEL_DRAFT;
     return target;
   }
   try {
-    await preflightPatchWritable({
+    const probe = await preflightPatchWritable({
       backend, entityType, bundle, id, existing, attributes,
       resourceVersion: target.resourceVersion,
     });
+    if (probe.probed === true) target.preflight = PREFLIGHT_CORE_GUARD;
   } catch (err) {
     throw rewriteStaleCopyError(err);
   }
