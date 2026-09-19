@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-09-19
+
 ### Added
 - **Prompts for module-owned tools (#332).** Every module tool that discovery
   returns for a request also gets a per-tool prompt
