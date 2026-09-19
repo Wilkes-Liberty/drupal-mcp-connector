@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -228,5 +228,123 @@ describe("drupalFetch northbound HTTP timeout", () => {
       "/jsonapi/node/article",
       { signal: AbortSignal.timeout(20) }
     )).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("drupalUploadFile failure message (#343)", () => {
+  const site = { _name: "t", baseUrl: "https://x" };
+  let previousRoot;
+  let file;
+
+  beforeEach(() => {
+    previousRoot = process.env.MCP_UPLOAD_ROOT;
+    process.env.MCP_UPLOAD_ROOT = tmpdir();
+    file = join(tmpdir(), "mcp-connector-upload-error.png");
+    writeFileSync(file, "x");
+  });
+
+  afterEach(() => {
+    if (previousRoot === undefined) delete process.env.MCP_UPLOAD_ROOT;
+    else process.env.MCP_UPLOAD_ROOT = previousRoot;
+  });
+
+  async function failWith(status, body, contentType) {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status,
+      headers: { get: (name) => (name.toLowerCase() === "content-type" ? contentType ?? null : null) },
+      text: async () => body,
+    });
+    try {
+      await drupalUploadFile(site, "media", "image", "field_media_image", file);
+    } catch (err) {
+      return err.message;
+    }
+    throw new Error("expected the upload to fail");
+  }
+
+  it("surfaces errors[].detail from a JSON:API error document and nothing else", async () => {
+    const message = await failWith(422, JSON.stringify({
+      jsonapi: { version: "1.0" },
+      errors: [
+        {
+          title: "Unprocessable Entity", status: "422",
+          detail: "Unprocessable Entity: file validation failed.\nOnly files with the following extensions are allowed: <em class=\"placeholder\">png jpg</em>.",
+          source: { file: "/var/www/html/web/core/modules/jsonapi/src/Controller/FileUpload.php", line: 170 },
+          meta: { trace: "#0 /var/www/html/web/core/lib/Drupal/Core/File/FileSystem.php(310): secret()" },
+        },
+        { title: "Forbidden" },
+      ],
+    }), "application/vnd.api+json");
+    expect(message).toBe(
+      "File upload failed 422: Unprocessable Entity: file validation failed. " +
+      "Only files with the following extensions are allowed: png jpg.; Forbidden"
+    );
+    expect(message).not.toContain("/var/www");
+    expect(message).not.toContain("trace");
+  });
+
+  it("redacts a server path and a stream-wrapper URI inside a detail", async () => {
+    const message = await failWith(500, JSON.stringify({
+      errors: [{ detail: "file_put_contents(/var/www/html/web/sites/default/files/tmp/a.png): failed. Could not move private://hr/2026/jane-doe-resume.pdf" }],
+    }), "application/vnd.api+json");
+    expect(message).toContain("File upload failed 500:");
+    expect(message).toContain("[path]");
+    expect(message).toContain("private://[path]");
+    expect(message).not.toContain("/var/www");
+    expect(message).not.toContain("jane-doe");
+  });
+
+  it("never passes an HTML body through, by content type", async () => {
+    const html = "<!DOCTYPE html><html><head><title>Error | Example</title></head><body><h1>The website encountered an unexpected error.</h1>" +
+      "<pre>PDOException in /var/www/html/web/core/lib/Database.php line 12</pre></body></html>";
+    const message = await failWith(500, html, "text/html; charset=UTF-8");
+    expect(message).toBe("File upload failed 500: the server returned an HTML page, not shown (title: Error | Example)");
+    expect(message).not.toContain("PDOException");
+    expect(message).not.toContain("<");
+  });
+
+  it("detects an HTML body without a content type", async () => {
+    const message = await failWith(413, "\n  <html>\r\n<head><title>413 Request Entity Too Large</title></head><body><center>nginx</center></body></html>");
+    expect(message).toBe("File upload failed 413: the server returned an HTML page, not shown (title: 413 Request Entity Too Large)");
+  });
+
+  it("reports an HTML body with no title without quoting it", async () => {
+    const message = await failWith(502, "<html><body><p>Bad gateway at /srv/app/proxy.conf</p></body></html>");
+    expect(message).toBe("File upload failed 502: the server returned an HTML page, not shown");
+  });
+
+  it("bounds an oversized detail", async () => {
+    const message = await failWith(422, JSON.stringify({ errors: [{ detail: "x".repeat(20000) }] }), "application/vnd.api+json");
+    expect(message.length).toBeLessThan(600);
+    expect(message).toMatch(/… \[truncated\]$/);
+  });
+
+  it("bounds an oversized plain-text body and strips markup and control characters", async () => {
+    const message = await failWith(500, `Upload <b>rejected</b>\u0000\u001b[31m: ${"y".repeat(50000)}`, "text/plain");
+    expect(message.startsWith("File upload failed 500: Upload rejected")).toBe(true);
+    expect(message).not.toMatch(/[\u0000-\u001f<>]/);
+    expect(message.length).toBeLessThan(600);
+  });
+
+  it("keeps the status when the body is empty", async () => {
+    expect(await failWith(503, "")).toBe("File upload failed 503 (empty response body)");
+    expect(await failWith(503, "  \n ")).toBe("File upload failed 503 (empty response body)");
+  });
+
+  it("does not echo a JSON body that is not an error document", async () => {
+    const message = await failWith(500, JSON.stringify({ debug: { dsn: "pgsql://user:pw@db/app" } }), "application/json");
+    expect(message).toBe("File upload failed 500: the server returned JSON with no error detail, not shown");
+  });
+
+  it("reads the message member of a plain Drupal JSON error", async () => {
+    const message = await failWith(403, JSON.stringify({ message: "The 'create media' permission is required." }), "application/json");
+    expect(message).toBe("File upload failed 403: The 'create media' permission is required.");
+  });
+
+  it("still fails with the status when the body cannot be read", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 500, text: async () => { throw new Error("socket hang up"); } });
+    await expect(drupalUploadFile(site, "media", "image", "field_media_image", file))
+      .rejects.toThrow("File upload failed 500 (response body could not be read)");
   });
 });

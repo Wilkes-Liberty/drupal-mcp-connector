@@ -284,7 +284,7 @@ requires `allowPublish: true` and an explicit `status: true`.
 | `drupal_create_media` | `type`, `name` | Create a media entity. Pass source field in `fields`; entity-reference values in JSON:API linkage shape (`{ data: { type, id } }`) are sent as relationships automatically (#171). Defaults unpublished. |
 | `drupal_update_media` | `type`, `id` | Update a media entity. Partial: `status` is only sent when provided (publish gated by `allowPublish`). Reference-shaped `fields` values route to relationships automatically; an unrequested published-state flip is reported via `_statusChanged` (#171). Pass `langcode` to continue an unpublished working translation via Sentinel (not a canonical live PATCH). |
 | `drupal_delete_media` | `type`, `id` | Delete a media entity. Requires `allowDestructive: true`. |
-| `drupal_upload_file` | `filePath`, `bundle`, `fieldName` | Upload a local file under `MCP_UPLOAD_ROOT` (or cwd). Returns file UUID for use in create_media. |
+| `drupal_upload_file` | `filePath`, `bundle`, `fieldName` | Upload a local file under `MCP_UPLOAD_ROOT` (or cwd). Returns file UUID for use in create_media. On failure the error keeps the HTTP status and Drupal's `errors[].detail` (for example a rejected file extension), cleaned and cut to 400 characters. An HTML error page is never returned; the error says so and gives the page title. |
 | `drupal_upload_file_and_create_media` | `filePath`, `mediaType`, `fieldName` | Upload + create media in one step. Media defaults unpublished. |
 | `drupal_find_orphaned_media` | — | Find media entities not referenced by any content. |
 
