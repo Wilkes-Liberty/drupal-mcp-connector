@@ -277,7 +277,7 @@ Fields are also excluded from `drupal_entity_create` and `drupal_entity_update` 
 
 ### Error detail path redaction
 
-Field redaction covers successful responses. The detail of a failed Drupal request is cleaned separately (`src/lib/error-body.js`): markup and control characters are stripped, a backtrace is removed, the text is bounded, and paths are redacted to `[path]`.
+Field redaction covers successful responses. The detail of a failed Drupal request is cleaned separately (`src/lib/error-body.js`): markup and control characters are stripped, a backtrace is removed, the text is bounded, and paths are redacted to `[path]`. The same cleaning applies to the server-tool bridge: a failed `tools/call`, `tools/list` or session handshake, a JSON-RPC error message, a tool's error text, and every string of a module tool's failed result.
 
 A slash-led path of two or more segments is redacted when it looks like a filesystem path:
 

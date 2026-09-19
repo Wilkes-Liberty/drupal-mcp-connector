@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  describeErrorBody, cleanErrorText, cleanGraphqlErrors, describeGraphqlErrors,
-  ERROR_DETAIL_MAX_CHARS, ERROR_DOCUMENT_MAX_CHARS, GRAPHQL_ERRORS_MAX_COUNT, GRAPHQL_ERRORS_MAX_CHARS,
+  describeErrorBody, cleanErrorText, cleanErrorData, cleanGraphqlErrors, describeGraphqlErrors,
+  ERROR_DATA_MAX_CHARS, ERROR_DATA_MAX_DEPTH, ERROR_DATA_MAX_ENTRIES, ERROR_DETAIL_MAX_CHARS, ERROR_DOCUMENT_MAX_CHARS, GRAPHQL_ERRORS_MAX_COUNT, GRAPHQL_ERRORS_MAX_CHARS,
 } from "../../src/lib/error-body.js";
 
 describe("cleanErrorText", () => {
@@ -322,5 +322,67 @@ describe("describeGraphqlErrors", () => {
   it("never returns an empty string for a non-empty errors value", () => {
     expect(describeGraphqlErrors([{}])).toBe("GraphQL error with no message");
     expect(describeGraphqlErrors([])).toBe("");
+  });
+});
+
+describe("cleanErrorData", () => {
+  const path = "/var/www/html/web/modules/custom/x/src/Y.php";
+
+  it("cleans every string and keeps the shape, numbers, booleans and null", () => {
+    expect(cleanErrorData({
+      success: false, code: "denied", count: 3, ratio: 0.5, extra: null,
+      message: `<b>No</b> in ${path}`,
+      errors: [{ field: "amount", message: "required Stack trace: #0 x.php(1)" }],
+    })).toEqual({
+      success: false, code: "denied", count: 3, ratio: 0.5, extra: null,
+      message: "No in [path]",
+      errors: [{ field: "amount", message: "required [stack trace removed]" }],
+    });
+    expect(cleanErrorData(`<p>plain</p> ${path}`)).toBe("plain [path]");
+    expect(cleanErrorData(null)).toBe(null);
+    expect(cleanErrorData(7)).toBe(7);
+  });
+
+  it("cleans keys, and drops a key that cleans to nothing or repeats", () => {
+    const cleaned = cleanErrorData({ [path]: "a", "<i>note</i>": "b", note: "c", "<>": "d" });
+    expect(cleaned).toEqual({ "[path]": "a", note: "b" });
+  });
+
+  it("drops values JSON cannot hold", () => {
+    expect(cleanErrorData({ a: undefined, b: () => 1, c: NaN, d: Infinity })).toEqual({ a: null, b: null, c: null, d: null });
+  });
+
+  it("bounds one string, the summed strings, the entries and the depth", () => {
+    expect(cleanErrorData("x".repeat(5000)).length).toBeLessThanOrEqual(ERROR_DETAIL_MAX_CHARS + "… [truncated]".length);
+
+    const many = cleanErrorData(Array.from({ length: 500 }, () => "y".repeat(300)));
+    expect(many.length).toBe(ERROR_DATA_MAX_ENTRIES + 1);
+    expect(many.at(-1)).toBe("… [truncated]");
+    const summed = many.join("").length;
+    expect(summed).toBeLessThanOrEqual(ERROR_DATA_MAX_CHARS + many.length * "… [truncated]".length);
+
+    const wide = cleanErrorData(Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`k${i}`, i])));
+    expect(Object.keys(wide).length).toBe(ERROR_DATA_MAX_ENTRIES + 1);
+    expect(wide._truncated).toBe(true);
+
+    let deep = "leaf";
+    for (let i = 0; i < 30; i++) deep = { next: deep };
+    let cursor = cleanErrorData(deep);
+    let levels = 0;
+    while (cursor && typeof cursor === "object") { cursor = cursor.next; levels++; }
+    expect(levels).toBe(ERROR_DATA_MAX_DEPTH);
+    expect(cursor).toBe("… [truncated]");
+  });
+
+  it("does not let __proto__ in a payload reach a prototype", () => {
+    const cleaned = cleanErrorData(JSON.parse("{\"__proto__\":{\"polluted\":true},\"message\":\"x\"}"));
+    expect({}.polluted).toBeUndefined();
+    expect(cleaned.message).toBe("x");
+    expect(Object.getPrototypeOf(cleaned)).toBe(Object.prototype);
+  });
+
+  it("is stable when applied twice", () => {
+    const once = cleanErrorData({ message: `<b>x</b> ${path}`, errors: Array.from({ length: 80 }, () => "z".repeat(900)) });
+    expect(cleanErrorData(once)).toEqual(once);
   });
 });

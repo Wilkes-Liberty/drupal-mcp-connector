@@ -27,6 +27,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { authHeadersAsync, clientHeaders, CLIENT_NAME, CLIENT_VERSION } from "./config.js";
 import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial, getDataFlowContext } from "./data-flow.js";
 import { clearToken } from "./oauth.js";
+import { cleanErrorText, describeErrorBody } from "./error-body.js";
 
 /** Calls a configured module binding through the registry, without fallback. */
 export async function callBoundModuleTool(site, binding, args, required) {
@@ -243,6 +244,49 @@ function parseSse(text) {
 }
 
 /**
+ * Message for a non-2xx bridge response.
+ *
+ * The body is untrusted: an HTML error page from Drupal, PHP or a proxy, a
+ * server path or a backtrace. Only a cleaned, bounded detail is shown (see
+ * `describeErrorBody`). The prefix holds the HTTP status and always ends with a
+ * colon, because the verifier's `classifyBridgeError()` matches on it (#362).
+ *
+ * A body that is a JSON-RPC error keeps its integer code and its cleaned
+ * message, so a refusal sent with a 401 or 403 stays readable.
+ * @param {string} prefix Message start, e.g. "Server-tool call x failed 502".
+ * @param {object} res node-fetch Response with `ok === false`.
+ * @param {string} rawText Response body.
+ * @param {?object} body Parsed JSON-RPC body, if any.
+ * @returns {string} Bounded message.
+ */
+function failedResponseMessage(prefix, res, rawText, body) {
+  const rpcError = body?.error;
+  if (rpcError && typeof rpcError === "object") {
+    const code = Number.isInteger(rpcError.code) ? ` ${rpcError.code}` : "";
+    const message = cleanErrorText(rpcError.message) || "the server returned no error message";
+    return `${prefix}: JSON-RPC error${code}: ${message}`;
+  }
+  const detail = describeErrorBody(rawText, res.headers?.get?.("content-type") ?? null);
+  return `${prefix}: ${detail || "the server returned an empty body"}`;
+}
+
+/**
+ * Message for a JSON-RPC `error` object.
+ *
+ * `error.code` is kept when it is an integer, because callers read it.
+ * `error.message` is cleaned and bounded. `error.data` is never read: with
+ * verbose errors on it holds a backtrace.
+ * @param {string} subject Message start, e.g. "Server-tool x".
+ * @param {*} rpcError JSON-RPC error object from the response.
+ * @returns {string} Bounded message.
+ */
+function rpcErrorMessage(subject, rpcError) {
+  const code = Number.isInteger(rpcError?.code) ? ` (${rpcError.code})` : "";
+  const detail = cleanErrorText(rpcError?.message) || "the server returned no error message";
+  return `${subject} error${code}: ${detail}`;
+}
+
+/**
  * Perform the MCP session handshake against the server and cache the resulting
  * session id: `initialize` (read the `Mcp-Session-Id` response header) followed
  * by a best-effort `notifications/initialized`. A 401 on OAuth sites triggers a
@@ -281,13 +325,9 @@ async function initializeSession(site, endpoint, key) {
 
   const { body, rawText } = await readBody(res);
   if (!res.ok) {
-    throw new Error(`Server-tool session initialize failed ${res.status}: ${rawText}`);
+    throw new Error(failedResponseMessage(`Server-tool session initialize failed ${res.status}`, res, rawText, body));
   }
-  if (body?.error) {
-    const { code, message } = body.error;
-    const hasCode = code !== undefined && code !== null;
-    throw new Error(`Server-tool session initialize error${hasCode ? ` (${code})` : ""}: ${message}`);
-  }
+  if (body?.error) throw new Error(rpcErrorMessage("Server-tool session initialize", body.error));
 
   const sessionId = res.headers.get("mcp-session-id");
   if (!sessionId) {
@@ -414,22 +454,22 @@ async function requestServerTool(site, method, params, options) {
     if (!res.ok) {
       const mapped = sourceBudgetDenial(rawText);
       if (mapped) throw mapped;
-      throw new Error(`Server-tool call ${toolName} failed ${res.status}: ${rawText}`);
+      throw new Error(failedResponseMessage(`Server-tool call ${toolName} failed ${res.status}`, res, rawText, body));
     }
 
     // JSON-RPC transport-level error.
-    if (body?.error) {
-      const { code, message } = body.error;
-      const hasCode = code !== undefined && code !== null;
-      throw new Error(`Server-tool ${toolName} error${hasCode ? ` (${code})` : ""}: ${message}`);
-    }
+    if (body?.error) throw new Error(rpcErrorMessage(`Server-tool ${toolName}`, body.error));
 
     // MCP tools/call result: { content: [...], isError?: boolean }.
     const result = body?.result;
     if (result?.isError && !options.preserveErrors) {
-      const detail = extractTextContent(result) || "tool reported an error";
-      const mapped = sourceBudgetDenial(detail);
+      // The budget code is looked for in the whole text, before it is cut.
+      const text = extractTextContent(result);
+      const mapped = sourceBudgetDenial(text);
       if (mapped) throw mapped;
+      // The tool's own words are for the caller (a governed refusal explains
+      // itself), so they are kept: cleaned and bounded, never relayed raw.
+      const detail = cleanErrorText(text) || "tool reported an error";
       throw new Error(`Server-tool ${toolName} reported an error: ${detail}`);
     }
     return result;
