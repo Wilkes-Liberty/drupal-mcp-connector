@@ -406,7 +406,7 @@ Read-only audit and analysis tools. All respect the security config.
 | `drupal_report_stale_content` | `type`, `days` | Content not updated in N days. Default: 180 days. |
 | `drupal_report_content_by_author` | `type` | Node count per author UUID, sorted by most prolific. |
 | `drupal_report_recently_published` | `type`, `limit` | Most recently published content. |
-| `drupal_report_field_completeness` | `type` | % of nodes with optional fields populated. Finds SEO gaps. |
+| `drupal_report_field_completeness` | `type` | % of nodes with optional fields populated. Finds SEO gaps. Reads scalar and entity-reference fields. Each row has `populated`, `empty`, `absent` and `completenessPercent`; a node that omits the key is `absent` and stays out of the percentage. A field you name that is absent from every sampled node is listed in `notVisible` with a `notVisibleNote` and is not scored: it may be denied to this account, not exist on the content type, or be misspelled. `approximate` is true when the scan hits `sampleSize`. |
 | `drupal_report_taxonomy_usage` | `vocabulary` | How many nodes reference each term. Finds orphaned terms. |
 | `drupal_report_revision_hotspots` | `type` | Nodes with most revisions — spots churn. Requires D9.3+. |
 | `drupal_report_user_activity` | `inactiveDays` | Active/blocked/inactive user summary. |
@@ -873,7 +873,7 @@ Read-only, backend-neutral content-quality audits. Each samples via the configur
 | `drupal_report_readability` | — | Flesch Reading Ease per body plus structural issues (no H2s, multiple H1s). |
 | `drupal_report_orphan_pages` | — | Published pages with no inbound internal links from the sampled set. |
 | `drupal_report_pii_exposure` | — | Emails / US SSNs / phone numbers in published bodies; matched values are masked in the output. |
-| `drupal_report_seo_meta_coverage` | — | Per-field structured-meta coverage (metatag, meta description) and nodes missing all meta. |
+| `drupal_report_seo_meta_coverage` | — | Per-field structured-meta coverage (metatag, meta description) and nodes missing all meta. Reads scalar and entity-reference fields. A field absent from every sampled node has `coverage: null` and, when you named it, is listed in `notVisible`. When no checked field is visible, `nodesMissingAllMeta` is null and no node is flagged. |
 
 ### drupal_report_pii_exposure
 

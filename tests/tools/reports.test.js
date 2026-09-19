@@ -167,6 +167,104 @@ describe("drupal_report_field_completeness", () => {
     expect(bodyRow.empty).toBe(1);
     expect(bodyRow.completenessPercent).toBe(50);
   });
+
+  it("reads relationship fields; a relationship with no target is empty (#341)", async () => {
+    backend.listEntities.mockResolvedValue({
+      entities: [
+        {
+          id: "n1", fields: {},
+          relationships: { field_image: { id: "m1", entityType: "media", bundle: "image" }, field_tags: [{ id: "t1" }] },
+        },
+        { id: "n2", fields: {}, relationships: { field_image: null, field_tags: [] } },
+      ],
+      page: { hasNext: false },
+    });
+    const out = await handlers.drupal_report_field_completeness({ type: "article", fields: ["field_image", "field_tags"] });
+    expect(out.fields.find((r) => r.field === "field_image")).toMatchObject({ populated: 1, empty: 1, absent: 0, completenessPercent: 50 });
+    expect(out.fields.find((r) => r.field === "field_tags")).toMatchObject({ populated: 1, empty: 1, absent: 0, completenessPercent: 50 });
+    expect(out.notVisible).toEqual([]);
+  });
+
+  it("evaluates the default relationship fields too (#341)", async () => {
+    backend.listEntities.mockResolvedValue({
+      entities: [{ id: "n1", fields: { body: { value: "x" } }, relationships: { field_image: { id: "m1" }, field_tags: [] } }],
+      page: { hasNext: false },
+    });
+    const out = await handlers.drupal_report_field_completeness({ type: "article" });
+    expect(out.fields.map((r) => r.field).sort()).toEqual(["body", "field_image", "field_tags"]);
+    expect(out.fields.find((r) => r.field === "field_image").completenessPercent).toBe(100);
+    expect(out.fields.find((r) => r.field === "field_tags").completenessPercent).toBe(0);
+    // Default guesses that are not on the bundle are dropped, not reported as not visible.
+    expect(out.notVisible).toBeUndefined();
+  });
+
+  it("lists a requested field absent from every sampled node as notVisible, not as 0% or 100% (#341)", async () => {
+    backend.listEntities.mockResolvedValue({
+      entities: [
+        { id: "n1", fields: { body: { value: "text" } }, relationships: {} },
+        { id: "n2", fields: { body: null }, relationships: {} },
+      ],
+      page: { hasNext: false },
+    });
+    const out = await handlers.drupal_report_field_completeness({ type: "article", fields: ["body", "field_denied"] });
+    expect(out.fields.map((r) => r.field)).toEqual(["body"]);
+    expect(out.notVisible).toEqual(["field_denied"]);
+    expect(out.notVisibleNote).toMatch(/absent from every sampled/);
+    expect(out.notVisibleNote).toMatch(/may not view/);
+  });
+
+  it("counts a key missing on some nodes as absent, outside the percentage (#341)", async () => {
+    backend.listEntities.mockResolvedValue({
+      entities: [
+        { id: "n1", fields: { field_subtitle: "A" } },
+        { id: "n2", fields: { field_subtitle: "" } },
+        { id: "n3", fields: {} },
+      ],
+      page: { hasNext: false },
+    });
+    const out = await handlers.drupal_report_field_completeness({ type: "article", fields: ["field_subtitle"] });
+    expect(out.fields[0]).toMatchObject({ field: "field_subtitle", populated: 1, empty: 1, absent: 1, completenessPercent: 50 });
+    expect(out.note).toMatch(/absent/);
+  });
+
+  it("counts a link or other keyed object value as populated (#341)", async () => {
+    backend.listEntities.mockResolvedValue({
+      entities: [
+        { id: "n1", fields: { field_link: { uri: "https://example.org", title: "More" }, body: { value: "", summary: "" } } },
+      ],
+      page: { hasNext: false },
+    });
+    const out = await handlers.drupal_report_field_completeness({ type: "article", fields: ["field_link", "body"] });
+    expect(out.fields.find((r) => r.field === "field_link")).toMatchObject({ populated: 1, empty: 0 });
+    expect(out.fields.find((r) => r.field === "body")).toMatchObject({ populated: 0, empty: 1 });
+  });
+
+  it("sets approximate from the sample cap (#341)", async () => {
+    backend.listEntities.mockResolvedValue({
+      entities: [{ id: "n1", fields: { body: "a" } }, { id: "n2", fields: { body: "b" } }],
+      page: { hasNext: true },
+    });
+    const capped = await handlers.drupal_report_field_completeness({ type: "article", fields: ["body"], sampleSize: 2 });
+    expect(capped.approximate).toBe(true);
+    expect(capped.note).toMatch(/sampling-bounded/);
+
+    backend.listEntities.mockResolvedValue({
+      entities: [{ id: "n1", fields: { body: "a" } }],
+      page: { hasNext: false },
+    });
+    const whole = await handlers.drupal_report_field_completeness({ type: "article", fields: ["body"], sampleSize: 2 });
+    expect(whole.approximate).toBe(false);
+    expect(whole.note).toBeUndefined();
+  });
+
+  it("claims nothing about visibility when no node was sampled (#341)", async () => {
+    backend.listEntities.mockResolvedValue({ entities: [], page: { hasNext: false } });
+    const out = await handlers.drupal_report_field_completeness({ type: "article", fields: ["field_denied"] });
+    expect(out.sampleSize).toBe(0);
+    expect(out.notVisible).toBeUndefined();
+    expect(out.fields).toEqual([{ field: "field_denied", populated: 0, empty: 0, absent: 0, completenessPercent: null }]);
+    expect(out.note).toMatch(/No published/);
+  });
 });
 
 describe("drupal_report_seo_audit", () => {

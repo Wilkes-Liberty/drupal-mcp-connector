@@ -11,7 +11,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
-import { collectEntities, gatedReport, fieldValue, daysSince } from "../lib/reports-support.js";
+import { collectEntities, gatedReport, fieldValue, fieldPresence, isEmptyFieldValue, FIELDS_NOT_VISIBLE_NOTE, daysSince } from "../lib/reports-support.js";
 import { fetchRenderedMetaDescriptions } from "../lib/metatag-audit.js";
 
 // ---------------------------------------------------------------------------
@@ -171,14 +171,28 @@ async function recentlyPublished({ site: siteName, type, limit = 20 }) {
   };
 }
 
+/** Field names checked when the caller names none. Guesses: a bundle rarely has all of them. */
+const DEFAULT_COMPLETENESS_FIELDS = ["body", "summary", "metaDescription", "field_meta_description", "image", "field_image", "tags", "field_tags"];
+
 /**
  * Field completeness: what % of sampled nodes have optional fields populated.
- * A field absent on every sampled node is treated as "not on this content
- * type" and dropped from the results rather than counted as empty.
+ * Reads scalar fields and relationship (entity-reference) fields; a
+ * relationship with no target is empty.
+ *
+ * An absent key is not an empty value (#341). JSON:API keeps the key of an
+ * empty field and leaves out a field the account may not view. A node that
+ * omits the key is counted as `absent` and stays out of the percentage. A
+ * field the caller named that is absent from EVERY sampled node is listed in
+ * `notVisible` instead of being scored; one of the tool's own default guesses
+ * in the same state is dropped. Nothing is claimed when no node was sampled.
+ *
+ * Sampling-bounded: `approximate` is true when the scan hits `sampleSize`.
  *
  * @param {object} args - { site?, type, fields?, sampleSize? }. `type` is
  *   required; `fields` defaults to common SEO/editorial field names.
- * @returns {Promise<object>} Per-field populated/empty counts and percentages.
+ * @returns {Promise<{contentType: string, sampleSize: number, approximate: boolean,
+ *   fields: Array<{field: string, populated: number, empty: number, absent: number, completenessPercent: ?number}>,
+ *   notVisible?: string[], notVisibleNote?: string, note?: string}>}
  * @throws {Error} If no content type is supplied.
  * @throws {SecurityError} If reading the content type is not permitted.
  */
@@ -188,40 +202,50 @@ async function fieldCompleteness({ site: siteName, type, fields, sampleSize = 10
   assertReadAllowed(sec, "node", type);
   if (!type) throw new Error("fieldCompleteness requires a content type.");
   const backend = await resolveBackend(site);
-  const fieldsToCheck = (fields && fields.length)
-    ? fields
-    : ["body", "summary", "metaDescription", "field_meta_description", "image", "field_image", "tags", "field_tags"];
+  const requested = Boolean(fields && fields.length);
+  const fieldsToCheck = requested ? [...new Set(fields)] : DEFAULT_COMPLETENESS_FIELDS;
   const entities = await collectEntities(
     backend,
     { entityType: "node", bundle: type, filters: [{ field: "status", op: "eq", value: true }] },
     sampleSize
   );
-  const results = fieldsToCheck.map((field) => {
-    let populated = 0, empty = 0, missing = 0;
+  const rows = fieldsToCheck.map((field) => {
+    let populated = 0, empty = 0, absent = 0;
     for (const e of entities) {
-      const v = fieldValue(e, [field]);
-      if (v === undefined) {
-        missing++;
-      } else if (v === null || v === "" || (typeof v === "object" && !v?.value && !(Array.isArray(v) && v.length))) {
-        empty++;
-      } else {
-        populated++;
-      }
+      const { present, value } = fieldPresence(e, field);
+      if (!present) absent++;
+      else if (isEmptyFieldValue(value)) empty++;
+      else populated++;
     }
     const checked = populated + empty;
     return {
-      field,
-      populated,
-      empty,
-      notOnContentType: (missing === entities.length && entities.length > 0) ? true : undefined,
+      field, populated, empty, absent,
       completenessPercent: checked > 0 ? Math.round((populated / checked) * 100) : null,
     };
-  }).filter((r) => !r.notOnContentType);
+  });
+  const sampled = entities.length > 0;
+  const invisible = (row) => sampled && row.absent === entities.length;
+  const notVisible = rows.filter(invisible).map((row) => row.field);
+  const scored = rows.filter((row) => !invisible(row));
+
+  const approximate = entities.length >= sampleSize;
+  const notes = [];
+  if (!sampled) notes.push("No published nodes of this content type were sampled, so no field could be scored.");
+  if (approximate) notes.push("Result is sampling-bounded; more nodes may exist beyond the sample cap.");
+  if (scored.some((row) => row.absent > 0)) {
+    notes.push(
+      "Some sampled nodes omit a field entirely (`absent`). Drupal leaves a field the account may not view out of the response, " +
+      "so those may be access-denied rather than empty. They are not counted in completenessPercent."
+    );
+  }
   return {
     contentType: type,
     sampleSize: entities.length,
-    approximate: false,
-    fields: results.sort((a, b) => (a.completenessPercent ?? 0) - (b.completenessPercent ?? 0)),
+    approximate,
+    fields: scored.sort((a, b) => (a.completenessPercent ?? 0) - (b.completenessPercent ?? 0)),
+    ...(requested && sampled ? { notVisible } : {}),
+    ...(requested && notVisible.length ? { notVisibleNote: FIELDS_NOT_VISIBLE_NOTE } : {}),
+    note: notes.length ? notes.join(" ") : undefined,
   };
 }
 
@@ -583,7 +607,7 @@ export const definitions = [
   },
   {
     name: "drupal_report_field_completeness",
-    description: "Score how completely optional fields are filled in for a content type. Finds nodes missing summaries, images, meta descriptions, tags, etc.",
+    description: "Score how completely optional fields are filled in for a content type. Finds nodes missing summaries, images, meta descriptions, tags, etc. Reads scalar and entity-reference fields; a reference with no target is empty. Sampling-bounded — flags 'approximate' when the scan hits sampleSize. An absent field is not an empty one: JSON:API leaves out a field this account may not view. A node that omits the key is counted as `absent` and stays out of completenessPercent. A field you name that is absent from every sampled node is listed in `notVisible` and not scored (it may be denied to this account, not exist on the content type, or be misspelled). Default field guesses that are absent are dropped.",
     inputSchema: {
       type: "object", required: ["type"],
       properties: {

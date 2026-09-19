@@ -65,6 +65,35 @@ export function fieldValue(entity, candidates) {
 }
 
 /**
+ * Read a field off a canonical entity and say whether its KEY was there.
+ *
+ * JSON:API keeps the key of an empty field (value `null`, `[]`, or
+ * `data: null`) and leaves out the key of a field the account may not view.
+ * So an absent key and an empty value are different facts, and callers that
+ * count "missing" values must keep them apart (#337).
+ *
+ * Looks in `fields`, then `relationships`. Promoted base attributes (`title`,
+ * `status`, `langcode`, `created`, `changed`, and `path` as `url`) are always
+ * carried by the canonical shape, so they always read as present: a denied
+ * base attribute cannot be told from an empty one after promotion.
+ *
+ * @param {object} entity Canonical entity.
+ * @param {string} field Field machine name.
+ * @returns {{present: boolean, value: *}} `present` is about the key, not the value.
+ */
+export function fieldPresence(entity, field) {
+  const name = field === "path" ? "url" : field;
+  if (BASE_KEYS.has(name)) {
+    return { present: true, value: new Map(Object.entries(entity ?? {})).get(name) };
+  }
+  const fields = new Map(Object.entries(entity?.fields ?? {}));
+  if (fields.has(name)) return { present: true, value: fields.get(name) };
+  const relationships = new Map(Object.entries(entity?.relationships ?? {}));
+  if (relationships.has(name)) return { present: true, value: relationships.get(name) };
+  return { present: false, value: undefined };
+}
+
+/**
  * Whole days elapsed between a date and now.
  * @param {?(string|number|Date)} dateValue A date parseable by `new Date()`.
  * @returns {?number} Whole days since the date, or null when no date is given.
@@ -73,3 +102,37 @@ export function daysSince(dateValue) {
   if (!dateValue) return null;
   return Math.floor((Date.now() - new Date(dateValue).getTime()) / MS_PER_DAY);
 }
+
+/**
+ * Whether a canonical field or relationship value carries no content.
+ *
+ * Handles scalars, `{value}` text objects, arrays, relationship refs
+ * (`{id}` / `[{id}, …]` / `null`), and keyed objects such as a link
+ * (`{uri, title}`). A keyed object with at least one key and none of the
+ * known value keys counts as populated.
+ *
+ * @param {*} value A value read off an entity's base props, `fields`, or `relationships`.
+ * @returns {boolean} True when the value is absent or carries no content.
+ */
+export function isEmptyFieldValue(value) {
+  if (value === undefined || value === null || value === "") return true;
+  if (Array.isArray(value)) return value.every((item) => isEmptyFieldValue(item));
+  if (typeof value === "object") {
+    if ("id" in value) return !value.id;
+    if ("value" in value) return value.value === undefined || value.value === null || value.value === "";
+    if ("target_id" in value) return value.target_id === undefined || value.target_id === null;
+    if ("uri" in value) return !value.uri;
+    return Object.keys(value).length === 0;
+  }
+  return false;
+}
+
+/**
+ * Note attached to a report's `notVisible` list: requested fields whose key is
+ * absent from every sampled entity, so the report could not score them (#341).
+ */
+export const FIELDS_NOT_VISIBLE_NOTE =
+  "These fields are absent from every sampled entity (the key is missing, not empty). " +
+  "Each may be denied to this account or not exist on this bundle, or the name may be wrong. " +
+  "Drupal leaves a field the account may not view out of the response with no marker, so this report cannot tell whether any value is missing. " +
+  "They were not scored.";

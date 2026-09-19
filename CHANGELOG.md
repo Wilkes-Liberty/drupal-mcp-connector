@@ -52,6 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Northbound Drupal HTTP timeouts.** JSON:API, GraphQL, and file-upload
   `node-fetch` calls abort after 30s (`AbortSignal.timeout`), matching the
   Drush SSH bound. A hung Drupal host no longer stalls the MCP process.
+- **Field reports score reference fields and name fields they cannot see (#341).**
+  `drupal_report_field_completeness` skipped entity-reference fields and dropped
+  a requested field that was absent from every sampled node. It now reads
+  references, counts a node that omits the key as `absent`, lists such a
+  requested field in `notVisible`, and sets `approximate` from `sampleSize`. A
+  link value counts as populated. `drupal_report_seo_meta_coverage` follows the
+  same rules: `coverage: null` for an absent field, and no node flagged when no
+  checked field is visible. Two stubs under `.agents/commands/` were regenerated.
 
 ## [2.19.1] - 2026-09-17
 
