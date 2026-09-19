@@ -184,6 +184,21 @@ describe("reports-extra tools", () => {
       expect(out.note).toMatch(/1 sampled entit(y|ies) omit/);
     });
 
+    it("keeps the sampling note and the absent note together when the scan is capped", async () => {
+      const entities = [
+        canonicalNode({ id: "has", fields: { field_x: "v" } }),
+        canonicalNode({ id: "gone1", fields: {} }),
+        canonicalNode({ id: "gone2", fields: {} }),
+      ];
+      backend.listEntities.mockResolvedValue({ entities, page: { total: 99, hasNext: true }, approximate: false });
+      const out = await handlers.drupal_report_missing_field({ type: "article", field: "field_x", sampleSize: 3 });
+      expect(out.approximate).toBe(true);
+      expect(out.notVisible).toBeUndefined();
+      expect(out.totalAbsent).toBe(2);
+      expect(out.note).toMatch(/sampling-bounded/);
+      expect(out.note).toMatch(/2 sampled entities omit "field_x"/);
+    });
+
     it("applies the same rule to a relationship field", async () => {
       backend.listEntities.mockResolvedValue({
         entities: [
