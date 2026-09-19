@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { verifyLive, LIVE_CHECKS, NOT_APPLICABLE } from "../../src/lib/verify.js";
+import { verifyLive, classifyBridgeError, LIVE_CHECKS, NOT_APPLICABLE } from "../../src/lib/verify.js";
+import { OAuthError } from "../../src/lib/oauth.js";
 
 /**
  * The live half of the verifier proves the same claims against a running
@@ -561,5 +562,138 @@ describe("verifyLive — inapplicable is not unexercised", () => {
     });
     expect(statusOf(noTarget, "probe_content_edit")).toBe("skipped");
     expect(noTarget.summary.ok).toBe(false);
+  });
+});
+
+describe("classifyBridgeError — the response status decides, not the text (#361)", () => {
+  const TOOL = "tool_api__mcp_sentinel_config_set";
+  /** An error as the bridge client throws it: message plus what failed. */
+  const bridge = (message, props) => Object.assign(new Error(message), props);
+  const outcomeOf = (error) => classifyBridgeError(error).outcome;
+
+  it("does not score a 500 as a refusal because its body names a 403", () => {
+    const body = "{\"error\":\"upstream call failed 403: denied\"}";
+    expect(outcomeOf(bridge(`Server-tool call ${TOOL} failed 500: ${body}`, { status: 500, bridgeFailure: "http" }))).toBe("unexercised");
+    // The same message with no status property, as the issue reproduces it.
+    expect(outcomeOf(new Error(`Server-tool call ${TOOL} failed 500: ${body}`))).toBe("unexercised");
+    expect(outcomeOf(new Error(`Server-tool call ${TOOL} failed 502: <h1>call x failed 401: no</h1>`))).toBe("unexercised");
+  });
+
+  it("scores a real 401 or 403 on the tools/call as a refusal", () => {
+    expect(outcomeOf(bridge(`Server-tool call ${TOOL} failed 403: forbidden`, { status: 403, bridgeFailure: "http" }))).toBe("refused");
+    expect(outcomeOf(bridge(`Server-tool call ${TOOL} failed 401: no`, { status: 401, bridgeFailure: "http" }))).toBe("refused");
+    expect(outcomeOf(new Error(`Server-tool call ${TOOL} failed 403: forbidden`))).toBe("refused");
+  });
+
+  it("lets the status property win over the message", () => {
+    expect(outcomeOf(bridge(`Server-tool call ${TOOL} failed 403: forbidden`, { status: 500, bridgeFailure: "http" }))).toBe("unexercised");
+  });
+
+  it("never scores a 5xx as a refusal, whatever the body says", () => {
+    for (const status of [500, 502, 503, 504]) {
+      for (const body of [
+        `Server-tool ${TOOL} reported an error: denied by policy`,
+        `Server-tool ${TOOL} error (-32000): access denied`,
+        "call failed 403: denied",
+      ]) {
+        const message = `Server-tool call ${TOOL} failed ${status}: ${body}`;
+        expect(outcomeOf(bridge(message, { status, bridgeFailure: "http" }))).toBe("unexercised");
+        expect(outcomeOf(new Error(message))).toBe("unexercised");
+      }
+    }
+  });
+
+  it("classifies a tool error from a 200 by its own rule, not by numbers in its text", () => {
+    const text = "upstream failed 500: error (-32601): Method not found";
+    expect(outcomeOf(bridge(`Server-tool ${TOOL} reported an error: ${text}`, { bridgeFailure: "tool" }))).toBe("refused");
+    expect(outcomeOf(new Error(`Server-tool ${TOOL} reported an error: ${text}`))).toBe("refused");
+  });
+
+  it("classifies a JSON-RPC error by its code, not by a code quoted in its message", () => {
+    const spoof = "wrapped error (-32000): access denied, reported an error: denied";
+    expect(outcomeOf(bridge(`Server-tool ${TOOL} error (-32601): ${spoof}`, { bridgeFailure: "rpc", rpcCode: -32601 }))).toBe("unexercised");
+    expect(outcomeOf(new Error(`Server-tool ${TOOL} error (-32601): ${spoof}`))).toBe("unexercised");
+    expect(outcomeOf(bridge(`Server-tool ${TOOL} error (-32000): access denied`, { bridgeFailure: "rpc", rpcCode: -32000 }))).toBe("refused");
+    // The code property decides when the message disagrees.
+    expect(outcomeOf(bridge(`Server-tool ${TOOL} error (-32000): access denied`, { bridgeFailure: "rpc", rpcCode: -32602 }))).toBe("unexercised");
+  });
+
+  it("does not score a JSON-RPC error with no readable code as a refusal", () => {
+    expect(outcomeOf(bridge(`Server-tool ${TOOL} error: access denied`, { bridgeFailure: "rpc" }))).toBe("unexercised");
+    expect(outcomeOf(bridge(`Server-tool ${TOOL} error (-32000): x`, { bridgeFailure: "rpc", rpcCode: "-32000" }))).toBe("unexercised");
+  });
+
+  it("does not score a failure before the tools/call as a refusal", () => {
+    // The token endpoint and the session handshake answer 401/403 too.
+    expect(outcomeOf(new OAuthError("OAuth token request failed 403", 403))).toBe("unexercised");
+    expect(outcomeOf(bridge("Server-tool session initialize failed 403: forbidden", { status: 403, bridgeFailure: "session" }))).toBe("unexercised");
+    expect(outcomeOf(new Error("Server-tool session initialize failed 403: forbidden"))).toBe("unexercised");
+    expect(outcomeOf(new Error("Server-tool session initialize error (-32000): denied"))).toBe("unexercised");
+    expect(outcomeOf(Object.assign(new Error("forbidden"), { status: 403 }))).toBe("unexercised");
+  });
+
+  it("does not read a refusal out of an unrelated message", () => {
+    for (const message of [
+      "request to https://drupal.example.com/mcp failed, reason: the tool reported an error: denied",
+      "lookup: Server-tool x reported an error: denied",
+      "proxy said: Server-tool call x failed 403: no",
+      "",
+    ]) {
+      expect(outcomeOf(new Error(message))).toBe("unexercised");
+    }
+    for (const value of [undefined, null, 403, {}]) expect(outcomeOf(value)).toBe("unexercised");
+  });
+});
+
+describe("verifyLive — a server failure is not a refusal (#361)", () => {
+  it("skips the config probe when a 500 body quotes a 403", async () => {
+    const failing = async () => {
+      throw Object.assign(
+        new Error(`Server-tool call ${CONFIG_SET} failed 500: {"error":"upstream call failed 403: denied"}`),
+        { status: 500, bridgeFailure: "http" },
+      );
+    };
+    const result = await run({}, {}, failing);
+    expect(statusOf(result, "probe_config_change")).toBe("skipped");
+    expect(statusOf(result, "entitlement_filtering")).toBe("skipped");
+    expect(result.summary.ok).toBe(false);
+  });
+
+  it("skips a mass read that failed on the server or never answered", async () => {
+    for (const massRead of [
+      () => reply(500, {}),
+      () => reply(503, { errors: [{ code: "read_budget_exceeded" }] }),
+      () => reply(404, {}),
+      () => { throw new Error("ECONNRESET"); },
+    ]) {
+      const result = await run({}, { massRead });
+      expect(statusOf(result, "probe_mass_read")).toBe("skipped");
+      expect(findingsOf(result, "probe_mass_read").join(" ")).toMatch(/proves nothing|not a refusal/i);
+      expect(result.summary.ok).toBe(false);
+    }
+  });
+
+  it("still passes a mass read the source refused", async () => {
+    for (const massRead of [
+      () => reply(403, {}),
+      () => reply(429, {}),
+      () => reply(400, { errors: [{ code: "read_budget_exceeded" }] }),
+    ]) {
+      expect(statusOf(await run({}, { massRead }), "probe_mass_read")).toBe("pass");
+    }
+  });
+
+  it("skips principal_auth when the anonymous request failed on the server", async () => {
+    for (const readinessAnonymous of [
+      () => reply(500, {}),
+      () => { throw new Error("ECONNRESET"); },
+    ]) {
+      const result = await run({}, { readinessAnonymous });
+      expect(statusOf(result, "principal_auth")).toBe("skipped");
+      expect(findingsOf(result, "principal_auth").join(" ")).toMatch(/anonymous/i);
+    }
+    // A missing token is still a failure, not a skip.
+    const noToken = await run({}, { token: () => reply(401, {}), readinessAnonymous: () => reply(500, {}) });
+    expect(statusOf(noToken, "principal_auth")).toBe("fail");
   });
 });

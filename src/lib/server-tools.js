@@ -243,6 +243,29 @@ function parseSse(text) {
 }
 
 /**
+ * Build a bridge error that says what failed.
+ *
+ * The message ends with a response body or tool text, so code that branches on
+ * the failure reads these properties, never the message (#361):
+ *  - `bridgeFailure`: `"session"` (the handshake failed; no tool was reached),
+ *    `"http"` (non-2xx on the request), `"rpc"` (JSON-RPC error object) or
+ *    `"tool"` (the tool ran and its result has `isError`);
+ *  - `status`: the HTTP status, on a non-2xx response only (see `httpStatusOf`);
+ *  - `rpcCode`: the JSON-RPC `error.code`, when it is an integer.
+ * @param {string} message Error message.
+ * @param {"session"|"http"|"rpc"|"tool"} failure What failed.
+ * @param {{status?: number, rpcCode?: *}} [facts] Response status or JSON-RPC code.
+ * @returns {Error} The marked error.
+ */
+function bridgeError(message, failure, { status, rpcCode } = {}) {
+  const error = new Error(message);
+  error.bridgeFailure = failure;
+  if (Number.isInteger(status)) error.status = status;
+  if (Number.isInteger(rpcCode)) error.rpcCode = rpcCode;
+  return error;
+}
+
+/**
  * Perform the MCP session handshake against the server and cache the resulting
  * session id: `initialize` (read the `Mcp-Session-Id` response header) followed
  * by a best-effort `notifications/initialized`. A 401 on OAuth sites triggers a
@@ -281,18 +304,19 @@ async function initializeSession(site, endpoint, key) {
 
   const { body, rawText } = await readBody(res);
   if (!res.ok) {
-    throw new Error(`Server-tool session initialize failed ${res.status}: ${rawText}`);
+    throw bridgeError(`Server-tool session initialize failed ${res.status}: ${rawText}`, "session", { status: res.status });
   }
   if (body?.error) {
     const { code, message } = body.error;
     const hasCode = code !== undefined && code !== null;
-    throw new Error(`Server-tool session initialize error${hasCode ? ` (${code})` : ""}: ${message}`);
+    throw bridgeError(`Server-tool session initialize error${hasCode ? ` (${code})` : ""}: ${message}`, "session", { rpcCode: code });
   }
 
   const sessionId = res.headers.get("mcp-session-id");
   if (!sessionId) {
-    throw new Error(
-      `Server-tool session initialize for site "${site._name}" returned no Mcp-Session-Id header.`
+    throw bridgeError(
+      `Server-tool session initialize for site "${site._name}" returned no Mcp-Session-Id header.`,
+      "session",
     );
   }
 
@@ -414,14 +438,14 @@ async function requestServerTool(site, method, params, options) {
     if (!res.ok) {
       const mapped = sourceBudgetDenial(rawText);
       if (mapped) throw mapped;
-      throw new Error(`Server-tool call ${toolName} failed ${res.status}: ${rawText}`);
+      throw bridgeError(`Server-tool call ${toolName} failed ${res.status}: ${rawText}`, "http", { status: res.status });
     }
 
     // JSON-RPC transport-level error.
     if (body?.error) {
       const { code, message } = body.error;
       const hasCode = code !== undefined && code !== null;
-      throw new Error(`Server-tool ${toolName} error${hasCode ? ` (${code})` : ""}: ${message}`);
+      throw bridgeError(`Server-tool ${toolName} error${hasCode ? ` (${code})` : ""}: ${message}`, "rpc", { rpcCode: code });
     }
 
     // MCP tools/call result: { content: [...], isError?: boolean }.
@@ -430,7 +454,7 @@ async function requestServerTool(site, method, params, options) {
       const detail = extractTextContent(result) || "tool reported an error";
       const mapped = sourceBudgetDenial(detail);
       if (mapped) throw mapped;
-      throw new Error(`Server-tool ${toolName} reported an error: ${detail}`);
+      throw bridgeError(`Server-tool ${toolName} reported an error: ${detail}`, "tool");
     }
     return result;
   }

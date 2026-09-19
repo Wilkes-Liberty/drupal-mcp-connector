@@ -72,6 +72,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source-side control. Two stubs under `.agents/commands/` were regenerated.
 
 ### Fixed
+- **The verifier reads the HTTP status from the response, not from its body
+  (#361).** `classifyBridgeError()` found the status of a failed bridge call
+  with a pattern that also matched the response body, so a 500 whose body held
+  "failed 403:" scored as a refusal and the config probe passed although the
+  tool never ran. The words "reported an error" and a quoted JSON-RPC code in a
+  body had the same effect. The bridge client now sets `status` on the error
+  for a non-2xx response, as `drupalFetch` does, and marks what failed
+  (`bridgeFailure`: `session`, `http`, `rpc` or `tool`, plus `rpcCode`). The
+  verifier reads those properties through `httpStatusOf()`. An error with no
+  marker is read only from the start of a documented message. A 401 or 403
+  from the token endpoint or the session handshake is no longer a refusal: no
+  tool was reached. A JSON-RPC error with no integer code is `skipped`.
+- **A server failure no longer passes `probe_mass_read` or `principal_auth`
+  (#361).** Any failed mass read passed, including a 5xx, a 404 and a request
+  that never answered. The probe now passes on 401, 403 or 429, or on another
+  4xx (not 404) that carries the source's refusal code; anything else is
+  `skipped`. `principal_auth` is `skipped` when the anonymous request fails
+  with a 5xx or no answer, instead of counting that as "anonymous access is
+  refused".
 - **Error details keep the URL paths the caller supplied (#357).** The error
   cleaning added for #343 and #345 replaced every slash-led path of two or more
   segments with `[path]`, so "The alias /about/team is already in use" arrived
