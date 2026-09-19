@@ -23,6 +23,9 @@ import { DIAGNOSTIC_TOOLS } from "./principal.js";
 /** How long a passing verification stays fresh before it must be re-proven. */
 export const OK_TTL_MS = 60_000;
 
+/** Readiness GET abort timeout. Matches Drupal/Drush outbound HTTP. */
+export const READINESS_TIMEOUT_MS = 30_000;
+
 /** How long a failed verification is held before the next attempt re-checks. */
 export const FAIL_TTL_MS = 5_000;
 
@@ -81,7 +84,7 @@ export async function verifySourceGovernance(site, { force = false } = {}) {
 }
 
 /**
- * One authenticated readiness probe; maps every outcome to {ok, reason}.
+ * One authenticated readiness probe; maps every outcome (including abort) to {ok, reason}.
  * @param {object} site Resolved site config.
  * @returns {Promise<{ok: boolean, reason: string|null, checkedAt: number}>}
  */
@@ -104,7 +107,11 @@ async function probeReadiness(site) {
 
   let res;
   try {
-    res = await fetch(`${site.baseUrl}/drupal-mcp/readiness`, { method: "GET", headers });
+    res = await fetch(`${site.baseUrl}/drupal-mcp/readiness`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(READINESS_TIMEOUT_MS),
+    });
   } catch {
     // Network detail (addresses, DNS text) is deliberately not propagated.
     return { ok: false, reason: "sentinel_unreachable", checkedAt };

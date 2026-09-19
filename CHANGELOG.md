@@ -50,6 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   One stub under `.agents/commands/` was regenerated.
 
 ### Fixed
+- **Remaining northbound HTTP timeouts.** Server-tool `tools/call` (including
+  governed config), the OAuth token POST, and the Sentinel readiness GET now
+  abort with `AbortSignal.timeout` so a hung Drupal/Sentinel host cannot stall
+  the MCP process. `requestServerTool` always attaches the 256 KiB body cap and
+  a 15s abort; those were previously gated on `maxBytes`, so `callGovernedServerTool`
+  could hang unbounded. Token acquisition fails as `OAuthError` after 30s.
+  A hung readiness probe stays `sentinel_unreachable`.
 - **`dryRun` says what it checked (#336).** A preview could return without a
   refusal and the real write then failed with a field-access 403. The core PATCH
   probe sends no fields, and core rejects its id before it checks field access
