@@ -34,7 +34,7 @@ function resourceUriIsListed(listed, requested) {
  *   `definitions` is the full static surface (schema projection); the optional
  *   `list` hook decides what is DISCOVERABLE per request (governance + entitlement).
  * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, read: (uri: string) => Promise<object>}} surface.resources
- * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, get: (name: string, args: object) => Array<object>}} surface.prompts
+ * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, get: (name: string, args: object) => Array<object>, describe?: (name: string, args: object) => Promise<?{description: string, messages: Array<object>}>}} surface.prompts
  * @returns {(context: import("@modelcontextprotocol/server").McpRequestContext) => Server}
  */
 export function createConnectorServerFactory({ serverInfo, tools, resources, prompts }) {
@@ -78,6 +78,12 @@ export function createConnectorServerFactory({ serverInfo, tools, resources, pro
     }));
     server.setRequestHandler("prompts/get", async (request) => {
       const { name, arguments: args } = request.params;
+      // A surface with live prompts resolves listing and messages in one pass.
+      if (prompts.describe) {
+        const found = await prompts.describe(name, args ?? {});
+        if (!found) throw new Error(`Unknown prompt: "${name}"`);
+        return found;
+      }
       const visible = prompts.list ? await prompts.list() : prompts.definitions;
       const known = visible.find((prompt) => prompt.name === name);
       if (!known) throw new Error(`Unknown prompt: "${name}"`);

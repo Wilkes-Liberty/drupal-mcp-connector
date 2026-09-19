@@ -145,7 +145,13 @@ npm run install:commands     # copies into ~/.claude/commands, ~/.grok/commands,
 # npm run install:commands -- --clients claude
 # npm run install:commands -- --clients codex
 # npm run install:commands -- --home /path/to/fake-home   # tests / CI
+# npm run install:commands -- --modules   # also write stubs for module-owned tools
 ```
+
+Module-owned tools ([docs/module-tools.md](docs/module-tools.md)) get a prompt
+whenever they are visible to the caller. Their bare `/drupal-<namespace>-<alias>`
+stubs are written only with `--modules`, which discovers them from the sources
+in `config/config.json`.
 
 From an npm install, the same files ship at
 `node_modules/drupal-mcp-connector/.agents/commands/`. Do not copy them into an

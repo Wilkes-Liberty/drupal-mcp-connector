@@ -56,6 +56,31 @@ describe("createConnectorServerFactory", () => {
     await server.close();
   });
 
+  it("resolves a prompt through the describe hook with a single discovery", async () => {
+    const current = surface();
+    current.prompts.list = vi.fn(async () => []);
+    current.prompts.describe = vi.fn(async (name) => name === "drupal-live"
+      ? { description: "Live prompt", messages: [{ role: "user", content: { type: "text", text: "live" } }] }
+      : null);
+    const server = createConnectorServerFactory(current)({ era: "legacy" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const found = await client.getPrompt({ name: "drupal-live", arguments: { stage: "won" } });
+    expect(found.description).toBe("Live prompt");
+    expect(found.messages[0].content.text).toBe("live");
+    expect(current.prompts.describe).toHaveBeenCalledWith("drupal-live", { stage: "won" });
+    expect(current.prompts.list).not.toHaveBeenCalled();
+    expect(current.prompts.get).not.toHaveBeenCalled();
+    await expect(client.getPrompt({ name: "drupal-gone" })).rejects.toThrow(/Unknown prompt/);
+
+    await client.close();
+    await server.close();
+  });
+
   it("serves the registered surface over the public MCP client interface", async () => {
     const current = surface();
     const server = createConnectorServerFactory(current)({ era: "legacy" });
