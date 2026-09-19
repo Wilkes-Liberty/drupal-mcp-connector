@@ -20,9 +20,14 @@ import {
   assertConfigReadAllowed,
   assertConfigWriteAllowed,
   assertConfigScope,
+  assertCoreExtensionChangeAllowed,
+  assertCoreExtensionValueKeepsProtected,
+  isCoreExtensionConfig,
   hasScope,
+  CORE_EXTENSION_CONFIG,
+  SecurityError,
 } from "../lib/security.js";
-import { callGovernedServerTool, callBoundModuleTool } from "../lib/server-tools.js";
+import { callGovernedServerTool, callBoundModuleTool, toolResultData } from "../lib/server-tools.js";
 
 /**
  * Compatibility names use an approved module binding when configured. Without
@@ -70,6 +75,56 @@ async function configList({ site: siteName, prefix }) {
 }
 
 /**
+ * Read the machine names of the modules installed now, through the governed
+ * config read. Used only to check a core.extension write (#349).
+ * @param {object} site Resolved site config.
+ * @param {object} sec Resolved security config.
+ * @returns {Promise<string[]>} Installed module machine names.
+ * @throws {SecurityError} if the list cannot be read or understood. The caller
+ *   then writes nothing.
+ */
+async function readInstalledModules(site, sec) {
+  const blocked = "The write to core.extension is refused because the current module list could not be read, " +
+    "so the connector cannot tell whether a protected module would be removed. Nothing was written.";
+  let data;
+  try {
+    assertConfigReadAllowed(sec);
+    data = toolResultData(await configTool(site, "configGet", { name: CORE_EXTENSION_CONFIG }, "read", "configRead"));
+  } catch (err) {
+    throw new SecurityError(`${blocked} Reason: ${String(err?.message ?? err).slice(0, 300)}`);
+  }
+  // The source's config tool answers { name, data }; a plain config map is read too.
+  const modules = [data?.data?.module, data?.module]
+    .find((candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate));
+  if (!modules) throw new SecurityError(`${blocked} Reason: the read returned no module map.`);
+  return Object.keys(modules);
+}
+
+/**
+ * Gate a drupal_config_set on core.extension (#349). A write there can install
+ * or uninstall any module or theme without Drupal's install and uninstall
+ * steps, and it bypasses the protected-module list. It is refused unless the
+ * operator opted in; with the opt-in, a value that would remove or alter a
+ * protected module is still refused.
+ * @param {object} site Resolved site config.
+ * @param {object} sec Resolved security config.
+ * @param {object} value The submitted map of config keys to values.
+ * @returns {Promise<void>}
+ * @throws {SecurityError} if the write is refused.
+ */
+async function assertCoreExtensionWriteAllowed(site, sec, value) {
+  assertCoreExtensionChangeAllowed(
+    sec,
+    "drupal_config_set does not write core.extension. A write there can install or uninstall any module or theme " +
+    "without running Drupal's install and uninstall steps, and it bypasses the protected-module list. Nothing was written."
+  );
+  const { needsCurrentModules } = assertCoreExtensionValueKeepsProtected(sec, value);
+  if (needsCurrentModules) {
+    assertCoreExtensionValueKeepsProtected(sec, value, await readInstalledModules(site, sec));
+  }
+}
+
+/**
  * Set a configuration value. Governed and audited server-side; the connector
  * additionally enforces the config-write cap before dispatching.
  *
@@ -77,9 +132,14 @@ async function configList({ site: siteName, prefix }) {
  * server-side tool (mcp_sentinel McpConfigSetTool) takes that map under the key
  * `data` and applies a partial `$editable->set($key, $value)` per entry, so we
  * translate `value` → `data` at the call site.
+ *
+ * A write to `core.extension` is refused unless the operator set
+ * `security.allowCoreExtensionChange` (#349). The check runs here, before the
+ * binding path and the unbound path split.
  * @param {object} args - { site?, name, value }.
  * @returns {Promise<*>} The server tool's result.
- * @throws {SecurityError} if the site is read-only or config writes are disabled.
+ * @throws {SecurityError} if the site is read-only, config writes are disabled,
+ *   or the write targets core.extension without the operator's opt-in.
  */
 async function configSet({ site: siteName, name, value }) {
   const site = getSiteConfig(siteName);
@@ -87,6 +147,7 @@ async function configSet({ site: siteName, name, value }) {
   assertConfigScope(site, `config:set ${name}`);
   assertNotReadOnly(sec, `config:set ${name}`);
   assertConfigWriteAllowed(sec);
+  if (isCoreExtensionConfig(name)) await assertCoreExtensionWriteAllowed(site, sec, value);
   return configTool(site, "configSet", { name, data: value }, "write", "configWrite");
 }
 
@@ -185,7 +246,7 @@ export const definitions = [
   },
   {
     name: "drupal_config_set",
-    description: "Set a Drupal configuration value via the governed server-side config tool. Audited and gated server-side; requires the config-editor (Developer) tier. Then export to YAML for a PR.",
+    description: "Set a Drupal configuration value via the governed server-side config tool. Audited and gated server-side; requires the config-editor (Developer) tier. Then export to YAML for a PR. Refused for `core.extension`, which lists installed modules and themes: use drupal_drush_module_enable or drupal_drush_module_disable instead. Only an operator can allow it, with `allowCoreExtensionChange` in site config (see drupal_security_info), and a value that removes a protected module is still refused.",
     inputSchema: {
       type: "object",
       required: ["name", "value"],
