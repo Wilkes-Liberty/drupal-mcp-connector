@@ -365,6 +365,11 @@ MCP tools rather than drush:
 "serverTools": { "url": "/mcp" }
 ```
 
+`serverTools` also takes `modules` (Drupal module-owned tools) and `bindings`
+(built-in commands served by a module). Both are optional. See
+[module-tools.md](module-tools.md) and the `_server_tools.example` block in
+`config/config.example.json`.
+
 `drupal_config_set` requires the `config-editor` (Developer) tier (or
 `security.allowConfigWrite: true`). Call `drupal_mcp_whoami` to see the effective tier,
 scopes, and capabilities for a site. See [integration-contract.md](integration-contract.md#5a-server-tool-bridge-transport).

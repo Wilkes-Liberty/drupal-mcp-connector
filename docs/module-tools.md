@@ -37,6 +37,10 @@ This exposes `drupal_module_write_staging_relationships__record_activity` only i
 Copy `name` from the installed source's advertised catalog. Bridge versions may
 use different derivative separators; the connector does not rewrite them.
 
+`config/config.example.json` has a full example under `_server_tools.example`:
+a namespace, two module-owned tools, and all seven compatibility bindings with
+the aliases they map to. A test checks it against the registry's validation.
+
 ## Compatibility bindings
 
 An existing command can retain its public name while its implementation lives
