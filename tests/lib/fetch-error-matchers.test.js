@@ -12,7 +12,7 @@ vi.mock("node-fetch", () => ({ default: vi.fn() }));
 import fetch from "node-fetch";
 import { drupalFetch, drupalGraphqlFetch } from "../../src/lib/drupal-fetch.js";
 import { isStaleCopyError, isWorkingCopyPatchError, isProbePassedWithoutSave } from "../../src/lib/patch-preflight.js";
-import { isAuthError } from "../../src/lib/backends/index.js";
+import { isAuthError, resolveBackend, _clearBackendCache } from "../../src/lib/backends/index.js";
 import { isModeratedStatusError } from "../../src/lib/backends/jsonapi.js";
 import {
   isMissingDraftEndpoint,
@@ -157,6 +157,35 @@ describe("backend matchers", () => {
   it("isAuthError does not read an unreachable or failing endpoint as an auth failure", async () => {
     expect(isAuthError(await fetchError(502, HTML_PAGE, { contentType: "text/html" }))).toBe(false);
     expect(isAuthError(await graphqlError(500, HTML_PAGE, "text/html"))).toBe(false);
+  });
+
+  // The GraphQL probe reads the errors of a 200 response. They are cleaned and
+  // bounded (#356); the words isAuthError matches on have to survive that.
+  it("isAuthError still matches the cleaned error of a GraphQL probe that answered 200", async () => {
+    const graphqlSite = { _name: "g", api: "graphql", baseUrl: "https://x" };
+    const probeWith = async (message) => {
+      _clearBackendCache();
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({
+          data: null,
+          errors: [{ message, extensions: { trace: [{ file: "/var/www/html/web/index.php" }] } }],
+        }),
+      });
+      return resolveBackend(graphqlSite).catch((err) => err);
+    };
+
+    const auth = await probeWith("<b>Unauthorized</b>: invalid_token in /var/www/html/web/modules/contrib/simple_oauth/src/x.php " + "y".repeat(20000));
+    expect(auth.message).toMatch(/authentication failed/i);
+    expect(auth.message).toContain("Unauthorized: invalid_token in [path]");
+    expect(auth.message).not.toMatch(/[<>]|var\/www/);
+    expect(auth.message.length).toBeLessThan(2500);
+
+    const schema = await probeWith("Cannot query field \"__typename\" in /var/www/html/web/core/lib/Drupal.php");
+    expect(schema.message).toMatch(/none of the configured api backends/i);
+    expect(schema.message).toContain("in [path]");
   });
 });
 

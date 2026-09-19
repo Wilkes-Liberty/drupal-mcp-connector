@@ -158,6 +158,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Path redaction was narrowed afterwards; see #357. Successful responses
   are unchanged. Every matcher on these messages has a regression test in
   `tests/lib/fetch-error-matchers.test.js`.
+- **GraphQL errors on a 200 response are cleaned and bounded (#356).** GraphQL
+  reports a failed query as HTTP 200 with an `errors` array, so those errors
+  skipped the cleaning added for #345. `drupal_graphql` (the thrown message and
+  the `warnings` of a partial result), `drupal_graphql_introspect`, the GraphQL
+  backend, the backend probe and the SEO audit's metatag lookup joined
+  `errors[].message` as received, with no length limit. `drupalGraphqlFetch()`
+  now replaces the array with a cleaned form before any caller reads it:
+  `message`, `path`, `locations` and the machine values `extensions.code`,
+  `category` and `classification`. `extensions.trace`, `debugMessage`, `file`,
+  `line` and any stack are dropped. A message has markup and control characters
+  stripped, paths redacted, any backtrace removed, and is cut to 400 characters.
+  At most 50 errors and 4,000 characters of message are kept, and a last entry
+  says how many were left out. Thrown messages are cut to 1,200 characters.
+  `drupal_graphql_introspect` with a `typeName` now reports the server's errors
+  for a failed lookup instead of "Type not found in schema", and the GraphQL
+  backend's schema load reports them instead of a `TypeError`. `data` is
+  unchanged.
 - **Field reports score reference fields and name fields they cannot see (#341).**
   `drupal_report_field_completeness` skipped entity-reference fields and dropped
   a requested field that was absent from every sampled node. It now reads

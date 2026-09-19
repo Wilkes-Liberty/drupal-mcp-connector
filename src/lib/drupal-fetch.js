@@ -20,7 +20,7 @@ import {
   sanitizeUploadFilename,
   validateMachineName,
 } from "./validate.js";
-import { describeErrorBody, ERROR_DOCUMENT_MAX_CHARS } from "./error-body.js";
+import { describeErrorBody, cleanGraphqlErrors, ERROR_DOCUMENT_MAX_CHARS } from "./error-body.js";
 
 const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
 
@@ -166,7 +166,11 @@ export async function drupalFetch(site, path, options = {}) {
  * GraphQL request — posts a JSON body to the site's GraphQL endpoint.
  * @param {object} site Resolved site config (provides baseUrl + auth).
  * @param {object} body GraphQL request body, e.g. { query, variables }.
- * @returns {Promise<object>} Parsed GraphQL JSON response.
+ * @returns {Promise<object>} Parsed GraphQL JSON response. `data` is returned
+ *   as received. GraphQL reports a failed query as HTTP 200 with an `errors`
+ *   array; that array is replaced by its cleaned, bounded form (see
+ *   `cleanGraphqlErrors`): `message`, `path`, `locations` and the machine
+ *   values of `extensions` only (#356).
  * @throws {Error} on any non-2xx response (clears the OAuth token cache on 401).
  *   The message is `GraphQL request failed <status>: <detail>`, where the detail
  *   is the cleaned, bounded `errors[].message` text (see `describeErrorBody`).
@@ -202,6 +206,11 @@ export async function drupalGraphqlFetch(site, body) {
 
   const { json, text } = await readOkBody(res);
   accountNorthboundBody(json, text);
+  if (json && typeof json === "object" && !Array.isArray(json) && "errors" in json) {
+    json.errors = cleanGraphqlErrors(json.errors);
+    // An empty list is not an error; consumers test `json.errors` for truth.
+    if (!json.errors.length) delete json.errors;
+  }
   return json;
 }
 

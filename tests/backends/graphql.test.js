@@ -118,6 +118,17 @@ describe("GraphqlBackend", () => {
     ).rejects.toThrow(/Field broke/);
   });
 
+  it("cleans and bounds the GraphQL errors it throws (#356)", async () => {
+    vi.mocked(drupalGraphqlFetch)
+      .mockResolvedValueOnce(INTROSPECTION)
+      .mockResolvedValueOnce({ data: null, errors: [{ message: "<b>Field broke</b> in /var/www/html/web/modules/custom/a.module " + "y".repeat(20000) }] });
+    const b = new GraphqlBackend(site);
+    const err = await b.listEntities({ entityType: "node", bundle: "article", page: { limit: 1 } }).catch((e) => e);
+    expect(err.message).toContain("Field broke in [path] yyy");
+    expect(err.message).not.toMatch(/[<>]|var\/www/);
+    expect(err.message.length).toBeLessThan(1400);
+  });
+
   it("getEntity returns canonical or null", async () => {
     vi.mocked(drupalGraphqlFetch)
       .mockResolvedValueOnce(INTROSPECTION)

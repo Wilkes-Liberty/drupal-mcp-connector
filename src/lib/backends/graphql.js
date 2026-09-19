@@ -12,6 +12,7 @@
  */
 
 import { drupalGraphqlFetch } from "../drupal-fetch.js";
+import { describeGraphqlErrors } from "../error-body.js";
 import { Backend } from "./backend-interface.js";
 import { BackendCapabilityError } from "./errors.js";
 import { loadSchemaMap } from "./graphql-schema.js";
@@ -129,14 +130,15 @@ export class GraphqlBackend extends Backend {
    * them so a backend failure surfaces as an error, not a silently-empty result.
    * @param {string} query GraphQL query document.
    * @returns {Promise<object>} The raw `{ data, errors? }` response.
-   * @throws {Error} When the response contains GraphQL errors.
+   * @throws {Error} When the response contains GraphQL errors. The messages are
+   *   cleaned and bounded (see `describeGraphqlErrors`).
    */
   async _query(query) {
     const json = await drupalGraphqlFetch(this.site, { query });
     if (json?.errors?.length) {
       throw new Error(
         `GraphQL query failed on site "${this.site._name}": ` +
-        json.errors.map((e) => e.message).join("; ")
+        describeGraphqlErrors(json.errors)
       );
     }
     return json;

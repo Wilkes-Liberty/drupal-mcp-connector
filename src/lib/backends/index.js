@@ -11,6 +11,7 @@
 import { drupalFetch } from "../drupal-fetch.js";
 import { drupalGraphqlFetch } from "../drupal-fetch.js";
 import { clearToken } from "../oauth.js";
+import { describeGraphqlErrors } from "../error-body.js";
 import { httpStatusOf } from "../error-status.js";
 import { JsonApiBackend } from "./jsonapi.js";
 import { GraphqlBackend } from "./graphql.js";
@@ -124,7 +125,9 @@ async function probeProtocol(name, site) {
     if (name === "graphql") {
       const json = await drupalGraphqlFetch(site, { query: "{ __typename }" });
       if (json && !json.errors) return { ok: true, error: null };
-      return { ok: false, error: new Error(json?.errors?.[0]?.message || "GraphQL probe returned errors") };
+      // The probe error ends up in the resolution error the client sees, and
+      // isAuthError() reads it: cleaned and bounded, keywords intact (#356).
+      return { ok: false, error: new Error(describeGraphqlErrors(json?.errors?.[0]) || "GraphQL probe returned errors") };
     }
     return { ok: false, error: new Error(`unknown backend "${name}"`) };
   } catch (error) {

@@ -260,3 +260,126 @@ export function describeErrorBody(body, contentType = null, options = {}) {
 
   return cleanErrorText(body) || "the server returned a body with no readable text, not shown";
 }
+
+/** Most GraphQL errors of one 200 response that are kept. */
+export const GRAPHQL_ERRORS_MAX_COUNT = 50;
+
+/** Bound for the summed message length of the kept GraphQL errors, in characters. */
+export const GRAPHQL_ERRORS_MAX_CHARS = 4000;
+
+/** Most `path` segments and `locations` entries kept on one GraphQL error. */
+const GRAPHQL_PATH_MAX_SEGMENTS = 32;
+const GRAPHQL_LOCATIONS_MAX_COUNT = 10;
+
+/** Longest `path` segment or `extensions` value, in characters. */
+const GRAPHQL_FIELD_MAX_CHARS = 100;
+
+/**
+ * Clean one short machine value of `extensions`.
+ * @param {*} value Untrusted value.
+ * @returns {string|number|undefined} The value, or undefined when it is not a
+ *   non-empty string or a finite number.
+ */
+function graphqlMachineValue(value) {
+  if (typeof value === "string") return cleanErrorText(value, GRAPHQL_FIELD_MAX_CHARS) || undefined;
+  return Number.isFinite(value) ? value : undefined;
+}
+
+const GRAPHQL_NO_MESSAGE = "GraphQL error with no message";
+const GRAPHQL_DROPPED_RE = /^\d+ more errors not shown$/;
+
+/**
+ * Clean one GraphQL error. Only `message`, `path`, `locations` and the machine
+ * values of `extensions` are read; nothing else is copied.
+ * @param {*} error One entry of a GraphQL `errors` array.
+ * @returns {{message: string, path?: Array<string|number>, locations?: Array<{line: number, column: number}>, extensions?: object}}
+ */
+function cleanGraphqlError(error) {
+  if (typeof error === "string") return { message: cleanErrorText(error) || GRAPHQL_NO_MESSAGE };
+  const out = { message: cleanErrorText(error?.message) || GRAPHQL_NO_MESSAGE };
+
+  if (Array.isArray(error?.path)) {
+    // A path segment is a response key (an alias the caller chose) or an index.
+    const path = error.path
+      .slice(0, GRAPHQL_PATH_MAX_SEGMENTS * 2)
+      .map((segment) => (Number.isInteger(segment) ? segment : cleanErrorText(segment, GRAPHQL_FIELD_MAX_CHARS)))
+      .filter((segment) => segment !== "")
+      .slice(0, GRAPHQL_PATH_MAX_SEGMENTS);
+    if (path.length) out.path = path;
+  }
+
+  if (Array.isArray(error?.locations)) {
+    // A location points into the caller's query document, not into the server.
+    const locations = error.locations
+      .slice(0, GRAPHQL_LOCATIONS_MAX_COUNT)
+      .filter((l) => Number.isInteger(l?.line) && Number.isInteger(l?.column))
+      .map((l) => ({ line: l.line, column: l.column }));
+    if (locations.length) out.locations = locations;
+  }
+
+  if (error?.extensions && typeof error.extensions === "object") {
+    // Only the short machine values a caller matches on. Everything else under
+    // `extensions` (`trace`, `debugMessage`, `file`, `line`, `exception`,
+    // `stacktrace`) is dropped.
+    const { code, category, classification } = error.extensions;
+    const extensions = Object.fromEntries(Object.entries({
+      code: graphqlMachineValue(code),
+      category: graphqlMachineValue(category),
+      classification: graphqlMachineValue(classification),
+    }).filter(([, value]) => value !== undefined));
+    if (Object.keys(extensions).length) out.extensions = extensions;
+  }
+  return out;
+}
+
+/**
+ * Clean the `errors` of a GraphQL response that arrived with a 2xx status.
+ *
+ * GraphQL reports a failed query as HTTP 200 with an `errors` array, so these
+ * errors never pass through {@link describeErrorBody}. With verbose errors on,
+ * a message can carry markup or a server path, and `extensions` can carry a
+ * backtrace (#356). Each message gets the {@link cleanErrorText} treatment. At
+ * most {@link GRAPHQL_ERRORS_MAX_COUNT} errors and
+ * {@link GRAPHQL_ERRORS_MAX_CHARS} characters of message are kept; a last entry
+ * says how many were dropped. The result is stable when cleaned again.
+ * @param {*} errors The `errors` value of a GraphQL response.
+ * @returns {Array<object>} Cleaned errors; empty when there is none.
+ */
+export function cleanGraphqlErrors(errors) {
+  // Any falsy value (`null`, `""`, `0`) means the response reports no error.
+  if (!errors) return [];
+  const list = Array.isArray(errors) ? errors : [errors];
+  if (!list.length) return [];
+
+  // A list that was cleaned before ends with the dropped-count entry. Count
+  // what it stands for, so cleaning twice does not lose the number.
+  const last = list.at(-1);
+  const lastMessage = typeof last?.message === "string" ? last.message : "";
+  const carried = GRAPHQL_DROPPED_RE.test(lastMessage) ? Number.parseInt(lastMessage, 10) : 0;
+  const source = carried ? list.slice(0, -1) : list;
+
+  const cleaned = [];
+  let chars = 0;
+  for (const error of source.slice(0, GRAPHQL_ERRORS_MAX_COUNT)) {
+    const entry = cleanGraphqlError(error);
+    if (cleaned.length && chars + entry.message.length > GRAPHQL_ERRORS_MAX_CHARS) break;
+    cleaned.push(entry);
+    chars += entry.message.length;
+  }
+  const dropped = source.length - cleaned.length + carried;
+  if (dropped > 0) cleaned.push({ message: `${dropped} more errors not shown` });
+  return cleaned;
+}
+
+/**
+ * Join the messages of a GraphQL `errors` value into one bounded string, for
+ * an error message or a report reason.
+ * @param {*} errors The `errors` value of a GraphQL response, cleaned or not.
+ * @param {number} [maxChars] Bound for the joined text.
+ * @returns {string} Joined text, or "" when there is no error.
+ */
+export function describeGraphqlErrors(errors, maxChars = ERROR_DOCUMENT_MAX_CHARS) {
+  const cleaned = cleanGraphqlErrors(errors);
+  if (!cleaned.length) return "";
+  return boundText(cleaned.map((e) => e.message).join("; "), maxChars);
+}

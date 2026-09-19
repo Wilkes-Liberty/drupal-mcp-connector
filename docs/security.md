@@ -58,6 +58,15 @@ that path. Prefer JSON:API entity tools when connector policy must hold.
 Mutation documents additionally require `allowGraphqlMutations` (also off
 outside `development`).
 
+The `errors` of a GraphQL response are untrusted text whatever the HTTP status.
+A non-2xx body goes through the same cleaning as a JSON:API failure. The
+`errors` array of a 200 response is cleaned in `drupalGraphqlFetch()` before any
+tool or backend reads it: `message`, `path`, `locations` and the short machine
+values `extensions.code`, `category` and `classification` are kept, and
+everything else (`extensions.trace`, `debugMessage`, `file`, `line`, a stack) is
+dropped. Messages are stripped of markup, have paths redacted and are bounded in
+length, count and total size (#356). `data` is not changed.
+
 ### Multi-site targeting
 
 Omitting `site` on a read still resolves to `defaultSite`. The response always

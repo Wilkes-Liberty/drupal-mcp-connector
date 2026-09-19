@@ -68,6 +68,14 @@ describe("fetchRenderedMetaDescriptions", () => {
     expect(res.reason).toContain("metatag");
   });
 
+  it("cleans and bounds the GraphQL error it gives as the reason (#356)", async () => {
+    graphqlFetch.mockResolvedValue({ errors: [{ message: "<b>Broken</b> in /var/www/html/web/modules/custom/a.module " + "y".repeat(20000) }] });
+    const res = await fetchRenderedMetaDescriptions(site, [{ id: "a", url: "/a" }]);
+    expect(res.source).toBe("unavailable");
+    expect(res.reason.startsWith("Broken in [path] yyy")).toBe(true);
+    expect(res.reason.length).toBeLessThan(500);
+  });
+
   it("is unavailable when the GraphQL request throws", async () => {
     graphqlFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const res = await fetchRenderedMetaDescriptions(site, [{ id: "a", url: "/a" }]);
