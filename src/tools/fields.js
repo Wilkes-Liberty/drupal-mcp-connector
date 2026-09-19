@@ -27,6 +27,17 @@ const SAMPLING_NOTE =
   "cardinality, allowed values, widget/storage settings) use the Drush bridge " +
   "(field config), which reads the Field API directly.";
 
+const NOT_VISIBLE_NOTE =
+  "These fields are defined in Drupal's Field API for this bundle but are absent from the sampled entity. " +
+  "JSON:API keeps the key of an empty field and leaves out a field the account may not view, so each one is " +
+  "most likely denied to this account. It may also be disabled or renamed in JSON:API. " +
+  "An absent field is not an empty field: do not read these as unset. The list covers configurable fields " +
+  "only (field_config, first 50) and one sampled entity, so it may be incomplete.";
+
+const DEFINITIONS_UNAVAILABLE_NOTE =
+  " Field definitions (JSON:API field_config) are not readable here, so a field this account may not view " +
+  "cannot be detected: JSON:API leaves a view-denied field out of the resource, and it is simply missing from this list.";
+
 const EMPTY_SCHEMA_NOTE =
   "No entities of this type/bundle exist yet, so sampling found no fields. " +
   "Create one entity, or use the Drush bridge (Field API), to introspect fields.";
@@ -75,8 +86,10 @@ function relationshipField(name) {
  * @param {object} args - { site?, type|entityType, bundle? }. `bundle` defaults
  *   to the entity type (matching Drupal's single-bundle types, e.g. `user`).
  * @returns {Promise<{entityType: string, bundle: string, resourceType?: string,
- *   approximate: true, fieldCount: number, fields: object[], note: string,
- *   authoritativeSource: string}>}
+ *   approximate: true, fieldCount: number, fields: object[],
+ *   fieldDefinitions: "available"|"unavailable",
+ *   notVisible?: Array<{name: string, translatable: boolean}>, notVisibleNote?: string,
+ *   note: string, authoritativeSource: string}>}
  * @throws {SecurityError} If reading the type/bundle is not permitted.
  * @throws {Error} If no entity type is given under either name.
  */
@@ -111,6 +124,20 @@ async function describeFields({ site: siteName, type, entityType: entityTypeArg,
 
   const sampledEmpty = fields.length === 0;
 
+  // #337: a view-denied field is left out of the JSON:API resource, so sampling
+  // never sees it. The Field API definitions already read above name the
+  // configurable fields of the bundle; any of those missing from the sampled
+  // KEYS (not values — an empty field keeps its key) is listed apart. Nothing
+  // is claimed when no entity was sampled or the definitions are unreadable.
+  const definitionsAvailable = translatableMap.size > 0;
+  const sampledNames = new Set(fields.map((field) => field.name));
+  const notVisible = definitionsAvailable && !sampledEmpty
+    ? [...translatableMap.entries()]
+      .filter(([name]) => !sampledNames.has(name))
+      .map(([name, value]) => ({ name, translatable: Boolean(value) }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+    : null;
+
   return {
     entityType: schema.entityType ?? entityType,
     bundle: schema.bundle ?? resolvedBundle,
@@ -118,7 +145,12 @@ async function describeFields({ site: siteName, type, entityType: entityTypeArg,
     approximate: true,
     fieldCount: fields.length,
     fields,
-    note: sampledEmpty ? EMPTY_SCHEMA_NOTE : SAMPLING_NOTE,
+    fieldDefinitions: definitionsAvailable ? "available" : "unavailable",
+    ...(notVisible ? { notVisible } : {}),
+    ...(notVisible?.length ? { notVisibleNote: NOT_VISIBLE_NOTE } : {}),
+    note: sampledEmpty
+      ? EMPTY_SCHEMA_NOTE
+      : SAMPLING_NOTE + (definitionsAvailable ? "" : DEFINITIONS_UNAVAILABLE_NOTE),
     authoritativeSource: "drush-bridge (Drupal Field API)",
   };
 }
@@ -136,7 +168,11 @@ export const definitions = [
       "schema SAMPLING (an existing entity), so results are approximate — only " +
       "populated fields are visible and required/cardinality/allowedValues are " +
       "inferred from value shape. When JSON:API field_config is readable, translatable " +
-      "is copied from Field API; omitted means unknown, not false. Authoritative field " +
+      "is copied from Field API; omitted means unknown, not false. A field this account may not " +
+      "view is left out of the JSON:API resource, so it is NOT in `fields` and looks like a field that " +
+      "does not exist. When field_config is readable (`fieldDefinitions: 'available'`), fields defined " +
+      "for the bundle but absent from the sampled entity are listed apart as `notVisible`; when it is " +
+      "not, denied fields cannot be detected. Absent is not empty. Authoritative field " +
       "metadata comes from the Drush bridge (Field API). Use this before creating/updating entities to learn field names.",
     inputSchema: {
       type: "object",

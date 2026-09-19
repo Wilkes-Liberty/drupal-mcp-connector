@@ -601,6 +601,25 @@ Introspect the fields of an entity type + bundle before writing. Built on schema
 }
 ```
 
+**Fields this account may not view.** When Drupal denies view access to a
+field, JSON:API leaves it out of the resource with no marker. An empty field
+keeps its key, with a `null` value. So a view-denied field is not in `fields`,
+and it looks like a field that does not exist. The tool already reads the
+bundle's `field_config` for `translatable`; it uses the same response to find
+these fields, with no extra request:
+
+- `fieldDefinitions` is `"available"` or `"unavailable"`.
+- When available, `notVisible` lists `{ name, translatable }` for each field
+  that `field_config` defines but the sampled entity does not carry, and
+  `notVisibleNote` explains it. They are most likely denied to this account.
+  They may also be disabled or renamed in JSON:API.
+- When unavailable, `notVisible` is omitted and `note` says denied fields
+  cannot be detected.
+- Nothing is claimed when no entity was sampled.
+
+The list covers configurable fields only (the first 50 `field_config` rows) and
+one sampled entity, so it may be incomplete. Base fields are not covered.
+
 ---
 
 ## References
@@ -801,7 +820,7 @@ Additional read-only audit tools that complement the [Reports](#reports) module.
 | Tool | Required params | Description |
 |------|----------------|-------------|
 | `drupal_report_unpublished` | — | List unpublished/draft content of a type (default `article`). Returns titles, last-changed dates, and paths — surfaces forgotten drafts. |
-| `drupal_report_missing_field` | `field` | Find entities where a given field is empty (scalar or entity-reference). Bounded by `sampleSize`. |
+| `drupal_report_missing_field` | `field` | Find entities where a given field is empty (scalar or entity-reference). Bounded by `sampleSize`. A field absent from every sampled entity is reported as `notVisible`, not as missing everywhere. |
 | `drupal_report_orphaned_references` | — | Find entities whose entity-reference fields point at targets that no longer exist. A 404 is an orphan; 401/403 and policy-denied types are `unverifiable`, not missing. Bounded by `sampleSize`. |
 
 ### drupal_report_missing_field
@@ -813,6 +832,26 @@ Additional read-only audit tools that complement the [Reports](#reports) module.
   "sampleSize": 100
 }
 ```
+
+**Absent is not empty.** JSON:API keeps the key of an empty field and leaves
+out a field the account may not view. The report reads the keys it already has;
+it makes no extra request per entity.
+
+- The field is absent from **every** sampled entity: the result is
+  `notVisible: true`, `totalMissing: null` and no findings. The field may be
+  denied to this account, not exist on the bundle, or be misspelled. The report
+  cannot tell whether any value is missing, so it counts none.
+- The field is absent from **some** entities: each finding carries `reason`,
+  `"empty"` (key present, no value) or `"absent"` (key missing, possibly
+  access-denied). `totalEmpty` and `totalAbsent` give the split, and `note`
+  says how many entities omit the field.
+- Promoted base attributes (`title`, `status`, `langcode`, `created`,
+  `changed`, `path`) always read as present. A denied base attribute cannot be
+  told from an empty one.
+
+Reports run by an account that node access restricts still see fewer entities
+than exist, with no signal from Drupal. `scanned` is the number this account
+could read.
 
 ---
 

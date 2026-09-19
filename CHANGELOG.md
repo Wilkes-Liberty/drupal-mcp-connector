@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `.agents/commands/` were regenerated.
 
 ### Fixed
+- **A field the account may not view is no longer reported as empty (#337).**
+  JSON:API leaves a view-denied field out of the resource and keeps the key of
+  an empty one. `drupal_report_missing_field` counted every entity as missing a
+  field it could not see. When the field is absent from every sampled entity
+  the report now returns `notVisible: true`, `totalMissing: null` and no
+  findings, and says the field may be denied, not on the bundle, or misspelled.
+  When only some entities omit it, each finding carries `reason` (`empty` or
+  `absent`) and the result adds `totalEmpty` and `totalAbsent`.
+  `drupal_describe_fields` reports `fieldDefinitions` (`available` or
+  `unavailable`) and, when `field_config` is readable, lists fields defined for
+  the bundle but absent from the sampled entity as `notVisible`. No request was
+  added per entity. Tool descriptions and `docs/tools-reference.md` state the
+  limit. Two stubs under `.agents/commands/` were regenerated.
 - **Northbound Drupal HTTP timeouts.** JSON:API, GraphQL, and file-upload
   `node-fetch` calls abort after 30s (`AbortSignal.timeout`), matching the
   Drush SSH bound. A hung Drupal host no longer stalls the MCP process.

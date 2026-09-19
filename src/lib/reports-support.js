@@ -65,6 +65,35 @@ export function fieldValue(entity, candidates) {
 }
 
 /**
+ * Read a field off a canonical entity and say whether its KEY was there.
+ *
+ * JSON:API keeps the key of an empty field (value `null`, `[]`, or
+ * `data: null`) and leaves out the key of a field the account may not view.
+ * So an absent key and an empty value are different facts, and callers that
+ * count "missing" values must keep them apart (#337).
+ *
+ * Looks in `fields`, then `relationships`. Promoted base attributes (`title`,
+ * `status`, `langcode`, `created`, `changed`, and `path` as `url`) are always
+ * carried by the canonical shape, so they always read as present: a denied
+ * base attribute cannot be told from an empty one after promotion.
+ *
+ * @param {object} entity Canonical entity.
+ * @param {string} field Field machine name.
+ * @returns {{present: boolean, value: *}} `present` is about the key, not the value.
+ */
+export function fieldPresence(entity, field) {
+  const name = field === "path" ? "url" : field;
+  if (BASE_KEYS.has(name)) {
+    return { present: true, value: new Map(Object.entries(entity ?? {})).get(name) };
+  }
+  const fields = new Map(Object.entries(entity?.fields ?? {}));
+  if (fields.has(name)) return { present: true, value: fields.get(name) };
+  const relationships = new Map(Object.entries(entity?.relationships ?? {}));
+  if (relationships.has(name)) return { present: true, value: relationships.get(name) };
+  return { present: false, value: undefined };
+}
+
+/**
  * Whole days elapsed between a date and now.
  * @param {?(string|number|Date)} dateValue A date parseable by `new Date()`.
  * @returns {?number} Whole days since the date, or null when no date is given.
