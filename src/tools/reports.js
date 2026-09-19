@@ -11,7 +11,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
-import { collectEntities, gatedReport, fieldValue, fieldPresence, isEmptyFieldValue, FIELDS_NOT_VISIBLE_NOTE, daysSince } from "../lib/reports-support.js";
+import { collectEntities, gatedReport, fieldValue, fieldPresence, isEmptyFieldValue, requestedFieldNames, FIELDS_NOT_VISIBLE_NOTE, daysSince } from "../lib/reports-support.js";
 import { fetchRenderedMetaDescriptions } from "../lib/metatag-audit.js";
 
 // ---------------------------------------------------------------------------
@@ -202,8 +202,9 @@ async function fieldCompleteness({ site: siteName, type, fields, sampleSize = 10
   assertReadAllowed(sec, "node", type);
   if (!type) throw new Error("fieldCompleteness requires a content type.");
   const backend = await resolveBackend(site);
-  const requested = Boolean(fields && fields.length);
-  const fieldsToCheck = requested ? [...new Set(fields)] : DEFAULT_COMPLETENESS_FIELDS;
+  const named = requestedFieldNames(fields);
+  const requested = named.length > 0;
+  const fieldsToCheck = requested ? named : DEFAULT_COMPLETENESS_FIELDS;
   const entities = await collectEntities(
     backend,
     { entityType: "node", bundle: type, filters: [{ field: "status", op: "eq", value: true }] },

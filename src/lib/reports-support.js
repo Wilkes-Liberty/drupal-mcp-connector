@@ -136,3 +136,15 @@ export const FIELDS_NOT_VISIBLE_NOTE =
   "Each may be denied to this account or not exist on this bundle, or the name may be wrong. " +
   "Drupal leaves a field the account may not view out of the response with no marker, so this report cannot tell whether any value is missing. " +
   "They were not scored.";
+
+/**
+ * Normalize a caller's `fields` argument to distinct, non-empty field names.
+ * Arguments are not schema-validated before they reach a handler, so a single
+ * string is read as one name and non-string entries are dropped.
+ * @param {*} fields The raw `fields` argument.
+ * @returns {string[]} Field names, or [] when the caller named none.
+ */
+export function requestedFieldNames(fields) {
+  const list = typeof fields === "string" ? [fields] : (Array.isArray(fields) ? fields : []);
+  return [...new Set(list.filter((f) => typeof f === "string" && f.trim()).map((f) => f.trim()))];
+}

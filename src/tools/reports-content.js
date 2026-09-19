@@ -16,7 +16,7 @@ import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
 import {
-  collectEntities, fieldValue, fieldPresence, isEmptyFieldValue, FIELDS_NOT_VISIBLE_NOTE, daysSince,
+  collectEntities, fieldValue, fieldPresence, isEmptyFieldValue, requestedFieldNames, FIELDS_NOT_VISIBLE_NOTE, daysSince,
 } from "../lib/reports-support.js";
 import { bodyHtml, extractAnchors, classifyLink, normalizePath } from "../lib/audit-support.js";
 import {
@@ -573,8 +573,9 @@ async function seoMetaCoverage({ site: siteName, type, fields, sampleSize = 100 
   assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
   const contentType = type || "article";
-  const requested = Boolean(fields && fields.length);
-  const metaFields = requested ? [...new Set(fields)] : DEFAULT_META_FIELDS;
+  const named = requestedFieldNames(fields);
+  const requested = named.length > 0;
+  const metaFields = requested ? named : DEFAULT_META_FIELDS;
   const nodes = await collectEntities(
     backend,
     { entityType: "node", bundle: contentType, sort: [{ field: "changed", dir: "desc" }] },

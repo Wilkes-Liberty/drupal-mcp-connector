@@ -257,6 +257,15 @@ describe("drupal_report_field_completeness", () => {
     expect(whole.note).toBeUndefined();
   });
 
+  it("reads a single string and ignores non-string field names (#341)", async () => {
+    backend.listEntities.mockResolvedValue({ entities: [{ id: "n1", fields: { body: "a" } }], page: { hasNext: false } });
+    const single = await handlers.drupal_report_field_completeness({ type: "article", fields: "body" });
+    expect(single.fields.map((r) => r.field)).toEqual(["body"]);
+    const mixed = await handlers.drupal_report_field_completeness({ type: "article", fields: ["body", null, 7, "body"] });
+    expect(mixed.fields.map((r) => r.field)).toEqual(["body"]);
+    expect(mixed.notVisible).toEqual([]);
+  });
+
   it("claims nothing about visibility when no node was sampled (#341)", async () => {
     backend.listEntities.mockResolvedValue({ entities: [], page: { hasNext: false } });
     const out = await handlers.drupal_report_field_completeness({ type: "article", fields: ["field_denied"] });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fieldPresence, isEmptyFieldValue, FIELDS_NOT_VISIBLE_NOTE } from "../../src/lib/reports-support.js";
+import { fieldPresence, isEmptyFieldValue, requestedFieldNames, FIELDS_NOT_VISIBLE_NOTE } from "../../src/lib/reports-support.js";
 
 describe("fieldPresence", () => {
   const entity = {
@@ -61,6 +61,18 @@ describe("isEmptyFieldValue", () => {
     expect(isEmptyFieldValue({ uri: "" })).toBe(true);
     expect(isEmptyFieldValue({ lat: 1, lng: 2 })).toBe(false);
     expect(isEmptyFieldValue({})).toBe(true);
+  });
+});
+
+describe("requestedFieldNames", () => {
+  it("keeps distinct, trimmed, non-empty string names", () => {
+    expect(requestedFieldNames(["body", " body ", "", null, 3, {}, "field_image"])).toEqual(["body", "field_image"]);
+  });
+  it("reads a single string as one name, not as characters", () => {
+    expect(requestedFieldNames("body")).toEqual(["body"]);
+  });
+  it("returns [] when the caller named nothing usable", () => {
+    for (const v of [undefined, null, [], [null], {}, 5]) expect(requestedFieldNames(v)).toEqual([]);
   });
 });
 
