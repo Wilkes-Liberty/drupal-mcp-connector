@@ -32,6 +32,9 @@ Extend an existing site's `serverTools` object. Keep its credential in the exist
 }
 ```
 
+Optional `serverTools.modules.workflows` enables module-owned workflow prompts
+for those tools. See [module-workflows.md](module-workflows.md).
+
 This exposes `drupal_module_write_staging_relationships__record_activity` only if the source lists the approved tool and caller policy permits it. The operation in the name comes from operator configuration, never the remote annotation. This keeps write classification consistent with transport and relay actor requirements. The namespace and alias together must be unique across configured sites.
 
 Copy `name` from the installed source's advertised catalog. Bridge versions may

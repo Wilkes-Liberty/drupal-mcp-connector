@@ -45,6 +45,20 @@ export function commandFileName(def) {
 /** Trailing marker that tells the installer a stub belongs to a module-owned tool. */
 export const MODULE_STUB_MARKER = "<!-- drupal-mcp-connector:module-tool -->";
 
+/** Trailing marker for a module-owned workflow stub. */
+export const WORKFLOW_STUB_MARKER = "<!-- drupal-mcp-connector:module-workflow -->";
+
+/**
+ * Command filename for a module-owned workflow prompt.
+ *
+ * @param {string} namespace
+ * @param {string} id
+ * @returns {string}
+ */
+export function workflowCommandFileName(namespace, id) {
+  return `drupal-${namespace}-${id}.md`.replace(/_/g, "-");
+}
+
 const MODULE_TOOL_NAME = /^drupal_module_(?:read|write|delete)_([a-z][a-z0-9_]*?)__([a-z][a-z0-9_]*)$/;
 
 /**
@@ -144,6 +158,35 @@ export function renderCommandMarkdown(def, options = {}) {
  * @param {object} def - The tool definition.
  * @returns {string} File contents.
  */
+/**
+ * Filesystem stub for a module-owned workflow prompt.
+ *
+ * @param {object} workflow - A loaded workflow from the #333 loader.
+ * @returns {string}
+ */
+export function renderWorkflowCommandMarkdown(workflow) {
+  const params = (workflow.arguments ?? []).map((arg) => ({
+    name: arg.name,
+    required: Boolean(arg.required),
+  }));
+  const hint = argumentHint(params);
+  const tools = (workflow.publicTools ?? []).map((name) => `\`${name}\``).join(", ");
+  const body = [
+    `# ${workflow.name}`,
+    "",
+    workflow.description,
+    "",
+    `This is a workflow prompt. Ask the MCP client for prompt \`${workflow.name}\`.`,
+    tools ? `It names these tools: ${tools}.` : "",
+    workflow.readOnly
+      ? "Read-only: do not write."
+      : "Confirm with the person before any write. Module writes are not retried.",
+    "",
+    WORKFLOW_STUB_MARKER,
+  ].filter((line, i, arr) => line !== "" || arr[i - 1] !== "");
+  return `---\ndescription: ${yamlString(workflow.description)}\nargument-hint: "${hint}"\n---\n\n${body.join("\n")}\n`;
+}
+
 export function renderClaudeCommandMarkdown(def) {
   return renderCommandMarkdown(def, {
     allowedTools: `mcp__drupal__${def.name}`,

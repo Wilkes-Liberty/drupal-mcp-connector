@@ -32,10 +32,13 @@ import {
   commandFileName,
   moduleCommandFileName,
   MODULE_STUB_MARKER,
+  WORKFLOW_STUB_MARKER,
   renderCommandMarkdown,
   renderClaudeCommandMarkdown,
   renderCodexSkillMarkdown,
   renderCodexToolsReference,
+  renderWorkflowCommandMarkdown,
+  workflowCommandFileName,
   CODEX_SKILL_NAME,
 } from "./generate-commands.js";
 
@@ -154,13 +157,41 @@ export function missingModuleTools(configured, discovered) {
   return configured.filter((name) => !found.has(name));
 }
 
-/** Whether an installed stub was written for a module-owned tool. */
+/** Whether an installed stub was written for a module-owned tool or workflow. */
 function isModuleStub(path) {
   try {
-    return readFileSync(path, "utf8").includes(MODULE_STUB_MARKER);
+    const text = readFileSync(path, "utf8");
+    return text.includes(MODULE_STUB_MARKER) || text.includes(WORKFLOW_STUB_MARKER);
   } catch {
     return false;
   }
+}
+
+/**
+ * Workflow stubs for enabled local definitions whose named tools were discovered.
+ *
+ * @param {object[]} workflows
+ * @param {Set<string>} builtInFiles
+ * @param {Set<string>} moduleFiles
+ * @returns {{stubs: Array<{file: string, workflow: object}>, refused: Array<object>}}
+ */
+export function planWorkflowStubs(workflows, builtInFiles, moduleFiles) {
+  const stubs = [];
+  const refused = [];
+  const byFile = new Map();
+  for (const workflow of workflows ?? []) {
+    const file = workflowCommandFileName(workflow.namespace, workflow.id);
+    if (builtInFiles.has(file) || moduleFiles.has(file)) {
+      refused.push({ name: workflow.name, file, reason: "matches a built-in or module-tool command" });
+      continue;
+    }
+    byFile.set(file, [...(byFile.get(file) ?? []), workflow]);
+  }
+  for (const [file, defs] of byFile) {
+    if (defs.length === 1) stubs.push({ file, workflow: defs[0] });
+    else defs.forEach((workflow) => refused.push({ name: workflow.name, file, reason: "shared by more than one workflow" }));
+  }
+  return { stubs, refused };
 }
 
 /**
@@ -229,6 +260,11 @@ export function install(options = {}) {
       writeFileSync(join(dir, file), client.render(def));
       moduleWritten.push(file);
     }
+    const workflowStubs = options.workflowStubs ?? [];
+    for (const { file, workflow } of workflowStubs) {
+      writeFileSync(join(dir, file), renderWorkflowCommandMarkdown(workflow));
+      moduleWritten.push(file);
+    }
     results.push({ client: name, dir, written, moduleWritten });
   }
   return results;
@@ -266,9 +302,11 @@ deprecated Codex custom prompts (~/.codex/prompts).
   --home DIR       Install root (default: the current user's home)
   --clients LIST   Comma-separated subset of: claude, grok, codex, agents
                    (default: claude,grok,codex)
-  --modules        Also write stubs for module-owned tools. Discovers them from
-                   the sources in config/config.json (run from that directory).
-                   Without this flag, installed module stubs are left alone.
+  --modules        Also write stubs for module-owned tools and workflows.
+                   Discovers tools from the sources in config/config.json
+                   (run from that directory). Workflows come from
+                   serverTools.modules.workflows. Without this flag, installed
+                   module stubs are left alone.
 `;
 
 const invokedDirectly =
@@ -302,6 +340,19 @@ if (invokedDirectly) {
       opts.moduleParts = parts;
       // An incomplete listing must not delete stubs for tools that may only be unreachable.
       opts.pruneModules = missing.length === 0;
+      const { loadWorkflows, moduleWorkflowProviders } = await import("../src/lib/workflow-prompts.js");
+      const { listResolvableSiteConfigs } = await import("../src/lib/dispatch.js");
+      const workflows = loadWorkflows(moduleWorkflowProviders(listResolvableSiteConfigs()), {
+        tools: definitions,
+        taken: new Set(allDefinitions.map((def) => def.name.replace(/_/g, "-"))),
+      });
+      const builtInFiles = new Set(allDefinitions.map(commandFileName));
+      const moduleFiles = new Set(planModuleStubs(definitions, allDefinitions, parts).stubs.map((s) => s.file));
+      const planned = planWorkflowStubs(workflows, builtInFiles, moduleFiles);
+      for (const r of planned.refused) {
+        console.error(`[install-commands] WARNING: no workflow stub for ${r.name}: ${r.reason}${r.file ? ` (${r.file})` : ""}`);
+      }
+      opts.workflowStubs = planned.stubs;
     }
     const results = install(opts);
     for (const r of results) {
