@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { describeErrorBody, cleanErrorText, ERROR_DETAIL_MAX_CHARS } from "../../src/lib/error-body.js";
+import { describeErrorBody, cleanErrorText, ERROR_DETAIL_MAX_CHARS, ERROR_DOCUMENT_MAX_CHARS } from "../../src/lib/error-body.js";
 
 describe("cleanErrorText", () => {
   it("strips markup, control characters and terminal escapes, and collapses whitespace", () => {
@@ -79,5 +79,50 @@ describe("describeErrorBody", () => {
 
   it("passes short plain text through", () => {
     expect(describeErrorBody("Request Entity Too Large", "text/plain")).toBe("Request Entity Too Large");
+  });
+
+  it("reads errors[].message from a GraphQL error document and ignores extensions", () => {
+    const body = JSON.stringify({ errors: [{ message: "Cannot query field \"x\".", extensions: { trace: "#0 /var/www/html/x.php" } }] });
+    expect(describeErrorBody(body, "application/json")).toBe("Cannot query field \"x\".");
+  });
+
+  it("reads an OAuth error document and never its hint", () => {
+    expect(describeErrorBody(JSON.stringify({ error: "invalid_token", error_description: "The token expired.", hint: "/var/www/keys/public.key", message: "ignored" })))
+      .toBe("invalid_token: The token expired.");
+    expect(describeErrorBody(JSON.stringify({ error: "access_denied", message: "Denied." }))).toBe("access_denied: Denied.");
+    expect(describeErrorBody(JSON.stringify({ error: "server_error" }))).toBe("server_error");
+    expect(describeErrorBody(JSON.stringify({ error: { code: 1 } }))).toBe("the server returned JSON with no error detail, not shown");
+  });
+
+  it("cleans each detail on its own, so a backtrace does not remove the next error", () => {
+    const body = JSON.stringify({ errors: [{ detail: "First. Stack trace: #0 /var/www/html/a.php" }, { detail: "Second." }] });
+    expect(describeErrorBody(body)).toBe("First. [stack trace removed]; Second.");
+  });
+
+  it("bounds the joined details to the default, or to maxChars when given", () => {
+    const body = JSON.stringify({ errors: Array.from({ length: 50 }, (_, i) => ({ detail: `e${i} ${"x".repeat(100)}` })) });
+    const byDefault = describeErrorBody(body);
+    expect(byDefault.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX_CHARS + 20);
+    expect(byDefault).toMatch(/… \[truncated\]$/);
+
+    const wider = describeErrorBody(body, null, { maxChars: ERROR_DOCUMENT_MAX_CHARS });
+    expect(wider.length).toBeGreaterThan(ERROR_DETAIL_MAX_CHARS);
+    expect(wider.length).toBeLessThanOrEqual(ERROR_DOCUMENT_MAX_CHARS + 20);
+    expect(wider).toContain("e9 ");
+  });
+
+  it("never bounds below one detail, and ignores a malformed maxChars", () => {
+    const body = JSON.stringify({ errors: [{ detail: "y".repeat(300) }, { detail: "z".repeat(300) }] });
+    expect(describeErrorBody(body, null, { maxChars: 5 }).length).toBeGreaterThan(300);
+    expect(describeErrorBody(body, null, { maxChars: "lots" })).toBe(describeErrorBody(body));
+    expect(describeErrorBody(body, null, { maxChars: Infinity })).toBe(describeErrorBody(body));
+  });
+
+  it("does not widen the bound of a single detail or of plain text", () => {
+    const one = describeErrorBody(JSON.stringify({ errors: [{ detail: "x".repeat(5000) }] }), null, { maxChars: ERROR_DOCUMENT_MAX_CHARS });
+    expect(one.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX_CHARS + 20);
+    expect(one.match(/truncated/g)).toHaveLength(1);
+    const plain = describeErrorBody("p".repeat(5000), "text/plain", { maxChars: ERROR_DOCUMENT_MAX_CHARS });
+    expect(plain.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX_CHARS + 20);
   });
 });

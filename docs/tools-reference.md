@@ -14,6 +14,19 @@ Complete reference for all 123 tools across 27 modules.
 > `source: "default"`. Writes require an explicit `site` when more than one
 > site is configured. `drupal_list_sites` and an unscoped
 > `drupal_governance_status` have no single target and omit `_target`.
+>
+> **Drupal HTTP errors (#343, #345).** A failed JSON:API request reports
+> `Drupal <status> on <method> <path>: <detail>`, a failed GraphQL request
+> `GraphQL request failed <status>: <detail>`, and a failed upload
+> `File upload failed <status>: <detail>`. The detail is Drupal's
+> `errors[].detail` (or `title`), GraphQL's `errors[].message`, an OAuth
+> `error` and `error_description`, or a plain `message`. Markup and control
+> characters are stripped. Server paths (any absolute path of two or more
+> segments, so `/about/team` as well as `/var/www/html`) and stream-wrapper
+> URIs become `[path]`. A backtrace is removed. One detail is cut to 400
+> characters and a list of details to 1,200 (400 for an upload). An HTML page,
+> or a JSON body with no error detail, is never returned: the error says so and
+> gives the page title. An empty body reports `(empty response body)`.
 
 ---
 
