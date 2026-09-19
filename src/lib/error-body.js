@@ -293,7 +293,8 @@ function cleanGraphqlError(error) {
  * @returns {Array<object>} Cleaned errors; empty when there is none.
  */
 export function cleanGraphqlErrors(errors) {
-  if (errors === undefined || errors === null || errors === false) return [];
+  // Any falsy value (`null`, `""`, `0`) means the response reports no error.
+  if (!errors) return [];
   const list = Array.isArray(errors) ? errors : [errors];
   if (!list.length) return [];
 

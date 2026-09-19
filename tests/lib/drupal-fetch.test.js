@@ -568,4 +568,11 @@ describe("drupalGraphqlFetch failure message (#345)", () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify(body) });
     await expect(drupalGraphqlFetch(site, { query: "{ __typename }" })).resolves.toEqual(body);
   });
+
+  it("does not turn an empty or null errors value into an error", async () => {
+    for (const errors of [[], null, "", 0, false]) {
+      vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ data: { ok: true }, errors }) });
+      await expect(drupalGraphqlFetch(site, { query: "{ __typename }" })).resolves.toEqual({ data: { ok: true } });
+    }
+  });
 });

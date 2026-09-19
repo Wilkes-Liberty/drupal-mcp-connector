@@ -218,8 +218,7 @@ describe("cleanGraphqlErrors", () => {
   it("reads an errors value that is not an array", () => {
     expect(cleanGraphqlErrors("boom at /var/www/html/x.php")).toEqual([{ message: "boom at [path]" }]);
     expect(cleanGraphqlErrors({ message: "one" })).toEqual([{ message: "one" }]);
-    expect(cleanGraphqlErrors(undefined)).toEqual([]);
-    expect(cleanGraphqlErrors([])).toEqual([]);
+    for (const none of [undefined, null, false, 0, "", []]) expect(cleanGraphqlErrors(none)).toEqual([]);
   });
 
   it("is stable when applied twice", () => {
