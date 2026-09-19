@@ -48,6 +48,50 @@ function stripTags(text) {
 }
 
 /**
+ * First segments that mark a filesystem path. Several are also plausible URL
+ * prefixes (`/home`, `/data`, `/web`); a match is redacted either way, so the
+ * rule errs towards hiding a path.
+ */
+const FILESYSTEM_ROOTS = new Set([
+  "var", "home", "srv", "usr", "opt", "tmp", "etc", "app", "mnt", "private", "users", "data", "code",
+  "workspace", "builds", "run", "proc", "sys", "lib", "bin", "root", "www", "sites", "vendor", "web",
+  "docroot", "html",
+]);
+
+/** Segments, at any depth, that mark a code tree, a web root or a file directory. */
+const SERVER_TREE_SEGMENTS = new Set([
+  "vendor", "node_modules", "core", "modules", "themes", "profiles", "sites", "src", "lib", "docroot",
+  "public_html", "htdocs", "files", "private", "tmp",
+]);
+
+/** File extensions that mark a server-side file rather than a page. */
+const SERVER_FILE_EXTENSIONS = new Set([
+  "php", "inc", "module", "install", "theme", "engine", "yml", "yaml", "twig", "log", "sql", "sh", "env",
+  "ini", "conf", "json", "lock", "phar",
+]);
+
+/**
+ * Whether a slash-led path names something on the server's filesystem rather
+ * than a site-relative URL. A path is a filesystem path when it has two or
+ * more segments and
+ * - its first segment is a known filesystem root (`/var/...`, `/tmp/...`), or
+ * - any segment marks a code or server tree (`vendor`, `modules`, `files`), or
+ * - any segment carries a server-side file extension (`settings.php`,
+ *   `.env.local`, `dump.sql.gz`).
+ * Segments compare case-insensitively. Everything else (`/about/team`,
+ * `/node/12/edit`) is a URL path.
+ * @param {string} path Slash-led path, as matched in an error text.
+ * @returns {boolean}
+ */
+function isFilesystemPath(path) {
+  const segments = path.toLowerCase().split("/").filter(Boolean);
+  if (segments.length < 2) return false;
+  if (FILESYSTEM_ROOTS.has(segments[0])) return true;
+  return segments.some((segment) => SERVER_TREE_SEGMENTS.has(segment)
+    || segment.split(".").slice(1).some((part) => SERVER_FILE_EXTENSIONS.has(part)));
+}
+
+/**
  * Strip markup and control characters, cut a backtrace, redact server paths,
  * collapse whitespace, and bound the length.
  * @param {*} text Untrusted text.
@@ -63,9 +107,16 @@ export function cleanErrorText(text, max = ERROR_DETAIL_MAX_CHARS) {
     .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
     // Drupal stream-wrapper URIs name files other users uploaded.
     .replace(/\b(public|private|temporary|s3|assets):\/\/[^\s"'),;]+/gi, "$1://[path]")
-    // Absolute filesystem paths of two or more segments. A URL path is left
-    // alone: its slash follows a word character, a colon or another slash.
-    .replace(/(?<![\w:/.\]])\/[\w.@%+~/-]+/g, (match) => (match.indexOf("/", 1) === -1 ? match : "[path]"))
+    // Local-file URIs.
+    .replace(/\b(file|phar):\/\/[^\s"'),;]+/gi, "$1://[path]")
+    // Windows drive paths (`C:\dir`, `C:/dir`) and UNC paths (`\\host\share`).
+    .replace(/(?<!\w)[A-Za-z]:[\\/](?![\\/])[^\s"'),;|*?]*/g, "[path]")
+    .replace(/(?<![\w\\])\\\\[\w.$-]+\\[^\s"'),;|*?]*/g, "[path]")
+    // Slash-led paths. A filesystem path is redacted; a site-relative URL path
+    // is kept, because the caller sent it and has to read it back (#357). The
+    // path part of an absolute URL never matches: its slash follows a word
+    // character, a colon or another slash.
+    .replace(/(?<![\w:/.\]])\/[\w.@%+~/-]+/g, (match) => (isFilesystemPath(match) ? "[path]" : match))
     .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();

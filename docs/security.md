@@ -266,6 +266,31 @@ Fields are also excluded from `drupal_entity_create` and `drupal_entity_update` 
 | `field_ssn` | varies | Sensitive PII |
 | `field_dob` | varies | PII |
 
+### Error detail path redaction
+
+Field redaction covers successful responses. The detail of a failed Drupal request is cleaned separately (`src/lib/error-body.js`): markup and control characters are stripped, a backtrace is removed, the text is bounded, and paths are redacted to `[path]`.
+
+A slash-led path of two or more segments is redacted when it looks like a filesystem path:
+
+- its first segment is a filesystem root: `/var`, `/home`, `/srv`, `/usr`, `/opt`, `/tmp`, `/etc`, `/app`, `/mnt`, `/private`, `/Users`, `/data`, `/code`, `/workspace`, `/builds`, `/run`, `/proc`, `/sys`, `/lib`, `/bin`, `/root`, `/www`, `/sites`, `/vendor`, `/web`, `/docroot`, `/html`; or
+- any segment marks a code tree, a web root or a file directory: `vendor`, `node_modules`, `core`, `modules`, `themes`, `profiles`, `sites`, `src`, `lib`, `docroot`, `public_html`, `htdocs`, `files`, `private`, `tmp`; or
+- any segment has a server-side file extension: `.php`, `.inc`, `.module`, `.install`, `.theme`, `.engine`, `.yml`, `.yaml`, `.twig`, `.log`, `.sql`, `.sh`, `.env`, `.ini`, `.conf`, `.json`, `.lock`, `.phar`. The extension can sit before another one, as in `.env.local` or `dump.sql.gz`.
+
+Segments compare case-insensitively. These are redacted whatever their shape:
+
+- Windows drive paths (`C:\inetpub\...`, `C:/xampp/...`) and UNC paths (`\\host\share\...`);
+- `file://` and `phar://` URIs, which become `file://[path]` and `phar://[path]`;
+- Drupal stream-wrapper URIs (`public://`, `private://`, `temporary://`, `s3://`, `assets://`), which become `<scheme>://[path]`.
+
+Any other slash-led path is kept. `/about/team`, `/node/12/edit` and `/old/page?x=1` are site-relative URL paths that the caller supplied, and a message such as "The alias /about/team is already in use" is useless without them (#357).
+
+Limits of the rule:
+
+- A URL path that matches a rule is redacted too. `/admin/modules/uninstall`, `/sites/default/files/a.pdf` and `/home/welcome` all become `[path]`. The rule errs towards hiding a path.
+- A filesystem path that matches no rule is kept, for example `/project/uploads/a.pdf` under a root the list does not name.
+- A relative path (`modules/custom/example/example.module`) is not slash-led and is not redacted.
+- A path with a space is redacted up to the space.
+
 ---
 
 ## HTTPS Enforcement
