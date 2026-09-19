@@ -201,6 +201,11 @@
     "_comment": "The audit tool groups (drupal_report_* links/config/content, drupal_audit_site_health) are read-only. Privileged audits (404 log, config drift/best-practices, module/permission/status) are self-sufficient via the connector's own drush bridge (drushSsh) — no companion module required; the config-inspection audits additionally prefer the governed config server-tool when serverTools is configured. They report 'unavailable' when no source is configured for the site. drupal_report_broken_links does no outbound HTTP unless called with checkLive:true; see each site's optional 'audit' block for live-check limits."
   },
 
+  "_protected_modules": {
+    "_comment": "drupal_drush_module_disable refuses governance, integrity, secrets, auth and API modules on every preset (mcp_sentinel, audit_chain, field_guard, file_gate, key, encrypt, simple_oauth, consumers, jsonapi, serialization, mcp_server, mcp_server_tool_bridge, tool, content_moderation, workflows). Two optional per-site keys under security change the list. protectedModules adds modules and cannot shrink the default. allowProtectedModuleUninstall is the explicit opt-out and removes only the modules it names. A malformed value in either key blocks every uninstall on that site. Neither key opens readOnly, allowDestructive or drushSsh.allowedCommands. An uninstall that would cascade to dependents is refused. See docs/security.md#protected-modules.",
+    "example": { "preset": "development", "protectedModules": ["my_audit_module"], "allowProtectedModuleUninstall": [] }
+  },
+
   "_mcp_client_registration": {
     "_comment": "Add under your MCP client's mcpServers config (stdio transport)",
     "drupal": {

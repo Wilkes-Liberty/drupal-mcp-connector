@@ -1,11 +1,11 @@
 ---
-description: "Uninstall a Drupal module. Irreversible for module-stored data. Confirm with user."
+description: "Uninstall a Drupal module. Irreversible for module-stored data. Confirm with user. Refused for a protected module: governance, integrity, secrets, auth and API modules such as mcp_sentinel, audit_chain, key, simple_oauth and jsonapi (see `protectedModules` in drupal_security_info). Only an operator can change that list, in site config. Also refused when the uninstall would cascade to dependents: nothing is uninstalled, the dependents are named, and each must be uninstalled by name first."
 argument-hint: "<moduleName> [site]"
 ---
 
 Call the MCP tool `drupal_drush_module_disable`.
 
-Uninstall a Drupal module. Irreversible for module-stored data. Confirm with user.
+Uninstall a Drupal module. Irreversible for module-stored data. Confirm with user. Refused for a protected module: governance, integrity, secrets, auth and API modules such as mcp_sentinel, audit_chain, key, simple_oauth and jsonapi (see `protectedModules` in drupal_security_info). Only an operator can change that list, in site config. Also refused when the uninstall would cascade to dependents: nothing is uninstalled, the dependents are named, and each must be uninstalled by name first.
 
 > ⚠ **Destructive** — this permanently changes or deletes data. Confirm with the user before calling.
 

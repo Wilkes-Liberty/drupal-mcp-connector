@@ -26,7 +26,9 @@ import { readFileSync }  from "fs";
 import { homedir }       from "os";
 import { join, resolve, normalize } from "path";
 import { getSiteConfig } from "../lib/config.js";
-import { resolveSecurityConfig, assertNotReadOnly, SecurityError } from "../lib/security.js";
+import {
+  resolveSecurityConfig, assertNotReadOnly, assertDestructiveAllowed, assertModuleUninstallAllowed, SecurityError,
+} from "../lib/security.js";
 import { validateMachineName, validateSqlQuery, sanitizeSshArg } from "../lib/validate.js";
 
 // ---------------------------------------------------------------------------
@@ -128,8 +130,11 @@ function resolveKeyPath(rawPath) {
  * Exported so the audit tool groups can reuse the hardened bridge for their
  * drush fallback paths (e.g. config:status, pm:list, watchdog:show) without
  * re-implementing SSH handling.
+ *
+ * @param {{confirm?: "yes"|"no"}} [options] - how Drush confirmation prompts are
+ *   answered. Default "yes". "no" makes Drush cancel at any prompt.
  */
-export function sshDrush(site, drushArgs, timeoutMs = 30000) {
+export function sshDrush(site, drushArgs, timeoutMs = 30000, { confirm = "yes" } = {}) {
   const sshCfg  = getDrushConfig(site);
   assertCommandAllowed(sshCfg, drushArgs[0]);
   const keyPath = resolveKeyPath(sshCfg.keyPath);
@@ -143,7 +148,10 @@ export function sshDrush(site, drushArgs, timeoutMs = 30000) {
   // Build the command: cd to Drupal root, then run vendor drush with escaped args
   const escapedArgs = drushArgs.map(sanitizeSshArg).join(" ");
   const drushBin    = `${drupalRoot}/vendor/bin/drush`;
-  const command     = `cd ${sanitizeSshArg(drupalRoot)} && ${drushBin} ${escapedArgs} --yes`;
+  // Every prompt is answered for the non-interactive session: yes by default,
+  // no when the caller must not let Drush widen the operation (#346).
+  const answer      = confirm === "no" ? "--no" : "--yes";
+  const command     = `cd ${sanitizeSshArg(drupalRoot)} && ${drushBin} ${escapedArgs} ${answer}`;
 
   console.error(`[drush-bridge] ${site._name}: drush ${redactSecretArgs(drushArgs)}`);
 
@@ -175,9 +183,17 @@ export function sshDrush(site, drushArgs, timeoutMs = 30000) {
 
         stream.on("close", (code) => {
           if (code !== 0) {
-            settle(reject, new Error(
+            const failure = new Error(
               `Drush exited ${code}: ${(stderr.trim() || stdout.trim()).slice(0, 500)}`
-            ));
+            );
+            // Kept off the message: callers that need to read Drush's own
+            // output (the cascade list, #346) get it without it reaching the client.
+            Object.defineProperties(failure, {
+              exitCode: { value: code },
+              drushStdout: { value: stdout },
+              drushStderr: { value: stderr },
+            });
+            settle(reject, failure);
           } else {
             settle(resolve, stdout.trim());
           }
@@ -366,25 +382,103 @@ async function securityUpdates({ site: siteName }) {
  * @throws {Error} If moduleName is not a valid machine name.
  */
 async function enableModule({ site: siteName, moduleName }) {
+  validateMachineName(moduleName, "moduleName"); // first: an invalid name never reaches a message
   const site = getSiteConfig(siteName);
   assertNotReadOnly(resolveSecurityConfig(site), `pm:enable ${moduleName}`);
-  validateMachineName(moduleName, "moduleName"); // throws if invalid
   await sshDrush(site, ["pm:enable", moduleName]);
   return { success: true, message: `Module "${moduleName}" enabled.` };
 }
 
 /**
- * Uninstall a module (`drush pm:uninstall`). Name is validated as a machine name.
+ * Drush prints this before it asks to confirm a cascading uninstall. The list
+ * may wrap over several lines. Case-sensitive on purpose: module names are
+ * lowercase, so the capture stops at the next sentence ("Do you want to…").
+ */
+const CASCADE_LIST_RE = /The following extensions will be uninstalled:\s*([a-z0-9_,\s]+)/;
+
+/**
+ * Read the modules Drush said it would uninstall from a cancelled run.
+ * @param {Error} failure Rejection from sshDrush().
+ * @returns {?string[]} Machine names, or null when Drush printed no list.
+ */
+function cascadeList(failure) {
+  return parseCascadeList(`${failure?.drushStdout ?? ""}\n${failure?.drushStderr ?? ""}`);
+}
+
+/**
+ * @param {string} output Drush output.
+ * @returns {?string[]} Machine names Drush said it would uninstall, or null.
+ */
+function parseCascadeList(output) {
+  const match = CASCADE_LIST_RE.exec(output);
+  if (!match) return null;
+  return match[1].split(",").map((name) => name.trim()).filter((name) => /^[a-z][a-z0-9_]*$/.test(name));
+}
+
+/**
+ * Uninstall a module (`drush pm:uninstall`).
+ *
+ * Refused for a module on the site's protected list (#346): the default list in
+ * `security.js`, plus `security.protectedModules`, minus the explicit
+ * `security.allowProtectedModuleUninstall`.
+ *
+ * `pm:uninstall` also uninstalls every module that depends on the named one,
+ * after a prompt. The bridge answers that prompt "no", so a cascade is
+ * cancelled by Drush and nothing is uninstalled; a protected module cannot be
+ * removed through one of its dependencies. The caller uninstalls each
+ * dependent by name, and each name goes through the same check.
+ *
  * @param {object} args - { site?, moduleName }.
- * @returns {Promise<{success: boolean, message: string}>}
- * @throws {SecurityError} If the site is read-only.
- * @throws {Error} If moduleName is not a valid machine name.
+ * @returns {Promise<{success: boolean, message: string, alsoUninstalled?: string[], warning?: string}>}
+ *   `alsoUninstalled` is set only if Drush ran a cascade despite the "no" answer.
+ * @throws {Error} If moduleName is not a valid machine name. Checked first, so
+ *   an invalid name never reaches a message.
+ * @throws {SecurityError} If the site is read-only, deletes are not allowed,
+ *   the module is protected, the protected-module config is malformed, or the
+ *   uninstall would cascade to dependents.
  */
 async function disableModule({ site: siteName, moduleName }) {
-  const site = getSiteConfig(siteName);
-  assertNotReadOnly(resolveSecurityConfig(site), `pm:uninstall ${moduleName}`);
   validateMachineName(moduleName, "moduleName");
-  await sshDrush(site, ["pm:uninstall", moduleName]);
+  const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  assertNotReadOnly(sec, `pm:uninstall ${moduleName}`);
+  assertDestructiveAllowed(sec, "module", moduleName);
+  assertModuleUninstallAllowed(sec, moduleName);
+  let stdout;
+  try {
+    stdout = await sshDrush(site, ["pm:uninstall", moduleName], 30000, { confirm: "no" });
+  } catch (failure) {
+    const list = cascadeList(failure);
+    if (!list) throw failure;
+    const dependents = list.filter((name) => name !== moduleName);
+    if (dependents.length === 0) {
+      // Drush 13 prompts only for a cascade. Older releases prompt on every
+      // uninstall, and the "no" answer cancels those too.
+      throw new SecurityError(
+        `Drush asked to confirm uninstalling "${moduleName}" alone and the bridge answers "no", so nothing was uninstalled. ` +
+        "This Drush release prompts on every uninstall; the cascade guard needs Drush 13 or later on the site."
+      );
+    }
+    const guarded = dependents.filter((name) => sec.protectedModules.includes(name));
+    throw new SecurityError(
+      `Uninstalling "${moduleName}" would also uninstall: ${dependents.join(", ")}. ` +
+      "Nothing was uninstalled. " +
+      (guarded.length ? `Protected: ${guarded.join(", ")}. ` : "") +
+      "Uninstall each dependent by name first; each one goes through the protected-module check."
+    );
+  }
+  // Drush should have cancelled a cascade. If it printed a cascade list and
+  // still exited 0, say what it removed instead of reporting a clean uninstall.
+  const alsoUninstalled = (parseCascadeList(String(stdout ?? "")) ?? []).filter((name) => name !== moduleName);
+  if (alsoUninstalled.length) {
+    return {
+      success: true,
+      message: `Module "${moduleName}" uninstalled.`,
+      alsoUninstalled,
+      warning: "Drush did not cancel the cascade prompt, so these dependents were uninstalled too: " +
+        `${alsoUninstalled.join(", ")}. Check the Drush version on the site.`,
+    };
+  }
   return { success: true, message: `Module "${moduleName}" uninstalled.` };
 }
 
@@ -529,7 +623,7 @@ export const definitions = [
   },
   {
     name: "drupal_drush_module_disable",
-    description: "Uninstall a Drupal module. Irreversible for module-stored data. Confirm with user.",
+    description: "Uninstall a Drupal module. Irreversible for module-stored data. Confirm with user. Refused for a protected module: governance, integrity, secrets, auth and API modules such as mcp_sentinel, audit_chain, key, simple_oauth and jsonapi (see `protectedModules` in drupal_security_info). Only an operator can change that list, in site config. Also refused when the uninstall would cascade to dependents: nothing is uninstalled, the dependents are named, and each must be uninstalled by name first.",
     inputSchema: { type: "object", required: ["moduleName"], properties: { site: { type: "string" }, moduleName: { type: "string", pattern: "^[a-z][a-z0-9_]*$" } } },
   },
   {

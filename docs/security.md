@@ -389,12 +389,45 @@ The Drush SSH bridge has additional requirements:
 - **No agent forwarding** — disabled in the SSH client config
 - **Argument escaping** — all args are single-quote escaped before shell execution
 - **Machine name validation** — module names and role names are validated against `/^[a-z][a-z0-9_]*$/`
+- **Protected modules** — `drupal_drush_module_disable` refuses the modules the connector's controls depend on. See [Protected modules](#protected-modules).
 - **Raw SQL** — off by default; when enabled (`drushSsh.rawSql: "governed"`) runs only through `mcp-sentinel:sql-query` (SELECT over entity tables, policy-gated server-side). There is no ungoverned `sql:query` path.
 
 For production: restrict the SSH key to specific commands in `~/.ssh/authorized_keys`:
 ```
 restrict,command="/var/www/html/vendor/bin/drush" ssh-ed25519 AAAA... mcp-api-key
 ```
+
+### Protected modules
+
+`drupal_drush_module_disable` runs `drush pm:uninstall`. Uninstalling a governance or integrity module removes a control the connector relies on, and Drupal drops the module's tables on uninstall, so an audit log or stored keys go with it. The tool refuses these modules on every preset:
+
+| Group | Modules |
+|-------|---------|
+| Governance and integrity | `mcp_sentinel`, `audit_chain`, `field_guard`, `file_gate` |
+| Secrets and authentication | `key`, `encrypt`, `simple_oauth`, `consumers` |
+| API and governed tool surface | `jsonapi`, `serialization`, `mcp_server`, `mcp_server_tool_bridge`, `tool` |
+| Editorial gate | `content_moderation`, `workflows` |
+
+The list is on by default. Two per-site keys under `security` change it:
+
+```json
+{
+  "preset": "development",
+  "protectedModules": ["my_audit_module"],
+  "allowProtectedModuleUninstall": ["tool"]
+}
+```
+
+- `protectedModules` adds modules. It cannot shrink the default list; an empty array changes nothing.
+- `allowProtectedModuleUninstall` is the explicit opt-out. It is the only way to remove a module from the list, and it removes only the modules it names.
+- A value that is not an array of module machine names in either key blocks every uninstall on that site until it is fixed. It is not ignored.
+- Neither key opens another gate. The tool still needs `readOnly: false`, `allowDestructive: true`, and `pm:uninstall` in `drushSsh.allowedCommands` when that list is set. `production-strict` is read-only, so the tool stays refused there.
+
+`pm:uninstall` also uninstalls every module that depends on the named one. The bridge answers that Drush prompt "no", so a cascading uninstall is cancelled and nothing is removed. The error names the dependents and marks the protected ones. Uninstall each dependent by name first; each name goes through the same check. A protected module cannot be removed through one of its dependencies. Drush 13 prompts only for a cascade. An older Drush prompts on every uninstall, so the tool refuses all of them there and says why.
+
+`drupal_security_info` shows the effective list as `protectedModules` and the opt-outs as `protectedModuleOptOuts`.
+
+The list covers this tool only. It does not cover a module removed by `drupal_drush_config_import` from a changed `core.extension`; keep `config:import` out of `drushSsh.allowedCommands` on sites where that matters.
 
 ---
 

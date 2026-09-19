@@ -36,6 +36,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prompts and command stubs show a parameter's allowed values when its schema
   has a short string `enum` (`one of: full, minimal`). Eight built-in stubs
   under `.agents/commands/` were regenerated.
+- **`drupal_drush_module_disable` refuses protected modules (#346).** The tool
+  no longer uninstalls governance, integrity, secrets, auth and API modules
+  (`mcp_sentinel`, `audit_chain`, `field_guard`, `file_gate`, `key`, `encrypt`,
+  `simple_oauth`, `consumers`, `jsonapi`, `serialization`, `mcp_server`,
+  `mcp_server_tool_bridge`, `tool`, `content_moderation`, `workflows`). The list
+  is on for every preset. `security.protectedModules` adds modules;
+  `security.allowProtectedModuleUninstall` is the explicit opt-out. A malformed
+  value in either key blocks every uninstall. The bridge now answers the
+  `pm:uninstall` cascade prompt "no": an uninstall that would also remove
+  dependents is refused and names them. The handler also checks
+  `allowDestructive` itself. `drupal_security_info` shows the effective list.
+  One stub under `.agents/commands/` was regenerated.
 
 ### Fixed
 - **`dryRun` says what it checked (#336).** A preview could return without a

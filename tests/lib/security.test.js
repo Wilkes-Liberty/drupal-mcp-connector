@@ -4,6 +4,7 @@ import { redactCanonicalEntity, redactResource, resolveSecurityConfig } from "..
 import { assertConfigReadAllowed, assertConfigWriteAllowed, getSecuritySummary } from "../../src/lib/security.js";
 import { assertPublishAllowed, isPublishBearing } from "../../src/lib/security.js";
 import { assertConfigScope, hasScope } from "../../src/lib/security.js";
+import { DEFAULT_PROTECTED_MODULES, assertModuleUninstallAllowed } from "../../src/lib/security.js";
 
 // allowGraphql required for any GraphQL path (#142); mutations need both flags.
 const allowMut = { allowGraphql: true, allowGraphqlMutations: true, readOnly: false };
@@ -352,5 +353,46 @@ describe("hasScope — the empty-scope bypass is closed for governed setups (#18
     expect(() => assertConfigScope(governed(), "config:set system.site")).toThrow(SecurityError);
     const scoped = governed({ oauth: { clientId: "dev-agent", scopes: ["mcp_read", "mcp_config"] } });
     expect(() => assertConfigScope(scoped, "config:set system.site")).not.toThrow();
+  });
+});
+
+describe("protected modules (#346)", () => {
+  it("resolves the default list on every preset, sorted", () => {
+    for (const preset of [undefined, "development", "content-editor", "config-editor", "auditor", "production-strict", "write-plane"]) {
+      const cfg = resolveSecurityConfig({ _name: "s", security: preset ? { preset } : {} });
+      expect(cfg.protectedModules).toEqual([...DEFAULT_PROTECTED_MODULES].sort());
+      expect(cfg.protectedModulesError).toBeNull();
+    }
+  });
+
+  it("extends with protectedModules and reduces only with allowProtectedModuleUninstall", () => {
+    const cfg = resolveSecurityConfig({ _name: "s", security: { protectedModules: ["my_audit", "key"], allowProtectedModuleUninstall: ["tool"] } });
+    expect(cfg.protectedModules).toContain("my_audit");
+    expect(cfg.protectedModules).toContain("key");
+    expect(cfg.protectedModules).not.toContain("tool");
+    expect(cfg.protectedModules.filter((m) => m === "key")).toHaveLength(1);
+  });
+
+  it("reports a malformed key and keeps the full default list", () => {
+    const cfg = resolveSecurityConfig({ _name: "s", security: { allowProtectedModuleUninstall: ["tool", "not a name"] } });
+    expect(cfg.protectedModulesError).toMatch(/security\.allowProtectedModuleUninstall/);
+    expect(cfg.protectedModules).toContain("tool");
+  });
+
+  it("assertModuleUninstallAllowed refuses listed modules and malformed config", () => {
+    const ok = resolveSecurityConfig({ _name: "s", security: {} });
+    expect(() => assertModuleUninstallAllowed(ok, "devel")).not.toThrow();
+    expect(() => assertModuleUninstallAllowed(ok, "jsonapi")).toThrow(SecurityError);
+    const bad = resolveSecurityConfig({ _name: "s", security: { protectedModules: "jsonapi" } });
+    expect(() => assertModuleUninstallAllowed(bad, "devel")).toThrow(/security\.protectedModules/);
+    // A config object that never went through resolveSecurityConfig fails closed.
+    expect(() => assertModuleUninstallAllowed({}, "devel")).toThrow(SecurityError);
+  });
+
+  it("shows the effective list and the opt-outs in the security summary", () => {
+    const s = getSecuritySummary({ _name: "s", security: { preset: "development", allowProtectedModuleUninstall: ["tool"] } });
+    expect(s.protectedModules).not.toContain("tool");
+    expect(s.protectedModules).toContain("mcp_sentinel");
+    expect(s.protectedModuleOptOuts).toEqual(["tool"]);
   });
 });

@@ -363,7 +363,7 @@ Works with **any** Drupal entity type — paragraphs, commerce products, webform
 | `drupal_entity_create` | `entityType`, `bundle` | Create any entity with arbitrary attributes and relationships. `returning: "minimal"` for a compact response. |
 | `drupal_entity_update` | `entityType`, `bundle`, `id` | Update any entity. `returning: "minimal"` for a compact response. `status` is strictly opt-in; if a server-side gate flips the published state anyway, the response carries a `_statusChanged` marker instead of a silent success (#171). Paragraph / ERR identifiers are resolved to include `meta.target_revision_id` (#192). Moderated targets run the same PATCH preflight and working-copy targeting as `drupal_update_node`, including on `dryRun` (#166 / #201). |
 | `drupal_entity_delete` | `entityType`, `bundle`, `id` | Delete any entity. Requires `allowDestructive: true`. |
-| `drupal_security_info` | — | Show active security configuration for a site. |
+| `drupal_security_info` | — | Show active security configuration for a site, including the effective `protectedModules` list. |
 
 ### Paragraphs Example
 
@@ -524,7 +524,7 @@ Requires `drushSsh` config block. SSH key auth only — no passwords. An optiona
 | `drupal_drush_config_import` | ✅ | Import config from sync directory. Confirm before prod. |
 | `drupal_drush_updatedb` | ✅ | Run pending DB updates. |
 | `drupal_drush_module_enable` | ✅ | Enable a module. Machine name validated. |
-| `drupal_drush_module_disable` | ✅ | Uninstall a module. Irreversible. Confirm first. |
+| `drupal_drush_module_disable` | ✅ | Uninstall a module. Irreversible. Confirm first. Refuses a protected module (governance, integrity, secrets, auth, API; see [Protected modules](security.md#protected-modules)) and an uninstall that would cascade to dependents. |
 | `drupal_drush_user_create` | ✅ | Create a user with roles. Password min 12 chars. |
 
 All write operations require `security.readOnly: false`. Delete-class operations additionally require `security.allowDestructive: true`.
