@@ -11,12 +11,13 @@ vi.mock("../../src/lib/config.js", () => ({
   getSiteConfig: vi.fn((n) => SITES[n] ?? SITES.dev),
 }));
 
+// The unbound path resolves the wire name from the source catalog, so the
+// tools hand over the binding key rather than a hard-coded wire name.
 const callServerTool = vi.fn();
 const callBoundModuleTool = vi.fn();
 vi.mock("../../src/lib/server-tools.js", () => ({
-  callServerTool: (...args) => callServerTool(...args),
+  callGovernedServerTool: (...args) => callServerTool(...args),
   callBoundModuleTool: (...args) => callBoundModuleTool(...args),
-  SERVER_TOOLS: { configGet: "config_get", configList: "config_list", configSet: "config_set" },
 }));
 
 import { handlers } from "../../src/tools/config.js";
@@ -45,7 +46,7 @@ describe("config tools — governed via server-tool bridge", () => {
   it("config_get on a config tier (mcp_config) calls the server tool", async () => {
     callServerTool.mockResolvedValue({ content: [{ type: "text", text: "{}" }] });
     await handlers.drupal_config_get({ site: "dev", name: "system.site" });
-    expect(callServerTool).toHaveBeenCalledWith(SITES.dev, "config_get", { name: "system.site" });
+    expect(callServerTool).toHaveBeenCalledWith(SITES.dev, "configGet", { name: "system.site" });
   });
 
   it("config_get is denied on the Content tier (no mcp_config scope)", async () => {
@@ -60,14 +61,19 @@ describe("config tools — governed via server-tool bridge", () => {
   it("config_list forwards an optional prefix", async () => {
     callServerTool.mockResolvedValue({});
     await handlers.drupal_config_list({ site: "dev", prefix: "system." });
-    expect(callServerTool).toHaveBeenCalledWith(SITES.dev, "config_list", { prefix: "system." });
+    expect(callServerTool).toHaveBeenCalledWith(SITES.dev, "configList", { prefix: "system." });
   });
 
   it("config_set on the Developer tier reaches the server tool", async () => {
     callServerTool.mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
     await handlers.drupal_config_set({ site: "dev", name: "system.site", value: { name: "X" } });
     // The public `value` map is forwarded to the server tool under the `data` key.
-    expect(callServerTool).toHaveBeenCalledWith(SITES.dev, "config_set", { name: "system.site", data: { name: "X" } });
+    expect(callServerTool).toHaveBeenCalledWith(SITES.dev, "configSet", { name: "system.site", data: { name: "X" } });
+  });
+
+  it("surfaces a tool the source does not advertise as an error, not an empty result", async () => {
+    callServerTool.mockRejectedValue(new Error("Server tool \"mcp_sentinel_config_get\" is not advertised by the source"));
+    await expect(handlers.drupal_config_get({ site: "dev", name: "system.site" })).rejects.toThrow(/not advertised by the source/);
   });
 
   it("config_set is denied on the Content tier (configWrite=false)", async () => {

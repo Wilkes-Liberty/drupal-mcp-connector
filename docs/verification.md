@@ -66,7 +66,7 @@ A served probe is the finding.
 | Probe | Attempts | Passes when |
 |---|---|---|
 | `probe_mass_read` | a 5000-item collection read | the source refuses it (e.g. `read_budget_exceeded`) **or** serves a materially smaller page — a cap is a bound, and reporting one as an unbounded read would train operators to ignore the verifier. A success whose size cannot be measured is `skipped`, never a pass. |
-| `probe_config_change` | a configuration write through the connector's own bridge client — the real MCP session, the governed `tool_api.mcp_sentinel_config_set` name and its argument shape, refusal surfaced as a tool error | the source refuses it. **Skipped** for a principal that holds `mcp_config` (a developer or break-glass role is *supposed* to write config; failing its healthy run would be a false finding). |
+| `probe_config_change` | a configuration write through the connector's own bridge client — the real MCP session, the config-set tool under the wire name the source's `tools/list` advertises (`tool_api__mcp_sentinel_config_set` on a current bridge, `tool_api.mcp_sentinel_config_set` on an older one, or the `configSet` binding's name) and its argument shape, refusal surfaced as a tool error | the catalog lists the tool **and** the source refuses the call. **Skipped** when the tool is not in the catalog or the catalog cannot be read (see below). **Not applicable** for a principal that holds `mcp_config` (a developer or break-glass role is *supposed* to write config; failing its healthy run would be a false finding). |
 | `probe_content_edit` | a publish-bearing edit (`status: true`, nothing else) against the node given by `--content-target` | the source refuses it with **403/401** — an authorisation decision. A 404, 422 or 5xx is `skipped`: a PATCH at an id that does not exist returns 404 *before* any access check, so counting it would claim the publish gate holds without ever reaching it. Skipped entirely when no target is supplied, or for a principal with no write scope. |
 
 **A thrown error is not automatically a refusal.** The bridge client throws for
@@ -77,6 +77,19 @@ would not initialise, a network failure, or a standard JSON-RPC error (method
 not found, invalid params) mean the probe never reached policy, and are
 `skipped` with the reason recorded. Scoring those as refusals is exactly how a
 verifier ends up green for an install that proved nothing.
+
+**The config tool must be in the catalog before a refusal counts.** A call to
+a name the source does not publish fails too, and that failure looks like a
+refusal. The probe reads `tools/list` first and only scores a refusal for a
+tool the catalog lists. When the tool is missing the probe still attempts the
+write, because a served write is a finding either way, but anything short of
+served is `skipped` with a "not advertised by the source" reason, and the run
+is not ok. A missing tool has three causes: it is not registered and enabled on
+the source, it is published under a different name, or the source filters
+discovery by entitlement and hides it from this principal. In the last case the
+probe cannot prove a refusal with this principal alone. List tools with a
+principal that holds `mcp_config` to confirm the tool exists and what it is
+called. `entitlement_filtering` uses the same attempt and reports the same way.
 
 The config probe writes nothing when the gate holds. The content probe is
 deliberately the one exception, because a publish gate cannot be proven without
