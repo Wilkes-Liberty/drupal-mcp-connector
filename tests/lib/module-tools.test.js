@@ -13,7 +13,7 @@ vi.mock("../../src/lib/governance.js", async (original) => ({
   ...await original(), assertSourceGovernance: vi.fn(async () => {}),
 }));
 import { assertSourceGovernance } from "../../src/lib/governance.js";
-import { createModuleToolRegistry, configuredModuleToolNames } from "../../src/lib/module-tools.js";
+import { createModuleToolRegistry, configuredModuleTools } from "../../src/lib/module-tools.js";
 import { resetDataFlowBudgets } from "../../src/lib/data-flow.js";
 
 const schema = {
@@ -102,10 +102,11 @@ describe("module-owned tool registry", () => {
   });
 
   it("names configured tools without contacting a source or checking a caller", () => {
-    expect(configuredModuleToolNames(state.sites)).toEqual([
-      "drupal_module_read_stage__relationship", "drupal_module_write_stage__asset",
+    expect(configuredModuleTools(state.sites)).toEqual([
+      { name: "drupal_module_read_stage__relationship", namespace: "stage", alias: "relationship" },
+      { name: "drupal_module_write_stage__asset", namespace: "stage", alias: "asset" },
     ]);
-    expect(configuredModuleToolNames([{ _name: "plain", baseUrl: "https://plain.example.com" }])).toEqual([]);
+    expect(configuredModuleTools([{ _name: "plain", baseUrl: "https://plain.example.com" }])).toEqual([]);
     expect(list).not.toHaveBeenCalled();
   });
 

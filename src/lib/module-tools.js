@@ -46,7 +46,7 @@ function entries(sites) {
       if (result.has(name) || result.size >= MAX_TOOLS) {
         throw new SecurityError("Duplicate module namespace or excessive tool policy entries.");
       }
-      result.set(name, { name, alias, site, policy });
+      result.set(name, { name, alias, namespace: config.namespace, site, policy });
     }
   }
   return result;
@@ -134,15 +134,19 @@ function describe(entry, remote) {
 }
 
 /**
- * Tool names the local policy configures, before any discovery or caller check.
- * Tooling compares this with a live listing to tell "nothing configured" from
- * "configured but not returned by the source".
+ * Tools the local policy configures, before any discovery or caller check, with
+ * the namespace and alias each name was built from. Tooling compares this with
+ * a live listing to tell "nothing configured" from "configured but not returned
+ * by the source". A tool name alone cannot be split back reliably, because
+ * either part may contain the `__` separator.
  *
  * @param {Array<object>} sites - Resolved site configs.
- * @returns {string[]} Sorted tool names.
+ * @returns {Array<{name: string, namespace: string, alias: string}>} Sorted by name.
  */
-export function configuredModuleToolNames(sites) {
-  return [...entries(sites).keys()].sort();
+export function configuredModuleTools(sites) {
+  return [...entries(sites).values()]
+    .map(({ name, namespace, alias }) => ({ name, namespace, alias }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Reserved module names never fall back to built-in handlers. */

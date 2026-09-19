@@ -120,14 +120,16 @@ function splitClients(raw) {
  *
  * @param {Array<object>} moduleDefinitions - Definitions from live discovery.
  * @param {Array<object>} [definitions] - Built-in definitions.
+ * @param {Map<string, {namespace: string, alias: string}>} [parts] - Configured
+ *   namespace and alias per tool name, so a `__` inside either is not misread.
  * @returns {{stubs: Array<{file: string, def: object}>, refused: Array<{name: string, file: ?string, reason: string}>}}
  */
-export function planModuleStubs(moduleDefinitions, definitions = allDefinitions) {
+export function planModuleStubs(moduleDefinitions, definitions = allDefinitions, parts = new Map()) {
   const builtIn = new Set(definitions.map(commandFileName));
   const byFile = new Map();
   const refused = [];
   for (const def of moduleDefinitions) {
-    const file = moduleCommandFileName(def);
+    const file = moduleCommandFileName(def, parts.get(def.name));
     if (!file) refused.push({ name: def.name, file, reason: "not a module tool name" });
     else if (builtIn.has(file)) refused.push({ name: def.name, file, reason: "matches a built-in command" });
     else byFile.set(file, [...(byFile.get(file) ?? []), def]);
@@ -171,6 +173,8 @@ function isModuleStub(path) {
  * @param {Array<object>} [options.definitions]
  * @param {Array<object>} [options.moduleDefinitions] - Module tools from live
  *   discovery. Omitted: installed module stubs are left as they are.
+ * @param {Map<string, {namespace: string, alias: string}>} [options.moduleParts]
+ *   Configured namespace and alias per module tool name.
  * @param {boolean} [options.pruneModules=true] - Remove module stubs that are
  *   not rewritten. Pass false when discovery was incomplete.
  * @returns {Array<{client: string, dir: string, written: string[], moduleWritten: string[], catalogued?: number}>}
@@ -180,7 +184,9 @@ export function install(options = {}) {
   const names = options.clients || DEFAULT_CLIENTS;
   const definitions = options.definitions || allDefinitions;
   const withModules = Array.isArray(options.moduleDefinitions);
-  const moduleStubs = withModules ? planModuleStubs(options.moduleDefinitions, definitions).stubs : [];
+  const moduleStubs = withModules
+    ? planModuleStubs(options.moduleDefinitions, definitions, options.moduleParts).stubs
+    : [];
   const pruneModules = withModules && options.pruneModules !== false;
 
   const results = [];
@@ -233,17 +239,22 @@ export function install(options = {}) {
  * operator (no inbound principal). Sources, credentials and governance checks
  * are the ones the server uses; a source that fails returns no tools.
  *
- * @returns {Promise<{definitions: Array<object>, configured: string[]}>}
+ * @returns {Promise<{definitions: Array<object>, configured: string[], parts: Map<string, {namespace: string, alias: string}>}>}
  */
 export async function discoverModuleDefinitions() {
   // Loaded on demand so a plain install needs no site config or network.
   const { loadLocalSecrets } = await import("../src/lib/load-secrets.js");
   const { listResolvableSiteConfigs } = await import("../src/lib/dispatch.js");
-  const { createModuleToolRegistry, configuredModuleToolNames } = await import("../src/lib/module-tools.js");
+  const { createModuleToolRegistry, configuredModuleTools } = await import("../src/lib/module-tools.js");
   loadLocalSecrets();
   const sites = listResolvableSiteConfigs();
   const definitions = await createModuleToolRegistry().list({ sites, identity: null });
-  return { definitions, configured: configuredModuleToolNames(sites) };
+  const tools = configuredModuleTools(sites);
+  return {
+    definitions,
+    configured: tools.map((tool) => tool.name),
+    parts: new Map(tools.map(({ name, namespace, alias }) => [name, { namespace, alias }])),
+  };
 }
 
 const HELP = `Usage: node scripts/install-commands.js [--home DIR] [--clients claude,grok,codex,agents] [--modules]
@@ -270,7 +281,7 @@ if (invokedDirectly) {
       process.exit(0);
     }
     if (opts.modules) {
-      const { definitions, configured } = await discoverModuleDefinitions();
+      const { definitions, configured, parts } = await discoverModuleDefinitions();
       const missing = missingModuleTools(configured, definitions);
       if (configured.length === 0) {
         console.error("[install-commands] --modules: no site configures serverTools.modules; nothing to discover.");
@@ -284,10 +295,11 @@ if (invokedDirectly) {
       for (const name of missing) {
         console.error(`[install-commands] WARNING: configured but not returned by its source: ${name}`);
       }
-      for (const r of planModuleStubs(definitions).refused) {
+      for (const r of planModuleStubs(definitions, allDefinitions, parts).refused) {
         console.error(`[install-commands] WARNING: no stub for ${r.name}: ${r.reason}${r.file ? ` (${r.file})` : ""}`);
       }
       opts.moduleDefinitions = definitions;
+      opts.moduleParts = parts;
       // An incomplete listing must not delete stubs for tools that may only be unreachable.
       opts.pruneModules = missing.length === 0;
     }

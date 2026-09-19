@@ -29,7 +29,9 @@ import { mkdirSync, readdirSync, rmSync, writeFileSync, realpathSync } from "fs"
 import { pathToFileURL } from "url";
 
 import { allDefinitions } from "../src/tools/index.js";
-import { isModuleDefinition, moduleCallNotes, toolNameToPromptName, toolParams } from "../src/lib/tool-prompts.js";
+import {
+  isModuleDefinition, moduleCallNotes, toolDescription, toolNameToPromptName, toolParams,
+} from "../src/lib/tool-prompts.js";
 import { isDestructiveTool } from "../src/lib/operations.js";
 
 /** Canonical, harness-agnostic command tree shipped in the repo and the npm package. */
@@ -50,12 +52,19 @@ const MODULE_TOOL_NAME = /^drupal_module_(?:read|write|delete)_([a-z][a-z0-9_]*?
  * operation is left out so the command reads as the module's action; the stub
  * body still names the full tool.
  *
+ * Either part may contain `__`, so a tool name cannot always be split back.
+ * Pass the configured parts when they are known; the name is parsed only as a
+ * fallback, at the first separator.
+ *
  * @param {object} def - A tool definition.
+ * @param {{namespace: string, alias: string}} [parts] - From local config.
  * @returns {?string} The filename, or null when the name is not a module tool.
  */
-export function moduleCommandFileName(def) {
+export function moduleCommandFileName(def, parts) {
   const match = MODULE_TOOL_NAME.exec(def?.name ?? "");
-  return match ? `drupal-${match[1]}-${match[2]}.md`.replace(/_/g, "-") : null;
+  if (!match) return null;
+  const [namespace, alias] = parts ? [parts.namespace, parts.alias] : [match[1], match[2]];
+  return `drupal-${namespace}-${alias}.md`.replace(/_/g, "-");
 }
 
 /** Collapse to a single-line, double-quoted YAML scalar. */
@@ -89,12 +98,13 @@ export function renderCommandMarkdown(def, options = {}) {
   const isModule = isModuleDefinition(def);
   const argumentsPhrase = options.argumentsPhrase ?? "the arguments supplied with this command";
 
-  const frontmatter = ["---", `description: ${yamlString(def.description)}`];
+  const description = toolDescription(def);
+  const frontmatter = ["---", `description: ${yamlString(description)}`];
   if (params.length) frontmatter.push(`argument-hint: ${yamlString(argumentHint(params))}`);
   if (options.allowedTools) frontmatter.push(`allowed-tools: ${options.allowedTools}`);
   frontmatter.push("---");
 
-  const body = [`Call the MCP tool \`${def.name}\`.`, "", def.description];
+  const body = [`Call the MCP tool \`${def.name}\`.`, "", description];
 
   if (isDestructiveTool(def.name)) {
     body.push("", "> ⚠ **Destructive** — this permanently changes or deletes data. Confirm with the user before calling.");

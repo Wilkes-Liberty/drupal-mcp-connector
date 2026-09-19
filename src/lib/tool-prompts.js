@@ -74,6 +74,32 @@ export function paramList(inputSchema) {
 export const isModuleDefinition = (def) =>
   typeof def?.name === "string" && def.name.startsWith("drupal_module_");
 
+/** Longest source-supplied description kept in a prompt or stub. */
+const SOURCE_TEXT_LIMIT = 1024;
+
+/**
+ * Flatten and bound text that a Drupal source supplied. It ends up in
+ * instruction text and in files on the operator's disk, so it stays on one
+ * line where it cannot start a heading, a rule or a block of its own.
+ *
+ * @param {*} value - Source-supplied text.
+ * @returns {string}
+ */
+export function sourceText(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, SOURCE_TEXT_LIMIT);
+}
+
+/**
+ * A tool's description as prompts and stubs should show it. Built-in text is
+ * authored in this repo and is returned as written.
+ *
+ * @param {object} def - A tool definition.
+ * @returns {string}
+ */
+export function toolDescription(def) {
+  return isModuleDefinition(def) ? sourceText(def.description) : def.description;
+}
+
 /**
  * Parameter catalog a person fills in for a tool. A module-owned tool wraps the
  * module's schema in a `{ catalogRevision, arguments }` envelope, so its
@@ -83,7 +109,9 @@ export const isModuleDefinition = (def) =>
  * @returns {Array<{name:string, required:boolean, hint:string, description:string}>}
  */
 export function toolParams(def) {
-  return paramList(isModuleDefinition(def) ? def.inputSchema?.properties?.arguments : def.inputSchema);
+  if (!isModuleDefinition(def)) return paramList(def.inputSchema);
+  return paramList(def.inputSchema?.properties?.arguments)
+    .map((param) => ({ ...param, description: sourceText(param.description) }));
 }
 
 /**
@@ -118,7 +146,7 @@ export function moduleCallNotes(def, hasParams) {
 export function buildToolPrompts(definitions) {
   return definitions.map((def) => ({
     name: toolNameToPromptName(def.name),
-    description: `Invoke the ${def.name} tool. ${def.description}`.slice(0, 300),
+    description: `Invoke the ${def.name} tool. ${toolDescription(def)}`.slice(0, 300),
     arguments: toolParams(def).map((p) => ({
       name: p.name,
       description: p.description ? `${p.hint} — ${p.description}` : p.hint,
@@ -141,7 +169,7 @@ function renderToolInstruction(def, args = {}) {
   const line = (p) => `- ${p.name} (${p.hint})${p.description ? `: ${p.description}` : ""}`;
   const isModule = isModuleDefinition(def);
 
-  const out = [`Call the MCP tool \`${def.name}\`.`, "", def.description];
+  const out = [`Call the MCP tool \`${def.name}\`.`, "", toolDescription(def)];
 
   if (isDestructiveTool(def.name)) {
     out.push("", "⚠ Destructive: this permanently changes or deletes data. Confirm with the user before calling.");

@@ -158,7 +158,10 @@ sources and credentials, and writes one stub per tool named
 to the `drupal-mcp` skill catalog instead.
 
 - A stub name that matches a built-in command, or that two module tools share,
-  is refused and reported. Pick a different namespace or alias.
+  is refused and reported. Pick a different namespace or alias. Names come from
+  the configured namespace and alias, not from parsing the tool name.
+- Descriptions a source supplies are flattened to one line and cut at 1024
+  characters before they reach a prompt or a stub.
 - If tools are configured and no source returns any, the run fails and writes
   nothing. If only some are returned, the missing names are printed and stubs
   from earlier runs are kept, since the source may only be unreachable.
