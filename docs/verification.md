@@ -52,7 +52,7 @@ credentials from the environment.
 | Check | What it proves |
 |---|---|
 | `transport` | The target answers over an encrypted transport. |
-| `principal_auth` | The principal mints a **usable** access token **and** an anonymous request to a governed path is refused. Without a usable token every authenticated check below is `skipped`, not passed: a 401 is not a policy decision, and a probe that "passes" because it was unauthenticated proves nothing. |
+| `principal_auth` | The principal mints a **usable** access token **and** an anonymous request to a governed path is refused. Without a usable token every authenticated check below is `skipped`, not passed: a 401 is not a policy decision, and a probe that "passes" because it was unauthenticated proves nothing. An anonymous request that fails with a 5xx or does not answer is `skipped`: a failure is not a refusal. |
 | `source_governance` | The source's governance contract verifies (`GET /drupal-mcp/readiness`); a failure reports the source's own stable reason. |
 | `entitlement_filtering` | An out-of-tier operation is filtered for this principal. |
 | `target_resolution` | The site resolves to one target that describes itself. |
@@ -65,7 +65,7 @@ A served probe is the finding.
 
 | Probe | Attempts | Passes when |
 |---|---|---|
-| `probe_mass_read` | a 5000-item collection read | the source refuses it (e.g. `read_budget_exceeded`) **or** serves a materially smaller page — a cap is a bound, and reporting one as an unbounded read would train operators to ignore the verifier. A success whose size cannot be measured is `skipped`, never a pass. |
+| `probe_mass_read` | a 5000-item collection read | the source refuses it — a 401, 403 or 429, or another 4xx that carries the source's refusal code (e.g. `read_budget_exceeded`) — **or** serves a materially smaller page — a cap is a bound, and reporting one as an unbounded read would train operators to ignore the verifier. A success whose size cannot be measured is `skipped`, never a pass. So is a 404, a 5xx or a request that never answered: the read control was not reached. |
 | `probe_config_change` | a configuration write through the connector's own bridge client — the real MCP session, the config-set tool under the wire name the source's `tools/list` advertises (`tool_api__mcp_sentinel_config_set` on a current bridge, `tool_api.mcp_sentinel_config_set` on an older one, or the `configSet` binding's name) and its argument shape, refusal surfaced as a tool error | the catalog lists the tool **and** the source refuses the call. **Skipped** when the tool is not in the catalog or the catalog cannot be read (see below). **Not applicable** for a principal that holds `mcp_config` (a developer or break-glass role is *supposed* to write config; failing its healthy run would be a false finding). |
 | `probe_content_edit` | a publish-bearing edit (`status: true`, nothing else) against the node given by `--content-target` | the source refuses it with **403/401** — an authorisation decision. A 404, 422 or 5xx is `skipped`: a PATCH at an id that does not exist returns 404 *before* any access check, so counting it would claim the publish gate holds without ever reaching it. Skipped entirely when no target is supplied, or for a principal with no write scope. |
 
@@ -77,6 +77,15 @@ would not initialise, a network failure, or a standard JSON-RPC error (method
 not found, invalid params) mean the probe never reached policy, and are
 `skipped` with the reason recorded. Scoring those as refusals is exactly how a
 verifier ends up green for an install that proved nothing.
+
+**The response status decides, never the response body.** The bridge client
+sets the HTTP status on the error it throws and marks what failed: the session
+handshake, the HTTP request, a JSON-RPC error or a tool error. The verifier
+reads those properties. A 500 whose body quotes "failed 403:" is a 500, and is
+`skipped`. A 401 or 403 counts only on the `tools/call` itself: the token
+endpoint and the session handshake answer 401 and 403 before any tool is
+reached. A JSON-RPC error with no integer code is `skipped`. A 5xx never counts
+as a refusal in any probe.
 
 **The config tool must be in the catalog before a refusal counts.** A call to
 a name the source does not publish fails too, and that failure looks like a

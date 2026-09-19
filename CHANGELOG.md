@@ -72,6 +72,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source-side control. Two stubs under `.agents/commands/` were regenerated.
 
 ### Fixed
+- **Server-tool bridge errors no longer relay the response body or raw tool
+  text (#362).** `src/lib/server-tools.js` put four untrusted strings into its
+  errors with no cleaning and no bound: the body of a non-2xx `tools/call` or
+  `tools/list`, the body of a failed session handshake, a JSON-RPC
+  `error.message`, and the text of a tool result with `isError`. An HTML error
+  page, a server path or a backtrace reached the MCP client through the config
+  tools, the Drush-bound tools and the verifier's evidence. They now go through
+  `describeErrorBody()` and `cleanErrorText()`, as the JSON:API, GraphQL and
+  upload paths do. The prefix, the HTTP status and an integer JSON-RPC code are
+  unchanged (`Server-tool call <tool> failed <status>: …`,
+  `Server-tool <tool> error (<code>): …`,
+  `Server-tool <tool> reported an error: …`), so the verifier still classifies
+  them. A JSON-RPC error sent with a 4xx or 5xx reads
+  `failed <status>: JSON-RPC error <code>: <message>`. An empty body reads
+  `the server returned an empty body`. A JSON-RPC code that is not an integer
+  is no longer printed, and `error.data` is never read. A governed refusal's
+  text stays readable. Source budget codes are still looked for in the whole
+  text before it is cut.
+- **A module tool's failure is cleaned before it is relayed (#362).** The
+  module registry relays a failed result (`isError`, or `success: false`)
+  because the module's message is what the caller needs. It now goes through
+  the new `cleanErrorData()`: the shape, keys, codes, numbers and booleans
+  stay, every string is cleaned like any other error detail, and the payload
+  is bounded (400 characters a string, 4,000 in total, 50 entries a level, 6
+  levels). A successful result is not changed. A transport failure behind the
+  registry was already replaced by a fixed message and still is.
+- **The verifier reads the HTTP status from the response, not from its body
+  (#361).** `classifyBridgeError()` found the status of a failed bridge call
+  with a pattern that also matched the response body, so a 500 whose body held
+  "failed 403:" scored as a refusal and the config probe passed although the
+  tool never ran. The words "reported an error" and a quoted JSON-RPC code in a
+  body had the same effect. The bridge client now sets `status` on the error
+  for a non-2xx response, as `drupalFetch` does, and marks what failed
+  (`bridgeFailure`: `session`, `http`, `rpc` or `tool`, plus `rpcCode`). The
+  verifier reads those properties through `httpStatusOf()`. An error with no
+  marker is read only from the start of a documented message. A 401 or 403
+  from the token endpoint or the session handshake is no longer a refusal: no
+  tool was reached. A JSON-RPC error with no integer code is `skipped`.
+- **A server failure no longer passes `probe_mass_read` or `principal_auth`
+  (#361).** Any failed mass read passed, including a 5xx, a 404 and a request
+  that never answered. The probe now passes on 401, 403 or 429, or on another
+  4xx (not 404) that carries the source's refusal code; anything else is
+  `skipped`. `principal_auth` is `skipped` when the anonymous request fails
+  with a 5xx or no answer, instead of counting that as "anonymous access is
+  refused".
 - **Error details keep the URL paths the caller supplied (#357).** The error
   cleaning added for #343 and #345 replaced every slash-led path of two or more
   segments with `[path]`, so "The alias /about/team is already in use" arrived
@@ -199,32 +244,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GraphQL request failed <status>`, `File upload failed <status>`). The orphan
   report no longer treats a bare "404" elsewhere in a message as a missing
   target; such a failure counts as unverifiable.
-- **Server-tool bridge errors no longer relay the response body or raw tool
-  text (#362).** `src/lib/server-tools.js` put four untrusted strings into its
-  errors with no cleaning and no bound: the body of a non-2xx `tools/call` or
-  `tools/list`, the body of a failed session handshake, a JSON-RPC
-  `error.message`, and the text of a tool result with `isError`. An HTML error
-  page, a server path or a backtrace reached the MCP client through the config
-  tools, the Drush-bound tools and the verifier's evidence. They now go through
-  `describeErrorBody()` and `cleanErrorText()`, as the JSON:API, GraphQL and
-  upload paths do. The prefix, the HTTP status and an integer JSON-RPC code are
-  unchanged (`Server-tool call <tool> failed <status>: …`,
-  `Server-tool <tool> error (<code>): …`,
-  `Server-tool <tool> reported an error: …`), so the verifier still classifies
-  them. A JSON-RPC error sent with a 4xx or 5xx reads
-  `failed <status>: JSON-RPC error <code>: <message>`. An empty body reads
-  `the server returned an empty body`. A JSON-RPC code that is not an integer
-  is no longer printed, and `error.data` is never read. A governed refusal's
-  text stays readable. Source budget codes are still looked for in the whole
-  text before it is cut.
-- **A module tool's failure is cleaned before it is relayed (#362).** The
-  module registry relays a failed result (`isError`, or `success: false`)
-  because the module's message is what the caller needs. It now goes through
-  the new `cleanErrorData()`: the shape, keys, codes, numbers and booleans
-  stay, every string is cleaned like any other error detail, and the payload
-  is bounded (400 characters a string, 4,000 in total, 50 entries a level, 6
-  levels). A successful result is not changed. A transport failure behind the
-  registry was already replaced by a fixed message and still is.
 
 ## [2.19.1] - 2026-09-17
 

@@ -14,6 +14,8 @@ import {
 const CONFIG_GET = "tool_api__mcp_sentinel_config_get";
 const CONFIG_LIST = "tool_api__mcp_sentinel_config_list";
 import { clearToken } from "../../src/lib/oauth.js";
+import { httpStatusOf } from "../../src/lib/error-status.js";
+import { classifyBridgeError } from "../../src/lib/verify.js";
 import {
   HEADER_DECLARED_DESTINATION,
   buildDataFlowContext,
@@ -333,5 +335,73 @@ describe("governed config tool names are resolved from the source catalog", () =
       .rejects.toThrow(/not advertised by the source/);
     const methods = vi.mocked(fetch).mock.calls.map(([, o]) => JSON.parse(o.body).method);
     expect(methods).toEqual(["tools/list"]);
+  });
+});
+
+describe("bridge errors say what failed (#361)", () => {
+  /** Run one tools/call against a scripted reply and return the thrown error. */
+  const failWith = async (response, options) => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk("sess-e")[0])
+      .mockResolvedValueOnce(initOk("sess-e")[1])
+      .mockResolvedValueOnce(response);
+    return callServerTool(plainSite(), CONFIG_GET, {}, { retryRejected: false, ...options }).then(
+      () => { throw new Error("expected the call to fail"); },
+      (error) => error,
+    );
+  };
+
+  it("sets the response status on a non-2xx tools/call", async () => {
+    const error = await failWith(mcpRes({ status: 500, text: "{\"error\":\"upstream call failed 403: denied\"}" }));
+    expect(error.status).toBe(500);
+    expect(error.bridgeFailure).toBe("http");
+    expect(httpStatusOf(error)).toBe(500);
+    expect(classifyBridgeError(error).outcome).toBe("unexercised");
+  });
+
+  it("scores a real 403 on the tools/call as a refusal", async () => {
+    const error = await failWith(mcpRes({ status: 403, text: "forbidden" }));
+    expect(error.status).toBe(403);
+    expect(classifyBridgeError(error).outcome).toBe("refused");
+  });
+
+  it("marks a JSON-RPC error with its code and no HTTP status", async () => {
+    const spoof = "upstream failed 403: error (-32000): denied";
+    const error = await failWith(mcpRes({ json: { jsonrpc: "2.0", id: 2, error: { code: -32602, message: spoof } } }));
+    expect(error.bridgeFailure).toBe("rpc");
+    expect(error.rpcCode).toBe(-32602);
+    expect(error.status).toBeUndefined();
+    expect(classifyBridgeError(error).outcome).toBe("unexercised");
+
+    const denied = await failWith(mcpRes({ json: { jsonrpc: "2.0", id: 2, error: { code: -32000, message: "access denied" } } }));
+    expect(denied.rpcCode).toBe(-32000);
+    expect(classifyBridgeError(denied).outcome).toBe("refused");
+  });
+
+  it("keeps a JSON-RPC code that is not an integer off the error", async () => {
+    const error = await failWith(mcpRes({ json: { jsonrpc: "2.0", id: 2, error: { code: "-32000", message: "denied" } } }));
+    expect(error.bridgeFailure).toBe("rpc");
+    expect(error.rpcCode).toBeUndefined();
+    expect(classifyBridgeError(error).outcome).toBe("unexercised");
+  });
+
+  it("marks a tool error from a 200, whatever numbers its text holds", async () => {
+    const error = await failWith(toolOk({ isError: true, content: [{ type: "text", text: "call failed 500: error (-32601): nope" }] }));
+    expect(error.bridgeFailure).toBe("tool");
+    expect(error.status).toBeUndefined();
+    expect(classifyBridgeError(error).outcome).toBe("refused");
+  });
+
+  it("marks a failed session handshake, which is never a refusal", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(mcpRes({ status: 403, text: "forbidden" }));
+    const error = await callServerTool(plainSite(), CONFIG_GET, {}).catch((e) => e);
+    expect(error.status).toBe(403);
+    expect(error.bridgeFailure).toBe("session");
+    expect(classifyBridgeError(error).outcome).toBe("unexercised");
+
+    vi.mocked(fetch).mockResolvedValueOnce(mcpRes({ json: { jsonrpc: "2.0", id: 1, error: { code: -32000, message: "denied" } } }));
+    const rpc = await callServerTool(plainSite(), CONFIG_GET, {}).catch((e) => e);
+    expect(rpc.bridgeFailure).toBe("session");
+    expect(classifyBridgeError(rpc).outcome).toBe("unexercised");
   });
 });

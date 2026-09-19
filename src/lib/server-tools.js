@@ -249,7 +249,8 @@ function parseSse(text) {
  * The body is untrusted: an HTML error page from Drupal, PHP or a proxy, a
  * server path or a backtrace. Only a cleaned, bounded detail is shown (see
  * `describeErrorBody`). The prefix holds the HTTP status and always ends with a
- * colon, because the verifier's `classifyBridgeError()` matches on it (#362).
+ * colon — the documented message shape (`httpStatusOf`, and
+ * `classifyBridgeError` when the error has no marker).
  *
  * A body that is a JSON-RPC error keeps its integer code and its cleaned
  * message, so a refusal sent with a 401 or 403 stays readable.
@@ -284,6 +285,29 @@ function rpcErrorMessage(subject, rpcError) {
   const code = Number.isInteger(rpcError?.code) ? ` (${rpcError.code})` : "";
   const detail = cleanErrorText(rpcError?.message) || "the server returned no error message";
   return `${subject} error${code}: ${detail}`;
+}
+
+/**
+ * Build a bridge error that says what failed.
+ *
+ * The message ends with a response body or tool text, so code that branches on
+ * the failure reads these properties, never the message (#361):
+ *  - `bridgeFailure`: `"session"` (the handshake failed; no tool was reached),
+ *    `"http"` (non-2xx on the request), `"rpc"` (JSON-RPC error object) or
+ *    `"tool"` (the tool ran and its result has `isError`);
+ *  - `status`: the HTTP status, on a non-2xx response only (see `httpStatusOf`);
+ *  - `rpcCode`: the JSON-RPC `error.code`, when it is an integer.
+ * @param {string} message Error message.
+ * @param {"session"|"http"|"rpc"|"tool"} failure What failed.
+ * @param {{status?: number, rpcCode?: *}} [facts] Response status or JSON-RPC code.
+ * @returns {Error} The marked error.
+ */
+function bridgeError(message, failure, { status, rpcCode } = {}) {
+  const error = new Error(message);
+  error.bridgeFailure = failure;
+  if (Number.isInteger(status)) error.status = status;
+  if (Number.isInteger(rpcCode)) error.rpcCode = rpcCode;
+  return error;
 }
 
 /**
@@ -325,14 +349,21 @@ async function initializeSession(site, endpoint, key) {
 
   const { body, rawText } = await readBody(res);
   if (!res.ok) {
-    throw new Error(failedResponseMessage(`Server-tool session initialize failed ${res.status}`, res, rawText, body));
+    throw bridgeError(
+      failedResponseMessage(`Server-tool session initialize failed ${res.status}`, res, rawText, body),
+      "session",
+      { status: res.status },
+    );
   }
-  if (body?.error) throw new Error(rpcErrorMessage("Server-tool session initialize", body.error));
+  if (body?.error) {
+    throw bridgeError(rpcErrorMessage("Server-tool session initialize", body.error), "session", { rpcCode: body.error?.code });
+  }
 
   const sessionId = res.headers.get("mcp-session-id");
   if (!sessionId) {
-    throw new Error(
-      `Server-tool session initialize for site "${site._name}" returned no Mcp-Session-Id header.`
+    throw bridgeError(
+      `Server-tool session initialize for site "${site._name}" returned no Mcp-Session-Id header.`,
+      "session",
     );
   }
 
@@ -454,11 +485,17 @@ async function requestServerTool(site, method, params, options) {
     if (!res.ok) {
       const mapped = sourceBudgetDenial(rawText);
       if (mapped) throw mapped;
-      throw new Error(failedResponseMessage(`Server-tool call ${toolName} failed ${res.status}`, res, rawText, body));
+      throw bridgeError(
+        failedResponseMessage(`Server-tool call ${toolName} failed ${res.status}`, res, rawText, body),
+        "http",
+        { status: res.status },
+      );
     }
 
     // JSON-RPC transport-level error.
-    if (body?.error) throw new Error(rpcErrorMessage(`Server-tool ${toolName}`, body.error));
+    if (body?.error) {
+      throw bridgeError(rpcErrorMessage(`Server-tool ${toolName}`, body.error), "rpc", { rpcCode: body.error?.code });
+    }
 
     // MCP tools/call result: { content: [...], isError?: boolean }.
     const result = body?.result;
@@ -470,7 +507,7 @@ async function requestServerTool(site, method, params, options) {
       // The tool's own words are for the caller (a governed refusal explains
       // itself), so they are kept: cleaned and bounded, never relayed raw.
       const detail = cleanErrorText(text) || "tool reported an error";
-      throw new Error(`Server-tool ${toolName} reported an error: ${detail}`);
+      throw bridgeError(`Server-tool ${toolName} reported an error: ${detail}`, "tool");
     }
     return result;
   }

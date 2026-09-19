@@ -1,18 +1,22 @@
 /**
  * Read the HTTP status of a failed Drupal request from its error.
  *
- * `drupalFetch`, `drupalGraphqlFetch` and the upload helper set `status` on the
- * error they throw. Code that branches on the status reads it here instead of
+ * `drupalFetch`, `drupalGraphqlFetch`, the upload helper and the server-tool
+ * bridge set `status` on the error they throw. Code that branches on the status reads it here instead of
  * testing the message for a number: the message also holds the request path and
  * Drupal's detail text, and either can contain "404" or "401" (#355).
  */
 
 /**
  * The documented message shapes, anchored at the start:
- * `Drupal <status> on <method> <path>…`, `GraphQL request failed <status>…` and
- * `File upload failed <status>…`.
+ * `Drupal <status> on <method> <path>…`, `GraphQL request failed <status>…`,
+ * `File upload failed <status>…`, `Server-tool call <tool> failed <status>…` and
+ * `Server-tool session initialize failed <status>…`. A tool name holds no
+ * whitespace, so the token after it is the status and nothing in the body that
+ * follows can stand in for it (#361).
  */
-const STATUS_PREFIX_RE = /^(?:Drupal|GraphQL request failed|File upload failed) (\d{3})(?!\w)/;
+const STATUS_PREFIX_RE =
+  /^(?:Drupal|GraphQL request failed|File upload failed|Server-tool call \S+ failed|Server-tool session initialize failed) (\d{3})(?!\w)/;
 
 /**
  * HTTP status of a failed request.
