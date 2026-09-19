@@ -10,6 +10,7 @@ import { assertSourceGovernance, GovernanceError } from "./governance.js";
 import { DataFlowBudgetError } from "./data-flow.js";
 import { toolError } from "./errors.js";
 import { withResolvedTarget } from "./site-target.js";
+import { cleanErrorData } from "./error-body.js";
 
 const PREFIX = "drupal_module_";
 const OPERATIONS = new Set(["read", "write", "delete"]);
@@ -244,7 +245,11 @@ export function createModuleToolRegistry({ list = listServerTools, call = callSe
           const data = toolResultData(result);
           const failed = result.isError === true || data?.success === false;
           if (!failed && spec.output && !spec.output(data)) throw new Error("Invalid module output schema.");
-          const structuredContent = withResolvedTarget({ result: data }, invokeContext.resolvedTarget);
+          // A failure is relayed because the module's message is what the
+          // caller needs. It matches no schema and is untrusted text, so it is
+          // cleaned and bounded first. A successful result is left as it is.
+          const relayed = failed ? cleanErrorData(data) : data;
+          const structuredContent = withResolvedTarget({ result: relayed }, invokeContext.resolvedTarget);
           return { content: [{ type: "text", text: JSON.stringify(structuredContent) }], structuredContent, isError: failed };
         }, invokeContext);
       } catch (error) {

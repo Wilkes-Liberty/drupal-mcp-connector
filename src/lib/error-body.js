@@ -261,6 +261,69 @@ export function describeErrorBody(body, contentType = null, options = {}) {
   return cleanErrorText(body) || "the server returned a body with no readable text, not shown";
 }
 
+/** Bound for the summed string length of one cleaned failure payload, in characters. */
+export const ERROR_DATA_MAX_CHARS = 4000;
+
+/** Most entries of one array or object kept in a cleaned failure payload. */
+export const ERROR_DATA_MAX_ENTRIES = 50;
+
+/** Deepest nesting kept in a cleaned failure payload. */
+export const ERROR_DATA_MAX_DEPTH = 6;
+
+/** Bound for one key of a cleaned failure payload, in characters. */
+const ERROR_DATA_KEY_MAX_CHARS = 100;
+
+/**
+ * Clean a structured failure payload a tool returned.
+ *
+ * A module tool's failure is application data the caller needs: a message, a
+ * code, the fields that failed. Its shape is kept. Every string in it is
+ * untrusted text, so each one goes through {@link cleanErrorText}. Keys are
+ * cleaned too. Numbers, booleans and null pass through. The summed string
+ * length, the entries per level and the depth are bounded; what is dropped is
+ * marked, never silently lost.
+ * @param {*} value Parsed failure payload, or its raw text.
+ * @returns {*} Cleaned payload with the same shape.
+ */
+export function cleanErrorData(value) {
+  return cleanErrorNode(value, 0, { chars: ERROR_DATA_MAX_CHARS });
+}
+
+/**
+ * Clean one node of a failure payload.
+ * @param {*} value Node.
+ * @param {number} depth Nesting depth of the node.
+ * @param {{chars: number}} budget Characters left for strings, shared by the walk.
+ * @returns {*} Cleaned node.
+ */
+function cleanErrorNode(value, depth, budget) {
+  if (typeof value === "string") {
+    if (budget.chars <= 0) return value ? TRUNCATED_SUFFIX.trim() : "";
+    const text = cleanErrorText(value, Math.min(ERROR_DETAIL_MAX_CHARS, budget.chars));
+    budget.chars -= text.length;
+    return text;
+  }
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "object") return null;
+  if (depth >= ERROR_DATA_MAX_DEPTH) return TRUNCATED_SUFFIX.trim();
+
+  if (Array.isArray(value)) {
+    const items = value.slice(0, ERROR_DATA_MAX_ENTRIES).map((item) => cleanErrorNode(item, depth + 1, budget));
+    if (value.length > ERROR_DATA_MAX_ENTRIES) items.push(TRUNCATED_SUFFIX.trim());
+    return items;
+  }
+  const cleaned = new Map();
+  const entries = Object.entries(value);
+  for (const [key, item] of entries.slice(0, ERROR_DATA_MAX_ENTRIES)) {
+    const name = cleanErrorText(key, ERROR_DATA_KEY_MAX_CHARS);
+    if (!name || cleaned.has(name)) continue;
+    cleaned.set(name, cleanErrorNode(item, depth + 1, budget));
+  }
+  if (entries.length > ERROR_DATA_MAX_ENTRIES) cleaned.set("_truncated", true);
+  return Object.fromEntries(cleaned);
+}
+
 /** Most GraphQL errors of one 200 response that are kept. */
 export const GRAPHQL_ERRORS_MAX_COUNT = 50;
 

@@ -30,6 +30,16 @@ Complete reference for all 123 tools across 27 modules.
 > gives the page title. An empty body reports `(empty response body)`.
 > The connector branches on the response status, never on a number inside the
 > path or the detail (#355).
+>
+> **Server-tool bridge errors (#362).** The config tools, and the tools behind
+> a `serverTools` binding, call Drupal's own MCP tools. A failed call reports
+> `Server-tool call <tool> failed <status>: <detail>`, a JSON-RPC error
+> `Server-tool <tool> error (<code>): <message>`, and a tool that ran and
+> refused `Server-tool <tool> reported an error: <text>`. The detail, the
+> message and the text are cleaned and cut the same way. An HTML page is never
+> returned. The status and the JSON-RPC code are kept. A module tool's failed
+> result keeps its shape; its strings are cleaned and the payload is bounded
+> (see [module-tools.md](module-tools.md)).
 
 ---
 
