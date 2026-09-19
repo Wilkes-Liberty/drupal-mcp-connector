@@ -239,10 +239,15 @@ export function getToolPromptMessages(promptName, args = {}, definitionsByName) 
  * @param {Set<string>} options.workflowNames - Names of the hand-authored workflow prompts.
  * @param {(name: string, args: object) => Array<object>} options.workflowMessages
  * @param {Map<string,object>} options.definitionsByName - Built-in tool name → definition.
+ * @param {(tools: Array<object>, taken: Set<string>) => object[]} [options.extraWorkflows]
+ *   Module-owned workflows visible for this request. Each item has name,
+ *   description, arguments, and is renderable by extraWorkflowMessages.
+ * @param {(workflow: object, args: object) => Array<object>} [options.extraWorkflowMessages]
  * @returns {{definitions: Array<object>, list: Function, describe: Function, get: Function}}
  */
 export function createPromptSurface({
   staticPrompts, discover, filter, workflowNames, workflowMessages, definitionsByName,
+  extraWorkflows, extraWorkflowMessages,
 }) {
   const get = (name, args) => workflowNames.has(name)
     ? workflowMessages(name, args)
@@ -251,11 +256,22 @@ export function createPromptSurface({
   async function visible() {
     const tools = await discover();
     const taken = new Set(staticPrompts.map((prompt) => prompt.name));
+    const extra = extraWorkflows ? extraWorkflows(tools, taken) : [];
+    for (const workflow of extra) taken.add(workflow.name);
     // A reserved module name cannot match a built-in, but never let a remote
     // catalog shadow a static prompt if that invariant is ever broken.
     const moduleDefs = tools.filter((tool) =>
       isModuleDefinition(tool) && !taken.has(toolNameToPromptName(tool.name)));
-    return { prompts: [...filter(staticPrompts, tools), ...buildToolPrompts(moduleDefs)], moduleDefs };
+    const extraPrompts = extra.map((workflow) => ({
+      name: workflow.name,
+      description: workflow.description,
+      arguments: workflow.arguments,
+    }));
+    return {
+      prompts: [...filter([...staticPrompts, ...extraPrompts], tools), ...buildToolPrompts(moduleDefs)],
+      moduleDefs,
+      extra,
+    };
   }
 
   return {
@@ -264,14 +280,21 @@ export function createPromptSurface({
     list: async () => (await visible()).prompts,
     /** Resolve one prompt, or null when it is not visible to this request. */
     async describe(name, args = {}) {
-      const { prompts, moduleDefs } = await visible();
+      const { prompts, moduleDefs, extra } = await visible();
       const known = prompts.find((prompt) => prompt.name === name);
       if (!known) return null;
       const live = moduleDefs.find((def) => toolNameToPromptName(def.name) === name);
-      const messages = live
-        ? getToolPromptMessages(name, args, new Map([[live.name, live]]))
-        : get(name, args);
-      return { description: known.description, messages };
+      if (live) {
+        return {
+          description: known.description,
+          messages: getToolPromptMessages(name, args, new Map([[live.name, live]])),
+        };
+      }
+      const workflow = extra.find((item) => item.name === name);
+      if (workflow && extraWorkflowMessages) {
+        return { description: known.description, messages: extraWorkflowMessages(workflow, args) };
+      }
+      return { description: known.description, messages: get(name, args) };
     },
   };
 }

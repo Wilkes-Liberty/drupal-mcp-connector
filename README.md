@@ -118,6 +118,8 @@ and other MCP-aware agents). Two kinds ship with the connector:
 - `drupal-create-article` — guided article creation with all fields
 - `drupal-seo-fix` — find and fix SEO gaps
 - `drupal-user-cleanup` — identify and handle inactive accounts
+- Module-owned workflows (`drupal-<namespace>-<workflow>`) when
+  `serverTools.modules.workflows` is enabled — see `docs/module-workflows.md`
 
 **One prompt per tool** — every `drupal_*` tool is also exposed as a
 `drupal-<tool>` prompt (e.g. `drupal-create-node`, `drupal-list-nodes`,

@@ -17,6 +17,7 @@ import { getDefaultSiteName, getInboundGrants } from "./config.js";
 import { inferOperation } from "./operations.js";
 import { POLICY_DIGEST } from "./policy-promotion.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
+import { lookupWorkflow } from "./workflow-prompts.js";
 
 const identityStore = new AsyncLocalStorage();
 
@@ -515,6 +516,19 @@ export function filterPromptsByPrincipal(prompts, identity, visibleTools) {
   if (!identity) return prompts;
   const visible = new Set((visibleTools ?? []).map((tool) => tool.name));
   return prompts.filter((prompt) => {
+    const wf = lookupWorkflow(prompt.name);
+    if (wf) {
+      if (wf.readOnly) {
+        if (!principalHasScope(identity, "mcp_read")) return false;
+      } else if (!principalHasScope(identity, "mcp_write")) {
+        return false;
+      }
+      if (!wf.builtin && Array.isArray(wf.publicTools) &&
+          !wf.publicTools.every((name) => visible.has(name))) {
+        return false;
+      }
+      return true;
+    }
     if (WRITE_WORKFLOW_PROMPTS.has(prompt.name)) {
       return principalHasScope(identity, "mcp_write");
     }

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Module-owned workflow prompts (#333).** Workflows are definitions the
+  connector loads, filters and relays. v1 sources them from built-in
+  definitions (the five connector-authored workflows, now the same format)
+  and from `serverTools.modules.workflows` next to approved module tools.
+  A workflow names tools by local alias (`{tool:alias}`), is listed only
+  when every named tool is visible, and cannot invent a tool the site did
+  not already approve. Write workflows require `mcp_write`, tell the model
+  to confirm, and append that module writes are not retried. Design:
+  `docs/module-workflows.md`. The example config ships `review_and_log` on
+  `example_site`. Drupal `prompts/list` is specified there and not
+  implemented in this change.
+
 ## [2.20.0] - 2026-09-19
 
 ### Added
