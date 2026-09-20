@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-09-20
+
 ### Added
 - **Remote Drupal workflow prompts (#371).** The module-workflow loader fetches
   `prompts/list` and `prompts/get` from `serverTools.url` (contrib `mcp_server`
