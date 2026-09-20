@@ -239,7 +239,7 @@ export function getToolPromptMessages(promptName, args = {}, definitionsByName) 
  * @param {Set<string>} options.workflowNames - Names of the hand-authored workflow prompts.
  * @param {(name: string, args: object) => Array<object>} options.workflowMessages
  * @param {Map<string,object>} options.definitionsByName - Built-in tool name → definition.
- * @param {(tools: Array<object>, taken: Set<string>) => object[]} [options.extraWorkflows]
+ * @param {(tools: Array<object>, taken: Set<string>) => object[]|Promise<object[]>} [options.extraWorkflows]
  *   Module-owned workflows visible for this request. Each item has name,
  *   description, arguments, and is renderable by extraWorkflowMessages.
  * @param {(workflow: object, args: object) => Array<object>} [options.extraWorkflowMessages]
@@ -256,7 +256,7 @@ export function createPromptSurface({
   async function visible() {
     const tools = await discover();
     const taken = new Set(staticPrompts.map((prompt) => prompt.name));
-    const extra = extraWorkflows ? extraWorkflows(tools, taken) : [];
+    const extra = extraWorkflows ? await extraWorkflows(tools, taken) : [];
     for (const workflow of extra) taken.add(workflow.name);
     // A reserved module name cannot match a built-in, but never let a remote
     // catalog shadow a static prompt if that invariant is ever broken.

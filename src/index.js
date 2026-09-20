@@ -64,7 +64,7 @@ import {
   loadWorkflows,
   toPromptDescriptor,
   renderWorkflowMessages,
-  moduleWorkflowProviders,
+  moduleWorkflowProvidersWithRemote,
   registerBuiltinWorkflows,
   replaceModuleWorkflows,
 } from "./lib/workflow-prompts.js";
@@ -231,8 +231,11 @@ const buildConnectorServer = createConnectorServerFactory({
     workflowNames: WORKFLOW_PROMPT_NAMES,
     workflowMessages: getPromptMessages,
     definitionsByName,
-    extraWorkflows: (tools, taken) => {
-      const loaded = loadWorkflows(moduleWorkflowProviders(listResolvableSiteConfigs()), { tools, taken });
+    extraWorkflows: async (tools, taken) => {
+      const loaded = loadWorkflows(
+        await moduleWorkflowProvidersWithRemote(listResolvableSiteConfigs()),
+        { tools, taken },
+      );
       replaceModuleWorkflows(loaded);
       return loaded;
     },

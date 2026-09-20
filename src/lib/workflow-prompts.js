@@ -266,6 +266,148 @@ export function renderWorkflowMessages(workflow, args = {}) {
 }
 
 /**
+ * Unique `{tool:alias}` names in instruction text, first-seen order.
+ *
+ * @param {string} instructions
+ * @returns {string[]}
+ */
+export function toolAliasesInInstructions(instructions) {
+  const aliases = [];
+  const seen = new Set();
+  for (const match of String(instructions ?? "").matchAll(/\{tool:([a-z][a-z0-9_]{0,47})\}/g)) {
+    if (seen.has(match[1])) continue;
+    seen.add(match[1]);
+    aliases.push(match[1]);
+  }
+  return aliases;
+}
+
+/**
+ * Join user-role text from a Drupal `prompts/get` result.
+ *
+ * @param {object} got
+ * @returns {string}
+ */
+export function instructionTextFromDrupalPrompt(got) {
+  const messages = Array.isArray(got?.messages) ? got.messages : [];
+  const parts = [];
+  for (const message of messages) {
+    if (message?.role !== "user") continue;
+    const content = message.content;
+    if (typeof content?.text === "string") {
+      parts.push(content.text);
+      continue;
+    }
+    if (Array.isArray(content)) {
+      for (const item of content) {
+        if (item?.type === "text" && typeof item.text === "string") parts.push(item.text);
+      }
+    }
+  }
+  return parts.join("\n").replace(/\{\{\s*([a-z][a-z0-9_]{0,47})\s*\}\}/g, "{arg:$1}");
+}
+
+/**
+ * `readOnly` is false when any named alias is a local write or delete.
+ *
+ * @param {string[]} aliases
+ * @param {object} toolsMap `serverTools.modules.tools`
+ * @returns {boolean}
+ */
+export function inferReadOnly(aliases, toolsMap) {
+  for (const alias of aliases) {
+    const operation = toolsMap?.[alias]?.operation;
+    if (operation === "write" || operation === "delete") return false;
+  }
+  return true;
+}
+
+/**
+ * Map a Drupal prompt list item + get body onto the v1 workflow definition.
+ * Returns null when the prompt cannot be a workflow (no `{tool:alias}`, an
+ * alias missing from the local tools map, or an unusable description).
+ *
+ * @param {string} id
+ * @param {object} listed
+ * @param {object} got
+ * @param {object} toolsMap
+ * @returns {object|null}
+ */
+export function workflowFromDrupalPrompt(id, listed, got, toolsMap) {
+  const instructions = instructionTextFromDrupalPrompt(got);
+  if (!instructions.trim()) return null;
+  const tools = toolAliasesInInstructions(instructions);
+  if (tools.length < 1) return null;
+  for (const alias of tools) {
+    if (!toolsMap?.[alias] || typeof toolsMap[alias] !== "object") return null;
+  }
+  const rawArgs = Array.isArray(listed?.arguments) ? listed.arguments : [];
+  const arguments_ = rawArgs.map((arg) => ({
+    name: arg?.name ?? arg?.machine_name,
+    description: arg?.description ?? "",
+    required: Boolean(arg?.required),
+  }));
+  const description = String(listed?.description ?? got?.description ?? "").trim() || "Module workflow.";
+  return {
+    id,
+    description,
+    readOnly: inferReadOnly(tools, toolsMap),
+    tools,
+    arguments: arguments_,
+    instructions,
+  };
+}
+
+/**
+ * Provider from site `serverTools.modules.workflows` maps, optionally merged
+ * with Drupal `prompts/list` + `prompts/get`. Local keys enable; remote bodies
+ * replace a local body when the catalog returns that id. A remote prompt that
+ * is not named locally is ignored. Fetch failures keep the v1 local bodies.
+ *
+ * @param {Array<object>} sites
+ * @param {{fetch?: Function}} [deps]
+ * @returns {Promise<object[]>}
+ */
+export async function moduleWorkflowProvidersWithRemote(sites, { fetch } = {}) {
+  const { fetchSiteWorkflowPrompts } = await import("./server-tools.js");
+  const load = fetch ?? fetchSiteWorkflowPrompts;
+  const providers = [];
+  for (const site of sites ?? []) {
+    const modules = site.serverTools?.modules;
+    if (!modules?.namespace || !modules.workflows || typeof modules.workflows !== "object") continue;
+    const enabled = [];
+    for (const [id, body] of Object.entries(modules.workflows)) {
+      if (id.startsWith("_") || !body || typeof body !== "object") continue;
+      enabled.push({ id: body.id ?? id, body });
+    }
+    let catalog = { list: [], bodies: new Map() };
+    try {
+      catalog = await load(site, enabled.map((item) => item.id));
+    } catch {
+      catalog = { list: [], bodies: new Map() };
+    }
+    const listedByName = new Map((catalog.list ?? []).map((prompt) => [prompt.name, prompt]));
+    const workflows = [];
+    for (const item of enabled) {
+      const listed = listedByName.get(item.id);
+      const got = catalog.bodies?.get(item.id);
+      if (listed && got) {
+        const mapped = workflowFromDrupalPrompt(item.id, listed, got, modules.tools ?? {});
+        if (mapped) workflows.push(mapped);
+        continue;
+      }
+      workflows.push({ ...item.body, id: item.id });
+    }
+    providers.push({
+      id: `config:${modules.namespace}`,
+      namespace: modules.namespace,
+      workflows,
+    });
+  }
+  return providers;
+}
+
+/**
  * Provider from site `serverTools.modules.workflows` maps.
  *
  * @param {Array<object>} sites

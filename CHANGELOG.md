@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Remote Drupal workflow prompts (#371).** The module-workflow loader fetches
+  `prompts/list` and `prompts/get` from `serverTools.url` (contrib `mcp_server`
+  `McpPromptConfig` entities) and merges them into the v1 path. A remote
+  workflow is listed only when local `serverTools.modules.workflows` names it
+  and every `{tool:alias}` is already in `serverTools.modules.tools`. Local
+  bodies remain the fallback when the catalog omits an enabled id. Write
+  workflows still require `mcp_write` and append that module writes are not
+  retried. See `docs/module-workflows.md`.
+
 ## [2.21.0] - 2026-09-19
 
 ### Added

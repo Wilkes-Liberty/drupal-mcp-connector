@@ -6,8 +6,10 @@ tools have sequences worth packaging that way. The connector discovers,
 filters, and relays those workflows. It does not hardcode a module's steps.
 
 This note is the #333 record. It answers the decisions that issue listed, then
-describes the v1 loader. Remote Drupal `prompts/list` is specified here and not
-implemented in this change.
+describes the loader. v1 loaded built-ins plus local `serverTools.modules.workflows`.
+The connector now also fetches Drupal `prompts/list` / `prompts/get` from
+`serverTools.url` (contrib `mcp_server` `McpPromptConfig` entities) and merges
+them into that loader.
 
 ## Decisions
 
@@ -20,8 +22,7 @@ The long-term source is the module that owns the tools, published as Drupal
 transport's `prompts/list` / `prompts/get`. The connector then relays, the
 same way it relays module tools.
 
-That transport does not expose prompts today. v1 therefore loads definitions
-from:
+The loader therefore takes definitions from:
 
 1. A built-in provider (the five connector-authored workflows, now in the
    same format so there is one code path).
@@ -29,10 +30,17 @@ from:
    `serverTools.modules.workflows`. A workflow listed there is enabled. Omit
    it to disable. A workflow may only name aliases that already exist under
    `serverTools.modules.tools` on that site. Config cannot invent a tool.
+3. Drupal `prompts/list` + `prompts/get` on `serverTools.url`, for ids that
+   local config already named. Remote instruction text is the source of truth
+   when the catalog returns that id; a local body remains the fallback when
+   the catalog omits it or the fetch fails. A remote prompt that is not named
+   locally is ignored.
 
-A later remote catalog cannot add tools the local policy did not approve, and
+A remote catalog cannot add tools the local policy did not approve, and
 local config cannot enable a remote workflow whose named tools are not
-already visible. That is "disable but not widen."
+already visible. That is "disable but not widen." Drupal `{{name}}` tokens
+are rewritten to `{arg:name}` so the existing renderer applies. `{tool:alias}`
+placeholders in the remote text are the tool list.
 
 ### 2. Trust
 
@@ -132,7 +140,8 @@ characters, starting with a letter. `tools` is a non-empty list of aliases.
 
 ## Out of scope here
 
-- Drupal `McpPromptConfig` entities and server-tool `prompts/list`.
+- Shipping `McpPromptConfig` YAML from individual Drupal modules (they own
+  that config; the connector only relays what `/mcp` already advertises).
 - Per-tool commands for module tools (separate issue).
 - Changing tool authorization.
 - Retrying a module write.

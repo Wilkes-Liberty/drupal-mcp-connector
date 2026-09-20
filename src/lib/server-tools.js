@@ -13,7 +13,8 @@
  * call site performs the MCP session handshake — `initialize` (read the
  * `Mcp-Session-Id` response header) → `notifications/initialized` → `tools/call`
  * carrying that session id. The session is cached per site and transparently
- * re-initialised when the server expires it.
+ * re-initialised when the server expires it. `prompts/list` and `prompts/get`
+ * reuse the same session.
  *
  * Config (per site):
  *   "serverTools": { "url": "/mcp" }   // path is resolved against site.baseUrl
@@ -333,7 +334,7 @@ async function initializeSession(site, endpoint, key) {
     method: "initialize",
     params: {
       protocolVersion: MCP_PROTOCOL_VERSION,
-      capabilities: {},
+      capabilities: { prompts: {} },
       clientInfo: { name: CLIENT_NAME, version: CLIENT_VERSION },
     },
   };
@@ -440,6 +441,74 @@ export async function listServerTools(site, cursor) {
   return requestServerTool(site, "tools/list", cursor === undefined ? {} : { cursor }, {
     maxBytes: SERVER_TOOL_MAX_BYTES, preserveErrors: true,
   });
+}
+
+/** Fetch one page of Drupal `McpPromptConfig` prompts. */
+export async function listServerPrompts(site, cursor) {
+  return requestServerTool(site, "prompts/list", cursor === undefined ? {} : { cursor }, {
+    maxBytes: SERVER_TOOL_MAX_BYTES, preserveErrors: true,
+  });
+}
+
+/**
+ * Fetch one Drupal prompt body. Pass no arguments so `{{token}}` placeholders
+ * stay intact for the connector's workflow renderer.
+ */
+export async function getServerPrompt(site, name) {
+  return requestServerTool(site, "prompts/get", { name, arguments: {} }, {
+    maxBytes: SERVER_TOOL_MAX_BYTES, preserveErrors: true,
+  });
+}
+
+/**
+ * Page `prompts/list` the same way as `tools/list`.
+ * @param {object} site Resolved site config.
+ * @param {Function} [list] Catalog page reader.
+ * @returns {Promise<object[]>} Prompt descriptors.
+ */
+export async function advertisedServerPrompts(site, list = listServerPrompts) {
+  const prompts = [];
+  const seen = new Set();
+  let cursor;
+  for (let page = 0; page < MAX_CATALOG_PAGES; page++) {
+    const result = await list(site, cursor);
+    if (!Array.isArray(result?.prompts)) {
+      throw new Error(`Server-tool catalog for site "${site._name}" is malformed: prompts/list returned no prompts array.`);
+    }
+    for (const prompt of result.prompts) {
+      if (prompt && typeof prompt.name === "string") prompts.push(prompt);
+    }
+    if (result.nextCursor === undefined || result.nextCursor === null) return prompts;
+    if (typeof result.nextCursor !== "string" || seen.has(result.nextCursor)) {
+      throw new Error(`Server-tool catalog for site "${site._name}" returned an invalid or repeated prompts cursor.`);
+    }
+    cursor = result.nextCursor;
+    seen.add(cursor);
+  }
+  throw new Error(`Server-tool catalog for site "${site._name}" exceeds ${MAX_CATALOG_PAGES} prompt pages.`);
+}
+
+/**
+ * Load listed prompt descriptors plus `prompts/get` bodies for the named ids.
+ * A get failure omits that id; the caller fail-closes rather than widening.
+ * @param {object} site Resolved site config.
+ * @param {string[]} names Workflow ids to fetch.
+ * @param {{list?: Function, get?: Function}} [deps]
+ * @returns {Promise<{list: object[], bodies: Map<string, object>}>}
+ */
+export async function fetchSiteWorkflowPrompts(site, names, { list = listServerPrompts, get = getServerPrompt } = {}) {
+  const listed = await advertisedServerPrompts(site, list);
+  const want = new Set(names ?? []);
+  const bodies = new Map();
+  for (const prompt of listed) {
+    if (!want.has(prompt.name)) continue;
+    try {
+      bodies.set(prompt.name, await get(site, prompt.name));
+    } catch {
+      // Fail closed for this id: no body, so the merge will not list it.
+    }
+  }
+  return { list: listed, bodies };
 }
 
 /** Shared bounded MCP request transport; size + abort are always attached. */
