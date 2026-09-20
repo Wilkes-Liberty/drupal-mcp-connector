@@ -7,6 +7,8 @@ import {
   workflowPromptName,
   sanitizeInstructions,
   moduleWorkflowProviders,
+  moduleWorkflowProvidersWithRemote,
+  workflowFromDrupalPrompt,
   publicToolName,
 } from "../../src/lib/workflow-prompts.js";
 import { builtinWorkflowProvider } from "../../src/lib/workflows/builtin.js";
@@ -198,5 +200,147 @@ describe("publicToolName", () => {
       crmTool,
       { name: "drupal_module_write_crm__opportunity_list" },
     ])).toBeNull();
+  });
+});
+
+function exampleSite(workflows) {
+  return {
+    _name: "example",
+    serverTools: {
+      url: "/mcp",
+      modules: {
+        namespace: "example_site",
+        tools: {
+          list_activities: { name: "tool_api__example_list_activities", scope: "example_read", operation: "read", capabilities: [] },
+          record_activity: { name: "tool_api__example_record_activity", scope: "example_write", operation: "write", capabilities: [] },
+        },
+        workflows,
+      },
+    },
+  };
+}
+
+const exampleTools = [
+  { name: "drupal_module_read_example_site__list_activities" },
+  { name: "drupal_module_write_example_site__record_activity" },
+];
+
+function remoteCatalog(prompts) {
+  const list = prompts.map((prompt) => ({
+    name: prompt.name,
+    description: prompt.description,
+    arguments: prompt.arguments ?? [],
+  }));
+  const bodies = new Map(prompts.map((prompt) => [prompt.name, { messages: prompt.messages }]));
+  return async (_site, _names) => ({ list, bodies });
+}
+
+describe("remote Drupal prompts", () => {
+  it("hides a remote workflow when local config omits it", async () => {
+    const providers = await moduleWorkflowProvidersWithRemote([exampleSite({
+      review_and_log: {
+        description: "Local fallback.",
+        readOnly: true,
+        tools: ["list_activities"],
+        instructions: "Call {tool:list_activities}.",
+      },
+    })], {
+      fetch: remoteCatalog([
+        {
+          name: "review_and_log",
+          description: "Remote review.",
+          messages: [{ role: "user", content: { type: "text", text: "Call {tool:list_activities}." } }],
+        },
+        {
+          name: "secret_dump",
+          description: "Should never list.",
+          messages: [{ role: "user", content: { type: "text", text: "Call {tool:list_activities}." } }],
+        },
+      ]),
+    });
+    const loaded = loadWorkflows(providers, { tools: exampleTools });
+    expect(loaded.map((w) => w.name)).toEqual(["drupal-example-site-review-and-log"]);
+  });
+
+  it("hides a remote workflow whose named alias is not visible", async () => {
+    const providers = await moduleWorkflowProvidersWithRemote([exampleSite({
+      review_and_log: {
+        description: "Local fallback.",
+        readOnly: true,
+        tools: ["list_activities"],
+        instructions: "Call {tool:list_activities}.",
+      },
+    })], {
+      fetch: remoteCatalog([{
+        name: "review_and_log",
+        description: "Remote review.",
+        messages: [{ role: "user", content: { type: "text", text: "Call {tool:missing_alias}." } }],
+      }]),
+    });
+    expect(loadWorkflows(providers, { tools: exampleTools })).toEqual([]);
+  });
+
+  it("truncates a remote description and instruction text", () => {
+    const mapped = workflowFromDrupalPrompt("review_and_log", {
+      name: "review_and_log",
+      description: `Remote ${"x".repeat(2000)}`,
+      arguments: [],
+    }, {
+      messages: [{ role: "user", content: { type: "text", text: `Call {tool:list_activities}.\n${"y".repeat(9000)}` } }],
+    }, {
+      list_activities: { operation: "read" },
+    });
+    const def = normalizeWorkflow(mapped);
+    expect(def.description.length).toBeLessThanOrEqual(1024);
+    expect(def.instructions.length).toBeLessThanOrEqual(8192);
+  });
+
+  it("appends the write-confirm no-retry line on a remote write workflow", async () => {
+    const providers = await moduleWorkflowProvidersWithRemote([exampleSite({
+      review_and_log: {
+        description: "Local.",
+        readOnly: false,
+        tools: ["list_activities", "record_activity"],
+        instructions: "Call {tool:list_activities}. Ask before {tool:record_activity}.",
+      },
+    })], {
+      fetch: remoteCatalog([{
+        name: "review_and_log",
+        description: "Remote write.",
+        messages: [{
+          role: "user",
+          content: { type: "text", text: "Call {tool:list_activities}. Ask before {tool:record_activity}." },
+        }],
+      }]),
+    });
+    const loaded = loadWorkflows(providers, { tools: exampleTools });
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].readOnly).toBe(false);
+    const text = renderWorkflowMessages(loaded[0], {})[0].content.text;
+    expect(text).toContain("Ask before");
+    expect(text).toContain("Module writes are not retried.");
+    expect(text).toContain("drupal_module_write_example_site__record_activity");
+  });
+
+  it("drops a remote workflow whose public name collides with a builtin", async () => {
+    const providers = await moduleWorkflowProvidersWithRemote([exampleSite({
+      review_and_log: {
+        description: "Local.",
+        readOnly: true,
+        tools: ["list_activities"],
+        instructions: "Call {tool:list_activities}.",
+      },
+    })], {
+      fetch: remoteCatalog([{
+        name: "review_and_log",
+        description: "Remote.",
+        messages: [{ role: "user", content: { type: "text", text: "Call {tool:list_activities}." } }],
+      }]),
+    });
+    const loaded = loadWorkflows(providers, {
+      tools: exampleTools,
+      taken: new Set(["drupal-content-audit", "drupal-example-site-review-and-log"]),
+    });
+    expect(loaded).toEqual([]);
   });
 });

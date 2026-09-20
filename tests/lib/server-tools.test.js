@@ -106,6 +106,7 @@ describe("callServerTool", () => {
     const [initUrl, initOpts] = calls[1];
     expect(initUrl).toBe("https://x/mcp");
     expect(JSON.parse(initOpts.body).method).toBe("initialize");
+    expect(JSON.parse(initOpts.body).params.capabilities).toEqual({ prompts: {} });
     expect(initOpts.headers["MCP-Protocol-Version"]).toBe("2025-06-18");
     expect(initOpts.headers.Accept).toContain("text/event-stream");
 
