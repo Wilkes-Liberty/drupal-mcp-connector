@@ -380,7 +380,7 @@ export async function moduleWorkflowProvidersWithRemote(sites, { fetch } = {}) {
       if (id.startsWith("_") || !body || typeof body !== "object") continue;
       enabled.push({ id: body.id ?? id, body });
     }
-    let catalog = { list: [], bodies: new Map() };
+    let catalog;
     try {
       catalog = await load(site, enabled.map((item) => item.id));
     } catch {
