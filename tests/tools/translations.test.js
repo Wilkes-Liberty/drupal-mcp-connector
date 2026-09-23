@@ -283,6 +283,36 @@ describe("translations tools", () => {
     })).rejects.toThrow(/revise: true/);
   });
 
+  it("create_translation revise refuses a working copy before writing (#376)", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: UUID, status: true, fields: { drupal_internal__vid: 10 },
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return {
+          meta: {
+            defaultLangcode: "en",
+            operations: ["create_translation", "revise_published_translation"],
+            live: { vid: "10", translations: [{ langcode: "es", status: true }] },
+            working: { vid: "11", translations: [{ langcode: "es", status: true }] },
+          },
+        };
+      }
+      throw new Error("revise must not POST");
+    });
+    await expect(handlers.drupal_create_translation({
+      type: "article", id: UUID, langcode: "es", revise: true, attributes: { title: "Acerca" },
+    })).rejects.toThrow(/working copy already exists/);
+    expect(backend.rawQuery.mock.calls.some((c) => String(c[0].path).endsWith("/mcp-draft/translations"))).toBe(false);
+  });
+
+  it("create_translation revise refuses paragraphs (#376)", async () => {
+    await expect(handlers.drupal_create_translation({
+      entityType: "paragraph", type: "p_text", id: UUID, langcode: "es", revise: true, revisionId: "9",
+      attributes: { field_body: "Texto" },
+    })).rejects.toThrow(/Paragraph draft writes continue an unpublished translation/);
+  });
+
   it("create_translation omits computed metatag that still shows live English (#283)", async () => {
     backend.getEntity.mockResolvedValue({
       id: UUID, status: true, fields: { drupal_internal__vid: 10, moderation_state: "published" },

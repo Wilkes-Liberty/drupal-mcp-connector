@@ -144,7 +144,7 @@ async function createTranslation({
   if (revise && entityType === "paragraph") {
     throw new Error(
       "Revising a published paragraph translation is not supported. " +
-      "Continue the pinned revision with drupal_update_paragraph and langcode.",
+      "Paragraph draft writes continue an unpublished translation on the pinned revision only.",
     );
   }
 
@@ -203,6 +203,7 @@ async function createTranslation({
         revise: revise === true,
         inventory: draftRevision.inventory,
         langcode: targetLang,
+        entityType,
       });
     }
     return {
@@ -227,6 +228,7 @@ async function createTranslation({
       revise: revise === true,
       inventory: draftRevision.inventory,
       langcode: targetLang,
+      entityType,
     });
   }
   const redacted = omitLiveComputedMetatag(redactCanonicalEntity(created, sec, entityType));

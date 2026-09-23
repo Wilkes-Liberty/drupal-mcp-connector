@@ -438,6 +438,12 @@ export async function prepareGuardedPatch(backend, {
       const liveRow = (target.inventory?.live?.translations ?? [])
         .find((row) => row?.langcode === langcode);
       if (liveRow && liveRow.status === true) {
+        if (langcode === target.inventory?.defaultLangcode || liveRow.default === true) {
+          throw new Error(
+            "The default language is not opened with drupal_create_translation. " +
+            "Omit langcode to draft it. A canonical langcode PATCH is not attempted."
+          );
+        }
         throw new Error(
           "This language is published on the live revision and has no working copy. " +
           "Revise it with drupal_create_translation and revise: true. " +

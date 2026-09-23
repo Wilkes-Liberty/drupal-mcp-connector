@@ -310,7 +310,7 @@ export async function createTranslationDraft(backend, input, preflight = false) 
  * alias. Permission, 5xx, and malformed inventory are not absence — they throw.
  * @param {object} backend
  * @param {{entityType: string, bundle: string, id: string, existing?: ?object}} ref
- * @returns {Promise<{liveVid: ?(number|string), workingVid: ?(number|string)}>}
+ * @returns {Promise<{liveVid: ?(number|string), workingVid: ?(number|string), operations: string[], inventory: ?object}>}
  */
 export async function resolveNodeTranslationPair(backend, { entityType, bundle, id, existing }) {
   const fromEntity = existing ? entityRevisionId(existing) : null;
@@ -356,12 +356,13 @@ export async function resolveNodeTranslationPair(backend, { entityType, bundle, 
  * Turn Sentinel's create-conflict 409 into the next step that can succeed.
  * Revise on a host that still says "already exists" did not honor the mode.
  * @param {unknown} error
- * @param {{revise?: boolean, inventory?: object|null, langcode?: string}} [context]
+ * @param {{revise?: boolean, inventory?: object|null, langcode?: string, entityType?: string}} [context]
  * @returns {Error}
  */
-export function explainExistingTranslation(error, { revise = false, inventory = null, langcode } = {}) {
+export function explainExistingTranslation(error, { revise = false, inventory = null, langcode, entityType = "node" } = {}) {
   const current = error instanceof Error ? error : new Error(String(error));
-  if (!/already exists/i.test(current.message)) return current;
+  // The create conflict only. "A working copy already exists" is a different 409.
+  if (!/translation for this language already exists/i.test(current.message)) return current;
   if (revise) {
     return new Error(
       "Sentinel did not revise the published translation; it still reports that the language already exists. " +
@@ -369,22 +370,28 @@ export function explainExistingTranslation(error, { revise = false, inventory = 
       { cause: current },
     );
   }
+  const continuer = entityType === "media"
+    ? "drupal_update_media"
+    : entityType === "paragraph"
+      ? "drupal_update_paragraph"
+      : "drupal_update_node";
   const liveRow = (inventory?.live?.translations ?? []).find((row) => row?.langcode === langcode);
   const workingDistinct = inventory?.working?.vid && inventory?.live?.vid
     && String(inventory.working.vid) !== String(inventory.live.vid);
   const workingRow = (inventory?.working?.translations ?? []).find((row) => row?.langcode === langcode);
-  if (liveRow && liveRow.status === true && !workingDistinct) {
+  const defaultLang = inventory?.defaultLangcode;
+  if (liveRow && liveRow.status === true && !workingDistinct && langcode !== defaultLang && liveRow.default !== true) {
     return new Error(
       "A published translation for this language already exists and there is no working copy. " +
       "Pass revise: true to drupal_create_translation to open an unpublished draft over it. " +
-      "drupal_update_node cannot open that draft.",
+      `${continuer} cannot open that draft.`,
       { cause: current },
     );
   }
   if (workingDistinct && workingRow && workingRow.status === false) {
     return new Error(
       "An unpublished working translation for this language already exists. " +
-      "Continue it with drupal_update_node and langcode (media: drupal_update_media; paragraph: drupal_update_paragraph). " +
+      `Continue it with ${continuer} and langcode. ` +
       "Do not create it again.",
       { cause: current },
     );

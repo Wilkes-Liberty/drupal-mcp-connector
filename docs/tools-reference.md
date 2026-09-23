@@ -792,7 +792,9 @@ To propose new copy for a language that is **already published** and has no work
     "moderation_state": "draft"
   }
 }
-``` A successful node response includes `_revisions.live` and `_revisions.working` for the revision the language landed on. Callers do not pass revision IDs — the connector loads them from Sentinel's translation inventory (or `rel:working-copy` if that inventory is absent). Computed `metatag` on that body is omitted (`_metatagOmitted`) because JSON:API resolves it from the live English default, not the unpublished translation (#283). Verify the stored `field_metatags` (or `field_metatag`) instead.
+```
+
+A successful node response includes `_revisions.live` and `_revisions.working` for the revision the language landed on. Callers do not pass revision IDs — the connector loads them from Sentinel's translation inventory (or `rel:working-copy` if that inventory is absent). Computed `metatag` on that body is omitted (`_metatagOmitted`) because JSON:API resolves it from the live English default, not the unpublished translation (#283). Verify the stored `field_metatags` (or `field_metatag`) instead.
 
 For paragraph field values, pass `entityType: "paragraph"`, the paragraph bundle as `type`, and `revisionId` as the host's `meta.target_revision_id`. Nested children are translated the same way; do not retarget the parent ERR field. Image alt on a person (or any translatable image field on a node) is a `relationships` entry with the existing file UUID and `meta.alt` — not a file replacement.
 
