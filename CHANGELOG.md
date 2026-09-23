@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-09-23
+
 ### Added
 - **Revise a published translation (#376).** `drupal_create_translation` accepts
   `revise: true` to open an unpublished draft over a language that is already
