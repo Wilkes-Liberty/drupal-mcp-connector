@@ -261,6 +261,11 @@ export async function resolveWorkingCopyPatchTarget(backend, { entityType, bundl
         return { resourceVersion: `id:${workingVid}`, workingCopy: null,
           liveVid, workingVid, inventory };
       }
+      if (!workingCopy) {
+        return {
+          resourceVersion: undefined, workingCopy: null, liveVid, workingVid: null, inventory,
+        };
+      }
     }
   }
   if (!workingCopy) {
@@ -425,14 +430,32 @@ export async function prepareGuardedPatch(backend, {
       throw new StaleCopyError();
     }
   }
-  if (target.inventory) assertInventoryDraftLanguage(target.inventory, langcode);
+  if (!langcode && target.inventory) assertInventoryDraftLanguage(target.inventory, langcode);
   if (langcode) {
-    if (!target.workingVid || !target.liveVid || String(target.workingVid) === String(target.liveVid)) {
+    const noWorking = !target.workingVid || !target.liveVid
+      || String(target.workingVid) === String(target.liveVid);
+    if (noWorking) {
+      const liveRow = (target.inventory?.live?.translations ?? [])
+        .find((row) => row?.langcode === langcode);
+      if (liveRow && liveRow.status === true) {
+        if (langcode === target.inventory?.defaultLangcode || liveRow.default === true) {
+          throw new Error(
+            "The default language is not opened with drupal_create_translation. " +
+            "Omit langcode to draft it. A canonical langcode PATCH is not attempted."
+          );
+        }
+        throw new Error(
+          "This language is published on the live revision and has no working copy. " +
+          "Revise it with drupal_create_translation and revise: true. " +
+          "A canonical langcode PATCH is not attempted."
+        );
+      }
       throw new Error(
         "No unpublished working translation for this language. " +
         "Create it with drupal_create_translation first; a canonical langcode PATCH is not attempted."
       );
     }
+    if (target.inventory) assertInventoryDraftLanguage(target.inventory, langcode);
     target.draftRevision = { liveVid: target.liveVid, workingVid: target.workingVid };
     try {
       await writeDraft(backend, {

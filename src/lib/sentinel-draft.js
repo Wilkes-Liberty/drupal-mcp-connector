@@ -21,6 +21,36 @@ const MISSING_TRANSLATION_ENDPOINT =
 const MISSING_DRAFT_RE = /does not provide Sentinel's governed draft endpoint/;
 const MISSING_TRANSLATION_RE = /does not provide Sentinel's governed draft-translation endpoint/;
 
+/** Inventory operation that opens a draft over a published translation. */
+export const REVISE_PUBLISHED_TRANSLATION = "revise_published_translation";
+
+/**
+ * First MCP Sentinel release that honors `X-MCP-Draft-Mode: revise`.
+ * Older hosts keep the create 409 and have no path in between.
+ */
+export const MIN_SENTINEL_REVISE_VERSION = "2.24.0";
+
+/**
+ * Whether a translation inventory advertises published-translation revise.
+ * Absent on Sentinel releases before 2.24.0.
+ * @param {object} [meta] Inventory `meta`, or an object with `operations`.
+ * @returns {boolean}
+ */
+export function supportsRevisePublishedTranslation(meta) {
+  return Array.isArray(meta?.operations) && meta.operations.includes(REVISE_PUBLISHED_TRANSLATION);
+}
+
+/**
+ * Refusal when the host cannot revise a published translation.
+ * @returns {Error}
+ */
+export function reviseCapabilityError() {
+  return new Error(
+    `This Sentinel host cannot revise a published translation (missing ${REVISE_PUBLISHED_TRANSLATION}). ` +
+    `Update MCP Sentinel to ${MIN_SENTINEL_REVISE_VERSION} or later. No write was attempted.`,
+  );
+}
+
 /**
  * Whether a backend can issue Sentinel's JSON:API draft/translation routes.
  * Requires `capabilities().sentinelDraft` when that flag is present.
@@ -212,6 +242,7 @@ export async function writeDraft(backend, input, preflight = false) {
  */
 export async function createTranslationDraft(backend, input, preflight = false) {
   const { entityType, bundle, id, attributes = {}, relationships, draftRevision } = input;
+  const revise = input.revise === true;
   const langcode = assertDraftLangcode(input.langcode);
   if (entityType === "paragraph") {
     return createParagraphTranslationDraft(backend, {
@@ -234,6 +265,12 @@ export async function createTranslationDraft(backend, input, preflight = false) 
   const data = { type: `${entityType}--${bundle}`, id, attributes: safeAttributes };
   if (relationships) data.relationships = relationships;
   const ifMatch = working ? `"${live}:${working}"` : `"${live}"`;
+  const headers = {
+    "If-Match": ifMatch,
+    "X-MCP-Draft-Preflight": preflight ? "1" : "0",
+    "X-MCP-Draft-Langcode": langcode,
+  };
+  if (revise) headers["X-MCP-Draft-Mode"] = "revise";
   let result;
   try {
     result = await sentinelDraftRequest(backend, {
@@ -241,11 +278,7 @@ export async function createTranslationDraft(backend, input, preflight = false) 
       missingMessage: MISSING_TRANSLATION_ENDPOINT,
       options: {
         method: "POST",
-        headers: {
-          "If-Match": ifMatch,
-          "X-MCP-Draft-Preflight": preflight ? "1" : "0",
-          "X-MCP-Draft-Langcode": langcode,
-        },
+        headers,
         body: JSON.stringify({ data }),
       },
     });
@@ -255,6 +288,9 @@ export async function createTranslationDraft(backend, input, preflight = false) 
   if (preflight) {
     if (result?.meta?.draft_preflight !== true || String(result.meta.live) !== live) {
       throw new Error("The site did not confirm a non-saving translation preflight. Refusing to continue.");
+    }
+    if (revise && result.meta.operation !== REVISE_PUBLISHED_TRANSLATION) {
+      throw reviseCapabilityError();
     }
     return result;
   }
@@ -274,7 +310,7 @@ export async function createTranslationDraft(backend, input, preflight = false) 
  * alias. Permission, 5xx, and malformed inventory are not absence — they throw.
  * @param {object} backend
  * @param {{entityType: string, bundle: string, id: string, existing?: ?object}} ref
- * @returns {Promise<{liveVid: ?(number|string), workingVid: ?(number|string)}>}
+ * @returns {Promise<{liveVid: ?(number|string), workingVid: ?(number|string), operations: string[], inventory: ?object}>}
  */
 export async function resolveNodeTranslationPair(backend, { entityType, bundle, id, existing }) {
   const fromEntity = existing ? entityRevisionId(existing) : null;
@@ -284,7 +320,7 @@ export async function resolveNodeTranslationPair(backend, { entityType, bundle, 
   } catch (error) {
     if (!isMissingTranslationEndpoint(error)) throw error;
     if (typeof backend.getEntity !== "function") {
-      return { liveVid: fromEntity, workingVid: undefined };
+      return { liveVid: fromEntity, workingVid: undefined, operations: [], inventory: null };
     }
     let workingCopy = null;
     try {
@@ -296,14 +332,71 @@ export async function resolveNodeTranslationPair(backend, { entityType, bundle, 
     }
     const workingVid = workingCopy ? entityRevisionId(workingCopy) : null;
     const distinct = workingVid !== null && fromEntity !== null && String(workingVid) !== String(fromEntity);
-    return { liveVid: fromEntity, workingVid: distinct ? workingVid : undefined };
+    return {
+      liveVid: fromEntity,
+      workingVid: distinct ? workingVid : undefined,
+      operations: [],
+      inventory: null,
+    };
   }
   const liveVid = meta.live?.vid ?? fromEntity;
   const workingVid = meta.working?.vid;
   const distinct = workingVid !== undefined && workingVid !== null && workingVid !== ""
     && liveVid !== undefined && liveVid !== null
     && String(workingVid) !== String(liveVid);
-  return { liveVid, workingVid: distinct ? workingVid : undefined };
+  return {
+    liveVid,
+    workingVid: distinct ? workingVid : undefined,
+    operations: Array.isArray(meta.operations) ? meta.operations : [],
+    inventory: meta,
+  };
+}
+
+/**
+ * Turn Sentinel's create-conflict 409 into the next step that can succeed.
+ * Revise on a host that still says "already exists" did not honor the mode.
+ * @param {unknown} error
+ * @param {{revise?: boolean, inventory?: object|null, langcode?: string, entityType?: string}} [context]
+ * @returns {Error}
+ */
+export function explainExistingTranslation(error, { revise = false, inventory = null, langcode, entityType = "node" } = {}) {
+  const current = error instanceof Error ? error : new Error(String(error));
+  // The create conflict only. "A working copy already exists" is a different 409.
+  if (!/translation for this language already exists/i.test(current.message)) return current;
+  if (revise) {
+    return new Error(
+      "Sentinel did not revise the published translation; it still reports that the language already exists. " +
+      `Update MCP Sentinel to ${MIN_SENTINEL_REVISE_VERSION} or later. No draft was opened.`,
+      { cause: current },
+    );
+  }
+  const continuer = entityType === "media"
+    ? "drupal_update_media"
+    : entityType === "paragraph"
+      ? "drupal_update_paragraph"
+      : "drupal_update_node";
+  const liveRow = (inventory?.live?.translations ?? []).find((row) => row?.langcode === langcode);
+  const workingDistinct = inventory?.working?.vid && inventory?.live?.vid
+    && String(inventory.working.vid) !== String(inventory.live.vid);
+  const workingRow = (inventory?.working?.translations ?? []).find((row) => row?.langcode === langcode);
+  const defaultLang = inventory?.defaultLangcode;
+  if (liveRow && liveRow.status === true && !workingDistinct && langcode !== defaultLang && liveRow.default !== true) {
+    return new Error(
+      "A published translation for this language already exists and there is no working copy. " +
+      "Pass revise: true to drupal_create_translation to open an unpublished draft over it. " +
+      `${continuer} cannot open that draft.`,
+      { cause: current },
+    );
+  }
+  if (workingDistinct && workingRow && workingRow.status === false) {
+    return new Error(
+      "An unpublished working translation for this language already exists. " +
+      `Continue it with ${continuer} and langcode. ` +
+      "Do not create it again.",
+      { cause: current },
+    );
+  }
+  return current;
 }
 
 /**

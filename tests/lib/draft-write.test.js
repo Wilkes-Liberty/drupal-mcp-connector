@@ -222,7 +222,7 @@ describe("resolveNodeTranslationPair fail-closed inventory", () => {
     ));
     await expect(resolveNodeTranslationPair(b, {
       entityType: "node", bundle: "page", id: "example-uuid", existing,
-    })).resolves.toEqual({ liveVid: 10, workingVid: 11 });
+    })).resolves.toEqual({ liveVid: 10, workingVid: 11, operations: [], inventory: null });
   });
 
   it("falls back to rel:working-copy when the translation endpoint is absent (405)", async () => {
@@ -231,7 +231,7 @@ describe("resolveNodeTranslationPair fail-closed inventory", () => {
     b.getEntity = vi.fn(async () => null);
     await expect(resolveNodeTranslationPair(b, {
       entityType: "node", bundle: "page", id: "example-uuid", existing,
-    })).resolves.toEqual({ liveVid: 10, workingVid: undefined });
+    })).resolves.toEqual({ liveVid: 10, workingVid: undefined, operations: [], inventory: null });
   });
 
   it("rethrows a permission failure instead of treating it as absence", async () => {

@@ -34,9 +34,13 @@ import { paragraphRevisionId } from "../lib/err-relationships.js";
 import {
   assertDraftLangcode,
   createTranslationDraft,
+  explainExistingTranslation,
   isMissingTranslationEndpoint,
+  MIN_SENTINEL_REVISE_VERSION,
   readTranslationInventory,
   resolveNodeTranslationPair,
+  reviseCapabilityError,
+  supportsRevisePublishedTranslation,
   supportsSentinelDraft,
 } from "../lib/sentinel-draft.js";
 import { mapTranslationRow } from "../lib/translation-rows.js";
@@ -123,7 +127,7 @@ async function listTranslations({ site: siteName, entityType = "node", type, id 
  */
 async function createTranslation({
   site: siteName, entityType = "node", type, id, langcode, attributes = {},
-  relationships, revisionId, dryRun = false,
+  relationships, revisionId, dryRun = false, revise = false,
 }) {
   validateMachineName(entityType, "entityType");
   validateMachineName(type, "type");
@@ -136,6 +140,12 @@ async function createTranslation({
 
   if (entityType !== "node" && entityType !== "paragraph" && entityType !== "media") {
     throw new Error("Governed translation create is implemented for nodes, paragraphs, and media.");
+  }
+  if (revise && entityType === "paragraph") {
+    throw new Error(
+      "Revising a published paragraph translation is not supported. " +
+      "Paragraph draft writes continue an unpublished translation on the pinned revision only.",
+    );
   }
 
   const backend = await resolveBackend(site);
@@ -158,6 +168,18 @@ async function createTranslation({
     draftRevision = await resolveNodeTranslationPair(backend, {
       entityType, bundle: type, id, existing,
     });
+    if (revise) {
+      if (!supportsRevisePublishedTranslation(draftRevision)) {
+        throw reviseCapabilityError();
+      }
+      if (draftRevision.workingVid) {
+        const continuer = entityType === "media" ? "drupal_update_media" : "drupal_update_node";
+        throw new Error(
+          "A working copy already exists. Continue that draft with " +
+          `${continuer} and langcode. Revise was not attempted.`,
+        );
+      }
+    }
     if (entityType === "node") {
       if (drafted.status === undefined && drafted.moderation_state === undefined) {
         drafted.moderation_state = "draft";
@@ -169,22 +191,46 @@ async function createTranslation({
     assertPublishAllowed(sec, drafted);
   }
 
+  const draftInput = {
+    entityType, bundle: type, id, langcode: targetLang, attributes: drafted, relationships, draftRevision,
+    revise: revise === true,
+  };
   if (dryRun) {
-    await createTranslationDraft(backend, {
-      entityType, bundle: type, id, langcode: targetLang, attributes: drafted, relationships, draftRevision,
-    }, true);
+    try {
+      await createTranslationDraft(backend, draftInput, true);
+    } catch (error) {
+      throw explainExistingTranslation(error, {
+        revise: revise === true,
+        inventory: draftRevision.inventory,
+        langcode: targetLang,
+        entityType,
+      });
+    }
     return {
-      dryRun: true, operation: "create_translation", entityType, bundle: type, id,
-      langcode: targetLang, attributes: drafted, ...(relationships ? { relationships } : {}),
+      dryRun: true,
+      operation: revise ? "revise_translation" : "create_translation",
+      entityType, bundle: type, id,
+      langcode: targetLang,
+      ...(revise ? { revise: true } : {}),
+      attributes: drafted,
+      ...(relationships ? { relationships } : {}),
       // createTranslationDraft throws unless the site confirmed a non-saving
       // preflight of this exact payload, so the claim holds when we get here.
-      ...dryRunChecks({ operation: "create_translation", preflight: PREFLIGHT_SENTINEL_DRAFT }),
+      ...dryRunChecks({ operation: revise ? "revise_translation" : "create_translation", preflight: PREFLIGHT_SENTINEL_DRAFT }),
     };
   }
 
-  const created = await createTranslationDraft(backend, {
-    entityType, bundle: type, id, langcode: targetLang, attributes: drafted, relationships, draftRevision,
-  });
+  let created;
+  try {
+    created = await createTranslationDraft(backend, draftInput);
+  } catch (error) {
+    throw explainExistingTranslation(error, {
+      revise: revise === true,
+      inventory: draftRevision.inventory,
+      langcode: targetLang,
+      entityType,
+    });
+  }
   const redacted = omitLiveComputedMetatag(redactCanonicalEntity(created, sec, entityType));
   if (entityType === "paragraph") return redacted;
   const workingVid = entityRevisionId(created) ?? draftRevision.workingVid;
@@ -229,6 +275,12 @@ export const definitions = [
       "working revision IDs are sent (If-Match) so Sentinel will add the language on that " +
       "draft (#282). English live title, body, status, alias, default revision, and " +
       "paragraph ERR pins stay unchanged. An existing translation is a conflict, not an overwrite. " +
+      "Pass revise: true to open an unpublished draft over a language that is already published " +
+      "on the live revision and has no working copy (Sentinel X-MCP-Draft-Mode: revise). " +
+      `That requires MCP Sentinel ${MIN_SENTINEL_REVISE_VERSION} or later; an older host is refused ` +
+      "before any write and the message names that version. dryRun uses the same translations " +
+      "endpoint and Sentinel's non-saving preflight. A working copy is refused. " +
+      "Paragraph revise is not supported. " +
       "The response includes `_revisions.live` / `_revisions.working` when known. " +
       "Computed `metatag` is omitted on the draft body because JSON:API resolves it from the live default (#283); use field_metatags. " +
       "Continue a node draft with drupal_update_node and langcode; a paragraph with " +
@@ -248,7 +300,8 @@ export const definitions = [
         attributes:    { type: "object", description: "Translated field values keyed by Drupal machine name" },
         relationships: { type: "object", description: "JSON:API relationships. Use for image alt (same file UUID, meta.alt)." },
         revisionId:    { type: "string", description: "Paragraph revision id the host already pins. Required for Home-shaped non-default pins." },
-        dryRun:        { type: "boolean", description: "Validate without saving. Sentinel's non-saving translation preflight receives the real fields, applies them through field access and validates the entity. The result's `checks` block says what was checked." },
+        dryRun:        { type: "boolean", description: "Validate without saving. Sentinel's non-saving translation preflight receives the real fields, applies them through field access and validates the entity. The result's `checks` block says what was checked. With revise: true the preflight is the same translations endpoint." },
+        revise:        { type: "boolean", description: "Open an unpublished draft over a translation that is already published on the live default revision and has no working copy. Requires MCP Sentinel 2.24.0 or later. Omit it to create a language that does not exist yet." },
       },
     },
   },

@@ -319,7 +319,7 @@ export const definitions = [
   },
   {
     name: "drupal_update_media",
-    description: "Update a media entity's name, status, or field values. Partial: omitted fields (status included) are left untouched. Pass langcode to continue an unpublished working translation via Sentinel; this does not PATCH canonical langcode and will not create a missing translation — use drupal_create_translation first.",
+    description: "Update a media entity's name, status, or field values. Partial: omitted fields (status included) are left untouched. Pass langcode to continue an unpublished working translation via Sentinel; this does not PATCH canonical langcode and will not create a missing translation — use drupal_create_translation first. A published translation with no working copy is opened with drupal_create_translation and revise: true, not with this tool.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {

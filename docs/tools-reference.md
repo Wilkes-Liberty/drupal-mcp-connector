@@ -761,7 +761,7 @@ Inspect and create entity translations (multilingual / `content_translation`). A
 | Tool | Required params | Description |
 |------|----------------|-------------|
 | `drupal_list_translations` | `type`, `id` | List live and working translation langcodes (Sentinel inventory). Falls back to the single observable JSON:API language with a note when the inventory endpoint is absent. Pass `entityType: "media"` or `"paragraph"` when not listing nodes. |
-| `drupal_create_translation` | `type`, `id`, `langcode` | Create a target-language **unpublished draft** beside the default language. Does not overwrite an existing translation. When an English working draft exists, both live and working revision IDs are sent so Sentinel accepts the POST (#282). Continue a node with `drupal_update_node` + `langcode`, a paragraph with `drupal_update_paragraph` + `langcode`, or media with `drupal_update_media` + `langcode`. Image alt is a relationship (same file UUID, `meta.alt`). |
+| `drupal_create_translation` | `type`, `id`, `langcode` | Create a target-language **unpublished draft** beside the default language. Does not overwrite an existing translation. When an English working draft exists, both live and working revision IDs are sent so Sentinel accepts the POST (#282). Pass `revise: true` to open a draft over a language that is already published and has no working copy (MCP Sentinel 2.24.0 or later). Continue a node with `drupal_update_node` + `langcode`, a paragraph with `drupal_update_paragraph` + `langcode`, or media with `drupal_update_media` + `langcode`. Image alt is a relationship (same file UUID, `meta.alt`). |
 
 ### drupal_create_translation
 
@@ -777,7 +777,24 @@ Inspect and create entity translations (multilingual / `content_translation`). A
 }
 ```
 
-Continue that draft with `drupal_update_node` (`langcode: "es"`) and the same UUID. Read it with `drupal_get_node` (`langcode: "es"`). The published English default revision is not the write target. A successful node response includes `_revisions.live` and `_revisions.working` for the revision the language landed on. Callers do not pass revision IDs — the connector loads them from Sentinel's translation inventory (or `rel:working-copy` if that inventory is absent). Computed `metatag` on that body is omitted (`_metatagOmitted`) because JSON:API resolves it from the live English default, not the unpublished translation (#283). Verify the stored `field_metatags` (or `field_metatag`) instead.
+Continue that draft with `drupal_update_node` (`langcode: "es"`) and the same UUID. Read it with `drupal_get_node` (`langcode: "es"`). The published English default revision is not the write target.
+
+To propose new copy for a language that is **already published** and has no working copy, pass `revise: true`. `dryRun: true` posts the same payload to Sentinel's non-saving preflight. The live revision, the other languages, and the alias stay published. Do not use `drupal_update_node` for that case: it refuses and names this flag. Hosts older than MCP Sentinel 2.24.0 are refused before a write, and the error names that version.
+
+```json
+{
+  "type": "basic_page",
+  "id": "85fccde4-03be-4c7f-b2ac-0b597c7b394c",
+  "langcode": "es",
+  "revise": true,
+  "attributes": {
+    "title": "Acerca de nosotros",
+    "moderation_state": "draft"
+  }
+}
+```
+
+A successful node response includes `_revisions.live` and `_revisions.working` for the revision the language landed on. Callers do not pass revision IDs — the connector loads them from Sentinel's translation inventory (or `rel:working-copy` if that inventory is absent). Computed `metatag` on that body is omitted (`_metatagOmitted`) because JSON:API resolves it from the live English default, not the unpublished translation (#283). Verify the stored `field_metatags` (or `field_metatag`) instead.
 
 For paragraph field values, pass `entityType: "paragraph"`, the paragraph bundle as `type`, and `revisionId` as the host's `meta.target_revision_id`. Nested children are translated the same way; do not retarget the parent ERR field. Image alt on a person (or any translatable image field on a node) is a `relationships` entry with the existing file UUID and `meta.alt` — not a file replacement.
 
