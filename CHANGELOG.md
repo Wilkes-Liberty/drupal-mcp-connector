@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Revise a published translation (#376).** `drupal_create_translation` accepts
+  `revise: true` to open an unpublished draft over a language that is already
+  published on the live revision and has no working copy. The call uses
+  Sentinel's translations endpoint and `X-MCP-Draft-Mode: revise`, including
+  on `dryRun`. A host that does not advertise `revise_published_translation`
+  is refused before any write; the message names MCP Sentinel 2.24.0.
+  `drupal_update_node` and `drupal_update_media` with `langcode` name that
+  flag instead of sending the caller to a create that is certain to 409.
+  A plain create that hits the existing-language 409 says to pass `revise: true`
+  when the language is published and there is no working copy, and to continue
+  with the update tool when an unpublished working translation already exists.
+
 ## [2.22.0] - 2026-09-20
 
 ### Added

@@ -149,6 +149,7 @@ describe("translations tools", () => {
     expect(call.path).toBe(`/jsonapi/node/article/${UUID}/mcp-draft/translations`);
     expect(call.options.method).toBe("POST");
     expect(call.options.headers["X-MCP-Draft-Langcode"]).toBe("de");
+    expect(call.options.headers["X-MCP-Draft-Mode"]).toBeUndefined();
     expect(call.options.headers["If-Match"]).toBe('"10"');
     const body = JSON.parse(call.options.body);
     expect(body.data.attributes.langcode).toBeUndefined();
@@ -180,6 +181,106 @@ describe("translations tools", () => {
     expect(out.dryRun).toBe(true);
     expect(out.checks).toMatchObject({ serverPreflight: "sentinel_draft", fieldAccess: "checked", entityValidation: "checked" });
     expect(out).not.toHaveProperty("caveat");
+  });
+
+  it("create_translation revise dryRun posts the mode header to the same preflight (#376)", async () => {
+    const live = {
+      id: UUID, entityType: "node", bundle: "article", langcode: "en", status: true,
+      fields: { drupal_internal__vid: 10, moderation_state: "published" },
+    };
+    backend.getEntity.mockResolvedValue(live);
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return {
+          meta: {
+            defaultLangcode: "en",
+            operations: ["create_translation", "revise_published_translation"],
+            live: {
+              vid: "10",
+              translations: [
+                { langcode: "en", status: true },
+                { langcode: "es", status: true, title: "Empresa" },
+              ],
+            },
+            working: null,
+          },
+        };
+      }
+      return {
+        meta: {
+          draft_preflight: true,
+          live: "10",
+          working: "",
+          langcode: "es",
+          operation: "revise_published_translation",
+        },
+      };
+    });
+    const out = await handlers.drupal_create_translation({
+      type: "article", id: UUID, langcode: "es", revise: true, dryRun: true,
+      attributes: { title: "Acerca de nosotros", moderation_state: "draft" },
+    });
+    const post = backend.rawQuery.mock.calls.find((c) => String(c[0].path).endsWith("/mcp-draft/translations"))[0];
+    expect(post.options.method).toBe("POST");
+    expect(post.options.headers["X-MCP-Draft-Mode"]).toBe("revise");
+    expect(post.options.headers["X-MCP-Draft-Preflight"]).toBe("1");
+    expect(post.options.headers["X-MCP-Draft-Langcode"]).toBe("es");
+    expect(post.options.headers["If-Match"]).toBe('"10"');
+    expect(JSON.parse(post.options.body).data.attributes.title).toBe("Acerca de nosotros");
+    expect(out.dryRun).toBe(true);
+    expect(out.revise).toBe(true);
+    expect(out.operation).toBe("revise_translation");
+    expect(out.checks).toMatchObject({
+      serverPreflight: "sentinel_draft",
+      fieldAccess: "checked",
+      entityValidation: "checked",
+    });
+  });
+
+  it("create_translation revise refuses an older Sentinel before writing (#376)", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: UUID, status: true, fields: { drupal_internal__vid: 10 },
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return {
+          meta: {
+            defaultLangcode: "en",
+            live: { vid: "10", translations: [{ langcode: "es", status: true }] },
+            working: null,
+          },
+        };
+      }
+      throw new Error("revise must not POST");
+    });
+    await expect(handlers.drupal_create_translation({
+      type: "article", id: UUID, langcode: "es", revise: true, attributes: { title: "Acerca" },
+    })).rejects.toThrow(/MCP Sentinel to 2\.24\.0 or later/);
+    expect(backend.rawQuery.mock.calls.some((c) => String(c[0].path).endsWith("/mcp-draft/translations"))).toBe(false);
+  });
+
+  it("create_translation without revise points a published language at revise: true (#376)", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: UUID, status: true, fields: { drupal_internal__vid: 10, moderation_state: "published" },
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return {
+          meta: {
+            defaultLangcode: "en",
+            live: {
+              vid: "10",
+              translations: [{ langcode: "es", status: true, title: "Empresa" }],
+            },
+            working: null,
+          },
+        };
+      }
+      throw new Error("Drupal 409 on POST /mcp-draft/translations: A translation for this language already exists. Continue it instead of creating it.");
+    });
+    await expect(handlers.drupal_create_translation({
+      type: "article", id: UUID, langcode: "es", attributes: { title: "Acerca" },
+    })).rejects.toThrow(/revise: true/);
   });
 
   it("create_translation omits computed metatag that still shows live English (#283)", async () => {

@@ -88,7 +88,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 | **Fields** | Describe a bundle's fields (type/required/cardinality, best-effort) |
 | **References** | Resolve a human name/title to an entity UUID for relationship fields |
 | **Bulk** | Bulk create/update with per-item partial-failure reporting |
-| **Translations** | List + create entity translations |
+| **Translations** | List, create, and revise published entity translations (`revise: true` on `drupal_create_translation`, MCP Sentinel 2.24.0+) |
 | **Paragraphs** | Create/update/get Paragraph components for embedding in host fields |
 | **Structure** | Menu links (list/create/update, incl. `parent` + `enabled`) + custom blocks (list/create) |
 | **Redirects** | Create active URL redirects (301/302) + update/repoint existing redirects (Redirect module) |
