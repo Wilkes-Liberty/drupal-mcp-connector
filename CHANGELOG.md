@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Default-language draft on a multilingual node (#379).** `drupal_update_node`
+  and the other update tools without `langcode` no longer stop at Sentinel's
+  409 when the working revision holds more than one language. When the default
+  language is the unpublished draft in that revision, the connector names it in
+  `X-MCP-Draft-Langcode`, on the preflight and on the write. It reads the
+  translation inventory only after Sentinel asks for the language, so other
+  writes make no extra request. A translation-only draft over published default
+  copy still needs an explicit `langcode`. When an older Sentinel refuses a
+  shared-field or paragraph change as a translation write, the message names
+  MCP Sentinel 2.24.2.
+
 ## [2.23.0] - 2026-09-23
 
 ### Added

@@ -25,7 +25,13 @@
 import { entityLooksModerated, hasExplicitModerationState } from "./moderation-default.js";
 import { entityRevisionId } from "./write-revision.js";
 import { httpStatusOf } from "./error-status.js";
-import { writeDraft, readNodeDraftInventory, assertInventoryDraftLanguage } from "./sentinel-draft.js";
+import {
+  writeDraft,
+  readNodeDraftInventory,
+  assertInventoryDraftLanguage,
+  inferDefaultDraftLangcode,
+  MIN_SENTINEL_DEFAULT_LANGUAGE_DRAFT_VERSION,
+} from "./sentinel-draft.js";
 import { PREFLIGHT_NONE, PREFLIGHT_CORE_GUARD, PREFLIGHT_SENTINEL_DRAFT } from "./dry-run-checks.js";
 
 /** Stable error code for a core working-copy / not-latest-revision block. */
@@ -430,7 +436,11 @@ export async function prepareGuardedPatch(backend, {
       throw new StaleCopyError();
     }
   }
-  if (!langcode && target.inventory) assertInventoryDraftLanguage(target.inventory, langcode);
+  // An inventory already in hand names the default-language draft for free.
+  let inferredLangcode = langcode ? undefined : inferDefaultDraftLangcode(target.inventory);
+  if (!langcode && !inferredLangcode && target.inventory) {
+    assertInventoryDraftLanguage(target.inventory, langcode);
+  }
   if (langcode) {
     const noWorking = !target.workingVid || !target.liveVid
       || String(target.workingVid) === String(target.liveVid);
@@ -469,14 +479,32 @@ export async function prepareGuardedPatch(backend, {
     return target;
   }
   if (target.resourceVersion) {
-    target.draftRevision = { liveVid: target.liveVid, workingVid: target.workingVid };
+    const draftRevisionFor = (lang) => ({
+      liveVid: target.liveVid,
+      workingVid: target.workingVid,
+      ...(lang ? { langcode: lang } : {}),
+    });
+    const preflightDraft = (lang) => writeDraft(backend, {
+      entityType, bundle, id, attributes, relationships, draftRevision: draftRevisionFor(lang),
+    }, true);
     try {
-      await writeDraft(backend, {
-        entityType, bundle, id, attributes, relationships, draftRevision: target.draftRevision,
-      }, true);
+      await preflightDraft(inferredLangcode);
     } catch (err) {
-      throw rewriteStaleCopyError(err);
+      // The working-copy alias found the draft without Sentinel's inventory.
+      // When Sentinel asks for the language of a multilingual revision, read
+      // the inventory once and name the default-language draft (#379).
+      const retryLang = !inferredLangcode && isMultilingualLanguageRefusal(err)
+        ? await discoverDefaultDraftLangcode(backend, { entityType, bundle, id }, target)
+        : undefined;
+      if (!retryLang) throw explainDefaultLanguageRefusal(rewriteStaleCopyError(err), inferredLangcode);
+      inferredLangcode = retryLang;
+      try {
+        await preflightDraft(inferredLangcode);
+      } catch (retryErr) {
+        throw explainDefaultLanguageRefusal(rewriteStaleCopyError(retryErr), inferredLangcode);
+      }
     }
+    target.draftRevision = draftRevisionFor(inferredLangcode);
     target.preflight = PREFLIGHT_SENTINEL_DRAFT;
     return target;
   }
@@ -490,6 +518,60 @@ export async function prepareGuardedPatch(backend, {
     throw rewriteStaleCopyError(err);
   }
   return target;
+}
+
+/**
+ * Sentinel's 409 for a multilingual working revision sent without
+ * X-MCP-Draft-Langcode (wording before and after 2.24.2).
+ * @param {*} err
+ * @returns {boolean}
+ */
+function isMultilingualLanguageRefusal(err) {
+  const message = err instanceof Error ? err.message : String(err);
+  return /X-MCP-Draft-Langcode/.test(message)
+    && /(Translated draft continuation requires|more than one language)/.test(message);
+}
+
+/**
+ * Read Sentinel's inventory and return the default language when it is the
+ * unpublished draft of a multilingual working revision.
+ * @param {object} backend
+ * @param {{entityType: string, bundle: string, id: string}} ref
+ * @param {{liveVid: *, workingVid: *}} target The revision pair the write targets.
+ * @returns {Promise<string|undefined>}
+ * @throws {WorkingCopyStaleError} When the inventory names a different working revision.
+ */
+async function discoverDefaultDraftLangcode(backend, ref, { liveVid, workingVid }) {
+  // A missing endpoint is null; permission, transport and malformed-response
+  // failures surface as themselves rather than as the original 409.
+  const inventory = await readNodeDraftInventory(backend, ref);
+  if (!inventory) return undefined;
+  const moved = !inventory.working
+    || (workingVid !== null && workingVid !== undefined && String(inventory.working.vid) !== String(workingVid))
+    || (liveVid !== null && liveVid !== undefined && String(inventory.live.vid) !== String(liveVid));
+  if (moved) {
+    throw new WorkingCopyStaleError(new Error("Sentinel's live or working revision changed during discovery."));
+  }
+  return inferDefaultDraftLangcode(inventory);
+}
+
+/**
+ * Sentinel before 2.24.2 treats a default-language header as a translation
+ * write and refuses shared-field and paragraph changes. Say so, instead of
+ * surfacing a translation error for a default-language edit (#379).
+ * @param {*} err
+ * @param {string|undefined} inferredLangcode
+ * @returns {*}
+ */
+function explainDefaultLanguageRefusal(err, inferredLangcode) {
+  const message = err instanceof Error ? err.message : String(err);
+  const translationRule = /on a translation draft|A translation cannot replace|omit langcode to change the shared workflow state/;
+  if (!inferredLangcode || !translationRule.test(message)) return err;
+  return new Error(
+    `${message} This edit targets the default language (${inferredLangcode}) of a multilingual draft. ` +
+    "Changing shared fields or paragraph structure there needs MCP Sentinel " +
+    `${MIN_SENTINEL_DEFAULT_LANGUAGE_DRAFT_VERSION} or later. No write was attempted.`
+  );
 }
 
 /**
