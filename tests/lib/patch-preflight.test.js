@@ -644,13 +644,69 @@ describe("prepareGuardedPatch default-language draft on a multilingual node (#37
     expect(draftCalls(backend)).toHaveLength(1);
   });
 
-  it("keeps Sentinel's 409 when the inventory cannot be read", async () => {
+  it("surfaces an inventory read failure instead of the original 409", async () => {
     const backend = aliasBackend(async () => { throw LANG_409; }, async () => { throw new Error("Drupal 403 inventory"); });
     await expect(prepareGuardedPatch(backend, {
       entityType: "node", bundle: "solution", id: "n1",
       existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
       attributes: { title: "Guess" },
-    })).rejects.toThrow(/X-MCP-Draft-Langcode/);
+    })).rejects.toThrow(/403 inventory/);
+    expect(draftCalls(backend)).toHaveLength(1);
+  });
+
+  it("refuses as stale when the working copy was published during discovery", async () => {
+    const published = multilingualInventory(false, true);
+    published.meta.working = null;
+    const backend = aliasBackend(async () => { throw LANG_409; }, async () => published);
+    await expect(prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
+      attributes: { title: "Guess" },
+    })).rejects.toBeInstanceOf(WorkingCopyStaleError);
+  });
+
+  it("recognises Sentinel 2.24.2's multilingual 409 wording", async () => {
+    const newWording = new Error(
+      "Drupal 409 on PATCH /jsonapi/node/solution/n1/mcp-draft: This draft has more than one language. " +
+      "Send X-MCP-Draft-Langcode with the language to continue, for example \"en\" for the default language."
+    );
+    const backend = aliasBackend(async (headers) => {
+      if (!headers["X-MCP-Draft-Langcode"]) throw newWording;
+      return { meta: { draft_preflight: true, live: "10", working: "20", langcode: "en" } };
+    });
+    const out = await prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
+      attributes: { title: "English draft two" },
+    });
+    expect(out.draftRevision.langcode).toBe("en");
+  });
+
+  it("does not retry a 409 that is not the multilingual language refusal", async () => {
+    const other = new Error("Drupal 409 on PATCH /jsonapi/node/solution/n1/mcp-draft: The live or working revision changed. Reload before retrying.");
+    const backend = aliasBackend(async () => { throw other; });
+    await expect(prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
+      attributes: { title: "Guess" },
+    })).rejects.toThrow();
+    expect(draftCalls(backend)).toHaveLength(1);
+    expect(backend.rawQuery.mock.calls.some(([call]) => String(call.path).endsWith("/mcp-translations"))).toBe(false);
+  });
+
+  it.each([
+    "A translation cannot replace a file or image reference.",
+    "moderation_state is not translatable on this bundle; omit langcode to change the shared workflow state.",
+  ])("names the Sentinel release for the older translation-write refusal: %s", async (detail) => {
+    const backend = aliasBackend(async (headers) => {
+      if (!headers["X-MCP-Draft-Langcode"]) throw LANG_409;
+      throw new Error(`Drupal 400 on PATCH /jsonapi/node/solution/n1/mcp-draft: ${detail}`);
+    });
+    await expect(prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
+      attributes: { title: "T" },
+    })).rejects.toThrow(/MCP Sentinel 2\.24\.2 or later/);
   });
 
   it("refuses as stale when the inventory names a different working revision", async () => {

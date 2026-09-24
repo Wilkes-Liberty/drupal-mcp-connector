@@ -494,7 +494,7 @@ export async function prepareGuardedPatch(backend, {
       // When Sentinel asks for the language of a multilingual revision, read
       // the inventory once and name the default-language draft (#379).
       const retryLang = !langcode && !inferredLangcode && isMultilingualLanguageRefusal(err)
-        ? await discoverDefaultDraftLangcode(backend, { entityType, bundle, id }, target.workingVid)
+        ? await discoverDefaultDraftLangcode(backend, { entityType, bundle, id }, target)
         : undefined;
       if (!retryLang) throw explainDefaultLanguageRefusal(rewriteStaleCopyError(err), inferredLangcode);
       inferredLangcode = retryLang;
@@ -537,16 +537,20 @@ function isMultilingualLanguageRefusal(err) {
  * unpublished draft of a multilingual working revision.
  * @param {object} backend
  * @param {{entityType: string, bundle: string, id: string}} ref
- * @param {number|string|null|undefined} workingVid The working revision the write targets.
+ * @param {{liveVid: *, workingVid: *}} target The revision pair the write targets.
  * @returns {Promise<string|undefined>}
  * @throws {WorkingCopyStaleError} When the inventory names a different working revision.
  */
-async function discoverDefaultDraftLangcode(backend, ref, workingVid) {
-  const inventory = await readNodeDraftInventory(backend, ref).catch(() => null);
-  if (!inventory?.working) return undefined;
-  if (workingVid !== null && workingVid !== undefined
-    && String(inventory.working.vid) !== String(workingVid)) {
-    throw new WorkingCopyStaleError(new Error("Sentinel's working revision changed during discovery."));
+async function discoverDefaultDraftLangcode(backend, ref, { liveVid, workingVid }) {
+  // A missing endpoint is null; permission, transport and malformed-response
+  // failures surface as themselves rather than as the original 409.
+  const inventory = await readNodeDraftInventory(backend, ref);
+  if (!inventory) return undefined;
+  const moved = !inventory.working
+    || (workingVid !== null && workingVid !== undefined && String(inventory.working.vid) !== String(workingVid))
+    || (liveVid !== null && liveVid !== undefined && String(inventory.live.vid) !== String(liveVid));
+  if (moved) {
+    throw new WorkingCopyStaleError(new Error("Sentinel's live or working revision changed during discovery."));
   }
   return inferDefaultDraftLangcode(inventory);
 }
@@ -561,7 +565,8 @@ async function discoverDefaultDraftLangcode(backend, ref, workingVid) {
  */
 function explainDefaultLanguageRefusal(err, inferredLangcode) {
   const message = err instanceof Error ? err.message : String(err);
-  if (!inferredLangcode || !/on a translation draft/.test(message)) return err;
+  const translationRule = /on a translation draft|A translation cannot replace|omit langcode to change the shared workflow state/;
+  if (!inferredLangcode || !translationRule.test(message)) return err;
   return new Error(
     `${message} This edit targets the default language (${inferredLangcode}) of a multilingual draft. ` +
     "Changing shared fields or paragraph structure there needs MCP Sentinel " +
