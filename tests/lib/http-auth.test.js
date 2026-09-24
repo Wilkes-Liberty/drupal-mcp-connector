@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet } from "jose";
 import {
   makeBearerCheck,
@@ -18,6 +18,7 @@ import {
   resolveInboundAuthMode,
   inboundAuthDeprecationWarning,
   resolveInboundAuthConfig,
+  INBOUND_IDP_TIMEOUT_MS,
 } from "../../src/lib/http-auth.js";
 import { authHeaders, authHeadersAsync } from "../../src/lib/config.js";
 
@@ -557,7 +558,117 @@ describe("discoverAuthorizationServer / introspectToken", () => {
       fetchFn,
     })).toBeNull();
   });
+
+  it("attaches AbortSignal.timeout on discovery and introspection", async () => {
+    const fake = new AbortController().signal;
+    const spy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(fake);
+    const seen = [];
+    const fetchFn = async (_url, options) => {
+      seen.push(options?.signal);
+      return {
+        ok: true,
+        json: async () => ({
+          issuer: "https://idp.example.com",
+          jwks_uri: "https://idp.example.com/jwks",
+          active: true,
+        }),
+      };
+    };
+    try {
+      await discoverAuthorizationServer("https://idp.example.com", fetchFn);
+      await introspectToken("tok", {
+        url: "https://idp.example.com/introspect",
+        clientId: "c",
+        clientSecret: "s",
+        fetchFn,
+      });
+      expect(spy).toHaveBeenCalledWith(INBOUND_IDP_TIMEOUT_MS);
+      expect(seen).toEqual([fake, fake]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("fails closed when issuer discovery times out", async () => {
+    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => originalTimeout(20));
+    try {
+      await expect(discoverAuthorizationServer("https://idp.example.com", hangingFetch))
+        .rejects.toThrow(/metadata not found/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("rejects introspection with AbortError when the IdP request times out", async () => {
+    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => originalTimeout(20));
+    try {
+      await expect(introspectToken("tok", {
+        url: "https://idp.example.com/introspect",
+        clientId: "c",
+        clientSecret: "s",
+        fetchFn: hangingFetch,
+      })).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("fails closed with 401 when JWKS retrieval times out", async () => {
+    const { privateKey } = await generateKeyPair("RS256");
+    const token = await signedToken({
+      privateKey,
+      issuer: "https://idp.example.com",
+      audience: "https://mcp.example.com",
+      claims: { sub: "agent-1", scope: "mcp_read" },
+    });
+    const fetchFn = async (url, options) => {
+      if (String(url).includes("/jwks")) return hangingFetch(url, options);
+      return {
+        ok: true,
+        json: async () => ({
+          issuer: "https://idp.example.com",
+          jwks_uri: "https://idp.example.com/jwks",
+        }),
+      };
+    };
+    const inbound = await createInboundHttpsAuth({
+      inboundCfg: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com",
+        resource: "https://mcp.example.com",
+      },
+      fetchFn,
+    });
+    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => originalTimeout(20));
+    try {
+      const denied = await inbound.authenticate({
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(denied.ok).toBe(false);
+      expect(denied.status).toBe(401);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
+
+function hangingFetch(_url, opts) {
+  return new Promise((_, reject) => {
+    const abort = () => {
+      const err = new Error("The operation was aborted");
+      err.name = "AbortError";
+      reject(err);
+    };
+    if (opts?.signal?.aborted) {
+      abort();
+      return;
+    }
+    opts?.signal?.addEventListener("abort", abort, { once: true });
+  });
+}
 
 describe("northbound token is never passed through to Drupal", () => {
   it("authHeaders only uses the site credential", () => {

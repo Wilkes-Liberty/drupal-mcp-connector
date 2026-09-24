@@ -6,12 +6,28 @@
  *   - OAuth resource server (`createResourceAuthenticator`) — network-facing
  *     HTTPS. JWT via issuer discovery + JWKS, optional RFC 7662 introspection,
  *     and a hot-reloaded revocation file. Caller-supplied identity headers
- *     never become the principal.
+ *     never become the principal. IdP HTTP (discovery, JWKS, introspection)
+ *     aborts after `INBOUND_IDP_TIMEOUT_MS` (30s).
  */
 
 import { timingSafeEqual } from "crypto";
 import { readFileSync, statSync, writeFileSync } from "fs";
 import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
+
+/** Inbound IdP HTTP timeout. Matches Drupal/Drush outbound HTTP. */
+export const INBOUND_IDP_TIMEOUT_MS = 30_000;
+
+/**
+ * Attach the inbound IdP abort timeout. A caller `signal` wins.
+ * @param {RequestInit} [options]
+ * @returns {RequestInit}
+ */
+function withInboundTimeout(options = {}) {
+  return {
+    ...options,
+    signal: options.signal ?? AbortSignal.timeout(INBOUND_IDP_TIMEOUT_MS),
+  };
+}
 
 /** Header names that must never become identity. */
 export const SPOOFABLE_IDENTITY_HEADERS = Object.freeze([
@@ -361,7 +377,7 @@ export async function discoverAuthorizationServer(issuer, fetchFn = fetch) {
   for (const url of authorizationServerDiscoveryUrls(issuer)) {
     let res;
     try {
-      res = await fetchFn(url, { headers: { accept: "application/json" } });
+      res = await fetchFn(url, withInboundTimeout({ headers: { accept: "application/json" } }));
     } catch {
       continue;
     }
@@ -393,7 +409,7 @@ export async function introspectToken(token, {
   fetchFn = fetch,
 }) {
   const creds = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-  const res = await fetchFn(url, {
+  const res = await fetchFn(url, withInboundTimeout({
     method: "POST",
     headers: {
       authorization: `Basic ${creds}`,
@@ -401,7 +417,7 @@ export async function introspectToken(token, {
       accept: "application/json",
     },
     body: new URLSearchParams({ token }).toString(),
-  });
+  }));
   if (!res.ok) return null;
   const body = await res.json();
   if (body.active !== true) return null;
@@ -608,8 +624,11 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
   const asMeta = await discoverAuthorizationServer(issuer, fetchFn);
   const advertisedIssuer = asMeta.issuer || issuer;
   // JWKS retrieval goes through the same injectable fetch as issuer
-  // discovery; with the default global fetch the behavior is unchanged.
-  const jwks = createRemoteJWKSet(new URL(asMeta.jwks_uri), { [customFetch]: fetchFn });
+  // discovery, with jose's timeoutDuration aligned to the inbound budget.
+  const jwks = createRemoteJWKSet(new URL(asMeta.jwks_uri), {
+    timeoutDuration: INBOUND_IDP_TIMEOUT_MS,
+    [customFetch]: (url, options) => fetchFn(url, withInboundTimeout(options)),
+  });
   const resourceMetadataUrl = resourceMetadataUrlFor(resource);
   const revocationStore = inboundCfg.revocationFile
     ? createRevocationStore({ filePath: inboundCfg.revocationFile })
