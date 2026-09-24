@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.1] - 2026-09-23
+
 ### Fixed
 - **Default-language draft on a multilingual node (#379).** `drupal_update_node`
   and the other update tools without `langcode` no longer stop at Sentinel's
