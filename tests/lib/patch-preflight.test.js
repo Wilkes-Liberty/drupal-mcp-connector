@@ -579,3 +579,153 @@ describe("resolveWorkingCopyPatchTarget (#166)", () => {
     });
   });
 });
+
+describe("prepareGuardedPatch default-language draft on a multilingual node (#379)", () => {
+  const multilingualInventory = (enStatus, esStatus) => ({
+    meta: {
+      defaultLangcode: "en",
+      live: {
+        vid: "10",
+        translations: [
+          { langcode: "en", status: true, default: true },
+          { langcode: "es", status: true, default: false },
+        ],
+      },
+      working: {
+        vid: "20",
+        translations: [
+          { langcode: "en", status: enStatus, default: true },
+          { langcode: "es", status: esStatus, default: false },
+        ],
+      },
+    },
+  });
+  const LANG_409 = new Error(
+    "Drupal 409 on PATCH /jsonapi/node/solution/n1/mcp-draft: Translated draft continuation requires X-MCP-Draft-Langcode."
+  );
+  const aliasBackend = (draftHandler, inventoryHandler = async () => multilingualInventory(false, true)) => backendStub({
+    getEntity: vi.fn(async ({ resourceVersion }) => (resourceVersion === "rel:working-copy"
+      ? { id: "n1", fields: { drupal_internal__vid: 20, moderation_state: "draft" } }
+      : { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } })),
+    rawQuery: vi.fn(async ({ path, options }) => {
+      if (String(path).endsWith("/mcp-translations")) return inventoryHandler();
+      if (String(path).endsWith("/mcp-draft")) return draftHandler(options?.headers ?? {});
+      throw new Error(`unexpected ${path}`);
+    }),
+  });
+  const draftCalls = (backend) => backend.rawQuery.mock.calls
+    .filter(([call]) => String(call.path).endsWith("/mcp-draft"))
+    .map(([call]) => call.options.headers);
+
+  it("retries with the default language after Sentinel's multilingual 409", async () => {
+    const backend = aliasBackend(async (headers) => {
+      if (!headers["X-MCP-Draft-Langcode"]) throw LANG_409;
+      return { meta: { draft_preflight: true, live: "10", working: "20", langcode: "en" } };
+    });
+    const out = await prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
+      attributes: { title: "English draft two" },
+    });
+    expect(out.draftRevision).toEqual({ liveVid: 10, workingVid: 20, langcode: "en" });
+    const calls = draftCalls(backend);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]["X-MCP-Draft-Langcode"]).toBeUndefined();
+    expect(calls[1]["X-MCP-Draft-Langcode"]).toBe("en");
+  });
+
+  it("keeps Sentinel's 409 when the default language is published in the working revision", async () => {
+    const backend = aliasBackend(async () => { throw LANG_409; }, async () => multilingualInventory(true, false));
+    await expect(prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
+      attributes: { title: "Guess" },
+    })).rejects.toThrow(/X-MCP-Draft-Langcode/);
+    expect(draftCalls(backend)).toHaveLength(1);
+  });
+
+  it("keeps Sentinel's 409 when the inventory cannot be read", async () => {
+    const backend = aliasBackend(async () => { throw LANG_409; }, async () => { throw new Error("Drupal 403 inventory"); });
+    await expect(prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
+      attributes: { title: "Guess" },
+    })).rejects.toThrow(/X-MCP-Draft-Langcode/);
+  });
+
+  it("refuses as stale when the inventory names a different working revision", async () => {
+    const moved = multilingualInventory(false, true);
+    moved.meta.working.vid = "21";
+    const backend = aliasBackend(async () => { throw LANG_409; }, async () => moved);
+    await expect(prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
+      attributes: { title: "Guess" },
+    })).rejects.toBeInstanceOf(WorkingCopyStaleError);
+    expect(draftCalls(backend)).toHaveLength(1);
+  });
+
+  it("names the default language up front when discovery already read the inventory", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async () => null),
+      rawQuery: vi.fn(async ({ path, options }) => {
+        if (String(path).endsWith("/mcp-translations")) return multilingualInventory(false, true);
+        if (String(path).endsWith("/mcp-draft")) {
+          expect(options.headers["X-MCP-Draft-Langcode"]).toBe("en");
+          return { meta: { draft_preflight: true, live: "10", working: "20", langcode: "en" } };
+        }
+        throw new Error(`unexpected ${path}`);
+      }),
+    });
+    const out = await prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
+      attributes: { title: "English draft two" },
+    });
+    expect(out.resourceVersion).toBe("id:20");
+    expect(out.draftRevision).toEqual({ liveVid: 10, workingVid: 20, langcode: "en" });
+  });
+
+  it("still asks for an explicit langcode on a translation-only draft", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async () => null),
+      rawQuery: vi.fn(async ({ path }) => {
+        if (String(path).endsWith("/mcp-translations")) return multilingualInventory(true, false);
+        throw new Error(`unexpected ${path}`);
+      }),
+    });
+    await expect(prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
+      attributes: { title: "Guess" },
+    })).rejects.toThrow(/explicit langcode/);
+  });
+
+  it("names the Sentinel release when an older host treats the default language as a translation write", async () => {
+    const backend = aliasBackend(async (headers) => {
+      if (!headers["X-MCP-Draft-Langcode"]) throw LANG_409;
+      throw new Error("Drupal 400 on PATCH /jsonapi/node/solution/n1/mcp-draft: Shared references cannot be changed on a translation draft.");
+    });
+    await expect(prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: { id: "n1", fields: { drupal_internal__vid: 10, moderation_state: "published" } },
+      relationships: { field_related: { data: [] } },
+    })).rejects.toThrow(/MCP Sentinel 2\.24\.2 or later/);
+  });
+
+  it("updateEntityGuarded sends the inferred language on the real write", async () => {
+    const backend = backendStub({
+      rawQuery: vi.fn(async ({ options }) => {
+        expect(options.headers["X-MCP-Draft-Langcode"]).toBe("en");
+        expect(options.headers["X-MCP-Draft-Preflight"]).toBe("0");
+        return { data: { id: "n1", type: "node--solution", attributes: {} } };
+      }),
+      toCanonical: vi.fn((data) => ({ id: data.id })),
+    });
+    await updateEntityGuarded(backend, {
+      entityType: "node", bundle: "solution", id: "n1", attributes: { title: "T" },
+      draftRevision: { liveVid: 10, workingVid: 20, langcode: "en" },
+    });
+    expect(backend.rawQuery).toHaveBeenCalledTimes(1);
+  });
+});

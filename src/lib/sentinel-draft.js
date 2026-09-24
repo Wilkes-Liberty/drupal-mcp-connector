@@ -29,6 +29,8 @@ export const REVISE_PUBLISHED_TRANSLATION = "revise_published_translation";
  * Older hosts keep the create 409 and have no path in between.
  */
 export const MIN_SENTINEL_REVISE_VERSION = "2.24.0";
+/** First Sentinel release that keeps a default-language draft out of translation-write rules (#379). */
+export const MIN_SENTINEL_DEFAULT_LANGUAGE_DRAFT_VERSION = "2.24.2";
 
 /**
  * Whether a translation inventory advertises published-translation revise.
@@ -209,7 +211,8 @@ export async function writeDraft(backend, input, preflight = false) {
     "If-Match": `"${live}:${working}"`,
     "X-MCP-Draft-Preflight": preflight ? "1" : "0",
   };
-  const targetLang = langcode ? assertDraftLangcode(langcode) : null;
+  const requestedLang = langcode ?? draftRevision?.langcode;
+  const targetLang = requestedLang ? assertDraftLangcode(requestedLang) : null;
   if (targetLang) headers["X-MCP-Draft-Langcode"] = targetLang;
   const result = await sentinelDraftRequest(backend, {
     entityType, bundle, id, suffix: "mcp-draft", missingMessage: MISSING_DRAFT_ENDPOINT,
@@ -464,6 +467,27 @@ export async function readNodeDraftInventory(backend, ref) {
     throw new Error("Sentinel returned an invalid revision inventory. Re-read before updating.");
   }
   return inventory;
+}
+
+/**
+ * The language to name when continuing a multilingual working revision
+ * without an explicit langcode (#379).
+ *
+ * Sentinel requires X-MCP-Draft-Langcode whenever the working revision holds
+ * more than one language, even for the default language. Infer it only when
+ * the default language is the unpublished draft in that revision; a
+ * translation-only draft over published default copy stays explicit.
+ * @param {object|null|undefined} inventory Sentinel translation inventory.
+ * @returns {string|undefined}
+ */
+export function inferDefaultDraftLangcode(inventory) {
+  const rows = inventory?.working?.translations ?? [];
+  if (rows.length < 2) return undefined;
+  const fallback = rows.find((row) => row?.default === true)?.langcode;
+  const defaultLang = typeof inventory.defaultLangcode === "string" ? inventory.defaultLangcode : fallback;
+  if (typeof defaultLang !== "string" || defaultLang === "") return undefined;
+  const row = rows.find((item) => item?.langcode === defaultLang);
+  return row && row.status === false ? defaultLang : undefined;
 }
 
 /**
