@@ -47,7 +47,9 @@ Clients send `Authorization: Bearer <access-token>`. The connector validates
 issuer, audience, expiry and scopes against the issuer's JWKS. A JSON revocation
 file (`{ "jti": [], "sub": [] }`) is re-read when it changes, so a revoke does
 not require a restart. Optional RFC 7662 introspection (`introspectionUrl`) is
-an additional fail-closed check when configured.
+an additional fail-closed check when configured. Issuer discovery, JWKS
+retrieval, and introspection abort after 30s (`AbortSignal.timeout`), matching
+outbound Drupal HTTP; a stuck IdP fails closed (startup throw, or 401 on `/mcp`).
 
 Unauthenticated clients receive `401` with a `WWW-Authenticate` challenge that
 points at RFC 9728 metadata:

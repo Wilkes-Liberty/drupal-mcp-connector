@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Inbound IdP HTTP timeouts.** RFC 8414 / OIDC discovery, JWKS retrieval,
+  and RFC 7662 introspection abort after 30s (`AbortSignal.timeout`), matching
+  outbound Drupal HTTP. A hung issuer fails closed (discovery throw on HTTPS
+  bring-up; 401 on `/mcp` auth) instead of stalling the process.
+
 ## [2.23.1] - 2026-09-23
 
 ### Fixed
