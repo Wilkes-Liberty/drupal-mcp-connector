@@ -493,7 +493,7 @@ export async function prepareGuardedPatch(backend, {
       // The working-copy alias found the draft without Sentinel's inventory.
       // When Sentinel asks for the language of a multilingual revision, read
       // the inventory once and name the default-language draft (#379).
-      const retryLang = !langcode && !inferredLangcode && isMultilingualLanguageRefusal(err)
+      const retryLang = !inferredLangcode && isMultilingualLanguageRefusal(err)
         ? await discoverDefaultDraftLangcode(backend, { entityType, bundle, id }, target)
         : undefined;
       if (!retryLang) throw explainDefaultLanguageRefusal(rewriteStaleCopyError(err), inferredLangcode);
