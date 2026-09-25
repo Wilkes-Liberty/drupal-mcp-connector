@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Adapter-neutral `drupal_list_translations` fallback.** When Sentinel's
+  translation inventory is unavailable, the tool reads `langcode` from
+  `backend.getEntity` instead of a JSON:API `rawQuery` path. GraphQL
+  backends can report the one observable language; `FALLBACK_NOTE` is
+  unchanged.
 - **Inbound IdP HTTP timeouts.** RFC 8414 / OIDC discovery, JWKS retrieval,
   and RFC 7662 introspection abort after 30s (`AbortSignal.timeout`), matching
   outbound Drupal HTTP. A hung issuer fails closed (discovery throw on HTTPS

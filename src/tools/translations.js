@@ -97,16 +97,15 @@ async function listTranslations({ site: siteName, entityType = "node", type, id 
     }
   }
 
-  const res = await backend.rawQuery({ path: `/jsonapi/${entityType}/${type}/${id}` });
-  const data = res?.data;
-  if (!data) return null;
+  const entity = await backend.getEntity({ entityType, bundle: type, id });
+  if (!entity) return null;
 
-  const defaultLangcode = data.attributes?.langcode ?? null;
+  const defaultLangcode = entity.langcode ?? null;
   const langcodes = defaultLangcode ? [defaultLangcode] : [];
   const translations = langcodes.map((lc) => ({ langcode: lc, default: lc === defaultLangcode }));
 
   return {
-    id: data.id,
+    id: entity.id,
     entityType,
     bundle: type,
     defaultLangcode,

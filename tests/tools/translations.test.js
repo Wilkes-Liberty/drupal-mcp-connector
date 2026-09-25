@@ -12,6 +12,8 @@ vi.mock("../../src/lib/config.js", () => ({
   getSiteConfig: vi.fn((n) => ({ _name: n || "d", baseUrl: "https://x", security: { preset: "development" } })),
 }));
 
+import { resolveBackend } from "../../src/lib/backends/index.js";
+import { supportsSentinelDraft } from "../../src/lib/sentinel-draft.js";
 import { handlers, definitions } from "../../src/tools/translations.js";
 
 const UUID = "11111111-2222-3333-4444-555555555555";
@@ -54,6 +56,8 @@ beforeEach(() => {
   backend.rawQuery.mockReset();
   backend.toCanonical.mockReset();
   backend.toCanonical.mockImplementation(toCanonicalEntity);
+  vi.mocked(resolveBackend).mockReset();
+  vi.mocked(resolveBackend).mockImplementation(async () => backend);
 });
 
 describe("translations tools", () => {
@@ -107,14 +111,41 @@ describe("translations tools", () => {
   });
 
   it("list_translations falls back to one observable langcode when Sentinel is absent", async () => {
-    backend.rawQuery
-      .mockRejectedValueOnce(new Error("Drupal 404 on GET /jsonapi/node/article/x/mcp-translations"))
-      .mockResolvedValueOnce({
-        data: { type: "node--article", id: UUID, attributes: { title: "Hello", langcode: "en" } },
-      });
+    backend.rawQuery.mockRejectedValueOnce(
+      new Error("Drupal 404 on GET /jsonapi/node/article/x/mcp-translations"),
+    );
+    backend.getEntity.mockResolvedValue({
+      id: UUID, entityType: "node", bundle: "article", langcode: "en", title: "Hello",
+    });
     const out = await handlers.drupal_list_translations({ type: "article", id: UUID });
+    expect(backend.rawQuery.mock.calls[0][0].path).toBe(`/jsonapi/node/article/${UUID}/mcp-translations`);
+    expect(backend.rawQuery.mock.calls.some(([arg]) => arg.path === `/jsonapi/node/article/${UUID}`)).toBe(false);
+    expect(backend.getEntity).toHaveBeenCalledWith({ entityType: "node", bundle: "article", id: UUID });
     expect(out.langcodes).toEqual(["en"]);
     expect(out.note).toMatch(/unavailable/);
+  });
+
+  it("list_translations GraphQL backend uses getEntity and never a JSON:API path", async () => {
+    const graphqlBackend = {
+      getEntity: vi.fn(async () => ({
+        id: UUID, entityType: "node", bundle: "article", langcode: "en", title: "Hello",
+      })),
+      rawQuery: vi.fn(async ({ query }) => ({ data: { query } })),
+      capabilities: () => ({ read: true, write: false, sentinelDraft: false }),
+    };
+    expect(supportsSentinelDraft(graphqlBackend)).toBe(false);
+    vi.mocked(resolveBackend).mockResolvedValueOnce(graphqlBackend);
+
+    const out = await handlers.drupal_list_translations({ type: "article", id: UUID });
+
+    expect(graphqlBackend.rawQuery.mock.calls.some(([arg]) => arg && Object.hasOwn(arg, "path"))).toBe(false);
+    expect(graphqlBackend.getEntity).toHaveBeenCalledWith({
+      entityType: "node", bundle: "article", id: UUID,
+    });
+    expect(out.langcodes).toEqual(["en"]);
+    expect(out.defaultLangcode).toBe("en");
+    expect(out.note).toMatch(/unavailable/);
+    expect(out.note).toMatch(/does not prove other translations are absent/);
   });
 
   it("create_translation POSTs the translation endpoint instead of PATCHing langcode", async () => {
