@@ -756,11 +756,11 @@ Create or update many entities of a single type + bundle in one call. Permission
 
 ## Translations
 
-Inspect and create entity translations (multilingual / `content_translation`). A translation is an unpublished forward draft beside the live default language — it is **not** a PATCH of `langcode` on the canonical entity. Node, paragraph, and media create/list/update/read go through Sentinel's `/mcp-draft` translation contract when that module is deployed. Core JSON:API alone still serves one language per resource.
+Inspect and create entity translations (multilingual / `content_translation`). A translation is an unpublished forward draft beside the live default language — it is **not** a PATCH of `langcode` on the canonical entity. Node, paragraph, and media create/list/update/read go through Sentinel's `/mcp-draft` translation contract when that module is deployed. Without Sentinel, a list serves one observable language per resource.
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_list_translations` | `type`, `id` | List live and working translation langcodes (Sentinel inventory). Falls back to the single observable JSON:API language with a note when the inventory endpoint is absent. Pass `entityType: "media"` or `"paragraph"` when not listing nodes. |
+| `drupal_list_translations` | `type`, `id` | List live and working translation langcodes (Sentinel inventory). Falls back to the single observable language on the canonical entity, with a note when the inventory endpoint is absent. Pass `entityType: "media"` or `"paragraph"` when not listing nodes. |
 | `drupal_create_translation` | `type`, `id`, `langcode` | Create a target-language **unpublished draft** beside the default language. Does not overwrite an existing translation. When an English working draft exists, both live and working revision IDs are sent so Sentinel accepts the POST (#282). Pass `revise: true` to open a draft over a language that is already published and has no working copy (MCP Sentinel 2.24.0 or later). Continue a node with `drupal_update_node` + `langcode`, a paragraph with `drupal_update_paragraph` + `langcode`, or media with `drupal_update_media` + `langcode`. Image alt is a relationship (same file UUID, `meta.alt`). |
 
 ### drupal_create_translation
