@@ -557,6 +557,46 @@ describe("prepareGuardedPatch published translation (#376)", () => {
   });
 });
 
+describe("prepareGuardedPatch translation still published on the working copy", () => {
+  it("names revise: true instead of continuing", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async () => null),
+      rawQuery: vi.fn(async ({ path }) => {
+        if (String(path).endsWith("/mcp-translations")) {
+          return {
+            meta: {
+              defaultLangcode: "en",
+              live: {
+                vid: "10",
+                translations: [
+                  { langcode: "en", status: true, title: "Company" },
+                  { langcode: "es", status: true, title: "Empresa" },
+                ],
+              },
+              working: {
+                vid: "11",
+                translations: [
+                  { langcode: "en", status: false, title: "Company draft" },
+                  { langcode: "es", status: true, title: "Empresa" },
+                ],
+              },
+            },
+          };
+        }
+        throw new Error(`unexpected ${path}`);
+      }),
+    });
+    const failure = prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "basic_page", id: "n1",
+      existing: { fields: { moderation_state: "published", drupal_internal__vid: 10 } },
+      attributes: { title: "Acerca de nosotros" },
+      langcode: "es",
+    });
+    await expect(failure).rejects.toThrow(/still published on the working copy.*revise: true/);
+    expect(backend.rawQuery.mock.calls.some(([call]) => String(call.path).endsWith("/mcp-draft"))).toBe(false);
+  });
+});
+
 describe("resolveWorkingCopyPatchTarget (#166)", () => {
   it("fetches the canonical entity when existing has no readable vid", async () => {
     const backend = backendStub({

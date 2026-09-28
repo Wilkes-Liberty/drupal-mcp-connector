@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Revise a published translation on a node that has a working copy.**
+  `drupal_create_translation` with `revise: true` used to refuse
+  client-side when the node had a working copy (for example an English draft)
+  and told the caller to continue it. Continuing cannot draft a language that
+  is still published on the working copy, so that language had no path to a
+  draft. The tool now sends both revision IDs (`If-Match: "live:working"`),
+  and Sentinel drafts the language on that working copy while the other
+  drafts carry forward. This needs MCP Sentinel 2.25.0 or later, detected by
+  `revise_over_working_copy` in the translation inventory. Older hosts are
+  refused before any write, and the message names the version.
+- **Refusals no longer point at each other.** A language that is already a
+  draft on the working copy is sent to `drupal_update_node` with `langcode`.
+  `drupal_update_node` with `langcode` on a language that is still published
+  on the working copy is sent to `drupal_create_translation` with
+  `revise: true`.
+
 ## [2.23.2] - 2026-09-28
 
 ### Fixed

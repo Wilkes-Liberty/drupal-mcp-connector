@@ -29,6 +29,10 @@ export const REVISE_PUBLISHED_TRANSLATION = "revise_published_translation";
  * Older hosts keep the create 409 and have no path in between.
  */
 export const MIN_SENTINEL_REVISE_VERSION = "2.24.0";
+/** Inventory operation: revise accepts a named working copy (`If-Match: "live:working"`). */
+export const REVISE_OVER_WORKING_COPY = "revise_over_working_copy";
+/** First MCP Sentinel release that revises a published translation over a working copy. */
+export const MIN_SENTINEL_REVISE_OVER_WORKING_VERSION = "2.25.0";
 /** First Sentinel release that keeps a default-language draft out of translation-write rules (#379). */
 export const MIN_SENTINEL_DEFAULT_LANGUAGE_DRAFT_VERSION = "2.24.2";
 
@@ -40,6 +44,30 @@ export const MIN_SENTINEL_DEFAULT_LANGUAGE_DRAFT_VERSION = "2.24.2";
  */
 export function supportsRevisePublishedTranslation(meta) {
   return Array.isArray(meta?.operations) && meta.operations.includes(REVISE_PUBLISHED_TRANSLATION);
+}
+
+/**
+ * Whether a translation inventory advertises revise over a named working copy.
+ * Absent on Sentinel releases before 2.25.0.
+ * @param {object} [meta] Inventory `meta`, or an object with `operations`.
+ * @returns {boolean}
+ */
+export function supportsReviseOverWorkingCopy(meta) {
+  return Array.isArray(meta?.operations) && meta.operations.includes(REVISE_OVER_WORKING_COPY);
+}
+
+/**
+ * Refusal when a working copy exists and the host cannot revise over it.
+ * Continuing is not offered: it cannot draft a language that is still
+ * published on the working copy.
+ * @returns {Error}
+ */
+export function reviseOverWorkingCapabilityError() {
+  return new Error(
+    "This node has a working copy, and this Sentinel host cannot revise a published translation over it " +
+    `(missing ${REVISE_OVER_WORKING_COPY}). Update MCP Sentinel ${MIN_SENTINEL_REVISE_OVER_WORKING_VERSION} or later, ` +
+    "or publish or discard the working copy first. No write was attempted.",
+  );
 }
 
 /**
@@ -502,6 +530,12 @@ export function assertInventoryDraftLanguage(inventory, langcode) {
     throw new Error("This working revision contains translations. Pass an explicit langcode for an existing unpublished language; no draft was created.");
   }
   const row = langcode ? rows.find((item) => item.langcode === langcode) : rows[0];
+  if (row && row.status === true && langcode && langcode !== inventory.defaultLangcode && row.default !== true) {
+    throw new Error(
+      "This language is still published on the working copy, so it cannot be continued. " +
+      "Open a draft of it with drupal_create_translation and revise: true. Published languages and other drafts were left unchanged.",
+    );
+  }
   if (!row || row.status !== false) {
     throw new Error("The requested language is not an existing unpublished working draft. Published languages and other drafts were left unchanged.");
   }
