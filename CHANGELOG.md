@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.3] - 2026-09-28
+
 ### Fixed
 - **Revise a published translation on a node that has a working copy.**
   `drupal_create_translation` with `revise: true` used to refuse
