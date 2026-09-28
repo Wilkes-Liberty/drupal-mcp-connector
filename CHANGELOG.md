@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.2] - 2026-09-28
+
 ### Fixed
 - **Adapter-neutral `drupal_list_translations` fallback.** When Sentinel's
   translation inventory is unavailable, the tool reads `langcode` from
