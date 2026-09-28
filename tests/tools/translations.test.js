@@ -314,7 +314,7 @@ describe("translations tools", () => {
     })).rejects.toThrow(/revise: true/);
   });
 
-  it("create_translation revise refuses a working copy before writing (#376)", async () => {
+  it("create_translation revise over a working copy refuses an older Sentinel before writing", async () => {
     backend.getEntity.mockResolvedValue({
       id: UUID, status: true, fields: { drupal_internal__vid: 10 },
     });
@@ -331,9 +331,74 @@ describe("translations tools", () => {
       }
       throw new Error("revise must not POST");
     });
+    const failure = handlers.drupal_create_translation({
+      type: "article", id: UUID, langcode: "es", revise: true, attributes: { title: "Acerca" },
+    });
+    await expect(failure).rejects.toThrow(/MCP Sentinel 2\.25\.0 or later/);
+    // Continuing cannot draft a language that is still published on the
+    // working copy, so the refusal must not send the caller there.
+    await expect(failure).rejects.not.toThrow(/drupal_update_node|Continue/);
+    expect(backend.rawQuery.mock.calls.some((c) => String(c[0].path).endsWith("/mcp-draft/translations"))).toBe(false);
+  });
+
+  it("create_translation revise over a working copy sends both revision IDs", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: UUID, status: true, fields: { drupal_internal__vid: 10 },
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return {
+          meta: {
+            defaultLangcode: "en",
+            operations: ["create_translation", "revise_published_translation", "revise_over_working_copy"],
+            live: { vid: "10", translations: [{ langcode: "en", status: true }, { langcode: "es", status: true }] },
+            working: {
+              vid: "11",
+              translations: [{ langcode: "en", status: false }, { langcode: "es", status: true }],
+            },
+          },
+        };
+      }
+      return {
+        meta: {
+          draft_preflight: true,
+          live: "10",
+          working: "11",
+          langcode: "es",
+          operation: "revise_published_translation",
+        },
+      };
+    });
+    const out = await handlers.drupal_create_translation({
+      type: "article", id: UUID, langcode: "es", revise: true, dryRun: true,
+      attributes: { field_summary: { value: "Resumen", format: "plain_text" } },
+    });
+    const post = backend.rawQuery.mock.calls.find((c) => String(c[0].path).endsWith("/mcp-draft/translations"))[0];
+    expect(post.options.headers["If-Match"]).toBe('"10:11"');
+    expect(post.options.headers["X-MCP-Draft-Mode"]).toBe("revise");
+    expect(out.revise).toBe(true);
+  });
+
+  it("create_translation revise points a language already drafted on the working copy at continue", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: UUID, status: true, fields: { drupal_internal__vid: 10 },
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return {
+          meta: {
+            defaultLangcode: "en",
+            operations: ["create_translation", "revise_published_translation", "revise_over_working_copy"],
+            live: { vid: "10", translations: [{ langcode: "es", status: true }] },
+            working: { vid: "11", translations: [{ langcode: "es", status: false }] },
+          },
+        };
+      }
+      throw new Error("revise must not POST");
+    });
     await expect(handlers.drupal_create_translation({
       type: "article", id: UUID, langcode: "es", revise: true, attributes: { title: "Acerca" },
-    })).rejects.toThrow(/working copy already exists/);
+    })).rejects.toThrow(/already an unpublished draft on the working copy.*drupal_update_node and langcode/);
     expect(backend.rawQuery.mock.calls.some((c) => String(c[0].path).endsWith("/mcp-draft/translations"))).toBe(false);
   });
 

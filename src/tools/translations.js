@@ -37,10 +37,13 @@ import {
   explainExistingTranslation,
   isMissingTranslationEndpoint,
   MIN_SENTINEL_REVISE_VERSION,
+  MIN_SENTINEL_REVISE_OVER_WORKING_VERSION,
   readTranslationInventory,
   resolveNodeTranslationPair,
   reviseCapabilityError,
+  reviseOverWorkingCapabilityError,
   supportsRevisePublishedTranslation,
+  supportsReviseOverWorkingCopy,
   supportsSentinelDraft,
 } from "../lib/sentinel-draft.js";
 import { mapTranslationRow } from "../lib/translation-rows.js";
@@ -171,12 +174,23 @@ async function createTranslation({
       if (!supportsRevisePublishedTranslation(draftRevision)) {
         throw reviseCapabilityError();
       }
-      if (draftRevision.workingVid) {
-        const continuer = entityType === "media" ? "drupal_update_media" : "drupal_update_node";
-        throw new Error(
-          "A working copy already exists. Continue that draft with " +
-          `${continuer} and langcode. Revise was not attempted.`,
-        );
+      const hasWorking = draftRevision.workingVid && draftRevision.liveVid
+        && String(draftRevision.workingVid) !== String(draftRevision.liveVid);
+      if (hasWorking) {
+        const workingRow = (draftRevision.inventory?.working?.translations ?? [])
+          .find((row) => row?.langcode === targetLang);
+        if (workingRow && workingRow.status === false) {
+          const continuer = entityType === "media" ? "drupal_update_media" : "drupal_update_node";
+          throw new Error(
+            "This language is already an unpublished draft on the working copy. " +
+            `Continue it with ${continuer} and langcode. Revise was not attempted.`,
+          );
+        }
+        // Sentinel 2.25.0+ builds the draft on the named working copy; the
+        // pair is sent as If-Match "live:working" by createTranslationDraft.
+        if (!supportsReviseOverWorkingCopy(draftRevision)) {
+          throw reviseOverWorkingCapabilityError();
+        }
       }
     }
     if (entityType === "node") {
@@ -275,10 +289,14 @@ export const definitions = [
       "draft (#282). English live title, body, status, alias, default revision, and " +
       "paragraph ERR pins stay unchanged. An existing translation is a conflict, not an overwrite. " +
       "Pass revise: true to open an unpublished draft over a language that is already published " +
-      "on the live revision and has no working copy (Sentinel X-MCP-Draft-Mode: revise). " +
+      "on the live revision (Sentinel X-MCP-Draft-Mode: revise). " +
       `That requires MCP Sentinel ${MIN_SENTINEL_REVISE_VERSION} or later; an older host is refused ` +
-      "before any write and the message names that version. dryRun uses the same translations " +
-      "endpoint and Sentinel's non-saving preflight. A working copy is refused. " +
+      "before any write and the message names that version. When the node already has a working " +
+      "copy (for example an English draft), both revision IDs are sent and Sentinel drafts the " +
+      "language on that working copy; the other drafts carry forward. That needs MCP Sentinel " +
+      `${MIN_SENTINEL_REVISE_OVER_WORKING_VERSION} or later. A language that is already a draft on the working copy is ` +
+      "continued with drupal_update_node and langcode instead. dryRun uses the same translations " +
+      "endpoint and Sentinel's non-saving preflight. " +
       "Paragraph revise is not supported. " +
       "The response includes `_revisions.live` / `_revisions.working` when known. " +
       "Computed `metatag` is omitted on the draft body because JSON:API resolves it from the live default (#283); use field_metatags. " +
@@ -300,7 +318,7 @@ export const definitions = [
         relationships: { type: "object", description: "JSON:API relationships. Use for image alt (same file UUID, meta.alt)." },
         revisionId:    { type: "string", description: "Paragraph revision id the host already pins. Required for Home-shaped non-default pins." },
         dryRun:        { type: "boolean", description: "Validate without saving. Sentinel's non-saving translation preflight receives the real fields, applies them through field access and validates the entity. The result's `checks` block says what was checked. With revise: true the preflight is the same translations endpoint." },
-        revise:        { type: "boolean", description: "Open an unpublished draft over a translation that is already published on the live default revision and has no working copy. Requires MCP Sentinel 2.24.0 or later. Omit it to create a language that does not exist yet." },
+        revise:        { type: "boolean", description: "Open an unpublished draft over a translation that is already published on the live default revision. Requires MCP Sentinel 2.24.0 or later, and 2.25.0 or later when the node already has a working copy. Omit it to create a language that does not exist yet." },
       },
     },
   },
