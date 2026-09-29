@@ -23,7 +23,7 @@ import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } f
 import { paragraphResourceVersion } from "./paragraphs.js";
 import { assertBodySummaryWritable, attachSummaryDeprecation } from "../lib/body-summary.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
-import { applyAllowedFormatsToAttributes } from "../lib/field-definition.js";
+import { applyAllowedFormatsToAttributes, attributesOmitTextFormat } from "../lib/field-definition.js";
 import { normalizeAlias, PATH_ALIAS_ENTITY_TYPE } from "../lib/path-alias.js";
 
 /** Fallback language for an alias when the node exposes none. */
@@ -469,19 +469,23 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   else if (status !== undefined) attributes.status = status;
   const bodyAttr = buildBodyAttribute(body, summary, format);
   if (bodyAttr) attributes.body = bodyAttr;
-  await applyAllowedFormatsToAttributes({
-    backend, site, entityType: "node", bundle: type, attributes,
-  });
-  // One pre-read serves the #131 draft default and the #171 unrequested-
-  // status-change flag. Skipped when the caller pinned the moderation state.
+  // One pre-read serves the #131 draft default, the #171 unrequested-
+  // status-change flag, and the stored text format (#327). Skipped when the
+  // caller pinned the moderation state and every formatted value already
+  // names its format. An omitted format still reads the entity: the published
+  // node's core PATCH guard does not validate fields, so the preview has to
+  // resolve the same format the save will send before it can report success.
   let existing = null;
-  if (!hasExplicitModerationState(attributes)) {
+  if (!hasExplicitModerationState(attributes) || attributesOmitTextFormat(attributes)) {
     try {
       existing = (await backend.getEntity({ entityType: "node", bundle: type, id })) ?? null;
     } catch {
       existing = null; // Unreadable target: server-side gates stay authoritative.
     }
   }
+  await applyAllowedFormatsToAttributes({
+    backend, site, entityType: "node", bundle: type, attributes, existingEntity: existing,
+  });
   // #131: published moderated nodes without an explicit state → draft forward revision.
   // Runs before the publish gate and on dryRun so previews match the real write.
   attributes = await applySafeDraftDefault({
@@ -632,7 +636,7 @@ export const definitions = [
         title:   { type: "string" },
         body:    { type: "string", description: "Body field HTML" },
         summary: { type: "string", description: "Body summary/teaser — writes body.summary on core text_with_summary only. Refused when the sampled body field has no summary property (text_long / text_formatted) or the schema cannot be determined. Prefer the site's dedicated deck/summary field via `fields`." },
-        format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. When the body field's allowed_formats lists exactly one format, that is the default. A caller format outside that list is refused before write. When allowed_formats cannot be resolved, defaults to the site config's `defaultTextFormat`, then 'full_html'." },
+        format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. When the body field's allowed_formats lists exactly one format, that is the default. A caller format outside that list is refused before write. allowed_formats is read from field_config, then base_field_override (node body). When that list cannot be resolved, defaults to the site config's `defaultTextFormat`, then 'full_html'." },
         status:  { type: "boolean", default: false, description: "Published flag for NON-moderated types. true to publish immediately. Ignored if moderationState is set; on a moderated type it is dropped automatically." },
         moderationState: { type: "string", description: "Moderation state for content_moderation types, e.g. 'draft' or 'published'. Takes precedence over status." },
         fields:  { type: "object", description: "Scalar/attribute field values keyed by Drupal machine name. Formatted text: a string or { value, format?, summary? }. format must be in the field's allowed_formats; a single allowed format is used when omitted. Do NOT put entity-reference fields here — Drupal rejects them as attributes; use `relationships`." },
@@ -654,13 +658,13 @@ export const definitions = [
         title:   { type: "string" },
         body:    { type: "string" },
         summary: { type: "string", description: "Body summary/teaser — writes body.summary on core text_with_summary only. Refused when the sampled body field has no summary property (text_long / text_formatted) or the schema cannot be determined. Prefer the site's dedicated deck/summary field via `fields`." },
-        format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. When the body field's allowed_formats lists exactly one format, that is the default. A caller format outside that list is refused before write. When allowed_formats cannot be resolved, defaults to the site config's `defaultTextFormat`, then 'full_html'." },
+        format:  { type: "string", description: "Text format machine name for the body, e.g. 'basic_html'. When the body field's allowed_formats lists exactly one format, that is the default. A caller format outside that list is refused before the preview and the write. allowed_formats is read from field_config, then base_field_override (node body). When that list cannot be resolved, an update reuses the format already stored on the field; if the node has none, the site config's `defaultTextFormat`, then 'full_html'. dryRun previews that same format, including on the published-node core PATCH guard." },
         status:  { type: "boolean", description: "Published flag for NON-moderated types: true = publish, false = unpublish. Ignored if moderationState is set." },
         moderationState: { type: "string", description: "Moderation state transition for content_moderation types, e.g. 'draft', 'published', 'archived'. Takes precedence over status. Required to keep or re-publish a live node — omitting it on a published moderated node defaults the write to 'draft'." },
         langcode: { type: "string", description: "Target language for an unpublished working translation (e.g. 'es'). Continues that translation via Sentinel; does not create a missing translation and does not PATCH canonical langcode." },
         fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Formatted text: a string or { value, format?, summary? }. format must be in the field's allowed_formats; a single allowed format is used when omitted. Entity-reference fields go in `relationships`, not here." },
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }. Paragraph / ERR items must carry meta.target_revision_id — the connector injects it when missing, and fails the write if it cannot. Image alt on a translation uses the existing file UUID plus meta.alt; replacing the file is refused." },
-        dryRun:  { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, run the server-side preflight when one applies, and return a preview without the real write. The result's `checks` block says what was checked; `caveat` names what was not. Only an existing node draft (or a langcode translation draft) is checked with the real payload: Sentinel's non-saving draft endpoint applies the submitted fields through field access and validates the entity (`serverPreflight: sentinel_draft`). On other moderated targets an id-mismatch core PATCH with no fields checks entity update access and core's working-copy guard only; field access and entity validation are NOT checked (`core_patch_guard`), so the real write can still fail with a field-access 403 or a 422. Unmoderated targets get no server-side check at all (`none`). A published node with no distinct working copy whose changed timestamp is later than revision_timestamp (possiblyPatchBlocked) fails dryRun the same as the real write (#273). Any refusal fails the dryRun." },
+        dryRun:  { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, run the server-side preflight when one applies, and return a preview without the real write. The result's `checks` block says what was checked; `caveat` names what was not. Only an existing node draft (or a langcode translation draft) is checked with the real payload: Sentinel's non-saving draft endpoint applies the submitted fields through field access and validates the entity (`serverPreflight: sentinel_draft`). On other moderated targets an id-mismatch core PATCH with no fields checks entity update access and core's working-copy guard only; Drupal does not check field access or entity validation on that probe (`core_patch_guard`). Text format is resolved before the preview returns, including on that path: a known allowed_formats list is enforced, and an unknown list reuses the format stored on the field. Other fields can still fail the real write with a field-access 403 or a validation 422. Unmoderated targets get no server-side check at all (`none`). A published node with no distinct working copy whose changed timestamp is later than revision_timestamp (possiblyPatchBlocked) fails dryRun the same as the real write (#273). Any refusal fails the dryRun." },
         returning: RETURNING_SCHEMA,
       },
     },

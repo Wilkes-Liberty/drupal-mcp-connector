@@ -729,15 +729,17 @@ export class JsonApiBackend extends Backend {
   }
 
   /**
-   * Read Field API metadata from JSON:API `field_config` (chain step 1).
+   * Read Field API metadata from JSON:API (chain step 1).
    *
+   * Configurable fields live on `field_config`. Node body is a base field:
+   * its `allowed_formats` live on `base_field_override`, not `field_config`.
    * This is an internal introspection call, not an agent entity-tool read:
    * `field_config` is on the connector deny list. Do not invent
    * `allowed_formats` from `this.site.defaultTextFormat` or `full_html`.
-   * Empty / unreadable `field_config` returns null so the caller can try
-   * Drush `config:get field.field.{entityType}.{bundle}.{field}` and, if
-   * that also fails, keep the historical default chain only while the list
-   * is unknown.
+   * Empty / unreadable rows return null so the caller can try Drush
+   * `config:get` (`field.field.*`, then `core.base_field_override.*`) and,
+   * if that also fails, keep the historical default chain only while the
+   * list is unknown. Updates reuse a stored format in that case (#327).
    *
    * @param {{entityType: string, bundle: string, fieldName: string}} ref
    * @returns {Promise<?{fieldName: string, fieldType: ?string, allowedFormats: string[]}>}
@@ -790,14 +792,19 @@ export class JsonApiBackend extends Backend {
     params.set("filter[bundle]", bundle);
     params.set("filter[field_name]", fieldName);
     params.set("page[limit]", "1");
-    let data;
-    try {
-      data = await drupalFetch(this.site, `/jsonapi/field_config/field_config?${params}`);
-    } catch {
-      return null;
-    }
-    const row = Array.isArray(data?.data) ? data.data[0] : data?.data;
-    return parseFieldConfigObject(row?.attributes, fieldName);
+    const read = async (resource) => {
+      try {
+        const data = await drupalFetch(this.site, `/jsonapi/${resource}/${resource}?${params}`);
+        const row = Array.isArray(data?.data) ? data.data[0] : data?.data;
+        return parseFieldConfigObject(row?.attributes, fieldName);
+      } catch {
+        return null;
+      }
+    };
+    // A configurable-field row is authoritative, including an empty
+    // allowed_formats list (no field-level restriction). Body is absent
+    // from field_config, so the base-field override is the next read.
+    return (await read("field_config")) ?? (await read("base_field_override"));
   }
 
   /**

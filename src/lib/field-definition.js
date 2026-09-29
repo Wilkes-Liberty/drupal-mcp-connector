@@ -7,14 +7,18 @@
  * `FALLBACK_TEXT_FORMAT` (`full_html`).
  *
  * Resolution chain for a field definition:
- *   1. `backend.getFieldDefinition` — JSON:API `field_config` via an internal
- *      adapter fetch (not `drupal_entity_get`; `field_config` is on the agent
- *      deny list).
- *   2. Drush `config:get field.field.{entityType}.{bundle}.{field}` when a
- *      Drush bridge is configured.
- *   3. If the definition cannot be resolved: return null. Callers keep the
- *      historical default chain only while the list is unknown. Once the list
- *      is known, never persist a format outside it.
+ *   1. `backend.getFieldDefinition` — JSON:API `field_config`, then
+ *      `base_field_override` (node body is a base field; its allowed_formats
+ *      are not on `field_config`). Internal adapter fetch, not
+ *      `drupal_entity_get` (`field_config` is on the agent deny list).
+ *   2. Drush `config:get field.field.{entityType}.{bundle}.{field}`, then
+ *      `core.base_field_override.{entityType}.{bundle}.{field}`, when a Drush
+ *      bridge is configured.
+ *   3. If the definition cannot be resolved: return null. Creates keep the
+ *      historical default chain only while the list is unknown. Updates reuse
+ *      the format already stored on that field (#327) so a dry run cannot
+ *      preview a fallback the save will reject. Once the list is known, never
+ *      persist a format outside it.
  */
 
 import { drushConfigured } from "./audit-sources.js";
@@ -36,10 +40,16 @@ const SKIP_FORMAT_FIELDS = new Set([
  * @param {*} raw settings.allowed_formats from field_config / Drush.
  * @returns {string[]}
  */
+function isEnabledFormatId(value) {
+  // Field UI checkboxes store a disabled format as 0 or "0", and an enabled
+  // format as its machine name. "0" is a non-empty string but not a format.
+  return typeof value === "string" && value !== "" && value !== "0";
+}
+
 export function asFormatList(raw) {
-  if (Array.isArray(raw)) return raw.filter((f) => typeof f === "string" && f);
+  if (Array.isArray(raw)) return raw.filter(isEnabledFormatId);
   if (raw && typeof raw === "object") {
-    return [...new Map(Object.entries(raw)).values()].filter((f) => typeof f === "string" && f);
+    return [...new Map(Object.entries(raw)).values()].filter(isEnabledFormatId);
   }
   return [];
 }
@@ -98,13 +108,20 @@ export async function fieldDefinitionFromDrush(site, entityType, bundle, fieldNa
   validateMachineName(entityType, "entityType");
   validateMachineName(bundle, "bundle");
   validateMachineName(fieldName, "fieldName");
-  const configName = `field.field.${entityType}.${bundle}.${fieldName}`;
-  try {
-    const raw = parseDrush(await sshDrush(site, ["config:get", configName, "--format=json"]));
-    return parseFieldConfigObject(unwrapDrushConfig(raw, configName), fieldName);
-  } catch {
-    return null;
+  const configNames = [
+    `field.field.${entityType}.${bundle}.${fieldName}`,
+    `core.base_field_override.${entityType}.${bundle}.${fieldName}`,
+  ];
+  for (const configName of configNames) {
+    try {
+      const raw = parseDrush(await sshDrush(site, ["config:get", configName, "--format=json"]));
+      const parsed = parseFieldConfigObject(unwrapDrushConfig(raw, configName), fieldName);
+      if (parsed) return parsed;
+    } catch {
+      // A missing `field.field.*` row is how Drush reports a base field.
+    }
   }
+  return null;
 }
 
 /**
@@ -226,6 +243,41 @@ function requestedFormatOf(value) {
 }
 
 /**
+ * Format Drupal already stored for a field, if the canonical entity has one.
+ * @param {?object} entity
+ * @param {string} fieldName
+ * @returns {string|undefined}
+ */
+function storedTextFormat(entity, fieldName) {
+  const fields = entity?.fields;
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) return undefined;
+  const value = new Map(Object.entries(fields)).get(fieldName);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const format = new Map(Object.entries(value)).get("format");
+  return typeof format === "string" && format && format !== "0" ? format : undefined;
+}
+
+/**
+ * Whether a write attribute map omits a text format the resolver may have to
+ * supply. Used to decide whether an update must read the stored entity first.
+ * @param {?object} attributes
+ * @returns {boolean}
+ */
+export function attributesOmitTextFormat(attributes) {
+  if (!attributes || typeof attributes !== "object") return false;
+  for (const [name, value] of Object.entries(attributes)) {
+    if (SKIP_FORMAT_FIELDS.has(name) || value === undefined || value === null) continue;
+    if (typeof value === "string") return true;
+    if (typeof value === "object" && !Array.isArray(value)) {
+      const hasValue = Object.prototype.hasOwnProperty.call(value, "value");
+      const hasFormat = Object.prototype.hasOwnProperty.call(value, "format") && value.format;
+      if ((name === "body" || hasValue) && !hasFormat) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * @param {*} raw
  * @param {string|undefined} format
  * @returns {{value: *, format?: string, summary?: *}}
@@ -247,11 +299,15 @@ function normalizeFormattedValue(raw, format) {
  * Same checks run for dry-run and real writes so a disallowed format never
  * reaches create/update.
  *
- * @param {{backend: object, site: object, entityType: string, bundle: string, attributes: object}} input
+ * On update, pass `existingEntity`. When the allowed list is unknown and the
+ * caller omitted a format, the format already stored on that field is reused.
+ * The same choice is what dryRun previews and what the save sends (#327).
+ *
+ * @param {{backend: object, site: object, entityType: string, bundle: string, attributes: object, existingEntity?: ?object}} input
  * @returns {Promise<object>} The same attributes object, with formats resolved.
  */
 export async function applyAllowedFormatsToAttributes({
-  backend, site, entityType, bundle, attributes,
+  backend, site, entityType, bundle, attributes, existingEntity = null,
 }) {
   const names = Object.keys(attributes).filter((name) => !SKIP_FORMAT_FIELDS.has(name));
   for (const fieldName of names) {
@@ -268,10 +324,17 @@ export async function applyAllowedFormatsToAttributes({
     if (def && !formattedType && !restricted && !isBody) continue;
     if (!def && !shaped && !isBody) continue;
 
+    const allowedFormats = def ? def.allowedFormats : null;
+    const listUnknown = !Array.isArray(allowedFormats) || allowedFormats.length === 0;
+    let requested = requestedFormatOf(value);
+    if ((requested === undefined || requested === null || requested === "") && listUnknown) {
+      const stored = storedTextFormat(existingEntity, fieldName);
+      if (stored) requested = stored;
+    }
     const format = resolveTextFormat({
       fieldName,
-      requested: requestedFormatOf(value),
-      allowedFormats: def ? def.allowedFormats : null,
+      requested,
+      allowedFormats,
       site,
       defaultWhenUnknown: isBody,
     });

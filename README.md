@@ -55,12 +55,13 @@ Each site declares which backend(s) it exposes via the `api` key:
 - **`defaultTextFormat` sets the body text format** used by the `body` convenience
   parameter on node writes, e.g. `{ "baseUrl": "…", "defaultTextFormat": "basic_html" }`.
   Individual calls can override it with `format`. Field API `allowed_formats` wins
-  when it can be resolved: a single allowed format is the default, and a format
-  outside the list is refused. Without a resolved list, the connector falls
-  back to `full_html`, which many governed sites deliberately do not define — and which
-  is the most permissive core format, so setting this per site is the safer posture. A
-  text format is Drupal's HTML-filtering boundary, so it is worth choosing deliberately
-  rather than inheriting.
+  when it can be resolved (from `field_config` or, for body, `base_field_override`):
+  a single allowed format is the default, and a format outside the list is refused.
+  Without a resolved list, a create falls back to `full_html`, which many governed
+  sites deliberately do not define — and which is the most permissive core format,
+  so setting this per site is the safer posture. An update reuses the format already
+  stored on the field instead of that fallback. A text format is Drupal's
+  HTML-filtering boundary, so it is worth choosing deliberately rather than inheriting.
 
 See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction and **[docs/graphql-local-setup.md](docs/graphql-local-setup.md)** for the GraphQL specifics.
 

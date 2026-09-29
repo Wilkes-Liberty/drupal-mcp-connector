@@ -929,4 +929,58 @@ describe("#168 honor field allowed_formats on node writes", () => {
     expect(out.attributes[IMPACT]).toEqual({ value: "<p>x</p>", format: "headless_clean" });
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
+
+  it("reuses the stored body format for the core-guard preview and the save (#327)", async () => {
+    backend.getFieldDefinition.mockResolvedValue(null);
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return canonicalNode({
+        status: true,
+        fields: {
+          moderation_state: "published",
+          drupal_internal__vid: 10,
+          body: { value: "<p>Old</p>", format: "client_html" },
+        },
+      });
+    });
+    const preview = await handlers.drupal_update_node({
+      type: "article", id: "n1", body: "<p>New</p>", moderationState: "draft", dryRun: true,
+    });
+    expect(preview.attributes.body).toEqual({ value: "<p>New</p>", format: "client_html" });
+    expect(preview.checks.serverPreflight).toBe("core_patch_guard");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+
+    await handlers.drupal_update_node({
+      type: "article", id: "n1", body: "<p>New</p>", moderationState: "draft",
+    });
+    expect(backend.updateEntity.mock.calls[0][0].attributes.body).toEqual({
+      value: "<p>New</p>", format: "client_html",
+    });
+  });
+
+  it("refuses an omitted body format on the core-guard path when it is not allowed (#327)", async () => {
+    mockFieldDefs({ body: fieldDef("body", ["client_html", "basic_html"], "text_with_summary") });
+    const { getSiteConfig } = await import("../../src/lib/config.js");
+    getSiteConfig.mockReturnValueOnce({
+      _name: "d", baseUrl: "https://x", security: {}, defaultTextFormat: "full_html",
+    });
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return canonicalNode({
+        status: true,
+        fields: {
+          moderation_state: "published",
+          body: { value: "<p>Old</p>", format: "client_html" },
+        },
+      });
+    });
+    await expect(handlers.drupal_update_node({
+      type: "article", id: "n1", body: "<p>New</p>", moderationState: "draft", dryRun: true,
+    })).rejects.toThrow(/body[\s\S]*full_html[\s\S]*client_html/s);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
 });

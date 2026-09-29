@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `moderation_state: published` or `status: true` is refused when
   `allowPublish` is false, as for every other type; drafts pass. On a site
   that moderates library items, Drupal's workflow is the second gate.
+### Fixed
+- **Node update preflight no longer accepts a body format the save rejects (#327).**
+  Node body is a base field. Its `allowed_formats` live on
+  `base_field_override`, which field lookup did not read, so an omitted format
+  fell back to `defaultTextFormat` / `full_html`. On a published moderated node
+  with no working copy, `dryRun` only probes core's working-copy guard and does
+  not send fields, so the preview succeeded and the save returned 422
+  `body.0.format is not a valid choice`. Lookup now reads
+  `base_field_override` (JSON:API, then Drush
+  `core.base_field_override.*`). When the allowed list is still unknown, an
+  update reuses the format already stored on the field. The preview and the
+  save resolve that same format, including on the core PATCH-guard path.
 
 ## [2.23.3] - 2026-09-28
 
