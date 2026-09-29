@@ -285,3 +285,16 @@ describe("#171 bulk updates keep status opt-in", () => {
     expect(sent.attributes).not.toHaveProperty("moderation_state");
   });
 });
+
+describe("bulk_create: Paragraphs Library items on a no-publish tier", () => {
+  it("sends status:false for items that say nothing about publication", async () => {
+    resolveSecurityConfig.mockImplementation(() => ({ ...openSec(), allowPublish: false }));
+    backend.createEntity.mockResolvedValue({ id: "l1" });
+    await handlers.drupal_bulk_create({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item",
+      items: [{ attributes: { label: "A" } }, { attributes: { label: "B", moderation_state: "draft" } }],
+    });
+    expect(backend.createEntity.mock.calls[0][0].attributes).toEqual({ label: "A", status: false });
+    expect(backend.createEntity.mock.calls[1][0].attributes).toEqual({ label: "B", moderation_state: "draft" });
+  });
+});

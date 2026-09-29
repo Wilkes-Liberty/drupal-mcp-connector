@@ -15,7 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `moderation_state: published` or `status: true` is refused when
   `allowPublish` is false, as for every other type; drafts pass. On a site
   that moderates library items, Drupal's workflow is the second gate.
+
 ### Fixed
+- **A library item created by a tier that cannot publish stays unpublished.**
+  Drupal publishes Paragraphs Library items by default. On a site that does
+  not moderate them, `drupal_entity_create` or `drupal_bulk_create` without
+  `status` put the item live on every page that places it, although
+  `allowPublish` was false. When publishing is not allowed and the caller sets
+  neither `status` nor `moderation_state`, the connector now sends
+  `status: false`. Other entity types are unchanged.
 - **Node update preflight no longer accepts a body format the save rejects (#327).**
   Node body is a base field. Its `allowed_formats` live on
   `base_field_override`, which field lookup did not read, so an omitted format
