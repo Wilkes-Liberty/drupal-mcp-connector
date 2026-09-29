@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.24.1] - 2026-09-29
+
 ### Removed
 - **Unused validate helpers and stale workflow-prompt exports.** `clampLimit` /
   `MAX_PAGE_LIMIT` and `validateFieldName` / `FIELD_NAME_RE` had no callers.
