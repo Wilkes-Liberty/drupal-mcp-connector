@@ -726,6 +726,34 @@ describe("JsonApiBackend.getFieldDefinition", () => {
     expect(path).toContain("filter[field_name]=field_mission_impact");
   });
 
+  it("reads body allowed_formats from base_field_override when field_config has no row", async () => {
+    vi.mocked(drupalFetch)
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({
+        data: [{
+          type: "base_field_override--base_field_override",
+          id: "b1",
+          attributes: {
+            field_name: "body",
+            field_type: "text_with_summary",
+            settings: { allowed_formats: { client_html: "client_html", full_html: 0 } },
+          },
+        }],
+      });
+    const out = await backend.getFieldDefinition({
+      entityType: "node", bundle: "article", fieldName: "body",
+    });
+    expect(out).toEqual({
+      fieldName: "body",
+      fieldType: "text_with_summary",
+      allowedFormats: ["client_html"],
+    });
+    const paths = vi.mocked(drupalFetch).mock.calls.map((call) => decodeURIComponent(call[1]));
+    expect(paths[0]).toContain("/jsonapi/field_config/field_config");
+    expect(paths[1]).toContain("/jsonapi/base_field_override/base_field_override");
+    expect(paths[1]).toContain("filter[field_name]=body");
+  });
+
   it("returns null when field_config is empty so callers do not invent a list", async () => {
     vi.mocked(drupalFetch).mockResolvedValue({ data: [] });
     const out = await backend.getFieldDefinition({

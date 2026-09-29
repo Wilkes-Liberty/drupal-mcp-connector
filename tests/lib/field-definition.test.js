@@ -89,6 +89,16 @@ describe("parseFieldConfigObject", () => {
       allowedFormats: ["headless_clean"],
     });
   });
+
+  it("keeps enabled checkbox values and drops disabled ones", () => {
+    expect(parseFieldConfigObject({
+      field_name: "body",
+      field_type: "text_with_summary",
+      settings: {
+        allowed_formats: { client_html: "client_html", full_html: 0, basic_html: "0" },
+      },
+    }).allowedFormats).toEqual(["client_html"]);
+  });
 });
 
 describe("resolveFieldDefinition chain", () => {
@@ -122,6 +132,27 @@ describe("resolveFieldDefinition chain", () => {
     });
     expect(sshDrush).toHaveBeenCalledWith(site, [
       "config:get", "field.field.node.solution.field_mission_impact", "--format=json",
+    ]);
+  });
+
+  it("reads core.base_field_override when field.field is missing", async () => {
+    vi.mocked(sshDrush)
+      .mockRejectedValueOnce(new Error("Config field.field.node.article.body does not exist"))
+      .mockResolvedValueOnce(JSON.stringify({
+        field_name: "body",
+        field_type: "text_with_summary",
+        settings: { allowed_formats: { client_html: "client_html", full_html: "0" } },
+      }));
+    const backend = { getFieldDefinition: vi.fn(async () => null) };
+    const site = { drushSsh: { host: "x" } };
+    const out = await resolveFieldDefinition(backend, site, "node", "article", "body");
+    expect(out).toEqual({
+      fieldName: "body",
+      fieldType: "text_with_summary",
+      allowedFormats: ["client_html"],
+    });
+    expect(sshDrush).toHaveBeenNthCalledWith(2, site, [
+      "config:get", "core.base_field_override.node.article.body", "--format=json",
     ]);
   });
 
