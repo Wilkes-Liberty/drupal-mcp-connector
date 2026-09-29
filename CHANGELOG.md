@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Paragraphs Library items on the content tiers.** `paragraphs_library_item`
+  joins the structural content set, so the `content-editor`, `config-editor`
+  and `write-plane` presets can create and edit reusable library items through
+  `drupal_entity_*`. Deletes stay blocked. A write carrying
+  `moderation_state: published` or `status: true` is refused when
+  `allowPublish` is false, as for every other type; drafts pass. On a site
+  that moderates library items, Drupal's workflow is the second gate.
+
 ## [2.23.3] - 2026-09-28
 
 ### Fixed

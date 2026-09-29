@@ -60,6 +60,25 @@ describe("entities tools (migrated)", () => {
     expect(backend.createEntity).not.toHaveBeenCalled();
   });
 
+  it("entity_create on a Paragraphs Library item: drafts pass, publish is refused on write-plane", async () => {
+    getSiteConfig.mockReturnValueOnce(noPublishSite);
+    await expect(
+      handlers.drupal_entity_create({
+        entityType: "paragraphs_library_item", bundle: "paragraphs_library_item",
+        attributes: { label: "CTA", moderation_state: "published" },
+      })
+    ).rejects.toThrow(/allowPublish/);
+    expect(backend.createEntity).not.toHaveBeenCalled();
+
+    getSiteConfig.mockReturnValueOnce(noPublishSite);
+    backend.createEntity.mockResolvedValue({ ...ent, entityType: "paragraphs_library_item", bundle: "paragraphs_library_item" });
+    await handlers.drupal_entity_create({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item",
+      attributes: { label: "CTA", moderation_state: "draft" },
+    });
+    expect(backend.createEntity).toHaveBeenCalledTimes(1);
+  });
+
   it("entity_update dryRun rejects a status:true write the real call would refuse (#112)", async () => {
     getSiteConfig.mockReturnValueOnce(noPublishSite);
     await expect(

@@ -13,7 +13,7 @@ import { parse } from "graphql";
  * ─── Quick presets ────────────────────────────────────────────────────────
  *
  *   "preset": "development"        Everything allowed. Opt-in only — set explicitly.
- *   "preset": "content-editor"     Create/edit content (nodes, media, terms, paragraphs, blocks,
+ *   "preset": "content-editor"     Create/edit content (nodes, media, terms, paragraphs, library items, blocks,
  *                                  menu links, redirects, aliases, files). No deletes. Config read-only.
  *   "preset": "config-editor"      content-editor + site-building config READ + governed config
  *                                  read/write (Developer tier). Model changes go via the config bridge.
@@ -99,6 +99,10 @@ import { parse } from "graphql";
 // JSON:API-writable, so the standard entity tools create/update them directly.
 const CONTENT_STRUCTURAL = [
   "paragraph",
+  // Paragraphs Library items: reusable paragraphs placed on many pages. On a
+  // site that moderates them, the Drupal workflow and allowPublish both gate
+  // go-live; a publish-bearing write is refused here first.
+  "paragraphs_library_item",
   "block_content",
   "menu_link_content",
   "redirect",

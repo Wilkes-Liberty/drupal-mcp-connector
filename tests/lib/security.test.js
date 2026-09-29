@@ -90,7 +90,7 @@ describe("write-plane preset", () => {
     // Base content set plus the structural content entities.
     expect(cfg.allowedEntityTypes).toEqual([
       "node", "taxonomy_term", "media",
-      "paragraph", "block_content", "menu_link_content", "redirect", "path_alias", "file",
+      "paragraph", "paragraphs_library_item", "block_content", "menu_link_content", "redirect", "path_alias", "file",
     ]);
     // No site-building config entities on the content tier.
     expect(cfg.allowedEntityTypes).not.toContain("field_storage_config");
@@ -104,7 +104,7 @@ describe("write-plane preset", () => {
 });
 
 describe("widened content/developer allowlists", () => {
-  const structural = ["paragraph", "block_content", "menu_link_content", "redirect", "path_alias", "file"];
+  const structural = ["paragraph", "paragraphs_library_item", "block_content", "menu_link_content", "redirect", "path_alias", "file"];
   const siteBuilder = ["node_type", "field_config", "field_storage_config", "entity_form_display", "entity_view_display", "taxonomy_vocabulary"];
   const sensitive = ["user", "oauth2_token", "key", "consumer", "encryption_profile", "mcp_tool_config", "mcp_policy_profile"];
 

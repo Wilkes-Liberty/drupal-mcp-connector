@@ -128,7 +128,7 @@ Everything allowed, including freeform GraphQL. **Local development only.** Neve
 { "preset": "content-editor" }
 ```
 Allows create/update across the full content set — `node`, `media`, `taxonomy_term`,
-`paragraph`, `block_content`, `menu_link_content`, `redirect`, `path_alias`, `file`.
+`paragraph`, `paragraphs_library_item`, `block_content`, `menu_link_content`, `redirect`, `path_alias`, `file`.
 No deletes. No GraphQL mutations. Secrets, governance config, and account data
 (`user`, `oauth2_token`, `key`, `consumer`, `encryption_profile`, `mcp_tool_config`,
 `mcp_policy_profile`) are always denied. No site-building config entities.
@@ -175,7 +175,7 @@ Good for: live production sites where any write access is unacceptable.
 ```
 Governed write access for automated agents. Create and update are allowed on the
 content set — `node`, `taxonomy_term`, `media`, plus the structural content entities
-`paragraph`, `block_content`, `menu_link_content`, `redirect`, `path_alias`, `file`.
+`paragraph`, `paragraphs_library_item`, `block_content`, `menu_link_content`, `redirect`, `path_alias`, `file`.
 Deletes and GraphQL mutations are blocked; secrets/governance/account types (`user`,
 `oauth2_token`, `key`, `consumer`, `encryption_profile`, `mcp_tool_config`,
 `mcp_policy_profile`) are denied; and `pass`/`mail` are redacted in all responses.
