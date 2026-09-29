@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **Unused validate helpers and stale workflow-prompt exports.** `clampLimit` /
+  `MAX_PAGE_LIMIT` and `validateFieldName` / `FIELD_NAME_RE` had no callers.
+  `workflowIndex`, `WORKFLOW_LIMITS`, and the unused `toolNameToPromptName`
+  re-export are gone. Filter/sort field names stay unvalidated so JSON:API
+  relationship paths keep working; `URLSearchParams` remains the T3 control.
+
 ## [2.24.0] - 2026-09-29
 
 ### Added

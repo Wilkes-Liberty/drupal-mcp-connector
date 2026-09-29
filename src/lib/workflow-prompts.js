@@ -6,11 +6,10 @@
  * docs/module-workflows.md.
  */
 
-import { sourceText, toolNameToPromptName } from "./tool-prompts.js";
+import { sourceText } from "./tool-prompts.js";
 
 const ID_RE = /^[a-z][a-z0-9_]{0,47}$/;
 const ARG_RE = /^[a-z][a-z0-9_]{0,47}$/;
-const MAX_DESCRIPTION = 1024;
 const MAX_INSTRUCTIONS = 8192;
 const MAX_ARG_VALUE = 200;
 const MAX_WORKFLOWS = 64;
@@ -465,26 +464,3 @@ export function replaceModuleWorkflows(workflows) {
 export function lookupWorkflow(name) {
   return INDEX.get(name);
 }
-
-/**
- * Index used by tests.
- *
- * @param {object[]} workflows
- * @returns {Map<string, {readOnly: boolean, builtin: boolean, publicTools: string[]}>}
- */
-export function workflowIndex(workflows) {
-  return new Map((workflows ?? []).map((wf) => [wf.name, {
-    readOnly: wf.readOnly,
-    builtin: wf.builtin,
-    publicTools: wf.publicTools,
-  }]));
-}
-
-export const WORKFLOW_LIMITS = {
-  MAX_DESCRIPTION,
-  MAX_INSTRUCTIONS,
-  MAX_WORKFLOWS,
-};
-
-// Re-export for callers that already import tool prompt hyphenation.
-export { toolNameToPromptName };

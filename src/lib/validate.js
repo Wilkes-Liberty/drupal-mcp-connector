@@ -197,26 +197,6 @@ export function validateBaseUrl(url, siteName = "site") {
 }
 
 // ---------------------------------------------------------------------------
-// Pagination limit guard
-// Prevents accidentally requesting thousands of records in a single call.
-// ---------------------------------------------------------------------------
-
-const MAX_PAGE_LIMIT = 200;
-
-/**
- * Clamp a page limit to a safe maximum, falling back to a default for
- * non-numeric or out-of-range input.
- * @param {*} value Requested limit (any type; coerced to Number).
- * @param {number} [defaultVal] Value returned for invalid/<1 input.
- * @returns {number} A limit in the range [1, MAX_PAGE_LIMIT].
- */
-export function clampLimit(value, defaultVal = 20) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 1) return defaultVal;
-  return Math.min(n, MAX_PAGE_LIMIT);
-}
-
-// ---------------------------------------------------------------------------
 // Local file upload path allowlist (#137 / audit C1)
 // ---------------------------------------------------------------------------
 //
@@ -328,28 +308,4 @@ export function assertUploadPathAllowed(filePath) {
     );
   }
   return real;
-}
-
-// ---------------------------------------------------------------------------
-// Field name sanitization (prevent crafted field names in JSON:API filters)
-// ---------------------------------------------------------------------------
-
-const FIELD_NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_.]*$/;
-
-/**
- * Validate a Drupal field machine name used in JSON:API filter parameters.
- * Allows dotted paths (e.g. "field.subfield") for nested references.
- * @param {string} value The field name to validate.
- * @param {string} [fieldName] Human-readable name for error messages.
- * @returns {string} The validated value.
- * @throws {Error} if the value is not a valid field name.
- */
-export function validateFieldName(value, fieldName = "field") {
-  if (typeof value !== "string" || !FIELD_NAME_RE.test(value)) {
-    throw new Error(
-      `${fieldName} "${value}" is not a valid field name. ` +
-      "Expected format: field_example or field.subfield"
-    );
-  }
-  return value;
 }

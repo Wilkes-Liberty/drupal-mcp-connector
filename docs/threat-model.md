@@ -45,12 +45,12 @@ see [SECURITY.md](../SECURITY.md).
 
 ### Note on T3 (filter fields)
 
-Filter/sort field names are intentionally **not** run through `validateFieldName`:
+Filter/sort field names are intentionally **not** machine-name validated:
 JSON:API supports dotted relationship paths (e.g. `uid.name`,
-`field_image.meta.alt`) that a strict machine-name check would wrongly reject.
+`field_image.meta.alt`) that a strict field-name check would wrongly reject.
 The `URLSearchParams` encoding already neutralizes injection, so the residual
-risk is only malformed/oversized keys (low). Don't "fix" this by tightening the
-validator — it would break legitimate relationship filters.
+risk is only malformed/oversized keys (low). Don't "fix" this by adding a
+field-name validator — it would break legitimate relationship filters.
 
 ## Residual risks & operator recommendations
 
