@@ -151,10 +151,11 @@ export class Backend {
    * Resolve Field API metadata for one field (internal introspection).
    *
    * `getEntitySchema` is sampling-only and does NOT expose `allowed_formats`.
-   * The JSON:API adapter reads `field_config` via an internal fetch — not via
-   * agent entity tools (`field_config` is on the agent deny list). Returns
-   * null when the definition cannot be resolved. Callers must not invent
-   * `allowed_formats` from `defaultTextFormat` or `full_html`.
+   * The JSON:API adapter reads `field_config`, then `base_field_override`,
+   * via an internal fetch — not via agent entity tools (`field_config` is on
+   * the agent deny list). Returns null when the definition cannot be resolved.
+   * Callers must not invent `allowed_formats` from `defaultTextFormat` or
+   * `full_html`.
    *
    * Default: unknown. GraphQL is read-only for writes; write sites use JSON:API.
    *

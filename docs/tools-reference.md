@@ -156,8 +156,11 @@ Drupal `{ value, format }` items. Represent them in tool payloads as:
 
 `format` is a Field API machine name. Before create/update (including
 `dryRun`) the connector resolves the field's `allowed_formats` from JSON:API
-`field_config` (internal introspection, not `drupal_entity_get`) and, if that
-is unavailable, from Drush `config:get field.field.{entity}.{bundle}.{field}`.
+`field_config`, then `base_field_override` (node body is a base field; its
+allowed formats are not on `field_config`). Both reads are internal
+introspection, not `drupal_entity_get`. If JSON:API has neither row, Drush
+`config:get` tries `field.field.{entity}.{bundle}.{field}` and then
+`core.base_field_override.{entity}.{bundle}.{field}`.
 
 - Exactly one allowed format → used when the caller omits `format`.
 - Caller `format` not in the list → the write is refused before mutation. The
@@ -165,9 +168,13 @@ is unavailable, from Drush `config:get field.field.{entity}.{bundle}.{field}`.
 - Several allowed formats and `format` omitted → site `defaultTextFormat` is
   used only if it is in the list; otherwise the write is refused.
 - If `allowed_formats` cannot be resolved at all, the connector does **not**
-  invent a list. Body then keeps the historical default (`defaultTextFormat`,
-  then `full_html`). A known list never persists `full_html` (or any other
-  format) when it is not in that list.
+  invent a list. A **create** keeps the historical default (`defaultTextFormat`,
+  then `full_html`). An **update** reuses the format already stored on that
+  field, and uses the historical default only when the entity has none. The
+  preview and the save use that same format, including when the server
+  preflight is the published-node core PATCH guard (that probe does not send
+  fields, so it cannot catch a format 422). A known list never persists
+  `full_html` (or any other format) when it is not in that list.
 
 Dry-run previews return the validated/defaulted `format` on each formatted
 attribute so you can see what would be persisted.
