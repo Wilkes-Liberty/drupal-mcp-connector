@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-09-29
+
 ### Added
 - **Paragraphs Library items on the content tiers.** `paragraphs_library_item`
   joins the structural content set, so the `content-editor`, `config-editor`
