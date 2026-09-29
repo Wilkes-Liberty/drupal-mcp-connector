@@ -166,7 +166,8 @@ const PRESETS = {
     allowConfigRead: true,            // config read-only
     allowConfigWrite: false,
     // Full content building: base content types + structural content entities
-    // (paragraphs, custom blocks, menu links, redirects, aliases, files).
+    // (paragraphs, library items, custom blocks, menu links, redirects,
+    // aliases, files).
     allowedEntityTypes: ["node", "media", "taxonomy_term", ...CONTENT_STRUCTURAL],
     deniedEntityTypes: [...SENSITIVE_DENY],
     entityRules: {
@@ -705,6 +706,32 @@ export function assertPublishAllowed(secConfig, attributes = {}) {
       "To enable, set security.allowPublish = true in your config."
     );
   }
+}
+
+// Entity types whose content is shared across many pages. When the tier
+// cannot publish, a create that says nothing about publication is sent as
+// unpublished instead of taking Drupal's published-by-default.
+const UNPUBLISHED_BY_DEFAULT = new Set(["paragraphs_library_item"]);
+
+/**
+ * Attributes for a create on a tier that cannot publish.
+ *
+ * A Paragraphs Library item is published by default in Drupal. On a site that
+ * does not moderate library items, a create that omits `status` would put the
+ * item live on every page that places it, although allowPublish is false. For
+ * the shared types in UNPUBLISHED_BY_DEFAULT, add `status: false` when the
+ * caller set neither `status` nor `moderation_state`; on a moderated site the
+ * workflow's default state applies as before. Other types are unchanged.
+ *
+ * @param {object} secConfig  Resolved security config.
+ * @param {string} entityType Entity type being created.
+ * @param {object} attributes Caller attributes.
+ * @returns {object} Attributes to send.
+ */
+export function withUnpublishedDefault(secConfig, entityType, attributes = {}) {
+  if (secConfig.allowPublish || !UNPUBLISHED_BY_DEFAULT.has(entityType)) return attributes;
+  if ("status" in attributes || "moderation_state" in attributes) return attributes;
+  return { ...attributes, status: false };
 }
 
 /**

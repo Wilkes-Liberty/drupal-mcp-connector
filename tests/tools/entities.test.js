@@ -408,3 +408,39 @@ describe("#166 entity_update targets an addressable working copy", () => {
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 });
+
+describe("Paragraphs Library items default to unpublished on a no-publish tier", () => {
+  const item = { entityType: "paragraphs_library_item", bundle: "paragraphs_library_item" };
+
+  beforeEach(() => {
+    backend.createEntity.mockResolvedValue({ ...ent, ...item });
+  });
+
+  it("sends status:false when the caller says nothing about publication", async () => {
+    getSiteConfig.mockReturnValueOnce(noPublishSite);
+    await handlers.drupal_entity_create({ ...item, attributes: { label: "CTA" } });
+    expect(backend.createEntity.mock.calls[0][0].attributes).toEqual({ label: "CTA", status: false });
+  });
+
+  it("leaves a moderation_state draft to the workflow", async () => {
+    getSiteConfig.mockReturnValueOnce(noPublishSite);
+    await handlers.drupal_entity_create({ ...item, attributes: { label: "CTA", moderation_state: "draft" } });
+    expect(backend.createEntity.mock.calls[0][0].attributes).toEqual({ label: "CTA", moderation_state: "draft" });
+  });
+
+  it("refuses status:true before any write", async () => {
+    getSiteConfig.mockReturnValueOnce(noPublishSite);
+    await expect(
+      handlers.drupal_entity_create({ ...item, attributes: { label: "CTA", status: true } })
+    ).rejects.toThrow(/allowPublish/);
+    expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("does not change other types or a tier that may publish", async () => {
+    getSiteConfig.mockReturnValueOnce(noPublishSite);
+    await handlers.drupal_entity_create({ entityType: "taxonomy_term", bundle: "tags", attributes: { name: "T" } });
+    expect(backend.createEntity.mock.calls[0][0].attributes).toEqual({ name: "T" });
+    await handlers.drupal_entity_create({ ...item, attributes: { label: "CTA" } });
+    expect(backend.createEntity.mock.calls[1][0].attributes).toEqual({ label: "CTA" });
+  });
+});

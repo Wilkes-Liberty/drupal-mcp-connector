@@ -13,7 +13,7 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
-import { resolveSecurityConfig, assertWriteAllowed, assertPublishAllowed } from "../lib/security.js";
+import { resolveSecurityConfig, assertWriteAllowed, assertPublishAllowed, withUnpublishedDefault } from "../lib/security.js";
 import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
 import {
   resolveErrRelationships, embedParagraphRef,
@@ -56,7 +56,7 @@ async function bulkCreate({ site: siteName, entityType, bundle, items = [] }) {
       const resolvedRelationships = await resolveErrRelationships(backend, item.relationships ?? {});
       const entity = await backend.createEntity({
         entityType, bundle,
-        attributes: item.attributes ?? {},
+        attributes: withUnpublishedDefault(sec, entityType, item.attributes ?? {}),
         relationships: resolvedRelationships,
       });
       created += 1;

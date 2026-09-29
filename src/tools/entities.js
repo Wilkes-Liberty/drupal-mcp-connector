@@ -21,7 +21,7 @@ import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight
 import { dryRunChecks, PREFLIGHT_NONE } from "../lib/dry-run-checks.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
-  redactCanonicalEntity, getSecuritySummary,
+  redactCanonicalEntity, getSecuritySummary, withUnpublishedDefault,
 } from "../lib/security.js";
 
 /**
@@ -65,11 +65,12 @@ async function getEntity({ site: siteName, entityType, bundle, id, include = [] 
  * @returns {Promise<object>} The created entity descriptor.
  * @throws {SecurityError} If creating the type/bundle is not permitted.
  */
-async function createEntity({ site: siteName, entityType, bundle, attributes = {}, relationships = {}, dryRun = false, returning = "full" }) {
+async function createEntity({ site: siteName, entityType, bundle, attributes: callerAttributes = {}, relationships = {}, dryRun = false, returning = "full" }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", entityType, bundle);
-  assertPublishAllowed(sec, attributes);
+  assertPublishAllowed(sec, callerAttributes);
+  const attributes = withUnpublishedDefault(sec, entityType, callerAttributes);
   const backend = await resolveBackend(site);
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
   if (dryRun) {
