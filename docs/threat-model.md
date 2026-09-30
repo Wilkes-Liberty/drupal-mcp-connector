@@ -124,7 +124,7 @@ never stores them.
 ## Assurance performed
 
 - `eslint-plugin-security` runs in CI lint.
-- Unit suite + Drupal integration job in CI.
+- Unit suite in CI.
 - `npm run verify` proves the shipped secure defaults on every CI run: the
   example configuration is verified tenant-neutral and secure by the same
   checks an operator runs against their own (#180).

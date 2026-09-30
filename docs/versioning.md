@@ -64,7 +64,7 @@ That pin does not limit northbound clients to the same revision.
 
 ## Runtime support
 
-- **Node.js 20+** (`engines.node`). CI runs the suite on Node 20 and 22.
+- **Node.js 20+** (`engines.node`). CI runs the suite on Node 20.
 - **Drupal 10 / 11** for the Drupal side.
 
 ## Deprecation policy
