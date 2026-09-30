@@ -18,8 +18,9 @@ jobs:
       fail-fast: false
       matrix:
         # 20 is the advertised floor (engines.node >=20.0.0). vitest 4 requires
-        # Node >=20, and 18 is past end-of-life. Keep these green so the floor is real.
-        node-version: ['20', '22']
+        # Node >=20, and 18 is past end-of-life. Full suite runs once on the
+        # floor; a second Node 22 pass repeated the same vitest run.
+        node-version: ['20']
     steps:
       - uses: actions/checkout@v7
 
@@ -43,47 +44,3 @@ jobs:
 
       - name: Unit tests
         run: npm test --if-present
-
-  integration:
-    name: Integration (Drupal)
-    runs-on: ubuntu-latest
-    needs: lint-and-syntax
-    services:
-      drupal:
-        image: drupal:10-apache
-        ports:
-          - 80:80
-        env:
-          DRUPAL_DATABASE_HOST: db
-          DRUPAL_DATABASE_NAME: drupal
-          DRUPAL_DATABASE_USER: drupal
-          DRUPAL_DATABASE_PASSWORD: drupal
-      db:
-        image: mariadb:10.11
-        env:
-          MYSQL_DATABASE: drupal
-          MYSQL_USER: drupal
-          MYSQL_PASSWORD: drupal
-          MYSQL_ROOT_PASSWORD: root
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Wait for Drupal
-        run: |
-          timeout 60 bash -c 'until curl -sf http://localhost/; do sleep 2; done'
-
-      - name: Run integration tests
-        run: npm test --if-present
-        env:
-          DRUPAL_BASE_URL: http://localhost
-          DRUPAL_USERNAME: admin
-          DRUPAL_PASSWORD: admin

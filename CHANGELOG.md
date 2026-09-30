@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **No-op Drupal integration CI job.** The `integration` job booted Drupal 10
+  and MariaDB, waited on `localhost:80`, then re-ran `npm test`. Nothing in
+  the suite talks to that service: stdio transport tests hard-code
+  `DRUPAL_BASE_URL=http://127.0.0.1:8888`, and no test reads the job's
+  `DRUPAL_BASE_URL` / credentials. The unit suite now runs once on Node 20
+  (the advertised floor) instead of repeating on Node 22.
+
 ## [2.24.1] - 2026-09-29
 
 ### Removed
