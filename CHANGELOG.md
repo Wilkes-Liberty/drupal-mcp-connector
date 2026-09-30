@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.24.2] - 2026-09-30
+
 ### Removed
 - **No-op Drupal integration CI job.** The `integration` job booted Drupal 10
   and MariaDB, waited on `localhost:80`, then re-ran `npm test`. Nothing in
