@@ -32,7 +32,7 @@ vi.mock("../../src/lib/config.js", async (orig) => {
 
 import fetch from "node-fetch";
 import { getSiteConfig, listSiteNames } from "../../src/lib/config.js";
-import { securityMiddleware, callTool, listResolvableSiteConfigs } from "../../src/lib/dispatch.js";
+import { securityMiddleware, callTool, invokeReadTool, listResolvableSiteConfigs } from "../../src/lib/dispatch.js";
 import { GovernanceError, clearGovernanceCache } from "../../src/lib/governance.js";
 import { SecurityError } from "../../src/lib/security.js";
 import { withResolvedTarget } from "../../src/lib/site-target.js";
@@ -149,6 +149,19 @@ describe("callTool governance envelope", () => {
     expect(text).toContain("Source governance");
     expect(text).toContain("no_designated_consumer");
     expect(text).not.toContain("tok-secret-value");
+  });
+});
+
+describe("invokeReadTool (resources/read)", () => {
+  it("unwraps a successful callTool payload", async () => {
+    const payload = await invokeReadTool("drupal_list_sites", {});
+    expect(payload.sites).toEqual(expect.arrayContaining(["gov", "open"]));
+    expect(payload._target).toBeUndefined();
+  });
+
+  it("throws the callTool denial instead of returning an envelope", async () => {
+    await expect(invokeReadTool("drupal_create_node", { type: "article", title: "T" }))
+      .rejects.toThrow(/Access denied:.*explicit site/s);
   });
 });
 

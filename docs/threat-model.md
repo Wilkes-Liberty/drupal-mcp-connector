@@ -124,7 +124,10 @@ never stores them.
 ## Assurance performed
 
 - `eslint-plugin-security` runs in CI lint.
-- Unit suite in CI.
+- Unit suite in CI on pinned Node 20 (`npm run syntax-check` + vitest).
+  Tool dispatch and security middleware live in `src/lib/dispatch.js`;
+  `resources/read` for content-types and security-policy goes through
+  `invokeReadTool` → `callTool`.
 - `npm run verify` proves the shipped secure defaults on every CI run: the
   example configuration is verified tenant-neutral and secure by the same
   checks an operator runs against their own (#180).

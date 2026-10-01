@@ -49,10 +49,9 @@ import {
 import { createLegacySessionHandler, createMcpRequestHandler } from "./lib/http-handler.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
 import { createRateLimiter } from "./lib/rate-limit.js";
-import { callTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
+import { callTool, invokeReadTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
 import { filterDiscoverableTools } from "./lib/governance.js";
 import {
-  assertPrincipalEntitlement,
   filterPromptsByPrincipal,
   filterResourcesByPrincipal,
   filterToolsByPrincipal,
@@ -61,7 +60,7 @@ import {
 } from "./lib/principal.js";
 
 // Tools — aggregated (single source of truth, side-effect-free) and per-tool prompts
-import { allDefinitions, allHandlers, definitionsByName } from "./tools/index.js";
+import { allDefinitions, definitionsByName } from "./tools/index.js";
 import { createModuleToolRegistry, isModuleTool } from "./lib/module-tools.js";
 import { buildToolPrompts, createPromptSurface } from "./lib/tool-prompts.js";
 import {
@@ -143,8 +142,7 @@ async function discoverableTools() {
 /**
  * Resolve a resource URI to its JSON payload. URIs are matched in order; the
  * templated forms (content-types, security-policy) capture the site name and
- * delegate to the corresponding read-only tool handler so resources and tools
- * always return the same shape.
+ * go through {@link invokeReadTool} so resources and tools share middleware.
  *
  * @param {string} uri - A drupal:// resource URI.
  * @returns {Promise<object>} The resource data (later JSON-serialized).
@@ -162,25 +160,13 @@ async function readResource(uri) {
   // drupal://{site}/content-types
   const ctMatch = uri.match(/^drupal:\/\/([^/]+)\/content-types$/);
   if (ctMatch) {
-    assertPrincipalEntitlement({
-      toolName: "drupal_list_content_types",
-      args: { site: ctMatch[1] },
-      identity,
-      sites,
-    });
-    return allHandlers.drupal_list_content_types({ site: ctMatch[1] });
+    return invokeReadTool("drupal_list_content_types", { site: ctMatch[1] });
   }
 
   // drupal://{site}/security-policy
   const spMatch = uri.match(/^drupal:\/\/([^/]+)\/security-policy$/);
   if (spMatch) {
-    assertPrincipalEntitlement({
-      toolName: "drupal_security_info",
-      args: { site: spMatch[1] },
-      identity,
-      sites,
-    });
-    return allHandlers.drupal_security_info({ site: spMatch[1] });
+    return invokeReadTool("drupal_security_info", { site: spMatch[1] });
   }
 
   throw new Error(`Unknown resource URI: ${uri}`);

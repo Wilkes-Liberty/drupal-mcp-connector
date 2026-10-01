@@ -12,32 +12,24 @@ concurrency:
 
 jobs:
   lint-and-syntax:
-    name: Lint, Syntax & Unit (Node ${{ matrix.node-version }})
+    name: Lint, Syntax & Unit (Node 20)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # 20 is the advertised floor (engines.node >=20.0.0). vitest 4 requires
-        # Node >=20, and 18 is past end-of-life. Full suite runs once on the
-        # floor; a second Node 22 pass repeated the same vitest run.
-        node-version: ['20']
     steps:
       - uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node-version }}
+          # 20 is the advertised floor (engines.node >=20.0.0). vitest 4+
+          # requires Node >=20, and 18 is past end-of-life.
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
       - name: Syntax check all source files
-        run: |
-          for f in src/lib/*.js src/tools/*.js src/index.js; do
-            node --input-type=module --check < "$f" && echo "$f ✓"
-          done
+        run: npm run syntax-check
 
       - name: Lint
         run: npm run lint --if-present

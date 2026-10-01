@@ -110,7 +110,7 @@ export function normalizeWorkflow(raw) {
  * @param {string} namespace
  * @returns {string}
  */
-export function resolvedName(def, namespace) {
+function resolvedName(def, namespace) {
   return def.name || workflowPromptName(namespace, def.id);
 }
 
@@ -141,7 +141,7 @@ export function publicToolName(namespace, alias, tools) {
  * @param {{builtin?: boolean}} [opts]
  * @returns {string[]|null} Public names, or null when any tool is missing.
  */
-export function resolveToolNames(def, namespace, tools, opts = {}) {
+function resolveToolNames(def, namespace, tools, opts = {}) {
   const visible = new Set((tools ?? []).map((tool) => tool.name));
   const names = [];
   for (const alias of def.tools) {
@@ -270,7 +270,7 @@ export function renderWorkflowMessages(workflow, args = {}) {
  * @param {string} instructions
  * @returns {string[]}
  */
-export function toolAliasesInInstructions(instructions) {
+function toolAliasesInInstructions(instructions) {
   const aliases = [];
   const seen = new Set();
   for (const match of String(instructions ?? "").matchAll(/\{tool:([a-z][a-z0-9_]{0,47})\}/g)) {
@@ -287,7 +287,7 @@ export function toolAliasesInInstructions(instructions) {
  * @param {object} got
  * @returns {string}
  */
-export function instructionTextFromDrupalPrompt(got) {
+function instructionTextFromDrupalPrompt(got) {
   const messages = Array.isArray(got?.messages) ? got.messages : [];
   const parts = [];
   for (const message of messages) {
@@ -313,7 +313,7 @@ export function instructionTextFromDrupalPrompt(got) {
  * @param {object} toolsMap `serverTools.modules.tools`
  * @returns {boolean}
  */
-export function inferReadOnly(aliases, toolsMap) {
+function inferReadOnly(aliases, toolsMap) {
   for (const alias of aliases) {
     const operation = toolsMap?.[alias]?.operation;
     if (operation === "write" || operation === "delete") return false;

@@ -12,7 +12,7 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │                  Drupal MCP Connector (Node.js)                    │
 │                                                                    │
-│  src/index.js ── MCP server ── security middleware ── transports   │
+│  src/index.js ── MCP server ── dispatch.js middleware ── transports │
 │                         │                                          │
 │        ┌────────────────┼─────────────────┐                       │
 │        ▼                ▼                 ▼                        │
@@ -175,8 +175,9 @@ req/min rate limit when `MCP_RATE_LIMIT` is unset. Bind-address restriction
 
 ```
 src/
-├── index.js                  # Entry point: MCP server, security middleware, transports
+├── index.js                  # Entry point: MCP server factory, transports
 ├── lib/
+│   ├── dispatch.js           # Security middleware + callTool / invokeReadTool
 │   ├── config.js             # Config loading, site resolution, auth headers, token/secure-auth
 │   ├── canonical.js          # Canonical entity shape + normalization helpers
 │   ├── drupal-fetch.js       # Authenticated HTTP wrappers (JSON:API, GraphQL, file upload)
@@ -244,13 +245,13 @@ export const definitions = [{
 export const handlers = { drupal_my_tool: myTool };
 ```
 
-Then add one import + array entry in `src/index.js`. Tool registration, the security middleware, and dispatch are automatic.
+Then add one import + array entry in `src/tools/index.js`. Tool registration, the security middleware (`src/lib/dispatch.js`), and dispatch are automatic.
 
 ---
 
 ## Security Middleware
 
-All tool calls pass through the security layer in `index.js` before reaching a handler:
+All tool calls pass through the security layer in `src/lib/dispatch.js` before reaching a handler:
 
 ```
 CallTool request

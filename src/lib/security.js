@@ -954,40 +954,7 @@ export function assertDeleteAllowed(secConfig, entityType, bundle, id) {
 // ---------------------------------------------------------------------------
 
 /**
- * Redact sensitive fields from a JSON:API resource object (or array of them),
- * replacing their `attributes` values with "[REDACTED]".
- * @param {?(object|object[])} resource JSON:API resource(s) to redact.
- * @param {object} secConfig Resolved security config (supplies the field lists).
- * @param {string} entityType Entity type, used to pick per-type redacted fields.
- * @returns {?(object|object[])} New resource object(s); originals are not mutated.
- */
-export function redactResource(resource, secConfig, entityType) {
-  if (!resource) return resource;
-
-  // Collect fields to redact for this entity type
-  const entityRules = new Map(Object.entries(secConfig.entityRules)).get(entityType) ?? {};
-  const fieldsToRedact = new Set([
-    ...(secConfig.globalRedactedFields ?? []),
-    ...(entityRules.redactedFields      ?? []),
-  ]);
-
-  if (fieldsToRedact.size === 0) return resource;
-
-  function redactAttrs(obj) {
-    if (!obj?.attributes) return obj;
-    const attrs = Object.fromEntries(
-      Object.entries(obj.attributes).map(([k, v]) => [k, fieldsToRedact.has(k) ? "[REDACTED]" : v])
-    );
-    return { ...obj, attributes: attrs };
-  }
-
-  if (Array.isArray(resource)) return resource.map(redactAttrs);
-  return redactAttrs(resource);
-}
-
-/**
  * Redact sensitive fields from a CANONICAL entity (base props + `fields`).
- * Mirrors redactResource but for the API-neutral canonical shape.
  * @param {?object} entity Canonical entity to redact.
  * @param {object} secConfig Resolved security config (supplies the field lists).
  * @param {string} entityType Entity type, used to pick per-type redacted fields.
