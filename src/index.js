@@ -26,6 +26,7 @@
  *
  * CLI subcommands (anything else starts the MCP server):
  *   wizard | init     Operator install wizard — see src/lib/wizard.js
+ *   doctor            Connection doctor — see src/lib/doctor.js
  */
 
 import { createServer as createHttpsServer } from "https";
@@ -73,10 +74,14 @@ import {
 } from "./lib/workflow-prompts.js";
 import { builtinWorkflowProvider } from "./lib/workflows/builtin.js";
 import { runWizardCli } from "./lib/wizard.js";
+import { runDoctorCli } from "./lib/doctor.js";
 
 const cliCommand = process.argv[2];
 if (cliCommand === "wizard" || cliCommand === "init") {
   process.exit(await runWizardCli(process.argv.slice(3)));
+}
+if (cliCommand === "doctor") {
+  process.exit(await runDoctorCli(process.argv.slice(3)));
 }
 
 // Apply config/secrets.map (or the shipped example table) before any site
