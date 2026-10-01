@@ -81,11 +81,19 @@ async function schedulePublish({
 
   let existing = null;
   if (typeof backend.getEntity === "function") {
-    existing = await backend.getEntity({ entityType: "node", bundle: type, id }).catch(() => null);
+    try {
+      existing = await backend.getEntity({ entityType: "node", bundle: type, id }) ?? null;
+    } catch {
+      existing = null;
+    }
   }
   let schema = null;
   if (existing && typeof backend.getEntitySchema === "function") {
-    schema = await backend.getEntitySchema("node", type).catch(() => null);
+    try {
+      schema = await backend.getEntitySchema("node", type);
+    } catch {
+      schema = null;
+    }
   }
 
   const moderated = entityLooksModerated(existing);

@@ -581,7 +581,7 @@ describe("prepareGuardedPatch carried published language (#400)", () => {
     const backend = backendStub({
       getEntity: vi.fn(async ({ resourceVersion }) => {
         if (resourceVersion === "rel:working-copy") {
-          return { id: "n1", fields: { drupal_internal__vid: 3171, moderation_state: "draft" } };
+          throw new Error("Drupal 403: No pending revision for moderated entity.");
         }
         return { id: "n1", fields: { drupal_internal__vid: 3141, moderation_state: "published" } };
       }),

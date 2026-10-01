@@ -993,10 +993,7 @@ describe("update_node after revise over a working copy (#400)", () => {
   it("refuses a carried published default language instead of pointing at revise", async () => {
     backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
       if (resourceVersion === "rel:working-copy") {
-        return canonicalNode({
-          status: false,
-          fields: { moderation_state: "draft", drupal_internal__vid: 3171 },
-        });
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
       }
       return canonicalNode({
         status: true,

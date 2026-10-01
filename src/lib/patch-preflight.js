@@ -423,19 +423,11 @@ export async function prepareGuardedPatch(backend, {
   // warning on list_revisions. Proceed to Sentinel / the core probe;
   // rewrite an actual Sentinel stale-copy refusal below.
   // An inventory already in hand names the default-language draft for free.
-  // When the working-copy alias skipped discovery, load inventory so a
-  // carried published language is refused locally (#400). A missing or
-  // malformed catalog is not a write failure: the alias already resolved.
-  if (!target.inventory && (langcode || target.resourceVersion)) {
-    try {
-      const inventory = await readNodeDraftInventory(backend, { entityType, bundle, id });
-      if (inventory) target.inventory = inventory;
-    } catch (err) {
-      const msg = String(err?.message || "");
-      if (langcode || !/invalid revision inventory|did not return a translation inventory/i.test(msg)) {
-        throw err;
-      }
-    }
+  // When langcode is set and the working-copy alias skipped discovery, load
+  // inventory so a carried published language is refused locally (#400).
+  if (langcode && !target.inventory) {
+    const inventory = await readNodeDraftInventory(backend, { entityType, bundle, id });
+    if (inventory) target.inventory = inventory;
   }
   let inferredLangcode = langcode ? undefined : inferDefaultDraftLangcode(target.inventory);
   if (!langcode && !inferredLangcode && target.inventory) {
