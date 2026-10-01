@@ -1,11 +1,11 @@
 ---
-description: "List custom (content) menu links, optionally scoped to a single menu (e.g. 'main', 'footer'). Returns each link's title, target URI, menu, and weight. Note: this lists editable menu_link_content entities, not code-defined static links."
+description: "List custom (content) menu links, optionally scoped to a single menu (e.g. 'main', 'footer'). Returns each link's title, target URI, menu, weight, and fields.drupal_internal__id (numeric id for /admin/structure/menu/item/{id}/edit). Note: this lists editable menu_link_content entities, not code-defined static links."
 argument-hint: "[site] [menu] [limit] [offset] [sort]"
 ---
 
 Call the MCP tool `drupal_list_menu_links`.
 
-List custom (content) menu links, optionally scoped to a single menu (e.g. 'main', 'footer'). Returns each link's title, target URI, menu, and weight. Note: this lists editable menu_link_content entities, not code-defined static links.
+List custom (content) menu links, optionally scoped to a single menu (e.g. 'main', 'footer'). Returns each link's title, target URI, menu, weight, and fields.drupal_internal__id (numeric id for /admin/structure/menu/item/{id}/edit). Note: this lists editable menu_link_content entities, not code-defined static links.
 
 Parse the arguments supplied with this command into this tool's parameters:
 

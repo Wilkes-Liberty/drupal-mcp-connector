@@ -5,7 +5,7 @@ vi.mock("../../src/lib/drupal-fetch.js", () => ({
 }));
 import { drupalFetch, drupalUploadFile } from "../../src/lib/drupal-fetch.js";
 import { describe, it, expect } from "vitest";
-import { JsonApiBackend, grantActorUid, isModeratedStatusError } from "../../src/lib/backends/jsonapi.js";
+import { JsonApiBackend, grantActorUid, isModeratedStatusError, jsonApiLanguagePath } from "../../src/lib/backends/jsonapi.js";
 import { runWithIdentity } from "../../src/lib/principal.js";
 
 function paramsOf(descriptor) {
@@ -73,6 +73,20 @@ describe("JsonApiBackend.compileQuery", () => {
   });
 });
 
+describe("jsonApiLanguagePath", () => {
+  it("prefixes a JSON:API path and leaves query strings in place", () => {
+    expect(jsonApiLanguagePath("/jsonapi/menu_link_content/menu_link_content/u", "es"))
+      .toBe("/es/jsonapi/menu_link_content/menu_link_content/u");
+    expect(jsonApiLanguagePath("/jsonapi/node/article/u?resourceVersion=rel%3Aworking-copy", "pt-br"))
+      .toBe("/pt-br/jsonapi/node/article/u?resourceVersion=rel%3Aworking-copy");
+  });
+
+  it("is a no-op without langcode and does not double-prefix", () => {
+    expect(jsonApiLanguagePath("/jsonapi/node/article/u")).toBe("/jsonapi/node/article/u");
+    expect(jsonApiLanguagePath("/es/jsonapi/node/article/u", "es")).toBe("/es/jsonapi/node/article/u");
+  });
+});
+
 describe("JsonApiBackend.toCanonical", () => {
   const backend = new JsonApiBackend({ _name: "t", baseUrl: "https://x" });
   const resource = {
@@ -134,6 +148,23 @@ describe("JsonApiBackend.toCanonical", () => {
     const c = backend.toCanonical(node);
     expect(c.fields.drupal_internal__nid).toBe(42);
     expect(c.fields.drupal_internal__vid).toBe(1510);
+  });
+
+  it("keeps drupal_internal__id on menu links for admin edit URLs (#398)", () => {
+    const link = {
+      type: "menu_link_content--menu_link_content",
+      id: "ml-1",
+      attributes: {
+        drupal_internal__id: 17,
+        title: "Empresa",
+        langcode: "es",
+        enabled: true,
+      },
+    };
+    const c = backend.toCanonical(link);
+    expect(c.fields.drupal_internal__id).toBe(17);
+    expect(c.title).toBe("Empresa");
+    expect(c.langcode).toBe("es");
   });
 
   it("keeps drupal_internal__revision_id on paragraphs and still strips other internals (#192)", () => {
@@ -399,6 +430,69 @@ describe("JsonApiBackend fetch methods", () => {
     expect(vi.mocked(drupalFetch).mock.calls[0][1]).toContain("resourceVersion=rel%3Aworking-copy");
   });
 
+  const MENU_LINK_UUID = "11111111-1111-4111-8111-111111111111";
+
+  it("getEntity with langcode prefixes the JSON:API path (#398)", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({
+      data: {
+        type: "menu_link_content--menu_link_content",
+        id: MENU_LINK_UUID,
+        attributes: { title: "Empresa", langcode: "es", drupal_internal__id: 17 },
+      },
+    });
+    const c = await backend.getEntity({
+      entityType: "menu_link_content", bundle: "menu_link_content",
+      id: MENU_LINK_UUID, langcode: "es",
+    });
+    expect(c.langcode).toBe("es");
+    expect(c.title).toBe("Empresa");
+    expect(c.fields.drupal_internal__id).toBe(17);
+    expect(vi.mocked(drupalFetch).mock.calls[0][1])
+      .toBe(`/es/jsonapi/menu_link_content/menu_link_content/${MENU_LINK_UUID}`);
+    expect(vi.mocked(drupalFetch).mock.calls[0][2].headers).toMatchObject({
+      "Accept-Language": "es",
+      "Content-Language": "es",
+    });
+  });
+
+  it("getEntity with langcode falls back to the unprefixed path when the prefix 404s (#398)", async () => {
+    const missing = new Error(`Drupal 404 on GET /es/jsonapi/menu_link_content/menu_link_content/${MENU_LINK_UUID}`);
+    missing.status = 404;
+    vi.mocked(drupalFetch)
+      .mockRejectedValueOnce(missing)
+      .mockResolvedValueOnce({
+        data: {
+          type: "menu_link_content--menu_link_content",
+          id: MENU_LINK_UUID,
+          attributes: { title: "Empresa", langcode: "es" },
+        },
+      });
+    const c = await backend.getEntity({
+      entityType: "menu_link_content", bundle: "menu_link_content",
+      id: MENU_LINK_UUID, langcode: "es",
+    });
+    expect(c.langcode).toBe("es");
+    expect(vi.mocked(drupalFetch).mock.calls[0][1])
+      .toBe(`/es/jsonapi/menu_link_content/menu_link_content/${MENU_LINK_UUID}`);
+    expect(vi.mocked(drupalFetch).mock.calls[1][1])
+      .toBe(`/jsonapi/menu_link_content/menu_link_content/${MENU_LINK_UUID}`);
+  });
+
+  it("getEntity with langcode refuses when the prefixed resource is still the default language (#398)", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({
+      data: {
+        type: "menu_link_content--menu_link_content",
+        id: MENU_LINK_UUID,
+        attributes: { title: "Company", langcode: "en" },
+      },
+    });
+    await expect(backend.getEntity({
+      entityType: "menu_link_content", bundle: "menu_link_content",
+      id: MENU_LINK_UUID, langcode: "es",
+    })).rejects.toThrow(/served language "en".*\/es\/jsonapi/);
+    expect(vi.mocked(drupalFetch)).toHaveBeenCalledTimes(1);
+  });
+
   it("createEntity POSTs a JSON:API payload", async () => {
     vi.mocked(drupalFetch).mockResolvedValue({ data: { type: "node--article", id: "new", attributes: { title: "N" } } });
     const c = await backend.createEntity({ entityType: "node", bundle: "article", attributes: { title: "N", status: false } });
@@ -481,6 +575,61 @@ describe("JsonApiBackend fetch methods", () => {
       resourceVersion: "rel:working-copy",
     });
     expect(vi.mocked(drupalFetch).mock.calls[0][1]).toContain("resourceVersion=rel%3Aworking-copy");
+  });
+
+  it("updateEntity with langcode PATCHes the language-prefixed path (#398)", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({
+      data: {
+        type: "menu_link_content--menu_link_content",
+        id: MENU_LINK_UUID,
+        attributes: { title: "Acerca de nosotros", langcode: "es", drupal_internal__id: 17 },
+      },
+    });
+    const c = await backend.updateEntity({
+      entityType: "menu_link_content", bundle: "menu_link_content",
+      id: MENU_LINK_UUID,
+      attributes: { title: "Acerca de nosotros" },
+      langcode: "es",
+    });
+    expect(c.langcode).toBe("es");
+    expect(c.title).toBe("Acerca de nosotros");
+    expect(c.fields.drupal_internal__id).toBe(17);
+    const [, path, opts] = vi.mocked(drupalFetch).mock.calls[0];
+    expect(path).toBe(`/es/jsonapi/menu_link_content/menu_link_content/${MENU_LINK_UUID}`);
+    expect(opts.method).toBe("PATCH");
+    expect(opts.headers).toMatchObject({ "Accept-Language": "es", "Content-Language": "es" });
+    expect(JSON.parse(opts.body)).toEqual({
+      data: {
+        type: "menu_link_content--menu_link_content",
+        id: MENU_LINK_UUID,
+        attributes: { title: "Acerca de nosotros" },
+      },
+    });
+  });
+
+  it("updateEntity with langcode falls back to the unprefixed path when the prefix 404s (#398)", async () => {
+    const missing = new Error(`Drupal 404 on PATCH /es/jsonapi/menu_link_content/menu_link_content/${MENU_LINK_UUID}`);
+    missing.status = 404;
+    vi.mocked(drupalFetch)
+      .mockRejectedValueOnce(missing)
+      .mockResolvedValueOnce({
+        data: {
+          type: "menu_link_content--menu_link_content",
+          id: MENU_LINK_UUID,
+          attributes: { title: "Acerca de nosotros", langcode: "es" },
+        },
+      });
+    const c = await backend.updateEntity({
+      entityType: "menu_link_content", bundle: "menu_link_content",
+      id: MENU_LINK_UUID,
+      attributes: { title: "Acerca de nosotros" },
+      langcode: "es",
+    });
+    expect(c.langcode).toBe("es");
+    expect(vi.mocked(drupalFetch).mock.calls[0][1])
+      .toBe(`/es/jsonapi/menu_link_content/menu_link_content/${MENU_LINK_UUID}`);
+    expect(vi.mocked(drupalFetch).mock.calls[1][1])
+      .toBe(`/jsonapi/menu_link_content/menu_link_content/${MENU_LINK_UUID}`);
   });
 
   it("deleteEntity issues a DELETE and resolves void", async () => {
