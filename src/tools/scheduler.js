@@ -45,8 +45,8 @@ import { httpStatusOf } from "../lib/error-status.js";
  * @returns {boolean}
  */
 export function looksLikeUnknownField(err) {
-  const msg = String(err?.message || err || "");
-  return /\b(?:attribute|field|property)\b[^.]*?\b(?:does not exist|doesn't exist|is unknown|is not recognized)/i.test(msg)
+  const msg = String(err?.message || err || "").slice(0, 2000);
+  return /\b(?:attribute|field|property)\b[^.]{0,200}?\b(?:does not exist|doesn't exist|is unknown|is not recognized)/i.test(msg)
     || /\b(?:unknown|unrecognized|invalid) (?:field|attribute|property)\b|\bno such (?:field|attribute)\b/i.test(msg);
 }
 
@@ -173,8 +173,10 @@ async function schedulePublish({
         `Backend error: ${err?.message || err}`,
       );
     }
+    // 403 (access or Sentinel policy) and 422 (validation) are the site's
+    // decision on this write. Other failures pass through unchanged.
     const status = httpStatusOf(err);
-    if (status !== null && status >= 400 && status < 500) throw siteRefusal(err, type);
+    if (status === 403 || status === 422) throw siteRefusal(err, type);
     throw err;
   }
   const out = updated ? redactCanonicalEntity(updated, sec, "node") : updated;

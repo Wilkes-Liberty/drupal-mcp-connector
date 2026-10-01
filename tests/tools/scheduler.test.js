@@ -210,6 +210,14 @@ describe("scheduler tools", () => {
     expect(err.status).toBe(403);
   });
 
+  it("does not label a 404 as a policy refusal", async () => {
+    const original = Object.assign(new Error("Drupal 404 on PATCH /jsonapi/node/page/n1: Not Found"), { status: 404 });
+    backend.updateEntity.mockRejectedValue(original);
+    const err = await handlers.drupal_schedule_publish({ type: "page", id: "n1", publishOn: "2026-07-01T12:00:00Z" })
+      .catch((e) => e);
+    expect(err).toBe(original);
+  });
+
   it("still reports a missing Scheduler capability when JSON:API says the attribute does not exist", async () => {
     backend.updateEntity.mockRejectedValue(Object.assign(
       new Error("Drupal 422 on PATCH /jsonapi/node/page/n1: The attribute publish_on does not exist on the node--page resource type."),
