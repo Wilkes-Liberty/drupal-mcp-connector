@@ -19,7 +19,9 @@ import { resolveErrRelationships, relationshipsWereSent, paragraphPinsFromEntity
 import { attachWrittenRevisionPair, readWrittenRevision } from "../lib/write-revision.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
 import { dryRunChecks, PREFLIGHT_NONE } from "../lib/dry-run-checks.js";
-import { assertDraftLangcode, readDraftTranslation, readTranslationInventory } from "../lib/sentinel-draft.js";
+import {
+  assertDraftLangcode, readDraftTranslation, readTranslationInventory, isUnpublishedWorkingDraft,
+} from "../lib/sentinel-draft.js";
 import { paragraphResourceVersion } from "./paragraphs.js";
 import { assertBodySummaryWritable, attachSummaryDeprecation } from "../lib/body-summary.js";
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
@@ -294,7 +296,7 @@ async function getNode({ site: siteName, type, id, langcode, resourceVersion, in
     const targetLang = assertDraftLangcode(langcode);
     const inventory = await readTranslationInventory(backend, { entityType: "node", bundle: type, id });
     const workingRow = (inventory.working?.translations ?? []).find((row) => row.langcode === targetLang);
-    if (workingRow && workingRow.status === false && inventory.live?.vid && inventory.working?.vid) {
+    if (workingRow && isUnpublishedWorkingDraft(workingRow) && inventory.live?.vid && inventory.working?.vid) {
       const entity = await readDraftTranslation(backend, {
         entityType: "node", bundle: type, id, langcode: targetLang,
         draftRevision: { liveVid: inventory.live.vid, workingVid: inventory.working.vid },
@@ -664,7 +666,7 @@ export const definitions = [
         langcode: { type: "string", description: "Target language for an unpublished working translation (e.g. 'es'). Continues that translation via Sentinel; does not create a missing translation and does not PATCH canonical langcode." },
         fields:  { type: "object", description: "Scalar/attribute field values keyed by machine name. Formatted text: a string or { value, format?, summary? }. format must be in the field's allowed_formats; a single allowed format is used when omitted. Entity-reference fields go in `relationships`, not here." },
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }. Paragraph / ERR items must carry meta.target_revision_id — the connector injects it when missing, and fails the write if it cannot. Image alt on a translation uses the existing file UUID plus meta.alt; replacing the file is refused." },
-        dryRun:  { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, run the server-side preflight when one applies, and return a preview without the real write. The result's `checks` block says what was checked; `caveat` names what was not. Only an existing node draft (or a langcode translation draft) is checked with the real payload: Sentinel's non-saving draft endpoint applies the submitted fields through field access and validates the entity (`serverPreflight: sentinel_draft`). On other moderated targets an id-mismatch core PATCH with no fields checks entity update access and core's working-copy guard only; Drupal does not check field access or entity validation on that probe (`core_patch_guard`). Text format is resolved before the preview returns, including on that path: a known allowed_formats list is enforced, and an unknown list reuses the format stored on the field. Other fields can still fail the real write with a field-access 403 or a validation 422. Unmoderated targets get no server-side check at all (`none`). A published node with no distinct working copy whose changed timestamp is later than revision_timestamp (possiblyPatchBlocked) fails dryRun the same as the real write (#273). Any refusal fails the dryRun." },
+        dryRun:  { type: "boolean", default: false, description: "Validate, resolve ERR identifiers, run the server-side preflight when one applies, and return a preview without the real write. The result's `checks` block says what was checked; `caveat` names what was not. Only an existing node draft (or a langcode translation draft) is checked with the real payload: Sentinel's non-saving draft endpoint applies the submitted fields through field access and validates the entity (`serverPreflight: sentinel_draft`). On other moderated targets an id-mismatch core PATCH with no fields checks entity update access and core's working-copy guard only; Drupal does not check field access or entity validation on that probe (`core_patch_guard`). Text format is resolved before the preview returns, including on that path: a known allowed_formats list is enforced, and an unknown list reuses the format stored on the field. Other fields can still fail the real write with a field-access 403 or a validation 422. Unmoderated targets get no server-side check at all (`none`). A changed/revision_timestamp gap on the default revision (possiblyPatchBlocked) is a warning on list_revisions, not a local dryRun refusal — the write proceeds to the core probe / Sentinel (#405). An actual Sentinel stale-copy refusal is still rewritten. Any refusal fails the dryRun." },
         returning: RETURNING_SCHEMA,
       },
     },

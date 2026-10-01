@@ -3,7 +3,7 @@ import { assertGraphqlMutationAllowed, SecurityError } from "../../src/lib/secur
 import { redactCanonicalEntity, redactResource, resolveSecurityConfig } from "../../src/lib/security.js";
 import { assertConfigReadAllowed, assertConfigWriteAllowed, getSecuritySummary } from "../../src/lib/security.js";
 import { assertPublishAllowed, isPublishBearing } from "../../src/lib/security.js";
-import { assertConfigScope, hasScope } from "../../src/lib/security.js";
+import { assertConfigScope, hasScope, hasConfigReadScope } from "../../src/lib/security.js";
 import { DEFAULT_PROTECTED_MODULES, assertModuleUninstallAllowed } from "../../src/lib/security.js";
 import { assertCoreExtensionChangeAllowed, assertCoreExtensionValueKeepsProtected, isCoreExtensionConfig } from "../../src/lib/security.js";
 
@@ -354,6 +354,16 @@ describe("hasScope — the empty-scope bypass is closed for governed setups (#18
     expect(() => assertConfigScope(governed(), "config:set system.site")).toThrow(SecurityError);
     const scoped = governed({ oauth: { clientId: "dev-agent", scopes: ["mcp_read", "mcp_config"] } });
     expect(() => assertConfigScope(scoped, "config:set system.site")).not.toThrow();
+  });
+
+  it("accepts mcp_config_read for config reads and still refuses writes (#397)", () => {
+    const reader = governed({ oauth: { clientId: "auditor", scopes: ["mcp_config_read"] } });
+    expect(hasConfigReadScope(reader)).toBe(true);
+    expect(() => assertConfigScope(reader, "config:get system.site")).not.toThrow();
+    expect(() => assertConfigScope(reader, "config:set system.site", { write: true })).toThrow(SecurityError);
+    const neither = governed({ oauth: { clientId: "content", scopes: ["mcp_read", "mcp_write"] } });
+    expect(hasConfigReadScope(neither)).toBe(false);
+    expect(() => assertConfigScope(neither, "config:get system.site")).toThrow(/mcp_config_read/);
   });
 });
 

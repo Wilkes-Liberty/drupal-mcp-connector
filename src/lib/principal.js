@@ -39,13 +39,16 @@ export const DIAGNOSTIC_TOOLS = new Set([
   "drupal_governance_status",
 ]);
 
-const CONFIG_TOOLS = new Set([
+const CONFIG_READ_TOOLS = new Set([
   "drupal_config_get",
   "drupal_config_list",
-  "drupal_config_set",
   "drupal_drush_config_export",
-  "drupal_drush_config_import",
   "drupal_drush_config_status",
+]);
+
+const CONFIG_WRITE_TOOLS = new Set([
+  "drupal_config_set",
+  "drupal_drush_config_import",
 ]);
 
 /** inferOperation() leaves these as "read"; they self-gate in-handler. */
@@ -98,7 +101,8 @@ export function getRequestIdentity() {
 export function requiredScopeForTool(toolName) {
   if (DIAGNOSTIC_TOOLS.has(toolName)) return null;
   if (toolName === "drupal_drush_sql_query") return "mcp_admin";
-  if (CONFIG_TOOLS.has(toolName)) return "mcp_config";
+  if (CONFIG_WRITE_TOOLS.has(toolName)) return "mcp_config";
+  if (CONFIG_READ_TOOLS.has(toolName)) return "mcp_config_read";
   if (WRITE_BY_NAME.has(toolName)) return "mcp_write";
   const op = inferOperation(toolName);
   if (op === "write" || op === "delete") return "mcp_write";
@@ -112,7 +116,11 @@ export function requiredScopeForTool(toolName) {
  */
 export function principalHasScope(identity, scope) {
   if (!scope) return true;
-  return (identity?.scopes ?? []).includes(scope);
+  const scopes = identity?.scopes ?? [];
+  if (scopes.includes(scope)) return true;
+  // Write-capable mcp_config includes the read-only auditor scope (#397).
+  if (scope === "mcp_config_read" && scopes.includes("mcp_config")) return true;
+  return false;
 }
 
 function grantNameList(values) {

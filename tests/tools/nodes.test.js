@@ -255,21 +255,25 @@ describe("nodes tools (migrated)", () => {
     expect(arg.attributes.title).toBe("Page edit");
   });
 
-  it("update_node dryRun fails when the default revision is possiblyPatchBlocked with no working copy (#273)", async () => {
+  it("update_node dryRun proceeds when changed is ahead of revision_timestamp and there is no working copy (#405)", async () => {
     const stale = canonicalNode({
       status: true,
-      changed: "2026-09-07T16:00:00Z",
+      changed: "2026-10-01T04:52:12Z",
       fields: {
         moderation_state: "published",
-        drupal_internal__vid: 1962,
-        revision_timestamp: "2026-09-01T00:00:00Z",
+        drupal_internal__vid: 3255,
+        revision_timestamp: "2026-10-01T04:51:39Z",
       },
     });
     backend.getEntity.mockResolvedValue(stale);
-    await expect(handlers.drupal_update_node({
-      type: "solution", id: "n1", title: "Draft title", dryRun: true,
-    })).rejects.toThrow(/changed after this copy was loaded|#273/);
+    const out = await handlers.drupal_update_node({
+      type: "basic_page", id: "n1", title: "Draft title", moderationState: "draft", dryRun: true,
+    });
+    expect(out.dryRun).toBe(true);
+    expect(out.attributes.moderation_state).toBe("draft");
     expect(backend.updateEntity).not.toHaveBeenCalled();
+    const probe = backend.rawQuery.mock.calls.map(([q]) => q).find((q) => q.options?.method === "PATCH");
+    expect(probe).toBeTruthy();
   });
 
   it("update_node dryRun preview includes the draft default for published moderated targets (#131)", async () => {
@@ -981,6 +985,52 @@ describe("#168 honor field allowed_formats on node writes", () => {
     await expect(handlers.drupal_update_node({
       type: "article", id: "n1", body: "<p>New</p>", moderationState: "draft", dryRun: true,
     })).rejects.toThrow(/body[\s\S]*full_html[\s\S]*client_html/s);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+});
+
+describe("update_node after revise over a working copy (#400)", () => {
+  it("refuses a carried published default language instead of pointing at revise", async () => {
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return canonicalNode({
+        status: true,
+        fields: { moderation_state: "published", drupal_internal__vid: 3141 },
+      });
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return {
+          meta: {
+            defaultLangcode: "en",
+            operations: ["create_translation", "revise_published_translation", "revise_over_working_copy"],
+            live: {
+              vid: "3141",
+              translations: [
+                { langcode: "en", default: true, status: true, moderation_state: "published" },
+                { langcode: "es", default: false, status: true, moderation_state: "published" },
+              ],
+            },
+            working: {
+              vid: "3171",
+              translations: [
+                { langcode: "en", default: true, status: false, moderation_state: "published" },
+                { langcode: "es", default: false, status: false, moderation_state: "draft" },
+              ],
+            },
+          },
+        };
+      }
+      throw new Error("must not PATCH or draft-write a carried published language");
+    });
+    await expect(handlers.drupal_update_node({
+      type: "basic_page", id: "n1", title: "Federal", moderationState: "draft", dryRun: true,
+    })).rejects.toThrow(/3626919|#400|Publish or discard/);
+    await expect(handlers.drupal_update_node({
+      type: "basic_page", id: "n1", langcode: "en", title: "Federal", moderationState: "draft", dryRun: true,
+    })).rejects.toThrow(/3626919|#400|Publish or discard/);
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 });

@@ -5,6 +5,7 @@ const SITES = {
   prod:  { _name: "prod",  oauth: { scopes: ["mcp_read", "mcp_write"] },              serverTools: { url: "/mcp" }, security: { preset: "content-editor" } },
   dev:   { _name: "dev",   oauth: { scopes: ["mcp_read", "mcp_write", "mcp_config"] }, serverTools: { url: "/mcp" }, security: { preset: "config-editor" } },
   admin: { _name: "admin", oauth: { scopes: ["mcp_read", "mcp_write", "mcp_config", "mcp_admin"] }, serverTools: { url: "/mcp" }, security: { preset: "development" } },
+  auditor: { _name: "auditor", oauth: { scopes: ["mcp_config_read"] }, serverTools: { url: "/mcp" }, security: { preset: "auditor" } },
 };
 
 vi.mock("../../src/lib/config.js", () => ({
@@ -58,6 +59,15 @@ describe("config tools — governed via server-tool bridge", () => {
     await expect(handlers.drupal_config_get({ site: "prod", name: "system.site" }))
       .rejects.toBeInstanceOf(SecurityError);
     expect(callServerTool).not.toHaveBeenCalled();
+  });
+
+  it("config_get accepts mcp_config_read and config_set still refuses it (#397)", async () => {
+    callServerTool.mockResolvedValue({ content: [{ type: "text", text: "{}" }] });
+    await handlers.drupal_config_get({ site: "auditor", name: "system.site" });
+    expect(callServerTool).toHaveBeenCalledWith(SITES.auditor, "configGet", { name: "system.site" });
+    await expect(handlers.drupal_config_set({ site: "auditor", name: "system.site", value: { name: "X" } }))
+      .rejects.toBeInstanceOf(SecurityError);
+    expect(callServerTool).toHaveBeenCalledTimes(1);
   });
 
   it("config_list forwards an optional prefix", async () => {
@@ -262,6 +272,13 @@ describe("drupal_mcp_whoami", () => {
     expect(out.tier).toBe("developer");
     expect(out.capabilities.configRead).toBe(true);
     expect(out.capabilities.configWrite).toBe(true);
+  });
+
+  it("reports configRead true for a mcp_config_read auditor token (#397)", async () => {
+    const out = await handlers.drupal_mcp_whoami({ site: "auditor" });
+    expect(out.scopes).toEqual(["mcp_config_read"]);
+    expect(out.capabilities.configRead).toBe(true);
+    expect(out.capabilities.configWrite).toBe(false);
   });
 
   it("reports the admin tier from the mcp_admin scope", async () => {

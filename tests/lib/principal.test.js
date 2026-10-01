@@ -77,9 +77,18 @@ describe("requiredScopeForTool", () => {
     expect(requiredScopeForTool("drupal_create_node")).toBe("mcp_write");
     expect(requiredScopeForTool("drupal_entity_create")).toBe("mcp_write");
     expect(requiredScopeForTool("drupal_entity_delete")).toBe("mcp_write");
-    expect(requiredScopeForTool("drupal_config_get")).toBe("mcp_config");
-    expect(requiredScopeForTool("drupal_drush_config_export")).toBe("mcp_config");
+    expect(requiredScopeForTool("drupal_config_get")).toBe("mcp_config_read");
+    expect(requiredScopeForTool("drupal_drush_config_export")).toBe("mcp_config_read");
+    expect(requiredScopeForTool("drupal_config_set")).toBe("mcp_config");
+    expect(requiredScopeForTool("drupal_drush_config_import")).toBe("mcp_config");
     expect(requiredScopeForTool("drupal_drush_sql_query")).toBe("mcp_admin");
+  });
+
+  it("treats mcp_config as satisfying the read-only mcp_config_read scope (#397)", () => {
+    expect(principalHasScope(identity({ scopes: ["mcp_config_read"] }), "mcp_config_read")).toBe(true);
+    expect(principalHasScope(identity({ scopes: ["mcp_config_read"] }), "mcp_config")).toBe(false);
+    expect(principalHasScope(identity({ scopes: ["mcp_config"] }), "mcp_config_read")).toBe(true);
+    expect(principalHasScope(identity({ scopes: ["mcp_config"] }), "mcp_config")).toBe(true);
   });
 });
 
@@ -109,6 +118,17 @@ describe("filterToolsByPrincipal", () => {
   it("keeps the full surface for a local operator (no inbound identity)", () => {
     expect(filterToolsByPrincipal(defs, sites, null).map((d) => d.name))
       .toEqual(defs.map((d) => d.name));
+  });
+
+  it("shows config reads but not writes for mcp_config_read (#397)", () => {
+    const visible = filterToolsByPrincipal(
+      defs,
+      sites,
+      identity({ scopes: ["mcp_config_read"] }),
+      { "content-agent": ["development"] },
+    ).map((d) => d.name);
+    expect(visible).toContain("drupal_config_get");
+    expect(visible).not.toContain("drupal_config_set");
   });
 
   it("hides write and config tools from a read-only principal", () => {

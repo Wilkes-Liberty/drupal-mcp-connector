@@ -135,6 +135,16 @@ describe("reports-content", () => {
       const res = await handlers.drupal_report_scheduled_content({ type: "page" });
       expect(res.gated).toBe(true);
     });
+    it("returns empty pending/overdue when Scheduler keys are present but null (#403)", async () => {
+      backend.listEntities.mockResolvedValue(page([
+        node({ id: "1", fields: { publish_on: null, unpublish_on: null } }),
+        node({ id: "2", fields: { publish_on: null, unpublish_on: null } }),
+      ]));
+      const res = await handlers.drupal_report_scheduled_content({ type: "basic_page" });
+      expect(res.gated).toBeUndefined();
+      expect(res.summary).toEqual({ pending: 0, overdue: 0 });
+      expect(res.scanned).toBe(2);
+    });
   });
 
   describe("drupal_report_readability", () => {

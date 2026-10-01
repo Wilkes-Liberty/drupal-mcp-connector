@@ -190,12 +190,15 @@ validates the real fields and live/working revision preconditions (#166;
 Sentinel d.o #3621022). The real write creates an unpublished continuation;
 it never discards the existing draft. Without a forward draft, the canonical
 probe uses a non-matching `data.id` to exercise core's guard without saving.
-An unsupported endpoint or failed precondition fails the dryRun. A published
-moderated node with no distinct working copy whose default `changed` is later
-than its `revision_timestamp` (`possiblyPatchBlocked`) fails dryRun the same
-way the saving write fails — Sentinel's stale-default check is not visible to
-the id-mismatch probe (#273). Save-time hooks run only on the real write;
-preflight does not reserve the revision.
+An unsupported endpoint or failed precondition fails the dryRun. A
+`changed` / `revision_timestamp` gap on the default revision
+(`possiblyPatchBlocked`) is a warning on `drupal_list_revisions`, not local
+proof of a hidden row: when inventory `working` is null and both JSON:API
+aliases report the same published vid, a draft write proceeds to the core
+probe / Sentinel (#405). If Sentinel's save-time stale-default check still
+refuses, that server error is returned — the connector does not claim
+Sentinel refused when it never sent the request. Save-time hooks run only
+on the real write; preflight does not reserve the revision.
 Use this (and
 `drupal_list_revisions.possiblyPatchBlocked`) **before** creating dependent
 paragraphs; preflight inside the host update cannot un-orphan work that
@@ -438,8 +441,8 @@ Works with **any** Drupal entity type — paragraphs, commerce products, webform
 optional `dryRun` boolean (default `false`). On a **moderated** `update`, `dryRun`
 also uses the same non-saving preflight as `drupal_update_node`: Sentinel's
 governed endpoint for an existing draft, or core's id-mismatch probe otherwise.
-A published node with no distinct working copy and `possiblyPatchBlocked` fails
-dryRun the same as the saving write (#273). Core revision selectors are read-only,
+A `possiblyPatchBlocked` timestamp gap on the default revision is a warning,
+not a local dryRun refusal (#405). Core revision selectors are read-only,
 not a PATCH target. When `true`, the tool validates the request and returns a
 preview of the write without committing it.
 
@@ -500,19 +503,21 @@ Read-only audit and analysis tools. All respect the security config.
 ## Configuration & Governance
 
 Governed configuration tools mediated by Drupal's authoritative server-side MCP tools
-(via the `serverTools.url` JSON-RPC bridge — **not** drush). Every config tool
-(`config_get` / `config_list` / `config_set`) requires the dedicated **`mcp_config`**
-OAuth scope server-side (config-editor / Developer tier); a content-tier token
-(`mcp_read` / `mcp_write` only) is denied on all of them. Each tool is additionally
-gated by the site's connector-side config caps (`allowConfigRead` / `allowConfigWrite`)
-as a defence-in-depth second layer. When OAuth scopes are configured, the connector
-checks for `mcp_config` up front and refuses without it rather than dispatching a call
-the server will deny. Requires a `serverTools` block on the site.
+(via the `serverTools.url` JSON-RPC bridge — **not** drush). Config **reads**
+(`config_get` / `config_list`) accept **`mcp_config`** or the read-only
+**`mcp_config_read`** auditor scope (#397). Config **writes** (`config_set`)
+still require `mcp_config` (config-editor / Developer tier). A content-tier
+token (`mcp_read` / `mcp_write` only) is denied on all of them. Each tool is
+additionally gated by the site's connector-side config caps (`allowConfigRead` /
+`allowConfigWrite`) as a defence-in-depth second layer. When OAuth scopes are
+configured, the connector checks the matching scope up front and refuses
+without it rather than dispatching a call the server will deny. Requires a
+`serverTools` block on the site.
 
 | Tool | Required params | Cap | Description |
 |------|----------------|-----|-------------|
-| `drupal_config_get` | `name` | configRead + `mcp_config` | Read one config object (e.g. `system.site`). |
-| `drupal_config_list` | — | configRead + `mcp_config` | List config object names; optional `prefix`. |
+| `drupal_config_get` | `name` | configRead + `mcp_config` or `mcp_config_read` | Read one config object (e.g. `system.site`). |
+| `drupal_config_list` | — | configRead + `mcp_config` or `mcp_config_read` | List config object names; optional `prefix`. |
 | `drupal_config_set` | `name`, `value` | configWrite + `mcp_config` | Set a config value (governed + audited server-side). Refuses `core.extension` unless the operator set `security.allowCoreExtensionChange`; see [Changes to core.extension](security.md#changes-to-coreextension). |
 | `drupal_mcp_whoami` | — | — | Report effective tier, preset, scopes, capabilities, and resolved `target` (`name`, `baseUrl`, `source`) for a site. |
 
@@ -644,11 +649,11 @@ Drive content under a `content_moderation` editorial workflow. Authoritative sta
 
 ## Scheduler
 
-Schedule future publish/unpublish using the Drupal [Scheduler](https://www.drupal.org/project/scheduler) module. Requires Scheduler installed and enabled for the content type with the `publish_on` / `unpublish_on` fields present on the bundle — otherwise the call fails with a clear capability error.
+Schedule future publish/unpublish using the Drupal [Scheduler](https://www.drupal.org/project/scheduler) module. Requires Scheduler installed and enabled for the content type with the `publish_on` / `unpublish_on` fields present on the bundle — otherwise the call fails with a clear capability error. On a bundle under Content Moderation, also set `publishState` / `unpublishState` (written as `publish_state` / `unpublish_state`); dates alone are accepted by Drupal and then fail at cron (#402).
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_schedule_publish` | `type`, `id` | Set the Scheduler `publish_on` and/or `unpublish_on` fields on a node. Provide at least one of `publishOn` / `unpublishOn`. |
+| `drupal_schedule_publish` | `type`, `id` | Set the Scheduler `publish_on` and/or `unpublish_on` fields on a node. Provide at least one of `publishOn` / `unpublishOn`. Moderated bundles require the matching `publishState` / `unpublishState` when those fields exist. |
 
 Timestamps accept ISO 8601 (e.g. `2026-07-01T12:00:00Z`) or a Unix epoch and are passed through unchanged.
 
@@ -659,7 +664,9 @@ Timestamps accept ISO 8601 (e.g. `2026-07-01T12:00:00Z`) or a Unix epoch and are
   "type": "article",
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "publishOn": "2026-07-01T12:00:00Z",
-  "unpublishOn": "2026-08-01T12:00:00Z"
+  "unpublishOn": "2026-08-01T12:00:00Z",
+  "publishState": "published",
+  "unpublishState": "draft"
 }
 ```
 
