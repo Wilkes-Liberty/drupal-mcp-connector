@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still fails loud.
 
 ### Added
+- **Terminal install wizard (`wizard` / `init`) (DEV-758).**
+  `npx drupal-mcp-connector init` (also `wizard`, `npm run init`,
+  `drupal-mcp-wizard`) collects transport (stdio vs remote HTTPS), auth
+  (OAuth vs sealed token), and agent client id, then prints Cursor
+  `.cursor/mcp.json` and Claude Code `mcpServers` snippets. Files are
+  written only with `--write` and never clobbered without confirm unless
+  `--yes`. Post-config `whoami` + `contract_ready` print pass/fail with a
+  next fix, or a clear skip when the host is unreachable. Remote HTTPS is
+  Tailscale / local-VPN only — not a public SaaS path.
 - **Menu tools return `fields.drupal_internal__id`.** The numeric menu-link
   id is kept on JSON:API canonicalization so list/create/update responses
   can build `/admin/structure/menu/item/{id}/edit` (and `…/edit/{langcode}`).

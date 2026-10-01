@@ -21,6 +21,17 @@ pick per client:
 >    on a server, use env vars / a secrets manager. See
 >    [oauth-client-credentials.md](oauth-client-credentials.md).
 
+### Operator wizard
+
+```bash
+npx -y drupal-mcp-connector init
+# CI: npx -y drupal-mcp-connector init --yes --json
+```
+
+Prints Cursor + Claude Code `mcpServers` snippets (and writes them only with
+`--write`). Remote HTTPS here means a connector **you** already host on a
+private network (Tailscale / local VPN) — not a public hosted SaaS URL.
+
 Regardless of client, a Drupal-side governance module (e.g.
 [MCP Sentinel](integration-contract.md)) remains the authoritative policy.
 
@@ -95,6 +106,41 @@ For a remote endpoint instead of stdio: `claude mcp add --transport http drupal 
 Restart the app. (GUI apps don't inherit your shell env — prefer the launcher,
 which reads the secret from your OS keychain. First launch may prompt for keychain
 access; approve it.)
+
+---
+
+## Cursor
+
+Project file `.cursor/mcp.json`, or user file `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "drupal": {
+      "command": "npx",
+      "args": ["-y", "drupal-mcp-connector"],
+      "env": {
+        "DRUPAL_BASE_URL": "https://drupal.example",
+        "DRUPAL_API_TOKEN": "${env:DRUPAL_API_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Remote HTTPS (Tailscale / local VPN — not a public SaaS URL):
+
+```json
+{
+  "mcpServers": {
+    "drupal": {
+      "url": "https://mcp.example.ts.net:3443/mcp"
+    }
+  }
+}
+```
+
+`npx drupal-mcp-connector init` prints both shapes.
 
 ---
 
@@ -266,6 +312,7 @@ Hardening (see [security-hardening.md](security-hardening.md)):
 |---|---|---|---|
 | Claude Code | ✅ | ✅ | `claude mcp add` (user/project scope) |
 | Claude Desktop | ✅ | ✅ | `claude_desktop_config.json` |
+| Cursor | ✅ | ✅ | `.cursor/mcp.json` or `~/.cursor/mcp.json` |
 | Grok Build (CLI) | ✅ | ✅ | native MCP, also reads `AGENTS.md` |
 | Grok API | — | ✅ | Remote MCP Tools in `tools` array |
 | OpenAI Codex CLI | ✅ | ✅ | `~/.codex/config.toml`; skills at `$HOME/.agents/skills/drupal-mcp/` (not `~/.codex/prompts`) |

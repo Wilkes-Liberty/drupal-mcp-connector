@@ -205,6 +205,25 @@ Full detail: **[docs/security.md](docs/security.md)** and **[docs/security-harde
 
 ## Quick Start
 
+### One-liner (recommended for operators)
+
+```bash
+npx -y drupal-mcp-connector init
+# aliases: npx -y drupal-mcp-connector wizard
+#          npx -y drupal-mcp-wizard
+# CI / dogfood: npx -y drupal-mcp-connector init --yes --json
+```
+
+The wizard prints Cursor (`.cursor/mcp.json`) and Claude Code `mcpServers`
+snippets, optional `auth.grants` allowlist hints, and a whoami / contract_ready
+check. It writes files only with `--write` (never clobbers without confirm
+unless `--yes`).
+
+**Remote HTTPS is Tailscale / local-VPN only.** This package does not ship a
+public SaaS remote endpoint. stdio is the default: the client launches the
+connector on your machine and inherits VPN/Tailscale/localhost reachability to
+Drupal. See **[docs/mcp-clients.md](docs/mcp-clients.md)**.
+
 ### From npm (recommended for operators)
 
 ```bash

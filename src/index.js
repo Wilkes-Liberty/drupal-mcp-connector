@@ -23,6 +23,9 @@
  *   MCP_RATE_LIMIT    Max /mcp requests per window per client IP (0/unset = off)
  *   MCP_RATE_WINDOW_SEC  Rate-limit window in seconds (default: 60)
  *   MCP_LEGACY_TRANSPORT "serve" (default) | "reject" for 2025-era clients
+ *
+ * CLI subcommands (anything else starts the MCP server):
+ *   wizard | init     Operator install wizard — see src/lib/wizard.js
  */
 
 import { createServer as createHttpsServer } from "https";
@@ -69,6 +72,12 @@ import {
   replaceModuleWorkflows,
 } from "./lib/workflow-prompts.js";
 import { builtinWorkflowProvider } from "./lib/workflows/builtin.js";
+import { runWizardCli } from "./lib/wizard.js";
+
+const cliCommand = process.argv[2];
+if (cliCommand === "wizard" || cliCommand === "init") {
+  process.exit(await runWizardCli(process.argv.slice(3)));
+}
 
 // Apply config/secrets.map (or the shipped example table) before any site
 // resolution. MCP clients spawn this file directly; the shell launcher is

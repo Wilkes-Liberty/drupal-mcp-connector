@@ -170,6 +170,14 @@ You should see:
 
 ## 6. Register with an MCP Client (stdio)
 
+```bash
+npx -y drupal-mcp-connector init
+```
+
+The wizard prints Cursor + Claude Code `mcpServers` snippets and a
+whoami / contract_ready check. Remote HTTPS is Tailscale / local-VPN only —
+see **[mcp-clients.md](mcp-clients.md)**.
+
 Most desktop and CLI MCP clients launch the connector as a stdio subprocess. For **copy-paste config per client** — Claude Code/Desktop, Grok Build, OpenAI Codex, Cursor — see **[mcp-clients.md](mcp-clients.md)**. The generic shape most stdio clients accept:
 
 ```json
