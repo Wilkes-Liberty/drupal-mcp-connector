@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.25.0] - 2026-10-01
+
+### Added
+- **Menu tools return `fields.drupal_internal__id`.** The numeric menu-link
+  id is kept on JSON:API canonicalization so list/create/update responses
+  can build `/admin/structure/menu/item/{id}/edit` (and `…/edit/{langcode}`).
+
 ### Fixed
 - **`drupal_update_menu_link` with `langcode` targets the translation via a JSON:API URL prefix (#398).**
   Stock Drupal negotiates content language from `/{langcode}/jsonapi/…` (the
@@ -18,11 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unprefixed path plus headers when the prefix 404s. Taxonomy get/update
   with `langcode` use the same backend path. A mismatch after both attempts
   still fails loud.
-
-### Added
-- **Menu tools return `fields.drupal_internal__id`.** The numeric menu-link
-  id is kept on JSON:API canonicalization so list/create/update responses
-  can build `/admin/structure/menu/item/{id}/edit` (and `…/edit/{langcode}`).
 
 ## [2.24.2] - 2026-09-30
 
