@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Terminal install wizard (`wizard` / `init`) (DEV-758).**
+  `npx drupal-mcp-connector init` (also `wizard`, `npm run init`,
+  `drupal-mcp-wizard`) collects transport (stdio vs remote HTTPS), auth
+  (OAuth vs sealed token), and agent client id, then prints Cursor
+  `.cursor/mcp.json` and Claude Code `mcpServers` snippets. Files are
+  written only with `--write` and never clobbered without confirm unless
+  `--yes`. Post-config `whoami` + `contract_ready` print pass/fail with a
+  next fix, or a clear skip when the host is unreachable. Remote HTTPS is
+  Tailscale / local-VPN only — not a public SaaS path.
+- **`doctor` CLI (DEV-759).** `npx drupal-mcp-connector doctor` runs ordered
+  gates (reachability → auth/401 → agent client → allowlist →
+  `contract_ready` → version skew), prints one primary failure plus the
+  exact next fix, exits non-zero on fail, and supports `--json` with no
+  secrets.
+- **Transport presets (DEV-763).** Wizard `--preset local-stdio|tailscale|public-https`
+  and docs table. Public HTTPS is marked gated/later — not a hosted SaaS URL.
+- **Version-skew blurb (DEV-766).** Doctor and wizard print “you are on X;
+  site needs Y” when readiness reports versions. No auto-upgrade.
+- **Two-minute happy-path recipe (DEV-760).** README walkthrough using
+  `drupal_mcp_whoami` → `drupal_list_sites` → unpublished
+  `drupal_list_nodes` / `dryRun` `drupal_create_node`.
+
 ### Fixed
 - **A `changed` / `revision_timestamp` gap on the default revision no longer blocks the next draft (#405).**
   `#273` treated `possiblyPatchBlocked` as local proof of a hidden revision and
