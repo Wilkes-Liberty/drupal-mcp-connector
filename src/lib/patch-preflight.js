@@ -30,6 +30,8 @@ import {
   readNodeDraftInventory,
   assertInventoryDraftLanguage,
   inferDefaultDraftLangcode,
+  isCarriedPublishedLanguage,
+  carriedPublishedLanguageError,
   MIN_SENTINEL_DEFAULT_LANGUAGE_DRAFT_VERSION,
 } from "./sentinel-draft.js";
 import { PREFLIGHT_NONE, PREFLIGHT_CORE_GUARD, PREFLIGHT_SENTINEL_DRAFT } from "./dry-run-checks.js";
@@ -102,26 +104,24 @@ export class WorkingCopyStaleError extends Error {
 /**
  * Sentinel's save-time stale-default check (McpWritePreconditions) is not
  * exercised by the id-mismatch PATCH probe — that probe fails before
- * entity validation / presave. A published node with no distinct working
- * copy and a changed timestamp later than its own revision_timestamp is
- * the readable fingerprint (`possiblyPatchBlocked`). dryRun and the real
- * write must refuse the same way; reloading and retrying does not help.
- * Do not bypass the draft or publish gate. See connector #273.
+ * entity validation / presave. #273 used the `changed` >
+ * `revision_timestamp` fingerprint (`possiblyPatchBlocked`) as a local
+ * stand-in, but a gap on the default revision itself is not proof of a
+ * hidden row (#405). list_revisions still reports the warning. A draft
+ * write proceeds to the core probe / Sentinel; this message is used only
+ * when Sentinel actually refuses. Do not bypass the draft or publish gate.
  */
 export const STALE_COPY_MESSAGE =
   "This entity cannot be updated: MCP Sentinel refused a stale default-revision " +
-  "write (the content changed after this copy was loaded). dryRun and the real " +
-  "write share this check. rel:latest-version and rel:working-copy report the " +
-  "same vid, but the default revision's changed timestamp is later than its " +
-  "revision_timestamp (possiblyPatchBlocked). Reloading and retrying the same " +
-  "canonical PATCH will not help. Do not bypass the draft or publish gate. " +
-  "See connector #273 / #201.";
+  "write (the content changed after this copy was loaded). Reloading and " +
+  "retrying the same canonical PATCH will not help. Do not bypass the draft " +
+  "or publish gate. See connector #273 / #201 / #405.";
 
 const STALE_COPY_RE = /changed after this copy was loaded/i;
 
 /**
- * Thrown when a canonical write (or its dryRun) would hit Sentinel's
- * stale-default-revision check (#273).
+ * Thrown when Sentinel's save-time stale-default-revision check refuses
+ * a write (#273). Not thrown from the local fingerprint alone (#405).
  */
 export class StaleCopyError extends Error {
   /**
@@ -417,28 +417,36 @@ export async function prepareGuardedPatch(backend, {
     : { resourceVersion: undefined, workingCopy: null, liveVid: null, workingVid: null };
   // Set only after a check has run and passed; a refusal throws first.
   target.preflight = PREFLIGHT_NONE;
-  if (needsPreflight && !target.resourceVersion) {
-    // Canonical path (no distinct working copy). The id-mismatch probe never
-    // reaches Sentinel's save-time stale-default check; refuse here when the
-    // possiblyPatchBlocked fingerprint is already readable (#273).
-    let fingerprint = existing;
-    const fields = fingerprint?.fields && typeof fingerprint.fields === "object" ? fingerprint.fields : {};
-    const hasTimestamps = Boolean(
-      fingerprint?.changed && (fingerprint.revisionTimestamp || fields.revision_timestamp),
-    );
-    if (!hasTimestamps && typeof backend?.getEntity === "function") {
-      const latest = await backend.getEntity({
-        entityType, bundle, id, resourceVersion: "rel:latest-version",
-      }).catch(() => null);
-      if (latest) fingerprint = latest;
-    }
-    if (changedAheadOfRevision(fingerprint)) {
-      throw new StaleCopyError();
+  // Canonical path (no distinct working copy): do not treat
+  // possiblyPatchBlocked as local proof of a hidden revision (#405).
+  // A changed/revision_timestamp gap on the default revision is a
+  // warning on list_revisions. Proceed to Sentinel / the core probe;
+  // rewrite an actual Sentinel stale-copy refusal below.
+  // An inventory already in hand names the default-language draft for free.
+  // When the working-copy alias skipped discovery, load inventory so a
+  // carried published language is refused locally (#400). A missing or
+  // malformed catalog is not a write failure: the alias already resolved.
+  if (!target.inventory && (langcode || target.resourceVersion)) {
+    try {
+      const inventory = await readNodeDraftInventory(backend, { entityType, bundle, id });
+      if (inventory) target.inventory = inventory;
+    } catch (err) {
+      const msg = String(err?.message || "");
+      if (langcode || !/invalid revision inventory|did not return a translation inventory/i.test(msg)) {
+        throw err;
+      }
     }
   }
-  // An inventory already in hand names the default-language draft for free.
   let inferredLangcode = langcode ? undefined : inferDefaultDraftLangcode(target.inventory);
   if (!langcode && !inferredLangcode && target.inventory) {
+    const defaultLang = typeof target.inventory.defaultLangcode === "string"
+      ? target.inventory.defaultLangcode
+      : undefined;
+    const carried = (target.inventory.working?.translations ?? [])
+      .find((row) => defaultLang && row?.langcode === defaultLang);
+    if (isCarriedPublishedLanguage(carried)) {
+      throw carriedPublishedLanguageError(defaultLang);
+    }
     assertInventoryDraftLanguage(target.inventory, langcode);
   }
   if (langcode) {

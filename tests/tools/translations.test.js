@@ -379,6 +379,42 @@ describe("translations tools", () => {
     expect(out.revise).toBe(true);
   });
 
+  it("create_translation revise does not treat status:false + published moderation as a draft (#400)", async () => {
+    backend.getEntity.mockResolvedValue({
+      id: UUID, status: true, fields: { drupal_internal__vid: 3141, moderation_state: "published" },
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        return {
+          meta: {
+            defaultLangcode: "en",
+            operations: ["create_translation", "revise_published_translation", "revise_over_working_copy"],
+            live: {
+              vid: "3141",
+              translations: [
+                { langcode: "en", default: true, status: true, moderation_state: "published" },
+                { langcode: "es", default: false, status: true, moderation_state: "published" },
+              ],
+            },
+            working: {
+              vid: "3171",
+              translations: [
+                { langcode: "en", default: true, status: false, moderation_state: "published" },
+                { langcode: "es", default: false, status: false, moderation_state: "draft" },
+              ],
+            },
+          },
+        };
+      }
+      throw new Error("revise must not POST for a carried published language");
+    });
+    await expect(handlers.drupal_create_translation({
+      type: "basic_page", id: UUID, langcode: "en", revise: true, dryRun: true,
+      attributes: { title: "Federal" },
+    })).rejects.toThrow(/3626919|#400|Publish or discard/);
+    expect(backend.rawQuery.mock.calls.some((c) => String(c[0].path).endsWith("/mcp-draft/translations"))).toBe(false);
+  });
+
   it("create_translation revise points a language already drafted on the working copy at continue", async () => {
     backend.getEntity.mockResolvedValue({
       id: UUID, status: true, fields: { drupal_internal__vid: 10 },

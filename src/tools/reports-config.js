@@ -18,7 +18,7 @@
  */
 
 import { getSiteConfig } from "../lib/config.js";
-import { resolveSecurityConfig, assertConfigReadAllowed } from "../lib/security.js";
+import { resolveSecurityConfig, assertConfigReadAllowed, configReadBindingScope } from "../lib/security.js";
 import { gatedReport } from "../lib/reports-support.js";
 import { callGovernedServerTool, callBoundModuleTool, toolResultData } from "../lib/server-tools.js";
 import { runPrivileged, serverToolsConfigured, drushConfigured } from "../lib/audit-sources.js";
@@ -67,7 +67,7 @@ function configSourceAvailable(site) {
 async function readConfig(site, name) {
   if (site.serverTools?.bindings !== undefined) {
     return toolResultData(await callBoundModuleTool(site, "configGet", { name }, {
-      operation: "read", scope: "mcp_config", capabilities: ["configRead"],
+      operation: "read", scope: configReadBindingScope(site), capabilities: ["configRead"],
     }));
   }
   if (serverToolsConfigured(site)) {
@@ -89,7 +89,7 @@ async function readConfig(site, name) {
 async function listConfigNames(site, prefix) {
   if (site.serverTools?.bindings !== undefined) {
     return pickConfigNames(toolResultData(await callBoundModuleTool(site, "configList", { prefix }, {
-      operation: "read", scope: "mcp_config", capabilities: ["configRead"],
+      operation: "read", scope: configReadBindingScope(site), capabilities: ["configRead"],
     })));
   }
   if (serverToolsConfigured(site)) {

@@ -45,6 +45,9 @@ import {
   supportsRevisePublishedTranslation,
   supportsReviseOverWorkingCopy,
   supportsSentinelDraft,
+  isUnpublishedWorkingDraft,
+  isCarriedPublishedLanguage,
+  carriedPublishedLanguageError,
 } from "../lib/sentinel-draft.js";
 import { mapTranslationRow } from "../lib/translation-rows.js";
 import { dryRunChecks, PREFLIGHT_SENTINEL_DRAFT } from "../lib/dry-run-checks.js";
@@ -179,12 +182,15 @@ async function createTranslation({
       if (hasWorking) {
         const workingRow = (draftRevision.inventory?.working?.translations ?? [])
           .find((row) => row?.langcode === targetLang);
-        if (workingRow && workingRow.status === false) {
+        if (workingRow && isUnpublishedWorkingDraft(workingRow)) {
           const continuer = entityType === "media" ? "drupal_update_media" : "drupal_update_node";
           throw new Error(
             "This language is already an unpublished draft on the working copy. " +
             `Continue it with ${continuer} and langcode. Revise was not attempted.`,
           );
+        }
+        if (workingRow && isCarriedPublishedLanguage(workingRow)) {
+          throw carriedPublishedLanguageError(targetLang);
         }
         // Sentinel 2.25.0+ builds the draft on the named working copy; the
         // pair is sent as If-Match "live:working" by createTranslationDraft.

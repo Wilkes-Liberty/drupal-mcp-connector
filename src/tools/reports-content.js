@@ -308,9 +308,11 @@ async function scheduledContent({ site: siteName, type, sampleSize = 200 }) {
   const overdue = [];
   for (const n of nodes) {
     for (const [field, action] of [["publish_on", "publish"], ["unpublish_on", "unpublish"]]) {
-      const raw = scalar(n, [field]);
+      // Presence of the key (even null) means Scheduler is exposed (#403).
+      const { present, value } = fieldPresence(n, field);
+      if (present) sawField = true;
+      const raw = value && typeof value === "object" && "value" in value ? value.value : value;
       if (raw === undefined || raw === null || raw === "" || raw === 0) continue;
-      sawField = true;
       const ms = toMillis(raw);
       if (ms === null) continue;
       const rec = { id: n.id, title: n.title, action, when: new Date(ms).toISOString(), path: n.url };

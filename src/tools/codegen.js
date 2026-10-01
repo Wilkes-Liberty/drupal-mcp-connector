@@ -18,7 +18,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { sshDrush } from "./drush.js";
 import { callBoundModuleTool, toolResultData } from "../lib/server-tools.js";
-import { SecurityError } from "../lib/security.js";
+import { SecurityError, configReadBindingScope } from "../lib/security.js";
 import { validateMachineName } from "../lib/validate.js";
 
 const INSPECT = "graphql-compose-codegen:inspect";
@@ -83,7 +83,7 @@ async function runGqcc(
     ]).get(subcommand);
     const result = toolResultData(await callBoundModuleTool(site, binding, {
       bundles: names, skip_fields: skip,
-    }, { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }));
+    }, { operation: "read", scope: configReadBindingScope(site), capabilities: ["configRead"] }));
     if (result?.success !== true || !result.data || typeof result.data !== "object" || Array.isArray(result.data)) {
       throw new SecurityError("Codegen module returned an invalid result. No SSH fallback was attempted.");
     }

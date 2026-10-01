@@ -25,6 +25,7 @@ import {
 } from "../lib/security.js";
 import {
   assertDraftLangcode, readDraftTranslation, readNodeDraftInventory, readTranslationInventory,
+  isUnpublishedWorkingDraft,
 } from "../lib/sentinel-draft.js";
 import { omitLiveComputedMetatag } from "../lib/entity-response.js";
 import { changedAheadOfRevision, prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
@@ -221,7 +222,7 @@ async function getRevision({ site: siteName, type, id, version, langcode }) {
     const targetLang = assertDraftLangcode(langcode);
     const inventory = await readTranslationInventory(backend, { entityType: "node", bundle: type, id });
     const workingRow = (inventory.working?.translations ?? []).find((row) => row.langcode === targetLang);
-    if (!inventory.live?.vid || !inventory.working?.vid || !workingRow || workingRow.status !== false) {
+    if (!inventory.live?.vid || !inventory.working?.vid || !workingRow || !isUnpublishedWorkingDraft(workingRow)) {
       throw new Error("No unpublished working translation is addressable for this revision.");
     }
     const entity = await readDraftTranslation(backend, {
