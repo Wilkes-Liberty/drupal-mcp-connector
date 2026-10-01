@@ -39,7 +39,7 @@ targeted tests while iterating (`npx vitest run tests/tools/nodes.test.js`).
 | `src/lib/backends/` | JSON:API + GraphQL adapters → canonical entity shape |
 | `tests/` | Mirrors `src/` (e.g. `src/tools/nodes.js` → `tests/tools/nodes.test.js`) |
 | `config/config.example.json` | Documented example site config |
-| `config/config.json` | **Local only — gitignored secrets** |
+| `config/config.json` | **Local only — gitignored.** Other `config/config.*.json` variants are ignored too; `config.example.json` stays tracked |
 | `.agents/commands/` | Generated `/drupal-*` slash stubs (harness-agnostic; see below) |
 
 ## Conventions
@@ -63,7 +63,7 @@ targeted tests while iterating (`npx vitest run tests/tools/nodes.test.js`).
 
 ## Security (non-negotiable)
 
-- Never commit `config/config.json`, `.env*`, tokens, OAuth secrets, or SSH keys.
+- Never commit `config/config.json` or any other `config/config.*.json` file except `config/config.example.json`. Never commit `.env*`, tokens, OAuth secrets, or SSH keys.
 - Connector security (`src/lib/security.js`) is defense-in-depth on top of Drupal
   permissions — do not weaken presets or redaction without an explicit decision.
 - Destructive tools and publish (`status: true` / `moderation_state: "published"`)
