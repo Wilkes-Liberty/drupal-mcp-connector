@@ -41,7 +41,7 @@ import * as config       from "./config.js";
 import * as codegen      from "./codegen.js";
 import { SITE_PARAM } from "../lib/site-target.js";
 
-export const allModules = [nodes, taxonomy, users, media, graphql, site, entities, reports, drush,
+const allModules = [nodes, taxonomy, users, media, graphql, site, entities, reports, drush,
   revisions, moderation, scheduler, fields, references, bulk, translations, paragraphs, structure, redirects, search, reportsExtra,
   reportsLinks, reportsConfig, reportsContent, auditComposite, config, codegen];
 

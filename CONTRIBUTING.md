@@ -30,6 +30,7 @@ npm run lint                      # eslint — must be clean
 npm run lint:fix                  # auto-fix what eslint can
 npm run audit                     # fail on high-severity dependency advisories
 npm run check                     # lint + audit together
+npm run syntax-check              # node --check over src/** (CI runs this)
 ```
 
 Before pushing, run `npm run check` and `npm test` — these mirror what CI enforces.
@@ -58,12 +59,14 @@ and [docs/tools-reference.md](docs/tools-reference.md) for naming conventions):
 3. Add a handler entry to the file's `handlers` export.
 
 No changes to `src/index.js` are needed unless you add a new module file.
+Tool registration and the security middleware live in `src/tools/index.js`
+and `src/lib/dispatch.js`.
 
 ### Adding a New Tool Module
 
 1. Create `src/tools/yourmodule.js` following the existing pattern.
-2. Add `import * as yourmodule from "./tools/yourmodule.js"` in `src/index.js`.
-3. Add `yourmodule` to the `allModules` array.
+2. Add `import * as yourmodule from "./yourmodule.js"` in `src/tools/index.js`.
+3. Include `yourmodule` in the module list that builds `allDefinitions` / `allHandlers`.
 
 ## Code Style
 

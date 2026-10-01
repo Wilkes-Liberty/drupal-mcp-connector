@@ -4,7 +4,7 @@
  * A tool's operation (read / write / delete / graphql) is inferred from its name
  * prefix rather than trusting per-tool metadata, so a new tool that follows the
  * naming convention is classified automatically. This single definition is shared
- * by the security middleware (src/index.js), the per-tool MCP prompts
+ * by the security middleware (src/lib/dispatch.js), the per-tool MCP prompts
  * (src/lib/tool-prompts.js), and the slash-command generator
  * (scripts/generate-commands.js) so authorization gating and the "destructive"
  * warnings surfaced to users can never drift apart.

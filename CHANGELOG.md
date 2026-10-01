@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Nightly leftover cleanup (#399).** CI pins Node 20 (no 1-cell matrix) and
+  runs `npm run syntax-check` recursively over `src/`. The two
+  `resources/read` URIs (`content-types`, `security-policy`) go through
+  `invokeReadTool` → `callTool`. AGENTS, CONTRIBUTING, threat-model, and
+  ops docs point middleware at `src/lib/dispatch.js`.
+
+### Removed
+- **Production-dead `redactResource`.** Canonical `redactCanonicalEntity` is
+  the only redaction path; JSON:API-shape tests folded into it.
+- **Leftover public exports** from `workflow-prompts.js`, `server-tools.js`,
+  and `allModules` (module-private after #395).
+
 ### Added
 - **Terminal install wizard (`wizard` / `init`) (DEV-758).**
   `npx drupal-mcp-connector init` (also `wizard`, `npm run init`,

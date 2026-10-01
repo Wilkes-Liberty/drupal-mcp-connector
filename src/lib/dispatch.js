@@ -236,3 +236,25 @@ export async function callTool(name, args, context = {}) {
     return toolError(err);
   }
 }
+
+/**
+ * Run a read tool through {@link callTool} and unwrap the MCP envelope.
+ * `resources/read` uses this so those URIs cannot skip middleware.
+ *
+ * @param {string} name Tool name.
+ * @param {object} args Tool arguments.
+ * @param {object} [context] Optional inbound identity / grant overrides.
+ * @returns {Promise<*>} The tool payload.
+ * @throws {Error} When the tool is missing, denied, or returns isError.
+ */
+export async function invokeReadTool(name, args, context = {}) {
+  const result = await callTool(name, args, context);
+  if (result?.isError) {
+    throw new Error(result.content?.[0]?.text ?? `Tool "${name}" failed`);
+  }
+  const text = result?.content?.[0]?.text;
+  if (typeof text !== "string") {
+    throw new Error(`Tool "${name}" returned no payload`);
+  }
+  return JSON.parse(text);
+}

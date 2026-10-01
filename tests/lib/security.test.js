@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { assertGraphqlMutationAllowed, SecurityError } from "../../src/lib/security.js";
-import { redactCanonicalEntity, redactResource, resolveSecurityConfig } from "../../src/lib/security.js";
+import { redactCanonicalEntity, resolveSecurityConfig } from "../../src/lib/security.js";
 import { assertConfigReadAllowed, assertConfigWriteAllowed, getSecuritySummary } from "../../src/lib/security.js";
 import { assertPublishAllowed, isPublishBearing } from "../../src/lib/security.js";
 import { assertConfigScope, hasScope, hasConfigReadScope } from "../../src/lib/security.js";
@@ -12,36 +12,6 @@ const allowMut = { allowGraphql: true, allowGraphqlMutations: true, readOnly: fa
 const denyMut = { allowGraphql: true, allowGraphqlMutations: false, readOnly: false };
 const readOnly = { allowGraphql: true, allowGraphqlMutations: true, readOnly: true };
 const noGraphql = { allowGraphql: false, allowGraphqlMutations: false, readOnly: false };
-
-describe("redactResource (JSON:API shape)", () => {
-  const sec = { globalRedactedFields: ["field_api_key"], entityRules: { user: { redactedFields: ["mail", "pass"] } } };
-  const userRes = () => ({ type: "user--user", id: "u1", attributes: { name: "jane", mail: "j@x.com", pass: "secret", field_api_key: "k", bio: "hi" } });
-
-  it("redacts entity-type + global fields, leaves others intact", () => {
-    const r = redactResource(userRes(), sec, "user");
-    expect(r.attributes.mail).toBe("[REDACTED]");
-    expect(r.attributes.pass).toBe("[REDACTED]");
-    expect(r.attributes.field_api_key).toBe("[REDACTED]");
-    expect(r.attributes.name).toBe("jane");
-    expect(r.attributes.bio).toBe("hi");
-  });
-
-  it("redacts across an array of resources", () => {
-    const out = redactResource([userRes(), userRes()], sec, "user");
-    expect(out).toHaveLength(2);
-    expect(out[0].attributes.mail).toBe("[REDACTED]");
-  });
-
-  it("returns the resource unchanged when nothing matches the entity type", () => {
-    const r = redactResource({ type: "node--article", id: "n1", attributes: { title: "T" } }, sec, "node");
-    expect(r.attributes.title).toBe("T");
-  });
-
-  it("is null/empty-safe", () => {
-    expect(redactResource(null, sec, "user")).toBeNull();
-    expect(redactResource({ type: "user--user", id: "u1" }, sec, "user")).toMatchObject({ id: "u1" });
-  });
-});
 
 describe("allowPublish policy (#114) + assertPublishAllowed (#111)", () => {
   it("defaults allowPublish false on every preset except development", () => {
@@ -310,6 +280,17 @@ describe("redactCanonicalEntity", () => {
 
   it("handles null/undefined entity", () => {
     expect(redactCanonicalEntity(null, sec, "user")).toBeNull();
+  });
+
+  it("is empty-safe when fields are missing", () => {
+    expect(redactCanonicalEntity({ id: "u1" }, sec, "user")).toMatchObject({ id: "u1" });
+  });
+
+  it("redacts the same fields on each mapped entity (list callers)", () => {
+    const out = [entity(), entity()].map((item) => redactCanonicalEntity(item, sec, "user"));
+    expect(out).toHaveLength(2);
+    expect(out[0].fields.mail).toBe("[REDACTED]");
+    expect(out[1].fields.field_api_key).toBe("[REDACTED]");
   });
 });
 

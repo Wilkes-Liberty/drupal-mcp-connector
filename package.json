@@ -63,7 +63,7 @@
     "test:watch": "vitest",
     "audit": "npm audit --audit-level=high",
     "check": "npm run lint && npm run audit",
-    "syntax-check": "for f in src/lib/*.js src/tools/*.js src/index.js; do node --input-type=module --check < $f && echo \"$f ✓\"; done",
+    "syntax-check": "find src -name '*.js' -print0 | while IFS= read -r -d '' f; do node --input-type=module --check < \"$f\" && echo \"$f ✓\"; done",
     "verify": "node bin/drupal-mcp-verify.js",
     "verify:example": "node bin/drupal-mcp-verify.js --config config/config.example.json",
     "wizard": "node bin/drupal-mcp-wizard.js",

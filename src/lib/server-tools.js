@@ -444,7 +444,7 @@ export async function listServerTools(site, cursor) {
 }
 
 /** Fetch one page of Drupal `McpPromptConfig` prompts. */
-export async function listServerPrompts(site, cursor) {
+async function listServerPrompts(site, cursor) {
   return requestServerTool(site, "prompts/list", cursor === undefined ? {} : { cursor }, {
     maxBytes: SERVER_TOOL_MAX_BYTES, preserveErrors: true,
   });
@@ -454,7 +454,7 @@ export async function listServerPrompts(site, cursor) {
  * Fetch one Drupal prompt body. Pass no arguments so `{{token}}` placeholders
  * stay intact for the connector's workflow renderer.
  */
-export async function getServerPrompt(site, name) {
+async function getServerPrompt(site, name) {
   return requestServerTool(site, "prompts/get", { name, arguments: {} }, {
     maxBytes: SERVER_TOOL_MAX_BYTES, preserveErrors: true,
   });
@@ -466,7 +466,7 @@ export async function getServerPrompt(site, name) {
  * @param {Function} [list] Catalog page reader.
  * @returns {Promise<object[]>} Prompt descriptors.
  */
-export async function advertisedServerPrompts(site, list = listServerPrompts) {
+async function advertisedServerPrompts(site, list = listServerPrompts) {
   const prompts = [];
   const seen = new Set();
   let cursor;
