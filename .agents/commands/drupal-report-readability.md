@@ -1,6 +1,6 @@
 ---
 description: "Score body readability (Flesch Reading Ease) for a content type and flag hard-to-read content and structural issues (no H2 subheadings, multiple H1s)."
-argument-hint: "[site] [type] [sampleSize] [hardThreshold]"
+argument-hint: "<type> [site] [sampleSize] [hardThreshold]"
 ---
 
 Call the MCP tool `drupal_report_readability`.
@@ -9,9 +9,11 @@ Score body readability (Flesch Reading Ease) for a content type and flag hard-to
 
 Parse the arguments supplied with this command into this tool's parameters:
 
+**Required:**
+- `type` (string): Content type machine name (required; see drupal_list_content_types)
+
 **Optional:**
 - `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
-- `type` (string): Content type (default: article)
 - `sampleSize` (number)
 - `hardThreshold` (number): Flag content scoring below this
 

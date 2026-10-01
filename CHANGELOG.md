@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`drupal_schedule_publish` site refusals (#402).** A 422 such as
+  `publish_state: You do not have access to transition from Draft to
+  Published` was rewritten as "Scheduler fields are not available", because
+  any message naming a Scheduler field counted as a missing field. Only the
+  "attribute does not exist" phrasing counts now. Other 4xx refusals,
+  including MCP Sentinel denials, return the site's reason verbatim with the
+  HTTP status.
+- **`drupal_schedule_publish` no longer refuses on its own (#402).** A
+  moderated bundle without `publish_state` / `unpublish_state` is written and
+  the result carries a warning; Drupal and Sentinel decide. A date without
+  its state is still refused when the bundle has the state field, since
+  Drupal accepts that schedule and it never runs. That check now also applies
+  when `moderation_state` is not visible to the account.
+- **`drupal_report_scheduled_content` on an empty bundle (#403).** A bundle
+  with no nodes reports pending 0 / overdue 0 with `schedulerFields:
+  "unknown"` instead of `gated: true`.
+
+### Changed
+- **Content-quality reports no longer default to `article` (#403).**
+  `drupal_report_duplicate_content`, `_workflow_bottlenecks`,
+  `_translation_coverage`, `_readability`, `_orphan_pages`, `_pii_exposure`
+  and `_seo_meta_coverage` require `type` and fail with a pointer to
+  `drupal_list_content_types` instead of a 404 on sites without that bundle.
+  `drupal_report_scheduled_content` scans every node bundle when `type` is
+  omitted, with one row per bundle in `byContentType`.
+
 ## [2.26.0] - 2026-10-01
 
 ### Changed

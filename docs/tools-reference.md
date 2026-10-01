@@ -649,11 +649,15 @@ Drive content under a `content_moderation` editorial workflow. Authoritative sta
 
 ## Scheduler
 
-Schedule future publish/unpublish using the Drupal [Scheduler](https://www.drupal.org/project/scheduler) module. Requires Scheduler installed and enabled for the content type with the `publish_on` / `unpublish_on` fields present on the bundle — otherwise the call fails with a clear capability error. On a bundle under Content Moderation, also set `publishState` / `unpublishState` (written as `publish_state` / `unpublish_state`); dates alone are accepted by Drupal and then fail at cron (#402).
+Schedule future publish/unpublish using the Drupal [Scheduler](https://www.drupal.org/project/scheduler) module. Requires Scheduler installed and enabled for the content type with the `publish_on` / `unpublish_on` fields present on the bundle — otherwise the call fails with a clear capability error. On a bundle under Content Moderation, also set `publishState` / `unpublishState` (moderation state machine names, written as `publish_state` / `unpublish_state`). Those fields exist only with the Scheduler Content Moderation Integration module. Dates alone are accepted by Drupal and then fail at cron (#402).
+
+- When the bundle has a state field and its date is set without the state, the call fails before writing.
+- When a moderated bundle has no state field, the dates are written and the result carries `warnings`.
+- The connector does not check who may schedule a transition. Drupal validation and the site's MCP Sentinel policy decide. A refusal (for example a 422 "You do not have access to transition from Draft to Published") is returned with the site's reason verbatim and its HTTP status.
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_schedule_publish` | `type`, `id` | Set the Scheduler `publish_on` and/or `unpublish_on` fields on a node. Provide at least one of `publishOn` / `unpublishOn`. Moderated bundles require the matching `publishState` / `unpublishState` when those fields exist. |
+| `drupal_schedule_publish` | `type`, `id` | Set the Scheduler `publish_on` and/or `unpublish_on` fields on a node. Provide at least one of `publishOn` / `unpublishOn`. When the bundle has `publish_state` / `unpublish_state`, the matching `publishState` / `unpublishState` is required with each date. |
 
 Timestamps accept ISO 8601 (e.g. `2026-07-01T12:00:00Z`) or a Unix epoch and are passed through unchanged.
 
@@ -666,7 +670,7 @@ Timestamps accept ISO 8601 (e.g. `2026-07-01T12:00:00Z`) or a Unix epoch and are
   "publishOn": "2026-07-01T12:00:00Z",
   "unpublishOn": "2026-08-01T12:00:00Z",
   "publishState": "published",
-  "unpublishState": "draft"
+  "unpublishState": "archived"
 }
 ```
 
@@ -1046,18 +1050,18 @@ Read-only configuration-posture audits. These read privileged data (config objec
 
 ## Reports — Content Quality
 
-Read-only, backend-neutral content-quality audits. Each samples via the configured backend and flags `approximate` when sampling-bounded; audits needing a field the site doesn't expose (moderation state, scheduler dates) return a `gated` note instead of failing.
+Read-only, backend-neutral content-quality audits. Each samples via the configured backend and flags `approximate` when sampling-bounded; audits needing a field the site doesn't expose (moderation state, scheduler dates) return a `gated` note instead of failing. Every report below except `drupal_report_scheduled_content` requires `type`; there is no default bundle.
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_report_duplicate_content` | — | Duplicate / near-duplicate titles within a content type (normalized grouping). |
-| `drupal_report_workflow_bottlenecks` | — | Content stuck in a non-published moderation state beyond N days (default 30). Gated without `moderation_state`. |
-| `drupal_report_translation_coverage` | — | Content distribution by language with lagging-language flags. |
-| `drupal_report_scheduled_content` | — | Scheduler publish/unpublish dates split into pending (future) and overdue (past). Gated without scheduler fields. |
-| `drupal_report_readability` | — | Flesch Reading Ease per body plus structural issues (no H2s, multiple H1s). |
-| `drupal_report_orphan_pages` | — | Published pages with no inbound internal links from the sampled set. |
-| `drupal_report_pii_exposure` | — | Emails / US SSNs / phone numbers in published bodies; matched values are masked in the output. |
-| `drupal_report_seo_meta_coverage` | — | Per-field structured-meta coverage (metatag, meta description) and nodes missing all meta. Reads scalar and entity-reference fields. A field absent from every sampled node has `coverage: null` and, when you named it, is listed in `notVisible`. When no checked field is visible, `nodesMissingAllMeta` is null and no node is flagged. |
+| `drupal_report_duplicate_content` | `type` | Duplicate / near-duplicate titles within a content type (normalized grouping). |
+| `drupal_report_workflow_bottlenecks` | `type` | Content stuck in a non-published moderation state beyond N days (default 30). Gated without `moderation_state`. |
+| `drupal_report_translation_coverage` | `type` | Content distribution by language with lagging-language flags. |
+| `drupal_report_scheduled_content` | — | Scheduler publish/unpublish dates split into pending (future) and overdue (past). Omit `type` to scan every node bundle (`byContentType` has one row each). Fields present but empty give pending 0 / overdue 0; gated only when no sampled node has the keys. A bundle with no nodes reports zeros with `schedulerFields: "unknown"`. |
+| `drupal_report_readability` | `type` | Flesch Reading Ease per body plus structural issues (no H2s, multiple H1s). |
+| `drupal_report_orphan_pages` | `type` | Published pages with no inbound internal links from the sampled set. |
+| `drupal_report_pii_exposure` | `type` | Emails / US SSNs / phone numbers in published bodies; matched values are masked in the output. |
+| `drupal_report_seo_meta_coverage` | `type` | Per-field structured-meta coverage (metatag, meta description) and nodes missing all meta. Reads scalar and entity-reference fields. A field absent from every sampled node has `coverage: null` and, when you named it, is listed in `notVisible`. When no checked field is visible, `nodesMissingAllMeta` is null and no node is flagged. |
 
 ### drupal_report_pii_exposure
 
