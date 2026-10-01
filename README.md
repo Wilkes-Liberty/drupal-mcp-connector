@@ -212,17 +212,54 @@ npx -y drupal-mcp-connector init
 # aliases: npx -y drupal-mcp-connector wizard
 #          npx -y drupal-mcp-wizard
 # CI / dogfood: npx -y drupal-mcp-connector init --yes --json
+npx -y drupal-mcp-connector doctor
+# CI: npx -y drupal-mcp-connector doctor --json
 ```
 
 The wizard prints Cursor (`.cursor/mcp.json`) and Claude Code `mcpServers`
 snippets, optional `auth.grants` allowlist hints, and a whoami / contract_ready
 check. It writes files only with `--write` (never clobbers without confirm
-unless `--yes`).
+unless `--yes`). Doctor prints **one** primary failing gate and the exact next
+fix (exit non-zero on fail; `--json` is secret-free).
+
+### Transport presets
+
+| Preset | URL shape | Notes |
+|--------|-----------|--------|
+| **Local stdio** (`--preset local-stdio`) | `https://drupal.ddev.site` | Client launches this connector as a subprocess. Drupal must be reachable from this machine. |
+| **Tailscale VPN** (`--preset tailscale`) | `https://drupal.<tailnet>.ts.net` | VPN-required. The MCP client host must be on the same tailnet. Not a public internet path. |
+| **Public HTTPS** (`--preset public-https`) | `https://mcp.example.com/mcp` | **Gated / later.** Operator-run `MCP_TRANSPORT=https` + TLS + inbound OAuth. There is **no** hosted Wilkes & Liberty SaaS MCP URL. |
 
 **Remote HTTPS is Tailscale / local-VPN only.** This package does not ship a
 public SaaS remote endpoint. stdio is the default: the client launches the
 connector on your machine and inherits VPN/Tailscale/localhost reachability to
 Drupal. See **[docs/mcp-clients.md](docs/mcp-clients.md)**.
+
+`requireGovernance: true` remains the listing default for a later marketplace
+entry — this repo does not submit listings. If the client only shows
+`drupal_list_sites` and `drupal_governance_status`, run `doctor`.
+
+### Two-minute happy path
+
+After `init` and a green `doctor`, in the MCP client (real tool names):
+
+1. **Who am I?** Call `drupal_mcp_whoami`. Confirm `tier`, `preset`, and
+   `capabilities.publish` (false on `production-strict` / `content-editor`).
+2. **What can I see?** Call `drupal_list_sites`, then `drupal_list_nodes` with
+   `{ "type": "article", "status": false, "limit": 5 }` (unpublished only) or
+   `drupal_get_node` on a staging UUID. Prefer `drupal_search_content` for a
+   title substring.
+3. **Safe unpublished write (optional, non-prod):** Preview with
+   `drupal_create_node`
+   `{ "type": "article", "title": "MCP draft", "status": false, "dryRun": true }`.
+   Commit without `dryRun` only on staging, still `status: false` (or
+   `moderationState: "draft"`). Never set `status: true` or
+   `moderationState: "published"` unless `drupal_mcp_whoami` shows
+   `capabilities.publish: true` **and** you intend to go live.
+
+Fail-closed: default `production-strict` is read-only. A deny is expected when
+the allowlist or Sentinel profile excludes the type — run `doctor` and
+`drupal_governance_status`; do not auto-widen allowlists.
 
 ### From npm (recommended for operators)
 

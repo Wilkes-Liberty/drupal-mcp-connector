@@ -172,11 +172,16 @@ You should see:
 
 ```bash
 npx -y drupal-mcp-connector init
+npx -y drupal-mcp-connector doctor
 ```
 
 The wizard prints Cursor + Claude Code `mcpServers` snippets and a
-whoami / contract_ready check. Remote HTTPS is Tailscale / local-VPN only —
-see **[mcp-clients.md](mcp-clients.md)**.
+whoami / contract_ready check. Doctor prints the first failing gate and the
+exact next fix. Transport presets: Local stdio / Tailscale VPN / Public HTTPS
+(gated/later — not a hosted SaaS URL). Remote HTTPS is Tailscale / local-VPN
+only — see **[mcp-clients.md](mcp-clients.md)**. After a green doctor, follow
+the README **Two-minute happy path** (`drupal_mcp_whoami` → `drupal_list_sites`
+→ unpublished `drupal_list_nodes` / `dryRun` `drupal_create_node`).
 
 Most desktop and CLI MCP clients launch the connector as a stdio subprocess. For **copy-paste config per client** — Claude Code/Desktop, Grok Build, OpenAI Codex, Cursor — see **[mcp-clients.md](mcp-clients.md)**. The generic shape most stdio clients accept:
 

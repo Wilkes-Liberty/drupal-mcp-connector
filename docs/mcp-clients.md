@@ -32,6 +32,20 @@ Prints Cursor + Claude Code `mcpServers` snippets (and writes them only with
 `--write`). Remote HTTPS here means a connector **you** already host on a
 private network (Tailscale / local VPN) — not a public hosted SaaS URL.
 
+```bash
+npx -y drupal-mcp-connector doctor          # one failing gate + next fix
+npx -y drupal-mcp-connector init --preset local-stdio
+npx -y drupal-mcp-connector init --preset tailscale --host https://drupal.tailnet.ts.net
+npx -y drupal-mcp-connector init --preset public-https --yes --json
+# public-https is gated/later — snippet shape only; no hosted SaaS endpoint
+```
+
+| Preset | Example | Constraint |
+|--------|---------|------------|
+| Local stdio | `https://drupal.ddev.site` | Client subprocess; Drupal on this machine/LAN |
+| Tailscale VPN | `https://drupal.<tailnet>.ts.net` | VPN-required; not public internet |
+| Public HTTPS | `https://mcp.example.com/mcp` | Gated/later; operator-run TLS + inbound OAuth |
+
 Regardless of client, a Drupal-side governance module (e.g.
 [MCP Sentinel](integration-contract.md)) remains the authoritative policy.
 

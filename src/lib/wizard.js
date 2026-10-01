@@ -15,6 +15,8 @@ import { stdin as input, stdout as output } from "node:process";
 import fetch from "node-fetch";
 import { CLIENT_VERSION } from "./config.js";
 import { handlers as configHandlers } from "../tools/config.js";
+import { formatTransportPresetHelp, isReservedDocumentationHost, resolveTransportPreset } from "./transports.js";
+import { detectVersionSkew, extractReportedVersions, versionSkewCheck } from "./version-skew.js";
 
 /** Short probe timeout so an unreachable host cannot hang the wizard. */
 export const WIZARD_PROBE_TIMEOUT_MS = 4_000;
@@ -29,6 +31,12 @@ const USAGE = `drupal-mcp-connector wizard|init
   (Tailscale / local VPN). This package does not provide a public SaaS
   remote endpoint.
 
+  Transport presets (DEV-763): local-stdio | tailscale | public-https
+  (public-https is gated/later — not a hosted SaaS URL).
+${formatTransportPresetHelp()}
+
+  --preset local-stdio|tailscale|public-https
+                            Named transport preset (sets --transport)
   --transport stdio|https   MCP transport (default: stdio)
   --host <url>              Drupal base URL (stdio) or MCP URL (https)
   --drupal-url <url>        Drupal site for whoami/contract_ready (https)
@@ -47,12 +55,16 @@ const USAGE = `drupal-mcp-connector wizard|init
   --json                    Machine-readable result on stdout
   --help                    Show this message
 
+  After a green run: npx drupal-mcp-connector doctor, then the README
+  two-minute happy path (drupal_mcp_whoami → drupal_list_sites →
+  unpublished read / dryRun create).
+
   Env (same meaning as the flags): MCP_WIZARD_TRANSPORT, MCP_WIZARD_HOST,
   MCP_WIZARD_DRUPAL_URL, MCP_WIZARD_AUTH, MCP_WIZARD_CLIENT_ID,
   MCP_WIZARD_CLIENTS, MCP_WIZARD_SERVER_NAME, MCP_WIZARD_SITE,
   MCP_WIZARD_GRANT_SITES, MCP_WIZARD_TOKEN_ENV, MCP_WIZARD_WRITE,
   MCP_WIZARD_SCOPE, MCP_WIZARD_OUTPUT, MCP_WIZARD_YES,
-  MCP_WIZARD_SKIP_CHECK.
+  MCP_WIZARD_SKIP_CHECK, MCP_WIZARD_PRESET.
 `;
 
 const DEFAULTS = {
@@ -155,6 +167,7 @@ export async function resolveWizardAnswers(args, options = {}) {
   const outputDir = String(args.output || process.env.MCP_WIZARD_OUTPUT || cwd);
 
   const asked = {
+    preset: pick("preset", args, "MCP_WIZARD_PRESET", ""),
     transport: pick("transport", args, "MCP_WIZARD_TRANSPORT", DEFAULTS.transport),
     host: pick("host", args, "MCP_WIZARD_HOST", DEFAULTS.host),
     drupalUrl: pick("drupal-url", args, "MCP_WIZARD_DRUPAL_URL", ""),
@@ -178,9 +191,11 @@ export async function resolveWizardAnswers(args, options = {}) {
     try {
       process.stdout.write(
         `Drupal MCP Connector v${CLIENT_VERSION} — setup wizard\n\n` +
-        "Remote HTTPS is Tailscale / local-VPN only. This package does not\n" +
-        "ship a public SaaS remote endpoint.\n\n",
+        "Transport presets: Local stdio / Tailscale VPN / Public HTTPS.\n" +
+        "Remote HTTPS is Tailscale / local-VPN only. Public HTTPS is gated/later —\n" +
+        "this package does not ship a public SaaS remote endpoint.\n\n",
       );
+      asked.preset = await ask(rl, "Preset [local-stdio/tailscale/public-https] (blank = use --transport)", asked.preset);
       asked.transport = await ask(rl, "Transport [stdio/https]", asked.transport);
       asked.host = await ask(
         rl,
@@ -202,7 +217,20 @@ export async function resolveWizardAnswers(args, options = {}) {
     }
   }
 
-  const transport = normalizeChoice(asked.transport, ["stdio", "https"], "transport");
+  let transportChoice = asked.transport;
+  let preset = null;
+  if (asked.preset) {
+    const resolved = resolveTransportPreset(asked.preset);
+    preset = resolved.preset;
+    transportChoice = resolved.transport;
+    if (args.transport && String(args.transport) !== resolved.transport) {
+      throw new Error(
+        `--preset ${preset.id} implies --transport ${resolved.transport} ` +
+        `(got --transport ${args.transport}).`,
+      );
+    }
+  }
+  const transport = normalizeChoice(transportChoice, ["stdio", "https"], "transport");
   const auth = normalizeChoice(asked.auth, ["token", "oauth"], "auth");
   const scope = normalizeChoice(asked.scope, ["project", "user"], "scope");
   const host = normalizeHttpUrl(asked.host, "host");
@@ -220,6 +248,8 @@ export async function resolveWizardAnswers(args, options = {}) {
   }
 
   return {
+    preset: preset ? preset.id : (transport === "https" ? "tailscale" : "local-stdio"),
+    gated: Boolean(preset?.gated),
     transport,
     host,
     drupalUrl,
@@ -283,7 +313,11 @@ export async function runReadinessChecks(answers, options = {}) {
   const reach = await probeUrl(target, fetchImpl);
   if (reach.unreachable) {
     const skip = skipUnreachable(target, reach.detail);
-    return { whoami: { ...skip, preview: localWhoami(answers) }, contract_ready: skip };
+    return {
+      whoami: { ...skip, preview: localWhoami(answers) },
+      contract_ready: skip,
+      version_skew: versionSkewCheck(detectVersionSkew()),
+    };
   }
 
   let whoami;
@@ -309,7 +343,13 @@ export async function runReadinessChecks(answers, options = {}) {
 
   const readinessUrl = `${stripSlash(target)}/drupal-mcp/readiness`;
   const readiness = await probeUrl(readinessUrl, fetchImpl);
-  return { whoami, contract_ready: interpretReadiness(readiness, readinessUrl) };
+  return {
+    whoami,
+    contract_ready: interpretReadiness(readiness, readinessUrl),
+    version_skew: versionSkewCheck(detectVersionSkew(
+      extractReportedVersions(readiness.body, null),
+    )),
+  };
 }
 
 /**
@@ -355,6 +395,7 @@ export function formatWizardReport(result, selected) {
     `Drupal MCP Connector wizard v${CLIENT_VERSION}`,
     "",
     "Remote HTTPS is Tailscale / local-VPN only — not a public SaaS path.",
+    `preset=${answers.preset || "local-stdio"}${answers.gated ? " [gated/later — not hosted SaaS]" : ""}`,
     "",
     `transport=${answers.transport} auth=${answers.auth} client_id=${answers.clientId}`,
     `host=${answers.host}`,
@@ -394,8 +435,11 @@ export function formatWizardReport(result, selected) {
   lines.push("Post-config checks:");
   lines.push(formatCheck(checks.whoami));
   lines.push(formatCheck(checks.contract_ready));
+  if (checks.version_skew) lines.push(formatCheck(checks.version_skew));
   lines.push("");
-  lines.push("Next: register the snippet in the client, restart it, then call drupal_mcp_whoami.");
+  lines.push("Next: register the snippet, restart the client, then call drupal_mcp_whoami.");
+  lines.push("Then: npx drupal-mcp-connector doctor  ·  README Two-minute happy path");
+  lines.push("  (drupal_mcp_whoami → drupal_list_sites → unpublished drupal_list_nodes / dryRun create).");
   lines.push("Full client notes: docs/mcp-clients.md · verify: npm run verify");
   return lines.join("\n");
 }
@@ -538,7 +582,11 @@ function skipUnreachable(url, detail) {
  */
 function skippedChecks(reason) {
   const skip = { status: "skip", title: "skipped", detail: reason, next: "Re-run without --skip-check against a reachable host." };
-  return { whoami: skip, contract_ready: skip };
+  return {
+    whoami: skip,
+    contract_ready: skip,
+    version_skew: versionSkewCheck(detectVersionSkew()),
+  };
 }
 
 /**
@@ -563,6 +611,8 @@ function localWhoami(answers) {
  */
 function publicAnswers(answers) {
   return {
+    preset: answers.preset || null,
+    gated: Boolean(answers.gated),
     transport: answers.transport,
     host: answers.host,
     mcpUrl: answers.mcpUrl || null,
@@ -790,26 +840,7 @@ function hostnameOf(url) {
   }
 }
 
-/**
- * RFC 2606 / 6761 documentation and reserved names — not a live Drupal.
- * @param {string} url
- * @returns {boolean}
- */
-export function isReservedDocumentationHost(url) {
-  const host = hostnameOf(url).toLowerCase();
-  return (
-    host === "example.com" ||
-    host === "example.net" ||
-    host === "example.org" ||
-    host.endsWith(".example.com") ||
-    host.endsWith(".example.net") ||
-    host.endsWith(".example.org") ||
-    host.endsWith(".example.test") ||
-    host.endsWith(".invalid") ||
-    host.endsWith(".test") ||
-    host.endsWith(".example")
-  );
-}
+export { isReservedDocumentationHost };
 
 /**
  * @param {string} raw

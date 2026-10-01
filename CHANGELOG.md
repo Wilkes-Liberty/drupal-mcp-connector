@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--yes`. Post-config `whoami` + `contract_ready` print pass/fail with a
   next fix, or a clear skip when the host is unreachable. Remote HTTPS is
   Tailscale / local-VPN only — not a public SaaS path.
+- **`doctor` CLI (DEV-759).** `npx drupal-mcp-connector doctor` runs ordered
+  gates (reachability → auth/401 → agent client → allowlist →
+  `contract_ready` → version skew), prints one primary failure plus the
+  exact next fix, exits non-zero on fail, and supports `--json` with no
+  secrets.
+- **Transport presets (DEV-763).** Wizard `--preset local-stdio|tailscale|public-https`
+  and docs table. Public HTTPS is marked gated/later — not a hosted SaaS URL.
+- **Version-skew blurb (DEV-766).** Doctor and wizard print “you are on X;
+  site needs Y” when readiness reports versions. No auto-upgrade.
+- **Two-minute happy-path recipe (DEV-760).** README walkthrough using
+  `drupal_mcp_whoami` → `drupal_list_sites` → unpublished
+  `drupal_list_nodes` / `dryRun` `drupal_create_node`.
 - **Menu tools return `fields.drupal_internal__id`.** The numeric menu-link
   id is kept on JSON:API canonicalization so list/create/update responses
   can build `/admin/structure/menu/item/{id}/edit` (and `…/edit/{langcode}`).

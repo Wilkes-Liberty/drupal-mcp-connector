@@ -150,4 +150,37 @@ describe("drupal-mcp-wizard CLI", () => {
     const dumped = JSON.stringify(body);
     expect(dumped).not.toMatch(/client_secret|CLIENT_SECRET|apiToken":\s*"[^$<]/);
   });
+
+  it("--preset public-https is gated and maps to https snippets", () => {
+    const result = runWizard([
+      "--yes",
+      "--json",
+      "--preset", "public-https",
+      "--host", "https://mcp.example.com/mcp",
+      "--output", dir,
+    ]);
+    expect(result.status).toBe(0);
+    const body = JSON.parse(result.stdout);
+    expect(body.answers.preset).toBe("public-https");
+    expect(body.answers.gated).toBe(true);
+    expect(body.answers.transport).toBe("https");
+    expect(body.clients.cursor.config.mcpServers.drupal.url).toMatch(/\/mcp$/);
+    expect(result.stderr).toMatch(/gated\/later|not a public SaaS/i);
+  });
+
+  it("--preset tailscale stays stdio and VPN-required", () => {
+    const result = runWizard([
+      "--yes",
+      "--json",
+      "--preset", "tailscale",
+      "--host", "https://drupal.example.ts.net",
+      "--output", dir,
+    ]);
+    expect(result.status).toBe(0);
+    const body = JSON.parse(result.stdout);
+    expect(body.answers.preset).toBe("tailscale");
+    expect(body.answers.gated).toBe(false);
+    expect(body.answers.transport).toBe("stdio");
+    expect(body.clients.cursor.config.mcpServers.drupal.command).toBe("npx");
+  });
 });
