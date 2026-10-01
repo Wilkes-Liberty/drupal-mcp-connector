@@ -48,6 +48,9 @@ describe("scheduler tools", () => {
     expect(def.description).toMatch(/Scheduler/i);
     expect(def.description).toMatch(/publish_on/);
     expect(def.description).toMatch(/unpublish_on/);
+    expect(def.description).toMatch(/publishState|publish_state/);
+    expect(def.inputSchema.properties.publishState).toBeTruthy();
+    expect(def.inputSchema.properties.unpublishState).toBeTruthy();
   });
 
   it("sets publish_on and unpublish_on attributes via updateEntity", async () => {
@@ -101,6 +104,50 @@ describe("scheduler tools", () => {
     backend.updateEntity.mockRejectedValue(new Error("Field 'publish_on' is unknown."));
     await expect(handlers.drupal_schedule_publish({ type: "article", id: "n1", publishOn: "2026-07-01T12:00:00Z" }))
       .rejects.toThrow(/Scheduler/i);
+  });
+
+  it("writes publish_state / unpublish_state when the caller names them", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({
+      status: false,
+      fields: { moderation_state: "draft", publish_on: null, publish_state: null, unpublish_on: null, unpublish_state: null },
+    }));
+    backend.updateEntity.mockResolvedValue(canonicalNode());
+    await handlers.drupal_schedule_publish({
+      type: "page", id: "n1",
+      publishOn: "2026-07-01T12:00:00Z",
+      unpublishOn: "2026-08-01T12:00:00Z",
+      publishState: "published",
+      unpublishState: "draft",
+    });
+    const arg = backend.updateEntity.mock.calls[0][0];
+    expect(arg.attributes).toMatchObject({
+      publish_on: "2026-07-01T12:00:00Z",
+      unpublish_on: "2026-08-01T12:00:00Z",
+      publish_state: "published",
+      unpublish_state: "draft",
+    });
+  });
+
+  it("requires publishState on a moderated bundle when publish_state exists (#402)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({
+      status: false,
+      fields: { moderation_state: "draft", publish_on: null, publish_state: null },
+    }));
+    await expect(handlers.drupal_schedule_publish({
+      type: "page", id: "n1", publishOn: "2026-07-01T12:00:00Z",
+    })).rejects.toThrow(/publishState/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("refuses a moderated bundle that has no publish_state field (#402)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({
+      status: false,
+      fields: { moderation_state: "draft", publish_on: null },
+    }));
+    await expect(handlers.drupal_schedule_publish({
+      type: "page", id: "n1", publishOn: "2026-07-01T12:00:00Z", publishState: "published",
+    })).rejects.toThrow(/Content Moderation Integration|publish_state/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
   it("uses the entity-type-aware write assertion", () => {

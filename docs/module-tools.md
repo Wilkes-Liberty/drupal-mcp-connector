@@ -60,9 +60,10 @@ to an alias in the same site's `serverTools.modules.tools` object:
 }
 ```
 
-These three aliases must have scope `mcp_config`. Get/list require operation
-`read` and capability `configRead`; set requires operation `write` and capability
-`configWrite`. Each alias's `name` is the exact approved source tool name, not a
+Get/list require operation `read` and capability `configRead`; their inbound
+scope may be `mcp_config` or the read-only `mcp_config_read` (#397). Set
+requires operation `write`, scope `mcp_config`, and capability `configWrite`.
+Each alias's `name` is the exact approved source tool name, not a
 connector constant. Existing config-set clients still pass `value`; the
 compatibility adapter supplies that map as the module's `data` argument.
 

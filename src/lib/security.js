@@ -512,22 +512,53 @@ function isGovernedSetup(site) {
 }
 
 /**
- * Gate the config tools (get/list/set) on the dedicated `mcp_config` OAuth
- * scope, which the governed server requires for every config_* tool. When OAuth
- * scopes are configured but `mcp_config` is absent, fail fast with a clear
- * message instead of dispatching a call the server will deny — keeping the
- * connector's behaviour and its drupal_mcp_whoami report consistent with what
- * the token can actually exercise.
+ * Whether the site's token can read config: `mcp_config` (read+write) or
+ * the read-only `mcp_config_read` auditor scope (#397).
+ * @param {object} site Resolved site config.
+ * @returns {boolean}
+ */
+export function hasConfigReadScope(site) {
+  return hasScope(site, "mcp_config") || hasScope(site, "mcp_config_read");
+}
+
+/**
+ * Inbound / binding scope to send for a config *read* (get/list/reports/codegen).
+ * Prefer `mcp_config` so existing write-capable bindings keep matching; a
+ * read-only token sends `mcp_config_read`.
+ * @param {object} site Resolved site config.
+ * @returns {string}
+ */
+export function configReadBindingScope(site) {
+  return hasScope(site, "mcp_config") ? "mcp_config" : "mcp_config_read";
+}
+
+/**
+ * Gate the config tools on OAuth scope. Writes require `mcp_config`.
+ * Reads accept `mcp_config` or the read-only `mcp_config_read` (#397).
+ * When OAuth scopes are configured and neither is present, fail fast rather
+ * than dispatching a call the server will deny.
  * @param {object} site Resolved site config.
  * @param {string} operationLabel Label used in the error message.
+ * @param {{write?: boolean}} [opts] `write: true` requires `mcp_config`.
  * @returns {void}
- * @throws {SecurityError} if scopes are configured and `mcp_config` is missing.
+ * @throws {SecurityError} if the required config scope is missing.
  */
-export function assertConfigScope(site, operationLabel) {
-  if (!hasScope(site, "mcp_config")) {
+export function assertConfigScope(site, operationLabel, { write = false } = {}) {
+  if (write) {
+    if (!hasScope(site, "mcp_config")) {
+      throw new SecurityError(
+        "Config writes require the 'mcp_config' OAuth scope (config-editor / " +
+        "Developer tier); this token does not carry it. " +
+        `Operation blocked: ${operationLabel}.`
+      );
+    }
+    return;
+  }
+  if (!hasConfigReadScope(site)) {
     throw new SecurityError(
-      "Config tools require the 'mcp_config' OAuth scope (config-editor / " +
-      "Developer tier); this token does not carry it. " +
+      "Config reads require the 'mcp_config' or 'mcp_config_read' OAuth scope " +
+      "(config-editor / Developer tier, or a read-only auditor token); " +
+      "this token does not carry either. " +
       `Operation blocked: ${operationLabel}.`
     );
   }

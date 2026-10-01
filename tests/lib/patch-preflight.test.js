@@ -379,9 +379,31 @@ describe("stale default-revision fingerprint (#273)", () => {
     expect(changedAheadOfRevision({ changed: "2026-09-07T16:00:00Z" })).toBe(false);
   });
 
-  it("prepareGuardedPatch refuses when live equals working and changed is ahead of revision_timestamp", async () => {
+  it("prepareGuardedPatch does not treat a default-revision timestamp gap as a local stale copy (#405)", async () => {
     const backend = backendStub({
       getEntity: vi.fn(async () => staleExisting),
+    });
+    const out = await prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "solution", id: "n1",
+      existing: staleExisting,
+      attributes: { title: "Draft title", moderation_state: "draft" },
+    });
+    expect(out.resourceVersion).toBeUndefined();
+    expect(out.preflight).toBe("core_patch_guard");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    const probe = backend.rawQuery.mock.calls.map(([q]) => q).find((q) => q.options?.method === "PATCH");
+    expect(probe).toBeTruthy();
+  });
+
+  it("prepareGuardedPatch still rewrites an actual Sentinel stale-copy refusal (#273)", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async () => staleExisting),
+      rawQuery: vi.fn(async ({ path }) => {
+        if (String(path).endsWith("/mcp-translations")) throw new Error("Drupal 404 inventory unavailable");
+        throw new Error(
+          "Drupal 500: Write denied by MCP Sentinel: the content changed after this copy was loaded."
+        );
+      }),
     });
     await expect(prepareGuardedPatch(backend, {
       entityType: "node", bundle: "solution", id: "n1",
@@ -390,10 +412,7 @@ describe("stale default-revision fingerprint (#273)", () => {
     })).rejects.toMatchObject({
       name: "StaleCopyError",
       code: STALE_COPY_CODE,
-      message: STALE_COPY_MESSAGE,
     });
-    expect(backend.rawQuery.mock.calls.every(([call]) => call.path.endsWith("/mcp-translations"))).toBe(true);
-    expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
   it("does not apply the fingerprint when a distinct working copy exists", async () => {
@@ -554,6 +573,55 @@ describe("prepareGuardedPatch published translation (#376)", () => {
       langcode: "es",
     })).rejects.toThrow(/revise: true/);
     expect(backend.rawQuery.mock.calls.some(([call]) => String(call.path).endsWith("/mcp-draft"))).toBe(false);
+  });
+});
+
+describe("prepareGuardedPatch carried published language (#400)", () => {
+  it("refuses continue and revise of a carried published default language", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => {
+        if (resourceVersion === "rel:working-copy") {
+          throw new Error("Drupal 403: No pending revision for moderated entity.");
+        }
+        return { id: "n1", fields: { drupal_internal__vid: 3141, moderation_state: "published" } };
+      }),
+      rawQuery: vi.fn(async ({ path }) => {
+        if (String(path).endsWith("/mcp-translations")) {
+          return {
+            meta: {
+              defaultLangcode: "en",
+              operations: ["create_translation", "revise_published_translation", "revise_over_working_copy"],
+              live: {
+                vid: "3141",
+                translations: [
+                  { langcode: "en", default: true, status: true, moderation_state: "published" },
+                  { langcode: "es", default: false, status: true, moderation_state: "published" },
+                ],
+              },
+              working: {
+                vid: "3171",
+                translations: [
+                  { langcode: "en", default: true, status: false, moderation_state: "published" },
+                  { langcode: "es", default: false, status: false, moderation_state: "draft" },
+                ],
+              },
+            },
+          };
+        }
+        throw new Error(`unexpected ${path}`);
+      }),
+    });
+    await expect(prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "basic_page", id: "n1",
+      existing: { status: true, fields: { moderation_state: "published", drupal_internal__vid: 3141 } },
+      attributes: { title: "Federal", moderation_state: "draft" },
+    })).rejects.toThrow(/3626919|#400|Publish or discard/);
+    await expect(prepareGuardedPatch(backend, {
+      entityType: "node", bundle: "basic_page", id: "n1",
+      existing: { status: true, fields: { moderation_state: "published", drupal_internal__vid: 3141 } },
+      attributes: { title: "Federal", moderation_state: "draft" },
+      langcode: "en",
+    })).rejects.toThrow(/3626919|#400|Publish or discard/);
   });
 });
 

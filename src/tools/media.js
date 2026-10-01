@@ -15,7 +15,7 @@ import {
   assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
 } from "../lib/security.js";
 import {
-  assertDraftLangcode, readDraftTranslation, readTranslationInventory,
+  assertDraftLangcode, readDraftTranslation, readTranslationInventory, isUnpublishedWorkingDraft,
 } from "../lib/sentinel-draft.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
 import { entityRevisionId } from "../lib/write-revision.js";
@@ -69,7 +69,7 @@ async function getMedia({ site: siteName, type, id, langcode }) {
     const targetLang = assertDraftLangcode(langcode);
     const inventory = await readTranslationInventory(backend, { entityType: "media", bundle: type, id });
     const workingRow = (inventory.working?.translations ?? []).find((row) => row.langcode === targetLang);
-    if (workingRow && workingRow.status === false && inventory.live?.vid && inventory.working?.vid) {
+    if (workingRow && isUnpublishedWorkingDraft(workingRow) && inventory.live?.vid && inventory.working?.vid) {
       const entity = await readDraftTranslation(backend, {
         entityType: "media", bundle: type, id, langcode: targetLang,
         draftRevision: { liveVid: inventory.live.vid, workingVid: inventory.working.vid },

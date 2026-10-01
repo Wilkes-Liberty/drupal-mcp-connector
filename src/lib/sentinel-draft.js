@@ -419,13 +419,16 @@ export function explainExistingTranslation(error, { revise = false, inventory = 
       { cause: current },
     );
   }
-  if (workingDistinct && workingRow && workingRow.status === false) {
+  if (workingDistinct && workingRow && isUnpublishedWorkingDraft(workingRow)) {
     return new Error(
       "An unpublished working translation for this language already exists. " +
       `Continue it with ${continuer} and langcode. ` +
       "Do not create it again.",
       { cause: current },
     );
+  }
+  if (workingDistinct && workingRow && isCarriedPublishedLanguage(workingRow)) {
+    return carriedPublishedLanguageError(langcode);
   }
   return current;
 }
@@ -498,6 +501,54 @@ export async function readNodeDraftInventory(backend, ref) {
 }
 
 /**
+ * Whether an inventory row is an unpublished working draft (#400).
+ *
+ * Decide from `moderation_state` when present: `status: false` alone is not
+ * a draft. Sentinel copies the live published moderation record onto a
+ * carried default language (drupal.org #3626610), so that row is unpublished
+ * in status and still `published` in workflow.
+ * @param {?object} row Inventory translation row.
+ * @returns {boolean}
+ */
+export function isUnpublishedWorkingDraft(row) {
+  if (!row || typeof row !== "object") return false;
+  const state = typeof row.moderation_state === "string" ? row.moderation_state.trim().toLowerCase() : "";
+  if (state) return state !== "published";
+  return row.status === false;
+}
+
+/**
+ * Whether a working-copy row is a carried published language, not a draft.
+ * `status: false` + `moderation_state: published` — Sentinel copied live
+ * workflow onto the language. Neither continue nor revise can open a draft
+ * of it while another translation draft exists (drupal.org #3626919 / #400).
+ * @param {?object} row Inventory translation row.
+ * @returns {boolean}
+ */
+export function isCarriedPublishedLanguage(row) {
+  if (!row || typeof row !== "object") return false;
+  const state = typeof row.moderation_state === "string" ? row.moderation_state.trim().toLowerCase() : "";
+  return row.status === false && state === "published";
+}
+
+/**
+ * Refusal when neither update_node nor revise can draft a carried language.
+ * @param {string} [langcode]
+ * @returns {Error}
+ */
+export function carriedPublishedLanguageError(langcode) {
+  const named = langcode ? ` (${langcode})` : "";
+  return new Error(
+    `This language${named} is on the working copy with published moderation and unpublished status ` +
+    "(Sentinel copied the live moderation record; it is not a working draft). " +
+    "Neither drupal_update_node nor drupal_create_translation revise can open a draft of it " +
+    "while another translation draft exists (drupal.org #3626919). " +
+    "Publish or discard the translation draft first, or edit in the Drupal UI. " +
+    "See connector #400."
+  );
+}
+
+/**
  * The language to name when continuing a multilingual working revision
  * without an explicit langcode (#379).
  *
@@ -505,6 +556,8 @@ export async function readNodeDraftInventory(backend, ref) {
  * more than one language, even for the default language. Infer it only when
  * the default language is the unpublished draft in that revision; a
  * translation-only draft over published default copy stays explicit.
+ * A carried published language (`status: false` + published moderation) is
+ * not a draft (#400).
  * @param {object|null|undefined} inventory Sentinel translation inventory.
  * @returns {string|undefined}
  */
@@ -515,7 +568,7 @@ export function inferDefaultDraftLangcode(inventory) {
   const defaultLang = typeof inventory.defaultLangcode === "string" ? inventory.defaultLangcode : fallback;
   if (typeof defaultLang !== "string" || defaultLang === "") return undefined;
   const row = rows.find((item) => item?.langcode === defaultLang);
-  return row && row.status === false ? defaultLang : undefined;
+  return row && isUnpublishedWorkingDraft(row) ? defaultLang : undefined;
 }
 
 /**
@@ -530,13 +583,16 @@ export function assertInventoryDraftLanguage(inventory, langcode) {
     throw new Error("This working revision contains translations. Pass an explicit langcode for an existing unpublished language; no draft was created.");
   }
   const row = langcode ? rows.find((item) => item.langcode === langcode) : rows[0];
+  if (row && isCarriedPublishedLanguage(row)) {
+    throw carriedPublishedLanguageError(langcode || row.langcode);
+  }
   if (row && row.status === true && langcode && langcode !== inventory.defaultLangcode && row.default !== true) {
     throw new Error(
       "This language is still published on the working copy, so it cannot be continued. " +
       "Open a draft of it with drupal_create_translation and revise: true. Published languages and other drafts were left unchanged.",
     );
   }
-  if (!row || row.status !== false) {
+  if (!row || !isUnpublishedWorkingDraft(row)) {
     throw new Error("The requested language is not an existing unpublished working draft. Published languages and other drafts were left unchanged.");
   }
 }

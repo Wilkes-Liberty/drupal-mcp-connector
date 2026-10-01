@@ -5,6 +5,9 @@ import {
   resolveNodeTranslationPair,
   supportsSentinelDraft,
   writeDraft,
+  isUnpublishedWorkingDraft,
+  isCarriedPublishedLanguage,
+  inferDefaultDraftLangcode,
 } from "../../src/lib/sentinel-draft.js";
 
 const input = {
@@ -261,5 +264,37 @@ describe("resolveNodeTranslationPair fail-closed inventory", () => {
       entityType: "node", bundle: "page", id: "example-uuid", existing,
     })).rejects.toThrow(/did not return a translation inventory/);
     expect(b.getEntity).not.toHaveBeenCalled();
+  });
+});
+
+describe("working-draft detection (#400)", () => {
+  it("treats a non-published moderation_state as a draft, not status:false alone", () => {
+    expect(isUnpublishedWorkingDraft({ langcode: "es", status: false, moderation_state: "draft" })).toBe(true);
+    expect(isUnpublishedWorkingDraft({ langcode: "en", status: false, moderation_state: "published" })).toBe(false);
+    expect(isUnpublishedWorkingDraft({ langcode: "es", status: false })).toBe(true);
+    expect(isCarriedPublishedLanguage({ langcode: "en", status: false, moderation_state: "published" })).toBe(true);
+    expect(isCarriedPublishedLanguage({ langcode: "es", status: false, moderation_state: "draft" })).toBe(false);
+  });
+
+  it("does not infer a default-language continue for a carried published row", () => {
+    const inventory = {
+      defaultLangcode: "en",
+      working: {
+        translations: [
+          { langcode: "en", default: true, status: false, moderation_state: "published" },
+          { langcode: "es", default: false, status: false, moderation_state: "draft" },
+        ],
+      },
+    };
+    expect(inferDefaultDraftLangcode(inventory)).toBeUndefined();
+    expect(inferDefaultDraftLangcode({
+      ...inventory,
+      working: {
+        translations: [
+          { langcode: "en", default: true, status: false, moderation_state: "draft" },
+          { langcode: "es", default: false, status: true, moderation_state: "published" },
+        ],
+      },
+    })).toBe("en");
   });
 });

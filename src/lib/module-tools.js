@@ -53,9 +53,24 @@ function entries(sites) {
   return result;
 }
 
+/**
+ * Whether an inbound principal satisfies a module-tool policy scope.
+ * A config *read* binding historically declared `mcp_config`; the read-only
+ * `mcp_config_read` auditor scope is enough for those reads (#397).
+ * @param {object|null} identity
+ * @param {object} policy
+ * @returns {boolean}
+ */
+function principalHasPolicyScope(identity, policy) {
+  if (principalHasScope(identity, policy.scope)) return true;
+  return policy.operation === "read"
+    && policy.scope === "mcp_config"
+    && principalHasScope(identity, "mcp_config_read");
+}
+
 function allowed(entry, identity, sites, grants) {
   const { site, policy } = entry;
-  if (identity && (!principalHasScope(identity, policy.scope) ||
+  if (identity && (!principalHasPolicyScope(identity, policy) ||
       !resolveGrantedSites(identity, sites, grants).some((s) => s._name === site._name))) return false;
   const sec = resolveSecurityConfig(site);
   if (policy.operation !== "read" && sec.readOnly) return false;
@@ -155,13 +170,29 @@ export function isModuleTool(name) {
   return typeof name === "string" && name.startsWith(PREFIX);
 }
 
+/**
+ * Whether a binding policy scope satisfies a compatibility required.scope.
+ * Config reads accept either `mcp_config` or `mcp_config_read` (#397).
+ * @param {object} policy
+ * @param {object} required
+ * @returns {boolean}
+ */
+function bindingScopeMatches(policy, required) {
+  if (policy.scope === required.scope) return true;
+  if (required.operation !== "read") return false;
+  const caps = required.capabilities ?? [];
+  if (!caps.includes("configRead")) return false;
+  const configReadScopes = new Set(["mcp_config", "mcp_config_read"]);
+  return configReadScopes.has(policy.scope) && configReadScopes.has(required.scope);
+}
+
 /** Resolves a local binding without granting access or contacting its provider. */
 export function resolveModuleBinding(site, binding, required) {
   const bindings = new Map(Object.entries(site.serverTools?.bindings ?? {}));
   const alias = bindings.get(binding);
   const entry = [...entries([site]).values()].find((item) => item.alias === alias);
   if (!entry || entry.policy.operation !== required.operation ||
-      entry.policy.scope !== required.scope ||
+      !bindingScopeMatches(entry.policy, required) ||
       !required.capabilities.every((cap) => entry.policy.capabilities.includes(cap))) {
     throw new SecurityError("Module binding is missing or does not satisfy the operation contract.");
   }

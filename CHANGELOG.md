@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A `changed` / `revision_timestamp` gap on the default revision no longer blocks the next draft (#405).**
+  `#273` treated `possiblyPatchBlocked` as local proof of a hidden revision and
+  refused before Sentinel ran. When inventory `working` is null and both
+  JSON:API aliases report the same published vid, a `moderationState: draft`
+  write now proceeds to the core probe / Sentinel. An actual Sentinel
+  stale-copy refusal is still rewritten. `drupal_list_revisions` still reports
+  the warning.
+- **`drupal_report_scheduled_content` no longer reports Scheduler fields missing when every date is empty (#403).**
+  Field presence is the key on the JSON:API attributes, not a non-empty value.
+  Keys present and all null: `summary: { pending: 0, overdue: 0 }`. `gated`
+  only when the keys are actually absent.
+- **`drupal_schedule_publish` writes `publish_state` / `unpublish_state` on moderated bundles (#402).**
+  Optional `publishState` / `unpublishState` are accepted. When the bundle is
+  moderated and those fields exist, the matching state is required whenever a
+  date is set. Dates alone were accepted by Drupal and then failed at cron.
+- **Revise guard uses `moderation_state`, not `status: false`, to decide "already a draft" (#400).**
+  After revising a translation over a working copy, Sentinel copies the live
+  published moderation record onto the carried default language (`status: false`
+  + `moderation_state: published`). Neither `drupal_update_node` nor
+  `drupal_create_translation` revise can open a draft of that language while
+  the other translation draft exists (drupal.org #3626919). Both tools now
+  say so and name the manual path: publish or discard the translation draft,
+  or edit in the UI.
+- **Config reads accept the read-only `mcp_config_read` scope (#397).**
+  `drupal_config_get` / `drupal_config_list`, config reports, and codegen
+  inspect/diff accept `mcp_config` or `mcp_config_read`. Writes still require
+  `mcp_config`. `drupal_mcp_whoami` reports `configRead: true` for a
+  read-scope token. A token with neither scope is still refused.
+
 ## [2.25.0] - 2026-10-01
 
 ### Added

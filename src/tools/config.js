@@ -24,6 +24,8 @@ import {
   assertCoreExtensionValueKeepsProtected,
   isCoreExtensionConfig,
   hasScope,
+  hasConfigReadScope,
+  configReadBindingScope,
   CORE_EXTENSION_CONFIG,
   SecurityError,
 } from "../lib/security.js";
@@ -36,8 +38,9 @@ import { callGovernedServerTool, callBoundModuleTool, toolResultData } from "../
  */
 async function configTool(site, binding, args, operation, capability) {
   if (site.serverTools?.bindings !== undefined) {
+    const scope = operation === "read" ? configReadBindingScope(site) : "mcp_config";
     return callBoundModuleTool(site, binding, args, {
-      operation, scope: "mcp_config", capabilities: [capability],
+      operation, scope, capabilities: [capability],
     });
   }
   return callGovernedServerTool(site, binding, args);
@@ -144,7 +147,7 @@ async function assertCoreExtensionWriteAllowed(site, sec, value) {
 async function configSet({ site: siteName, name, value }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertConfigScope(site, `config:set ${name}`);
+  assertConfigScope(site, `config:set ${name}`, { write: true });
   assertNotReadOnly(sec, `config:set ${name}`);
   assertConfigWriteAllowed(sec);
   if (isCoreExtensionConfig(name)) await assertCoreExtensionWriteAllowed(site, sec, value);
@@ -188,11 +191,13 @@ async function whoami({ site: siteName, _resolvedSource }) {
   const summary = getSecuritySummary(site);
   // Effective capability = connector preset AND the scope the server demands.
   // Reporting the preset alone over-states what the token can do — e.g. the
-  // content-editor preset allows config reads locally, but every config_* tool
-  // is gated server-side on mcp_config, which the content tier does not hold.
-  // When no OAuth scopes are configured, hasScope() is a no-op (preset-only).
+  // content-editor preset allows config reads locally, but config_* tools are
+  // gated server-side on mcp_config (writes) or mcp_config / mcp_config_read
+  // (reads). The content tier holds neither. When no OAuth scopes are
+  // configured, hasScope() is a no-op (preset-only).
   const canWrite  = !sec.readOnly && hasScope(site, "mcp_write");
   const canConfig = hasScope(site, "mcp_config");
+  const canConfigRead = hasConfigReadScope(site);
   const identity = getRequestIdentity();
   // Dispatch may inject `site` after a default/grant resolution. Prefer the
   // authoritative source so `target` and `_target` cannot disagree (#167).
@@ -212,7 +217,7 @@ async function whoami({ site: siteName, _resolvedSource }) {
       read:        hasScope(site, "mcp_read"),
       write:       canWrite,
       delete:      sec.allowDestructive && canWrite,
-      configRead:  sec.allowConfigRead  && canConfig,
+      configRead:  sec.allowConfigRead  && canConfigRead,
       configWrite: sec.allowConfigWrite && !sec.readOnly && canConfig,
       // Local publish policy (allowPublish), symmetric with delete/config caps.
       // Defaults false in every preset except `development`; the remote Drupal's
