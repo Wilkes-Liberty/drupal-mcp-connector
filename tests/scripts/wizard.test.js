@@ -151,7 +151,7 @@ describe("drupal-mcp-wizard CLI", () => {
     expect(dumped).not.toMatch(/client_secret|CLIENT_SECRET|apiToken":\s*"[^$<]/);
   });
 
-  it("--preset public-https is gated and maps to https snippets", () => {
+  it("--preset public-https is gated, forces oauth, and maps to https snippets", () => {
     const result = runWizard([
       "--yes",
       "--json",
@@ -164,8 +164,36 @@ describe("drupal-mcp-wizard CLI", () => {
     expect(body.answers.preset).toBe("public-https");
     expect(body.answers.gated).toBe(true);
     expect(body.answers.transport).toBe("https");
+    expect(body.answers.auth).toBe("oauth");
     expect(body.clients.cursor.config.mcpServers.drupal.url).toMatch(/\/mcp$/);
+    expect(body.clients.cursor.config.mcpServers.drupal.headers).toBeUndefined();
     expect(result.stderr).toMatch(/gated\/later|not a public SaaS/i);
+  });
+
+  it("--preset public-https rejects explicit --auth token", () => {
+    const result = runWizard([
+      "--yes",
+      "--json",
+      "--preset", "public-https",
+      "--auth", "token",
+      "--host", "https://mcp.example.com/mcp",
+      "--output", dir,
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/requires --auth oauth/i);
+  });
+
+  it("stdio + --auth oauth is rejected with an actionable error", () => {
+    const result = runWizard([
+      "--yes",
+      "--json",
+      "--transport", "stdio",
+      "--auth", "oauth",
+      "--host", "https://drupal.example.com",
+      "--output", dir,
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/stdio \+ --auth oauth/i);
   });
 
   it("--preset tailscale stays stdio and VPN-required", () => {

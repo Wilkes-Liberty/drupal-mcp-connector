@@ -424,13 +424,20 @@ export async function runDoctor(options = {}) {
       "security.allowedEntityTypes is an empty list, so every entity tool is denied.",
       "Set an explicit allowlist that includes node (or use a preset such as production-strict / content-editor). Doctor will not widen it for you.",
     ));
-  } else if (Array.isArray(sec.deniedEntityTypes) && sec.deniedEntityTypes.includes("node")
-    && Array.isArray(sec.allowedEntityTypes) && !sec.allowedEntityTypes.includes("node")) {
+  } else if (Array.isArray(sec.deniedEntityTypes) && sec.deniedEntityTypes.includes("node")) {
     checks.push(check(
       "allowlist",
       "Entity allowlist permits a content read",
       FAIL,
-      "node is denied and not allowlisted, so drupal_list_nodes / drupal_get_node will fail closed.",
+      "node is on security.deniedEntityTypes (deny-first), so drupal_list_nodes / drupal_get_node will fail closed.",
+      "Remove node from deniedEntityTypes on a staging preset only when a human intends that. Do not auto-widen production denylists.",
+    ));
+  } else if (Array.isArray(sec.allowedEntityTypes) && !sec.allowedEntityTypes.includes("node")) {
+    checks.push(check(
+      "allowlist",
+      "Entity allowlist permits a content read",
+      FAIL,
+      "security.allowedEntityTypes is set and omits node, so drupal_list_nodes / drupal_get_node will fail closed.",
       "Add node to security.allowedEntityTypes on a staging preset. Do not auto-widen production allowlists.",
     ));
   } else {
@@ -498,7 +505,7 @@ export async function runDoctor(options = {}) {
         `Readiness returned HTTP ${readinessProbe.status} (not_authorized_for_governance).`,
         "Grant the consumer access to the readiness route / mcp_read scope. This is an authz miss, not a reason to disable governance.",
       ));
-    } else if (readinessProbe.body && readinessProbe.body.contract_ready) {
+    } else if (readinessProbe.status === 200 && readinessProbe.body?.contract_ready === true) {
       checks.push(check(
         "readiness",
         "Source governance contract_ready",

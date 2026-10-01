@@ -168,6 +168,50 @@ describe("doctor gate order", () => {
     expect(formatDoctorReport(report)).toMatch(/drupal_mcp_whoami/);
   });
 
+  it("fails allowlist when node is denied (deny-first)", async () => {
+    const report = await runDoctor({
+      site: liveSite({
+        security: {
+          preset: "production-strict",
+          deniedEntityTypes: ["node"],
+          allowedEntityTypes: ["node", "media"],
+        },
+      }),
+      fetch: fetchMap({
+        "/jsonapi": reply(200, { jsonapi: { version: "1.0" } }),
+        "/drupal-mcp/readiness": reply(200, { contract_ready: true }),
+      }),
+    });
+    expect(report.primaryFailure.id).toBe("allowlist");
+    expect(report.primaryFailure.detail).toMatch(/deniedEntityTypes/);
+  });
+
+  it("fails allowlist when a configured allowlist omits node", async () => {
+    const report = await runDoctor({
+      site: liveSite({
+        security: { preset: "production-strict", allowedEntityTypes: ["media"] },
+      }),
+      fetch: fetchMap({
+        "/jsonapi": reply(200, { jsonapi: { version: "1.0" } }),
+        "/drupal-mcp/readiness": reply(200, { contract_ready: true }),
+      }),
+    });
+    expect(report.primaryFailure.id).toBe("allowlist");
+    expect(report.primaryFailure.detail).toMatch(/omits node/);
+  });
+
+  it("does not pass readiness on non-200 truthy contract_ready", async () => {
+    const report = await runDoctor({
+      site: liveSite(),
+      fetch: fetchMap({
+        "/jsonapi": reply(200, { jsonapi: { version: "1.0" } }),
+        "/drupal-mcp/readiness": reply(500, { contract_ready: true }),
+      }),
+    });
+    const readiness = report.checks.find((c) => c.id === "readiness");
+    expect(readiness.status).not.toBe("pass");
+  });
+
   it("never leaks secrets into the report or human text", async () => {
     const report = await runDoctor({
       site: liveSite(),

@@ -14,7 +14,6 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import fetch from "node-fetch";
 import { CLIENT_VERSION } from "./config.js";
-import { handlers as configHandlers } from "../tools/config.js";
 import { formatTransportPresetHelp, isReservedDocumentationHost, resolveTransportPreset } from "./transports.js";
 import { detectVersionSkew, extractReportedVersions, versionSkewCheck } from "./version-skew.js";
 
@@ -40,7 +39,7 @@ ${formatTransportPresetHelp()}
   --transport stdio|https   MCP transport (default: stdio)
   --host <url>              Drupal base URL (stdio) or MCP URL (https)
   --drupal-url <url>        Drupal site for whoami/contract_ready (https)
-  --auth token|oauth        Auth mode (default: token)
+  --auth token|oauth        Auth mode (default: token; public-https forces oauth)
   --client-id <id>          Agent client id (default: content-agent)
   --clients cursor,claude   Which snippets to emit (default: both)
   --server-name <id>        mcpServers key (default: drupal)
@@ -166,6 +165,7 @@ export async function resolveWizardAnswers(args, options = {}) {
   const cwd = options.cwd || process.cwd();
   const outputDir = String(args.output || process.env.MCP_WIZARD_OUTPUT || cwd);
 
+  let writeConfirmedInteractive = false;
   const asked = {
     preset: pick("preset", args, "MCP_WIZARD_PRESET", ""),
     transport: pick("transport", args, "MCP_WIZARD_TRANSPORT", DEFAULTS.transport),
@@ -212,6 +212,14 @@ export async function resolveWizardAnswers(args, options = {}) {
       if (!asked.write) {
         asked.write = /^y(es)?$/i.test(await ask(rl, "Write project MCP config files? [y/N]", "n"));
       }
+      if (asked.write && !yes) {
+        writeConfirmedInteractive = /^y(es)?$/i.test(
+          await ask(rl, "Confirm write/merge of MCP config files? [y/N]", "n"),
+        );
+        if (!writeConfirmedInteractive) {
+          asked.write = false;
+        }
+      }
     } finally {
       rl.close();
     }
@@ -231,7 +239,21 @@ export async function resolveWizardAnswers(args, options = {}) {
     }
   }
   const transport = normalizeChoice(transportChoice, ["stdio", "https"], "transport");
-  const auth = normalizeChoice(asked.auth, ["token", "oauth"], "auth");
+  let auth = normalizeChoice(asked.auth, ["token", "oauth"], "auth");
+  if (preset?.id === "public-https") {
+    if (auth === "token" && args.auth && String(args.auth) === "token") {
+      throw new Error(
+        "--preset public-https requires --auth oauth (MCP_AUTH_TOKEN is loopback-only; inbound OAuth is required for network HTTPS).",
+      );
+    }
+    auth = "oauth";
+  }
+  if (transport === "stdio" && auth === "oauth") {
+    throw new Error(
+      "stdio + --auth oauth needs a site config oauth block (clientId / clientSecretEnv). " +
+      "Use --auth token for env-based sealed tokens with stdio, or add an oauth block to config/config.json after init.",
+    );
+  }
   const scope = normalizeChoice(asked.scope, ["project", "user"], "scope");
   const host = normalizeHttpUrl(asked.host, "host");
   const drupalUrl = asked.drupalUrl
@@ -265,7 +287,7 @@ export async function resolveWizardAnswers(args, options = {}) {
     scope,
     output: outputDir,
     skipCheck: Boolean(asked.skipCheck),
-    yes,
+    yes: yes || writeConfirmedInteractive,
   };
 }
 
@@ -320,26 +342,13 @@ export async function runReadinessChecks(answers, options = {}) {
     };
   }
 
-  let whoami;
-  try {
-    const report = await configHandlers.drupal_mcp_whoami({ site: answers.site });
-    whoami = {
-      status: "pass",
-      title: "whoami",
-      detail: `tier=${report.tier} preset=${report.preset} site=${report.site}`,
-      next: null,
-      report,
-    };
-  } catch (err) {
-    const preview = localWhoami(answers);
-    whoami = {
-      status: "pass",
-      title: "whoami",
-      detail: `local policy preview (no loaded site config: ${shortError(err)})`,
-      next: "Copy config/config.example.json → config/config.json and set baseUrl + auth.",
-      report: preview,
-    };
-  }
+  const whoami = {
+    status: "skip",
+    title: "whoami",
+    detail: "Skipped — wizard does not load the generated client config; call drupal_mcp_whoami from the client after registering the snippet.",
+    next: "Register the snippet, restart the client, then call drupal_mcp_whoami against this host.",
+    report: localWhoami(answers),
+  };
 
   const readinessUrl = `${stripSlash(target)}/drupal-mcp/readiness`;
   const readiness = await probeUrl(readinessUrl, fetchImpl);
@@ -470,7 +479,10 @@ function buildServerEntry(answers, flavor) {
     const entry = { url: answers.mcpUrl };
     if (flavor === "claude") entry.type = "http";
     if (answers.auth === "token") {
-      const tokenRef = flavor === "cursor" ? "\${env:MCP_AUTH_TOKEN}" : "\${MCP_AUTH_TOKEN}";
+      // Build placeholder without a `${` token in source (code-quality / non-template string).
+      const tokenRef = flavor === "cursor"
+        ? ("$" + "{env:MCP_AUTH_TOKEN}")
+        : ("$" + "{MCP_AUTH_TOKEN}");
       entry.headers = { Authorization: `Bearer ${tokenRef}` };
     }
     return entry;
@@ -742,7 +754,8 @@ function formatCheck(check) {
   const tag = mark[check.status] || check.status.toUpperCase();
   const title = check.title || "check";
   const lines = [`  [${tag}] ${title} — ${check.detail}`];
-  if (check.next) lines.push(`         next: ${check.next}`);
+  const next = check.next || check.nextFix;
+  if (next) lines.push(`         next: ${next}`);
   return lines.join("\n");
 }
 
