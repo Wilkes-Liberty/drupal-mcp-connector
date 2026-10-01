@@ -17,7 +17,7 @@ import {
 } from "./config.js";
 import { resolveSecurityConfig, getSecuritySummary } from "./security.js";
 import { detectVersionSkew, extractReportedVersions, versionSkewCheck } from "./version-skew.js";
-import { formatTransportPresetHelp, isReservedDocumentationHost } from "./transports.js";
+import { formatTransportPresetHelp, isReservedDocumentationHost, isTailscaleMagicDnsHost } from "./transports.js";
 
 /** Doctor checks in the required order. */
 export const DOCTOR_CHECK_IDS = [
@@ -299,7 +299,7 @@ export async function runDoctor(options = {}) {
           "Drupal host is reachable",
           FAIL,
           `No TCP/HTTP response from ${host} (jsonapi or origin).`,
-          host.includes(".ts.net")
+          isTailscaleMagicDnsHost(host)
             ? "Join the Tailscale tailnet on this machine, then retry. Tailscale is VPN-required — this is not a public URL."
             : "Confirm the host URL, DNS, and that this machine can route to Drupal (Local stdio or Tailscale VPN).",
         ));

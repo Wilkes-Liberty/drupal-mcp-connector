@@ -112,7 +112,7 @@ export function resolveTransportPreset(id) {
  * @returns {boolean}
  */
 export function isReservedDocumentationHost(url) {
-  let host = url;
+  let host;
   try {
     host = new URL(url).hostname;
   } catch {
@@ -131,4 +131,23 @@ export function isReservedDocumentationHost(url) {
     || host.endsWith(".test")
     || host.endsWith(".example")
   );
+}
+
+/**
+ * True when the URL hostname is MagicDNS (*.ts.net), not a substring match.
+ * Shared by doctor messaging (DEV-759) so evil.example.com/.ts.net/path is not treated as Tailscale.
+ * @param {string} url
+ * @returns {boolean}
+ */
+export function isTailscaleMagicDnsHost(url) {
+  let host;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    host = String(url || "");
+    // Strip path/query/port if a bare host-ish string was passed.
+    host = host.split("/")[0].split("?")[0].split(":")[0];
+  }
+  host = String(host).toLowerCase();
+  return host === "ts.net" || host.endsWith(".ts.net");
 }

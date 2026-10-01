@@ -470,7 +470,7 @@ function buildServerEntry(answers, flavor) {
     const entry = { url: answers.mcpUrl };
     if (flavor === "claude") entry.type = "http";
     if (answers.auth === "token") {
-      const tokenRef = flavor === "cursor" ? "${env:MCP_AUTH_TOKEN}" : "${MCP_AUTH_TOKEN}";
+      const tokenRef = flavor === "cursor" ? "\${env:MCP_AUTH_TOKEN}" : "\${MCP_AUTH_TOKEN}";
       entry.headers = { Authorization: `Bearer ${tokenRef}` };
     }
     return entry;
