@@ -763,7 +763,7 @@ Create or update many entities of a single type + bundle in one call. Permission
 
 ## Translations
 
-Inspect and create entity translations (multilingual / `content_translation`). A translation is an unpublished forward draft beside the live default language — it is **not** a PATCH of `langcode` on the canonical entity. Node, paragraph, and media create/list/update/read go through Sentinel's `/mcp-draft` translation contract when that module is deployed. Without Sentinel, a list serves one observable language per resource.
+Inspect and create entity translations (multilingual / `content_translation`). A translation is an unpublished forward draft beside the live default language — it is **not** a PATCH of `langcode` on the canonical entity. Node, paragraph, and media create/list/update/read go through Sentinel's `/mcp-draft` translation contract when that module is deployed. Without Sentinel, a list serves one observable language per resource. Menu-link and taxonomy `langcode` updates stay on canonical JSON:API (URL prefix, then language headers); see [Structure](#structure).
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
@@ -842,9 +842,9 @@ Manage editable site structure — custom (content) menu links and custom conten
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_list_menu_links` | — | List custom menu links, optionally scoped to one `menu` (e.g. `main`, `footer`). Returns title, target URI, menu, and weight. Supports `limit` / `offset` / `sort`. |
+| `drupal_list_menu_links` | — | List custom menu links, optionally scoped to one `menu` (e.g. `main`, `footer`). Returns title, target URI, menu, weight, and `fields.drupal_internal__id` (numeric id for admin edit URLs). Supports `limit` / `offset` / `sort`. |
 | `drupal_create_menu_link` | `title`, `link`, `menu` | Create a custom menu link. `link` is a Drupal URI such as `internal:/about`, `entity:node/42`, or an absolute URL. |
-| `drupal_update_menu_link` | `id` | Partial update by UUID: rename, re-weight, re-target, re-parent, enable/disable. Omit `enabled` to preserve the current state. |
+| `drupal_update_menu_link` | `id` | Partial update by UUID: rename, re-weight, re-target, re-parent, enable/disable. Omit `enabled` to preserve the current state. Pass `langcode` to update an existing translation (does not create one). |
 | `drupal_list_blocks` | — | List custom content blocks, optionally scoped to one block `type` (bundle). Returns admin label (`info`) and body. Supports `limit` / `offset` / `sort`. |
 | `drupal_create_block` | `type`, `info` | Create a custom content block. `info` is the administrative label; `body` is optional HTML. |
 
@@ -858,6 +858,45 @@ Manage editable site structure — custom (content) menu links and custom conten
   "weight": 0
 }
 ```
+
+### drupal_update_menu_link (existing translation)
+
+Menu-link and taxonomy `langcode` writes use canonical JSON:API language
+negotiation, not Sentinel's draft-translation surface (that contract is
+node / paragraph / media). The connector requests
+`/{langcode}/jsonapi/menu_link_content/menu_link_content/{uuid}` first —
+the same prefix that returns a Spanish node from `/es/jsonapi/node/…` —
+and falls back to `/jsonapi/…` with `Accept-Language` /
+`Content-Language` headers if the prefix 404s.
+
+```json
+{
+  "id": "11111111-1111-4111-8111-111111111111",
+  "langcode": "es",
+  "title": "Acerca de nosotros"
+}
+```
+
+If JSON:API still serves the default language after both attempts, the
+write is refused. Check:
+
+1. **Content translation** is enabled for `menu_link_content`, and the
+   translation already exists (this tool does not create one).
+2. **URL language detection** is enabled for *Content* language, and the
+   language's path prefix matches the langcode (`es` → `/es/…`). Confirm
+   with `GET /es/jsonapi/menu_link_content/menu_link_content/{uuid}` —
+   it should return `"langcode": "es"`. If `/es/jsonapi/node/…` is
+   Spanish but the menu-link resource is still English, negotiation is
+   not reaching `menu_link_content`; that is a site/module gap, not a
+   connector one.
+3. Browser (Accept-Language) detection is optional once the URL prefix
+   works. Do not add `?langCode=` on stock JSON:API — core rejects
+   unknown query parameters unless [JSON:API Multilingual](https://www.drupal.org/project/jsonapi_multilingual)
+   is installed.
+
+List/create/update responses include `fields.drupal_internal__id`. The
+admin edit path is `/admin/structure/menu/item/{id}/edit` (append
+`/{langcode}` for a translation).
 
 ### drupal_create_block
 

@@ -156,7 +156,7 @@ async function createMenuLink({ site: siteName, title, link, menu, weight, paren
  * site — so an unrelated edit (rename, re-weight, re-parent) can never silently
  * regress a live link to disabled. Set `parent` to re-nest a link.
  *
- * @param {object} args - { site?, id, title?, link?, menu?, weight?, parent?, enabled? }.
+ * @param {object} args - { site?, id, title?, link?, menu?, weight?, parent?, enabled?, langcode? }.
  * @returns {Promise<object>} The updated menu-link descriptor from the backend.
  * @throws {Error} If id is missing.
  * @throws {SecurityError} If updating menu_link_content is not permitted.
@@ -243,7 +243,7 @@ async function createBlock({ site: siteName, type, info, body }) {
 export const definitions = [
   {
     name: "drupal_list_menu_links",
-    description: "List custom (content) menu links, optionally scoped to a single menu (e.g. 'main', 'footer'). Returns each link's title, target URI, menu, and weight. Note: this lists editable menu_link_content entities, not code-defined static links.",
+    description: "List custom (content) menu links, optionally scoped to a single menu (e.g. 'main', 'footer'). Returns each link's title, target URI, menu, weight, and fields.drupal_internal__id (numeric id for /admin/structure/menu/item/{id}/edit). Note: this lists editable menu_link_content entities, not code-defined static links.",
     inputSchema: {
       type: "object",
       properties: {
@@ -273,7 +273,7 @@ export const definitions = [
   },
   {
     name: "drupal_update_menu_link",
-    description: "Update a custom menu link by UUID (rename, re-weight, re-target, re-parent, enable/disable). Only the fields you pass change. The link's enabled state is preserved across edits — an unrelated change will not disable a live link — unless you pass 'enabled' explicitly. Checked against the site security config.",
+    description: "Update a custom menu link by UUID (rename, re-weight, re-target, re-parent, enable/disable). Only the fields you pass change. The link's enabled state is preserved across edits — an unrelated change will not disable a live link — unless you pass 'enabled' explicitly. Pass langcode to update an existing translation via JSON:API language negotiation (URL prefix, then language headers). Does not create a missing translation. Responses include fields.drupal_internal__id. Checked against the site security config.",
     inputSchema: {
       type: "object", required: ["id"],
       properties: {
@@ -285,7 +285,7 @@ export const definitions = [
         weight:  { type: "number", description: "New ordering weight. Omit to leave unchanged." },
         parent:  { type: "string", description: "New parent link plugin id (e.g. 'menu_link_content:<uuid>'), or '' for top level. Omit to leave unchanged." },
         enabled: { type: "boolean", description: "Enable/disable the link. Omit to preserve the current state." },
-        langcode: { type: "string", description: "Existing translation to update (e.g. 'es'). Omit for the default language. Does not create a missing translation." },
+        langcode: { type: "string", description: "Existing translation to update (e.g. 'es'). Uses /{langcode}/jsonapi/… when the site prefixes JSON:API, then language headers. Omit for the default language. Does not create a missing translation." },
       },
     },
   },

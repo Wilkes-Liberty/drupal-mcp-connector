@@ -11,6 +11,7 @@ import { drupalFetch, drupalUploadFile } from "../drupal-fetch.js";
 import { getRequestIdentity } from "../principal.js";
 import { validateUuid, validateMachineName } from "../validate.js";
 import { parseFieldConfigObject } from "../field-definition.js";
+import { httpStatusOf } from "../error-status.js";
 import { Backend } from "./backend-interface.js";
 import {
   makeCanonicalEntity,
@@ -33,14 +34,68 @@ const COUNT_PAGE_SIZE = 50;
 const COUNT_MAX_RECORDS = 1000;
 
 /**
- * JSON:API language headers. Drupal negotiates Content-Language / Accept-Language
- * when URL prefixes are not used on /jsonapi.
+ * JSON:API language headers. Stock Drupal ignores these unless Browser
+ * (Accept-Language) detection is enabled for content language. Production
+ * sites usually negotiate via URL prefixes instead — see jsonApiLanguagePath.
  * @param {?string} langcode
  * @returns {object}
  */
 function languageFetchOptions(langcode) {
   if (!langcode) return {};
   return { headers: { "Content-Language": langcode, "Accept-Language": langcode } };
+}
+
+/**
+ * Prefix a JSON:API path with the language code stock Drupal URL negotiation
+ * expects (`/es/jsonapi/...`). Does not add `?langCode=` — core JSON:API
+ * rejects unknown query parameters unless jsonapi_multilingual is installed.
+ * @param {string} path JSON:API path, optionally with a query string.
+ * @param {?string} langcode
+ * @returns {string}
+ */
+export function jsonApiLanguagePath(path, langcode) {
+  if (!langcode) return path;
+  const prefix = `/${encodeURIComponent(langcode)}`;
+  if (path === prefix || path.startsWith(`${prefix}/`)) return path;
+  return `${prefix}${path}`;
+}
+
+/**
+ * Merge language headers onto a drupalFetch options object.
+ * @param {object} [options]
+ * @param {?string} langcode
+ * @returns {object}
+ */
+function languageRequestOptions(options, langcode) {
+  const lang = languageFetchOptions(langcode);
+  if (!lang.headers) return { ...options };
+  return {
+    ...options,
+    headers: { ...(options?.headers || {}), ...lang.headers },
+  };
+}
+
+/**
+ * Fetch a JSON:API resource in a requested language.
+ *
+ * Prefer the URL prefix (how `/es/jsonapi/node/...` works on multilingual
+ * Drupal). If that 404s — the site has no language prefixes — retry the
+ * unprefixed path with language headers only (#398 / #303).
+ * @param {object} site Resolved site config.
+ * @param {string} path Unprefixed JSON:API path.
+ * @param {object} [options] node-fetch options (method, body, extra headers).
+ * @param {?string} langcode
+ * @returns {Promise<object|null>}
+ */
+async function fetchJsonApiWithLanguage(site, path, options = {}, langcode) {
+  const opts = languageRequestOptions(options, langcode);
+  if (!langcode) return drupalFetch(site, path, opts);
+  try {
+    return await drupalFetch(site, jsonApiLanguagePath(path, langcode), opts);
+  } catch (err) {
+    if (httpStatusOf(err) !== 404) throw err;
+    return drupalFetch(site, path, opts);
+  }
 }
 
 /**
@@ -59,7 +114,8 @@ function assertServedLanguage(entity, langcode) {
   if (entity.langcode !== langcode) {
     throw new Error(
       `JSON:API served language "${entity.langcode}" for requested langcode "${langcode}". ` +
-      "The translation may not exist, or this site does not negotiate JSON:API by language.",
+      "The translation may not exist, or this site does not negotiate JSON:API by language " +
+      `(URL prefix /${langcode}/jsonapi/… or Accept-Language).`,
     );
   }
 }
@@ -291,10 +347,12 @@ export class JsonApiBackend extends Backend {
           // while the UUID remains the canonical top-level id (#237).
           // Paragraph ERR attach needs the current revision id (#192).
           // Node / revisionable writes need the working vs live vid (#166).
+          // Menu-link admin edit URLs need the numeric id (#398).
           // Other drupal_internal__* attributes stay stripped.
           return (entityType === "node" && k === "drupal_internal__nid")
             || k === "drupal_internal__vid"
-            || (entityType === "paragraph" && k === "drupal_internal__revision_id");
+            || (entityType === "paragraph" && k === "drupal_internal__revision_id")
+            || (entityType === "menu_link_content" && k === "drupal_internal__id");
         }
         return true;
       })
@@ -397,7 +455,7 @@ export class JsonApiBackend extends Backend {
     if (resourceVersion) {
       path += `?resourceVersion=${encodeURIComponent(resourceVersion)}`;
     }
-    const data = await drupalFetch(this.site, path, languageFetchOptions(langcode));
+    const data = await fetchJsonApiWithLanguage(this.site, path, {}, langcode);
     const entity = data?.data ? this.toCanonical(data.data) : null;
     assertServedLanguage(entity, langcode);
     return entity;
@@ -514,14 +572,19 @@ export class JsonApiBackend extends Backend {
    * @returns {Promise<object>} The JSON:API response body.
    */
   async writeWithModerationFallback(path, method, buildPayload, attributes, langcode) {
-    const lang = languageFetchOptions(langcode);
+    const send = (attrs) => fetchJsonApiWithLanguage(
+      this.site,
+      path,
+      { method, body: JSON.stringify(buildPayload(attrs)) },
+      langcode,
+    );
     try {
-      return await drupalFetch(this.site, path, { method, body: JSON.stringify(buildPayload(attributes)), ...lang });
+      return await send(attributes);
     } catch (err) {
       if (!isModeratedStatusError(err) || !("status" in attributes)) throw err;
       const withoutStatus = { ...attributes };
       delete withoutStatus.status;
-      return drupalFetch(this.site, path, { method, body: JSON.stringify(buildPayload(withoutStatus)), ...lang });
+      return send(withoutStatus);
     }
   }
 

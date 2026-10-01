@@ -152,6 +152,42 @@ describe("structure tools", () => {
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
+  it("update_menu_link passes langcode through to the read-back and the write (#398)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalMenuLink({
+      langcode: "es", title: "Empresa",
+      fields: { enabled: true, link: { uri: "internal:/" }, menu_name: "main", weight: 0, drupal_internal__id: 17 },
+    }));
+    backend.updateEntity.mockResolvedValue(canonicalMenuLink({
+      langcode: "es", title: "Acerca de nosotros",
+      fields: { enabled: true, drupal_internal__id: 17 },
+    }));
+    const out = await handlers.drupal_update_menu_link({
+      id: "ml1", title: "Acerca de nosotros", langcode: "es",
+    });
+    expect(backend.getEntity).toHaveBeenCalledWith({
+      entityType: "menu_link_content", bundle: "menu_link_content", id: "ml1", langcode: "es",
+    });
+    expect(backend.updateEntity.mock.calls[0][0]).toMatchObject({
+      entityType: "menu_link_content", bundle: "menu_link_content", id: "ml1",
+      langcode: "es",
+      attributes: { title: "Acerca de nosotros", enabled: true },
+    });
+    expect(out.langcode).toBe("es");
+    expect(out.fields.drupal_internal__id).toBe(17);
+  });
+
+  it("list_menu_links surfaces drupal_internal__id from the backend (#398)", async () => {
+    backend.listEntities.mockResolvedValue({
+      entities: [canonicalMenuLink({
+        fields: { link: { uri: "internal:/" }, menu_name: "main", weight: 0, drupal_internal__id: 17 },
+      })],
+      page: { total: 1 },
+      approximate: false,
+    });
+    const out = await handlers.drupal_list_menu_links({});
+    expect(out.menuLinks[0].fields.drupal_internal__id).toBe(17);
+  });
+
   // --- blocks ---------------------------------------------------------------
 
   it("list_blocks lists block_content with no type filter", async () => {
