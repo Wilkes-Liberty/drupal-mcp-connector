@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.26.0] - 2026-10-01
+
 ### Changed
 - **Nightly leftover cleanup (#399).** CI pins Node 20 (no 1-cell matrix) and
   runs `npm run syntax-check` recursively over `src/`. The two
@@ -21,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `allModules` (module-private after #395).
 
 ### Added
-- **Terminal install wizard (`wizard` / `init`) (DEV-758).**
+- **Terminal install wizard (`wizard` / `init`).**
   `npx drupal-mcp-connector init` (also `wizard`, `npm run init`,
   `drupal-mcp-wizard`) collects transport (stdio vs remote HTTPS), auth
   (OAuth vs sealed token), and agent client id, then prints Cursor
@@ -30,16 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--yes`. Post-config `whoami` + `contract_ready` print pass/fail with a
   next fix, or a clear skip when the host is unreachable. Remote HTTPS is
   Tailscale / local-VPN only — not a public SaaS path.
-- **`doctor` CLI (DEV-759).** `npx drupal-mcp-connector doctor` runs ordered
+- **`doctor` CLI.** `npx drupal-mcp-connector doctor` runs ordered
   gates (reachability → auth/401 → agent client → allowlist →
   `contract_ready` → version skew), prints one primary failure plus the
   exact next fix, exits non-zero on fail, and supports `--json` with no
   secrets.
-- **Transport presets (DEV-763).** Wizard `--preset local-stdio|tailscale|public-https`
-  and docs table. Public HTTPS is marked gated/later — not a hosted SaaS URL.
-- **Version-skew blurb (DEV-766).** Doctor and wizard print “you are on X;
+- **Transport presets.** Wizard `--preset local-stdio|tailscale|public-https`
+  and docs table. Public HTTPS is listed as a preset and is not a hosted service.
+- **Version skew.** Doctor and wizard print “you are on X;
   site needs Y” when readiness reports versions. No auto-upgrade.
-- **Two-minute happy-path recipe (DEV-760).** README walkthrough using
+- **Happy-path recipe.** README walkthrough using
   `drupal_mcp_whoami` → `drupal_list_sites` → unpublished
   `drupal_list_nodes` / `dryRun` `drupal_create_node`.
 

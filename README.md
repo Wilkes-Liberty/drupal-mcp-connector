@@ -1,6 +1,6 @@
 # Drupal MCP Connector
 
-> Drupal MCP Connector — multi-site MCP server for Drupal with JSON:API and GraphQL, governed writes, draft translations, content tools, audit reports, and an SSH Drush bridge.
+> Multi-site MCP server for Drupal over JSON:API and GraphQL, with governed writes and an SSH Drush bridge. `init` writes a stdio or Tailscale client config from a transport preset. `doctor` checks reachability, auth, and readiness, and reports version skew. A timestamp gap on a published revision no longer blocks the next draft.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-green)](https://nodejs.org)
