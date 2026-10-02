@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-01
+
 ### Fixed
 - **`drupal_schedule_publish` site refusals (#402).** A 422 such as
   `publish_state: You do not have access to transition from Draft to
