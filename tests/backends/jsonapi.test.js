@@ -756,6 +756,23 @@ describe("JsonApiBackend.rawQuery", () => {
   });
 });
 
+describe("JsonApiBackend.listContentTypes", () => {
+  const backend = new JsonApiBackend({ _name: "t", baseUrl: "https://x" });
+  beforeEach(() => vi.mocked(drupalFetch).mockReset());
+
+  it("follows pages past 50 node types so an all-bundle scan is complete", async () => {
+    const ct = (i) => ({ attributes: { drupal_internal__type: `t${i}`, name: `T${i}`, description: null } });
+    const first = Array.from({ length: 50 }, (_, i) => ct(i));
+    vi.mocked(drupalFetch)
+      .mockResolvedValueOnce({ data: first, links: { next: { href: "https://x/jsonapi/node_type/node_type?page[offset]=50&page[limit]=50" } } })
+      .mockResolvedValueOnce({ data: [ct(50), ct(51)], links: {} });
+    const out = await backend.listContentTypes();
+    expect(out).toHaveLength(52);
+    expect(out[51].id).toBe("t51");
+    expect(vi.mocked(drupalFetch).mock.calls[1][1]).toContain("page[offset]=50");
+  });
+});
+
 describe("JsonApiBackend.listBundles", () => {
   const backend = new JsonApiBackend({ _name: "t", baseUrl: "https://x" });
   beforeEach(() => vi.mocked(drupalFetch).mockReset());

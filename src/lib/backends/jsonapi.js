@@ -20,6 +20,9 @@ import {
 } from "../canonical.js";
 import { isPositiveNid, normalizeAlias, PATH_ALIAS_ENTITY_TYPE } from "../path-alias.js";
 
+/** Most node_type pages read by listContentTypes (50 per page). */
+const CONTENT_TYPE_MAX_PAGES = 20;
+
 // Drupal exposes internal identifiers under drupal_internal__* attributes.
 // They are dropped from canonical `fields` except for the identifiers that
 // governed read/write workflows explicitly need.
@@ -666,13 +669,22 @@ export class JsonApiBackend extends Backend {
    * @returns {Promise<Array<{id: string, label: string, description: ?string}>>}
    */
   async listContentTypes() {
-    // page[limit]=50 is an intentional cap; matches Drupal JSON:API's default page size.
-    const data = await drupalFetch(this.site, "/jsonapi/node_type/node_type?page[limit]=50");
-    return (data.data || []).map((ct) => ({
-      id: ct.attributes.drupal_internal__type,
-      label: ct.attributes.name,
-      description: ct.attributes.description ?? null,
-    }));
+    // JSON:API caps a page at 50. Follow `links.next` so callers that scan
+    // every bundle see them all (#403); stop after a fixed number of pages.
+    const out = [];
+    for (let page = 0, offset = 0; page < CONTENT_TYPE_MAX_PAGES; page += 1, offset += 50) {
+      const data = await drupalFetch(this.site, `/jsonapi/node_type/node_type?page[limit]=50&page[offset]=${offset}`);
+      const rows = data.data || [];
+      for (const ct of rows) {
+        out.push({
+          id: ct.attributes.drupal_internal__type,
+          label: ct.attributes.name,
+          description: ct.attributes.description ?? null,
+        });
+      }
+      if (!data.links?.next || rows.length === 0) break;
+    }
+    return out;
   }
 
   /**

@@ -135,6 +135,12 @@ describe("reports-content", () => {
       const res = await handlers.drupal_report_scheduled_content({ type: "page" });
       expect(res.gated).toBe(true);
     });
+    it("keeps approximate on a gated bundle that hit the sample cap", async () => {
+      backend.listEntities.mockResolvedValue({ entities: [node({ id: "1" }), node({ id: "2" })], page: { hasNext: true } });
+      const res = await handlers.drupal_report_scheduled_content({ type: "page", sampleSize: 2 });
+      expect(res.gated).toBe(true);
+      expect(res.approximate).toBe(true);
+    });
     it("returns empty pending/overdue when Scheduler keys are present but null (#403)", async () => {
       backend.listEntities.mockResolvedValue(page([
         node({ id: "1", fields: { publish_on: null, unpublish_on: null } }),

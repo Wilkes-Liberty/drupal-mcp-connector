@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `publish_state: You do not have access to transition from Draft to
   Published` was rewritten as "Scheduler fields are not available", because
   any message naming a Scheduler field counted as a missing field. Only the
-  "attribute does not exist" phrasing counts now. Other 4xx refusals,
+  "The attribute X does not exist on the Y resource type" form counts now. Other 4xx refusals,
   including MCP Sentinel denials, return the site's reason verbatim with the
   HTTP status.
 - **`drupal_schedule_publish` no longer refuses on its own (#402).** A
@@ -23,7 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when `moderation_state` is not visible to the account.
 - **`drupal_report_scheduled_content` on an empty bundle (#403).** A bundle
   with no nodes reports pending 0 / overdue 0 with `schedulerFields:
-  "unknown"` instead of `gated: true`.
+  "unknown"` instead of `gated: true`. A gated bundle that hit the sample cap
+  keeps `approximate: true`.
+- **`listContentTypes` read only the first 50 node types (JSON:API).** It
+  now follows `links.next`, so all-bundle scans and
+  `drupal_report_content_summary` see every content type.
 
 ### Changed
 - **No node tool defaults to the `article` bundle any more (#403).** On a

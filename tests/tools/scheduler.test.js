@@ -101,7 +101,7 @@ describe("scheduler tools", () => {
   });
 
   it("surfaces a clear capability error when the backend reports an unknown field", async () => {
-    backend.updateEntity.mockRejectedValue(new Error("Field 'publish_on' is unknown."));
+    backend.updateEntity.mockRejectedValue(new Error("The attribute publish_on does not exist on the node--article resource type."));
     await expect(handlers.drupal_schedule_publish({ type: "article", id: "n1", publishOn: "2026-07-01T12:00:00Z" }))
       .rejects.toThrow(/Scheduler/i);
   });
@@ -208,6 +208,22 @@ describe("scheduler tools", () => {
     expect(err.message).toContain(reason);
     expect(err.message).not.toMatch(/not available|not installed/i);
     expect(err.status).toBe(403);
+  });
+
+  it.each([
+    "publish_state: invalid field value for this transition",
+    "publish_state: The field value is unknown for this workflow",
+    "publish_state: unknown property in transition",
+  ])("surfaces a 422 that merely mentions a field verbatim: %s", async (detail) => {
+    backend.updateEntity.mockRejectedValue(Object.assign(
+      new Error(`Drupal 422 on PATCH /jsonapi/node/page/n1: ${detail}`), { status: 422 },
+    ));
+    const err = await handlers.drupal_schedule_publish({
+      type: "page", id: "n1", publishOn: "2026-07-01T12:00:00Z", publishState: "published",
+    }).catch((e) => e);
+    expect(err.message).toContain(detail);
+    expect(err.message).toMatch(/refused/i);
+    expect(err.message).not.toMatch(/not available/i);
   });
 
   it("does not label a 404 as a policy refusal", async () => {

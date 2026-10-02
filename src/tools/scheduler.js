@@ -36,18 +36,18 @@ import { httpStatusOf } from "../lib/error-status.js";
 
 /**
  * Does this backend error say a Scheduler attribute does not exist on the
- * bundle? Only the "unknown attribute" phrasing counts. A field name alone is
- * not enough: Drupal's 422 validation detail starts with the property path
- * (`publish_state: You do not have access to transition …`), and that is a
- * refusal by the site, not a missing capability (#402).
+ * bundle? Only Drupal JSON:API's explicit form counts ("The attribute
+ * publish_on does not exist on the node--page resource type."). A 422
+ * validation detail names the field too (`publish_state: …`) and may say
+ * "invalid" or "unknown"; that is a refusal by the site, surfaced verbatim,
+ * not a missing capability (#402).
  *
  * @param {Error} err - The error thrown by the backend write.
  * @returns {boolean}
  */
 export function looksLikeUnknownField(err) {
   const msg = String(err?.message || err || "").slice(0, 2000);
-  return /\b(?:attribute|field|property)\b[^.]{0,200}?\b(?:does not exist|doesn't exist|is unknown|is not recognized)/i.test(msg)
-    || /\b(?:unknown|unrecognized|invalid) (?:field|attribute|property)\b|\bno such (?:field|attribute)\b/i.test(msg);
+  return /\battribute [\w.-]{1,128} does not exist on the [\w.-]{1,128} resource type\b/i.test(msg);
 }
 
 /**

@@ -331,6 +331,7 @@ async function scanScheduledBundle(backend, contentType, sampleSize) {
       schedulerFields: "absent",
       reason: "No sampled node carries a publish_on or unpublish_on key: Scheduler is not enabled for this content type, or this account cannot view those fields.",
       scanned: nodes.length,
+      approximate: nodes.length >= sampleSize,
     };
   }
   return {
