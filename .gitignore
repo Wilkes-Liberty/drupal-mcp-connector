@@ -3,9 +3,16 @@ node_modules/
 .pnp
 .pnp.js
 
-# Config with credentials — NEVER commit
+# Config with credentials — NEVER commit.
+# Local variants (machine configs, backups) stay untracked.
+# The documented example is the only tracked config file.
 config/config.json
+config/config.*.json
+!config/config.example.json
 config/secrets.map
+
+# One-off operator content loaders. Product scripts in scripts/ stay tracked.
+scripts/*-staging.mjs
 .env
 .env.local
 .env.*.local
