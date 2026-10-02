@@ -91,7 +91,7 @@ describe("verifyStatic — a secure, tenant-neutral configuration", () => {
     const residual = result.residuals.find((r) => r.id === "loopback_shared_bearer");
     expect(residual.status).toBe("managed");
     expect(residual.detail).toEqual(expect.stringContaining("shared_bearer"));
-    expect(residual.detail).toEqual(expect.stringContaining("v3.0.0"));
+    expect(residual.detail).toEqual(expect.stringContaining("v4.0.0"));
     expect(residual.detail).toEqual(expect.stringContaining("#231"));
   });
 

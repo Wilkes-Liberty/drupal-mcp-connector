@@ -167,7 +167,7 @@ describe("inboundAuthDeprecationWarning", () => {
     const warning = inboundAuthDeprecationWarning("shared_bearer");
     expect(warning).toEqual(expect.stringContaining("WARNING"));
     expect(warning).toEqual(expect.stringContaining("shared_bearer"));
-    expect(warning).toEqual(expect.stringContaining("v3.0.0"));
+    expect(warning).toEqual(expect.stringContaining("v4.0.0"));
     expect(warning).toEqual(expect.stringContaining("#231"));
   });
 
