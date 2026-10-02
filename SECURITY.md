@@ -36,7 +36,7 @@ This connector implements defense-in-depth:
 - Set `security.allowDestructive: false` to prevent any delete operations
 - Use the **`auditor` preset** for read-only analysis workloads
 - Rotate tokens regularly; they can be invalidated without changing passwords
-- Never commit `config/config.json` — it is gitignored by default
+- Never commit `config/config.json` or other `config/config.*.json` variants — they are gitignored. `config/config.example.json` is the only tracked config file
 
 ## Known Limitations
 
