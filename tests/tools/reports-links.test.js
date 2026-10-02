@@ -124,7 +124,7 @@ describe("reports-links", () => {
         node({ fields: { body: { value: '<a href="/in">i</a>' } } }),
       ]));
       checkLinks.mockResolvedValue({ checked: 1, truncated: false, results: [{ url: "https://example.com/in", ok: false, skipped: false, status: 404 }] });
-      const res = await handlers.drupal_report_broken_links({ checkLive: true });
+      const res = await handlers.drupal_report_broken_links({ type: "article", checkLive: true });
       expect(checkLinks).toHaveBeenCalledOnce();
       expect(res.liveChecked).toBe(true);
       expect(res.live.broken).toHaveLength(1);

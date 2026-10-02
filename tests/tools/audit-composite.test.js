@@ -43,7 +43,7 @@ describe("audit-composite", () => {
   });
 
   it("grades a clean site A and runs every section", async () => {
-    const res = await handlers.drupal_audit_site_health({});
+    const res = await handlers.drupal_audit_site_health({ type: "article" });
     expect(res.grade).toBe("A");
     expect(res.summary.errored).toBe(0);
     expect(res.summary.unavailable).toBe(0);
@@ -53,7 +53,7 @@ describe("audit-composite", () => {
   it("aggregates high-severity findings into a worse grade", async () => {
     h.content.drupal_report_pii_exposure = ok({ flaggedNodes: 4 });
     h.config.drupal_audit_config_best_practices = ok({ counts: { high: 3, medium: 1, low: 0 } });
-    const res = await handlers.drupal_audit_site_health({ sections: ["pii_exposure", "config_best_practices"] });
+    const res = await handlers.drupal_audit_site_health({ type: "article", sections: ["pii_exposure", "config_best_practices"] });
     expect(res.summary.totalHigh).toBe(7);
     expect(res.grade).toBe("F");
   });

@@ -21,6 +21,7 @@ import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
 import {
   collectEntities, fieldValue, fieldPresence, isEmptyFieldValue, requestedFieldNames, FIELDS_NOT_VISIBLE_NOTE, daysSince,
+  requireContentType,
 } from "../lib/reports-support.js";
 import { bodyHtml, extractAnchors, classifyLink, normalizePath } from "../lib/audit-support.js";
 import {
@@ -50,28 +51,6 @@ function stripTags(html) {
 function scalar(entity, candidates) {
   const v = fieldValue(entity, candidates);
   return v && typeof v === "object" && "value" in v ? v.value : v;
-}
-
-// ---------------------------------------------------------------------------
-// Content type argument
-// ---------------------------------------------------------------------------
-
-/**
- * Return the content type a bundle-scoped report scans, or fail clearly.
- * These reports used to default to `article`, which 404s on a site without
- * that bundle (#403). There is no bundle every site has, so the caller names
- * one.
- * @param {?string} type Content type machine name from the caller.
- * @param {string} tool Tool name, for the message.
- * @returns {string} The content type.
- * @throws {Error} When no type was given.
- */
-function requireContentType(type, tool) {
-  if (typeof type === "string" && type.trim()) return type;
-  throw new Error(
-    `${tool} scans one content type: pass type (a node bundle machine name). ` +
-    "Call drupal_list_content_types to see the bundles on this site.",
-  );
 }
 
 // ---------------------------------------------------------------------------

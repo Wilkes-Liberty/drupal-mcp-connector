@@ -9,6 +9,7 @@
 
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
+import { readableNodeBundles, listNodesAcrossBundles } from "../lib/reports-support.js";
 import {
   resolveSecurityConfig, redactCanonicalEntity,
   assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
@@ -357,7 +358,10 @@ async function listNodes({ site: siteName, type, status, filters = [], limit = 2
 }
 
 /**
- * Search nodes by title substring (defaults to the article bundle).
+ * Search nodes by title substring. With `type`, searches that bundle. Without
+ * it, searches every node bundle the connector may read and merges by
+ * `changed` (newest first). A bundle that fails to load fails the search with
+ * the bundle named, so a partial result is never returned as complete (#403).
  *
  * @param {object} args - { site?, query, type?, status?, limit? }.
  * @returns {Promise<object[]>} Redacted matching nodes.
@@ -365,13 +369,15 @@ async function listNodes({ site: siteName, type, status, filters = [], limit = 2
 async function searchContent({ site: siteName, query, type, status, limit = 10 }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  const bundle = type || "article";
-  assertReadAllowed(sec, "node", bundle);
+  assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
   const filters = [{ field: "title", op: "contains", value: query }];
   if (status !== undefined) filters.push({ field: "status", op: "eq", value: status });
-  const res = await backend.listEntities({ entityType: "node", bundle, filters, sort: [{ field: "changed", dir: "desc" }], page: { limit } });
-  return res.entities.map((e) => redactCanonicalEntity(e, sec, "node"));
+  const descriptor = { filters, sort: [{ field: "changed", dir: "desc" }] };
+  const found = type
+    ? (await backend.listEntities({ ...descriptor, entityType: "node", bundle: type, page: { limit } })).entities
+    : await listNodesAcrossBundles(backend, await readableNodeBundles(backend, sec), descriptor, limit);
+  return found.map((e) => redactCanonicalEntity(e, sec, "node"));
 }
 
 /**
@@ -621,7 +627,7 @@ export const definitions = [
       properties: {
         site:   { type: "string" },
         query:  { type: "string", description: "Search term to match against node titles" },
-        type:   { type: "string", description: "Limit to this content type (default: article)" },
+        type:   { type: "string", description: "Content type machine name. Omit to search every node bundle (merged, newest first); if any bundle cannot be read the search fails and names it." },
         status: { type: "boolean", description: "Filter by publish status" },
         limit:  { type: "number", default: 10 },
       },

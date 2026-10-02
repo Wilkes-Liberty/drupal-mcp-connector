@@ -2,6 +2,8 @@
  * Shared helpers for the reporting tools — backend-neutral.
  */
 
+import { assertReadAllowed } from "./security.js";
+
 /** Canonical base property names (read directly off the entity, not from `fields`). */
 const BASE_KEYS = new Set(["id", "title", "status", "langcode", "created", "changed", "url"]);
 
@@ -147,4 +149,70 @@ export const FIELDS_NOT_VISIBLE_NOTE =
 export function requestedFieldNames(fields) {
   const list = typeof fields === "string" ? [fields] : (Array.isArray(fields) ? fields : []);
   return [...new Set(list.filter((f) => typeof f === "string" && f.trim()).map((f) => f.trim()))];
+}
+
+/**
+ * Return the content type a bundle-scoped tool reads, or fail clearly.
+ * Node tools used to default to `article`, which 404s on a site without that
+ * bundle (#403). There is no bundle every site has, so the caller names one.
+ * @param {?string} type Content type machine name from the caller.
+ * @param {string} tool Tool name, for the message.
+ * @param {string} [argName] Argument name, for the message.
+ * @returns {string} The content type.
+ * @throws {Error} When no type was given.
+ */
+export function requireContentType(type, tool, argName = "type") {
+  if (typeof type === "string" && type.trim()) return type;
+  throw new Error(
+    `${tool} reads one content type: pass ${argName} (a node bundle machine name). ` +
+    "Call drupal_list_content_types to see the bundles on this site.",
+  );
+}
+
+/**
+ * Node bundles a tool may read when the caller named none. Bundles that
+ * connector policy denies are left out; they are not the caller's to see.
+ * @param {{listContentTypes: Function}} backend Resolved backend.
+ * @param {object} sec Resolved security config.
+ * @returns {Promise<string[]>} Bundle machine names.
+ */
+export async function readableNodeBundles(backend, sec) {
+  const types = await backend.listContentTypes();
+  return types.map((ct) => ct?.id).filter((id) => {
+    if (!id) return false;
+    try {
+      assertReadAllowed(sec, "node", id);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * List nodes from several bundles with one descriptor, merged newest first by
+ * `sortField`. A bundle that fails to load fails the whole call with the
+ * bundle named, so a partial list is never returned as complete (#403).
+ * @param {{listEntities: Function}} backend Resolved backend.
+ * @param {string[]} bundles Node bundles to read.
+ * @param {object} descriptor listEntities descriptor without `bundle`.
+ * @param {number} limit Max nodes returned.
+ * @param {string} [sortField] Canonical date property to merge by.
+ * @returns {Promise<object[]>} Canonical entities.
+ * @throws {Error} When any bundle fails to load.
+ */
+export async function listNodesAcrossBundles(backend, bundles, descriptor, limit, sortField = "changed") {
+  const found = [];
+  for (const bundle of bundles) {
+    let res;
+    try {
+      res = await backend.listEntities({ ...descriptor, entityType: "node", bundle, page: { limit } });
+    } catch (err) {
+      throw new Error(`Could not read content type '${bundle}': ${err?.message || err}. Pass type to read one content type.`, { cause: err });
+    }
+    found.push(...(res.entities ?? []));
+  }
+  const key = (e) => String(new Map(Object.entries(e ?? {})).get(sortField) ?? "");
+  found.sort((x, y) => key(y).localeCompare(key(x)));
+  return found.slice(0, limit);
 }

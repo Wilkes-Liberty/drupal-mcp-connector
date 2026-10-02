@@ -85,7 +85,7 @@ Tools for creating, reading, updating, and deleting Drupal content nodes. Reads 
 |------|----------------|-------------|
 | `drupal_get_node` | `type`, `id` | Fetch a single node by UUID. Returns all attributes. |
 | `drupal_list_nodes` | `type` | List nodes with filter, sort, pagination support. Drupal core caps `page[limit]` at 50; a larger `limit` is filled via `links.next`. `total` is exact only when `meta.count` is present or the window reached the end; otherwise `approximate` is true and `hasNext` is set. |
-| `drupal_search_content` | `query` | Search nodes by title substring. |
+| `drupal_search_content` | `query` | Search nodes by title substring. Omit `type` to search every node bundle (merged, newest first); a bundle that cannot be read fails the search and is named. |
 | `drupal_create_node` | `type`, `title` | Create a node. Scalar fields via `fields`; **entity-reference fields (taxonomy, related content, media) via `relationships`** (JSON:API shape). `returning: "minimal"` for a compact identity+state response. |
 | `drupal_update_node` | `type`, `id` | Update node fields. Only send what you want to change. Reference fields go in `relationships`, not `fields`; `returning: "minimal"` bounds the response size. On a **published moderated** node, omitting `moderationState` defaults the write to `moderation_state: "draft"` (forward revision). An unrequested published-state flip in the persisted node is reported via `_statusChanged` (#171). Paragraph / ERR identifiers are resolved to include `meta.target_revision_id` before PATCH (#192); the write fails if any ref cannot be resolved. On moderated targets a non-saving PATCH preflight runs first, including on `dryRun`, against the same URL the write will hit. An addressable node draft uses Sentinel's governed draft endpoint with live/working revision preconditions (#166). A successful write may include `_revisions: { live, working }` when both vids can be read. When the core working-copy alias is absent or echoes live, Sentinel inventory discovers translation-only revisions (#297). Continue an existing unpublished language with explicit `langcode`; published languages are not converted into drafts. Unresolved revision conflicts fail without advising draft deletion. |
 | `drupal_delete_node` | `type`, `id` | Permanently delete a node. Requires `allowDestructive: true`. Subject to entity allowlists like all node tools. |
@@ -488,15 +488,15 @@ Read-only audit and analysis tools. All respect the security config.
 | Tool | Key params | Description |
 |------|-----------|-------------|
 | `drupal_report_content_summary` | — | Node counts by type and status. Start here for any audit. |
-| `drupal_report_stale_content` | `type`, `days` | Content not updated in N days. Default: 180 days. |
+| `drupal_report_stale_content` | `type` | Content not updated in N days. Default: 180 days. |
 | `drupal_report_content_by_author` | `type` | Node count per author UUID, sorted by most prolific. |
-| `drupal_report_recently_published` | `type`, `limit` | Most recently published content. |
+| `drupal_report_recently_published` | — | Most recently published content. Omit `type` to read every node bundle, merged newest first; unreadable bundles are listed in `bundleErrors`. |
 | `drupal_report_field_completeness` | `type` | % of nodes with optional fields populated. Finds SEO gaps. Reads scalar and entity-reference fields. Each row has `populated`, `empty`, `absent` and `completenessPercent`; a node that omits the key is `absent` and stays out of the percentage. A field you name that is absent from every sampled node is listed in `notVisible` with a `notVisibleNote` and is not scored: it may be denied to this account, not exist on the content type, or be misspelled. `approximate` is true when the scan hits `sampleSize`. |
-| `drupal_report_taxonomy_usage` | `vocabulary` | How many nodes reference each term. Finds orphaned terms. |
+| `drupal_report_taxonomy_usage` | `vocabulary`, `contentType` | How many nodes reference each term. Finds orphaned terms. |
 | `drupal_report_revision_hotspots` | `type` | Nodes with most revisions — spots churn. Requires D9.3+. |
 | `drupal_report_user_activity` | `inactiveDays` | Active/blocked/inactive user summary. |
-| `drupal_report_seo_audit` | `type`, `sampleSize` | Missing meta descriptions, title length, thin content. Meta descriptions use the rendered Metatag output via GraphQL when available (`metaSource`: `graphql`/`jsonapi`/`unavailable`); reports the meta check as unavailable rather than a false zero when no source is readable. |
-| `drupal_report_accessibility_audit` | `type`, `sampleSize` | Missing alt text, H1s in body, bad link text, tables without captions. |
+| `drupal_report_seo_audit` | `type` | Missing meta descriptions, title length, thin content. Meta descriptions use the rendered Metatag output via GraphQL when available (`metaSource`: `graphql`/`jsonapi`/`unavailable`); reports the meta check as unavailable rather than a false zero when no source is readable. |
+| `drupal_report_accessibility_audit` | `type` | Missing alt text, H1s in body, bad link text, tables without captions. |
 
 ---
 
@@ -948,7 +948,7 @@ Best-effort content search. Title-match fallback over a content type (`mode: 'fa
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_search` | `query` | Search content by query string. Defaults to the `article` content type; `type` and `limit` are optional. |
+| `drupal_search` | `query` | Search content by query string. Omit `type` to search every node bundle (merged, newest first); a bundle that cannot be read fails the search and is named. |
 
 ### drupal_search
 
@@ -968,9 +968,9 @@ Additional read-only audit tools that complement the [Reports](#reports) module.
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_report_unpublished` | — | List unpublished/draft content of a type (default `article`). Returns titles, last-changed dates, and paths — surfaces forgotten drafts. |
-| `drupal_report_missing_field` | `field` | Find entities where a given field is empty (scalar or entity-reference). Bounded by `sampleSize`. A field absent from every sampled entity is reported as `notVisible`, not as missing everywhere. |
-| `drupal_report_orphaned_references` | — | Find entities whose entity-reference fields point at targets that no longer exist. A 404 response is an orphan; 401/403, policy-denied types and any other failure (including a 500 whose text mentions 404) are `unverifiable`, not missing. Bounded by `sampleSize`. |
+| `drupal_report_unpublished` | — | List unpublished/draft content. Omit `type` to read every node bundle, merged newest first; unreadable bundles are listed in `bundleErrors`. Returns titles, last-changed dates, and paths — surfaces forgotten drafts. |
+| `drupal_report_missing_field` | `type`, `field` | Find entities where a given field is empty (scalar or entity-reference). Bounded by `sampleSize`. A field absent from every sampled entity is reported as `notVisible`, not as missing everywhere. |
+| `drupal_report_orphaned_references` | `type` | Find entities whose entity-reference fields point at targets that no longer exist. A 404 response is an orphan; 401/403, policy-denied types and any other failure (including a 500 whose text mentions 404) are `unverifiable`, not missing. Bounded by `sampleSize`. |
 
 ### drupal_report_missing_field
 
@@ -1012,10 +1012,10 @@ Read-only link- and 404-integrity audits. Entity-backed audits (redirect, alias,
 |------|----------------|-------------|
 | `drupal_report_404_log` | — | Aggregate "page not found" events into the top missing URLs ranked by hit count (redirect candidates). Via the drush watchdog bridge; gated when drush isn't configured. |
 | `drupal_report_redirect_health` | — | Audit the Redirect table for duplicate sources, self-redirects, and chains/loops. Deterministic from the redirect entity list. |
-| `drupal_report_broken_links` | — | Inventory internal/external/image links in published bodies and flag malformed hrefs. With `checkLive: true`, verifies links via a bounded, SSRF-guarded checker (no network egress otherwise). |
-| `drupal_report_alias_coverage` | — | Nodes whose URL is still `/node/N` (no alias), plus conflicting aliases when `path_alias` is exposed. |
+| `drupal_report_broken_links` | `type` | Inventory internal/external/image links in published bodies and flag malformed hrefs. With `checkLive: true`, verifies links via a bounded, SSRF-guarded checker (no network egress otherwise). |
+| `drupal_report_alias_coverage` | `type` | Nodes whose URL is still `/node/N` (no alias), plus conflicting aliases when `path_alias` is exposed. |
 | `drupal_report_menu_integrity` | — | Custom menu links that are disabled, placeholder-targeted, or external. Deep target-existence resolution isn't performed (JSON:API can't probe a target by internal id). |
-| `drupal_report_broken_embeds` | — | Embedded-entity usage by type in published bodies, flagging malformed `data-entity-uuid` embeds. |
+| `drupal_report_broken_embeds` | `type` | Embedded-entity usage by type in published bodies, flagging malformed `data-entity-uuid` embeds. |
 
 ### drupal_report_broken_links
 
@@ -1079,7 +1079,7 @@ Read-only, backend-neutral content-quality audits. Each samples via the configur
 
 | Tool | Required params | Description |
 |------|----------------|-------------|
-| `drupal_audit_site_health` | — | Runs a configurable battery of the content, link, and config audits and rolls them into one scored dashboard with a letter grade. Each section degrades independently — gated/errored sections are recorded, not fatal. Accepts `sections[]` to run a subset and `type` / `sampleSize` to scope the scan. |
+| `drupal_audit_site_health` | — | Runs a configurable battery of the content, link, and config audits and rolls them into one scored dashboard with a letter grade. Each section degrades independently — gated/errored sections are recorded, not fatal. Accepts `sections[]` to run a subset and `type` / `sampleSize` to scope the scan. Without `type`, sections that audit one content type are reported unavailable; site-wide sections still run. |
 
 ---
 

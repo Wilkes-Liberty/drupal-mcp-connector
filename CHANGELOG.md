@@ -26,13 +26,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "unknown"` instead of `gated: true`.
 
 ### Changed
-- **Content-quality reports no longer default to `article` (#403).**
-  `drupal_report_duplicate_content`, `_workflow_bottlenecks`,
-  `_translation_coverage`, `_readability`, `_orphan_pages`, `_pii_exposure`
-  and `_seo_meta_coverage` require `type` and fail with a pointer to
-  `drupal_list_content_types` instead of a 404 on sites without that bundle.
-  `drupal_report_scheduled_content` scans every node bundle when `type` is
-  omitted, with one row per bundle in `byContentType`.
+- **No node tool defaults to the `article` bundle any more (#403).** On a
+  site without that bundle the old default returned a 404 or scanned nothing.
+  - Require `type`: `drupal_report_duplicate_content`, `_workflow_bottlenecks`,
+    `_translation_coverage`, `_readability`, `_orphan_pages`, `_pii_exposure`,
+    `_seo_meta_coverage`, `_stale_content`, `_content_by_author`,
+    `_revision_hotspots`, `_seo_audit`, `_accessibility_audit`,
+    `_broken_links`, `_alias_coverage`, `_broken_embeds`, `_missing_field` and
+    `_orphaned_references`. `drupal_report_taxonomy_usage` requires
+    `contentType`. The error points to `drupal_list_content_types`.
+  - Scan every node bundle when `type` is omitted:
+    `drupal_report_scheduled_content` (one row per bundle in `byContentType`),
+    `drupal_report_recently_published` and `drupal_report_unpublished`
+    (merged newest first; unreadable bundles in `bundleErrors`), and
+    `drupal_search` / `drupal_search_content` (merged newest first; a bundle
+    that cannot be read fails the search and is named).
+  - `drupal_audit_site_health` without `type` reports its content-type
+    sections as unavailable and still runs the site-wide ones.
 
 ## [2.26.0] - 2026-10-01
 

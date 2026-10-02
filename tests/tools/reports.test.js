@@ -89,7 +89,7 @@ describe("drupal_report_recently_published", () => {
 
   it("uses approximate flag from backend response", async () => {
     backend.listEntities.mockResolvedValue({ entities: [], page: {}, approximate: true });
-    const out = await handlers.drupal_report_recently_published({});
+    const out = await handlers.drupal_report_recently_published({ type: "article" });
     expect(out.approximate).toBe(true);
   });
 });
@@ -371,7 +371,7 @@ describe("drupal_report_taxonomy_usage", () => {
     backend.countEntities
       .mockResolvedValueOnce({ count: 10, approximate: false })
       .mockResolvedValueOnce({ count: 0, approximate: false });
-    const out = await handlers.drupal_report_taxonomy_usage({ vocabulary: "tags" });
+    const out = await handlers.drupal_report_taxonomy_usage({ vocabulary: "tags", contentType: "article" });
     expect(out.terms[0].id).toBe("t1");
     expect(out.terms[0].nodeCount).toBe(10);
     expect(out.unusedTerms).toBe(1);
@@ -384,7 +384,7 @@ describe("drupal_report_taxonomy_usage", () => {
       page: { hasNext: false },
     });
     backend.countEntities.mockResolvedValue({ count: 5, approximate: true });
-    const out = await handlers.drupal_report_taxonomy_usage({ vocabulary: "tags" });
+    const out = await handlers.drupal_report_taxonomy_usage({ vocabulary: "tags", contentType: "article" });
     expect(out.approximate).toBe(true);
   });
 });
@@ -392,7 +392,7 @@ describe("drupal_report_taxonomy_usage", () => {
 describe("drupal_report_revision_hotspots", () => {
   it("returns {unavailable} when capabilities().revisions is false", async () => {
     backend.capabilities.mockReturnValue({ revisions: false, read: true });
-    const out = await handlers.drupal_report_revision_hotspots({});
+    const out = await handlers.drupal_report_revision_hotspots({ type: "article" });
     expect(out.unavailable).toBe(true);
     expect(out.report).toBe("revision_hotspots");
   });

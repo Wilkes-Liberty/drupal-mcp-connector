@@ -13,7 +13,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed, assertEntityTypeAllowed } from "../lib/security.js";
-import { collectEntities, fieldPresence } from "../lib/reports-support.js";
+import { collectEntities, fieldPresence, requireContentType, readableNodeBundles } from "../lib/reports-support.js";
 import { httpStatusOf } from "../lib/error-status.js";
 
 /** Author base fields that only ever point at `user`. */
@@ -100,11 +100,14 @@ function refsOf(rel) {
 // ---------------------------------------------------------------------------
 
 /**
- * Unpublished / draft content for a content type.
+ * Unpublished / draft content. With `type`, reads that bundle. Without it,
+ * reads every node bundle the connector may read, merges by `changed`
+ * (newest first) and keeps `limit` findings; a bundle that fails to load is
+ * listed in `bundleErrors` (#403).
  *
- * @param {object} args - { site?, type?, limit? }. `type` defaults to "article".
- * @returns {Promise<{contentType: string, approximate: boolean,
- *   totalUnpublished: number, findings: object[]}>} Matching unpublished nodes.
+ * @param {object} args - { site?, type?, limit? }.
+ * @returns {Promise<{contentType: ?string, approximate: boolean,
+ *   totalUnpublished: number, findings: object[], bundleErrors?: object[]}>} Matching unpublished nodes.
  * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function unpublished({ site: siteName, type, limit = 50 }) {
@@ -112,24 +115,45 @@ async function unpublished({ site: siteName, type, limit = 50 }) {
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
-  const res = await backend.listEntities({
-    entityType: "node", bundle: contentType,
-    filters: [{ field: "status", op: "eq", value: false }],
-    sort: [{ field: "changed", dir: "desc" }],
-    page: { limit },
-  });
+  const bundles = type ? [type] : await readableNodeBundles(backend, sec);
+  const findings = [];
+  const bundleErrors = [];
+  let approximate = false;
+  let totalUnpublished = 0;
+  for (const bundle of bundles) {
+    let res;
+    try {
+      res = await backend.listEntities({
+        entityType: "node", bundle,
+        filters: [{ field: "status", op: "eq", value: false }],
+        sort: [{ field: "changed", dir: "desc" }],
+        page: { limit },
+      });
+    } catch (err) {
+      if (type) throw err;
+      bundleErrors.push({ contentType: bundle, error: err?.message || String(err) });
+      continue;
+    }
+    approximate = approximate || (res.approximate ?? false);
+    totalUnpublished += res.page?.total ?? res.entities.length;
+    for (const n of res.entities) {
+      findings.push({
+        id: n.id,
+        title: n.title,
+        status: "unpublished",
+        changed: n.changed,
+        path: n.url,
+        ...(type ? {} : { contentType: bundle }),
+      });
+    }
+  }
+  if (!type) findings.sort((x, y) => String(y.changed ?? "").localeCompare(String(x.changed ?? "")));
   return {
-    contentType,
-    approximate: res.approximate ?? false,
-    totalUnpublished: res.page?.total ?? res.entities.length,
-    findings: res.entities.map((n) => ({
-      id: n.id,
-      title: n.title,
-      status: "unpublished",
-      changed: n.changed,
-      path: n.url,
-    })),
+    contentType: type || null,
+    approximate,
+    totalUnpublished,
+    findings: findings.slice(0, limit),
+    ...(bundleErrors.length ? { bundleErrors } : {}),
   };
 }
 
@@ -153,12 +177,12 @@ async function unpublished({ site: siteName, type, limit = 50 }) {
  * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function missingField({ site: siteName, type, field, sampleSize = 100 }) {
+  const contentType = requireContentType(type, "drupal_report_missing_field");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   if (!field) throw new Error("missingField requires a field machine name.");
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const entities = await collectEntities(
     backend,
     { entityType: "node", bundle: contentType, sort: [{ field: "changed", dir: "desc" }] },
@@ -213,16 +237,16 @@ async function missingField({ site: siteName, type, field, sampleSize = 100 }) {
  * orphan; 401/403 and connector policy denials are unverifiable (#205).
  * Sampling-bounded, so `approximate` is set when the entity scan is capped.
  *
- * @param {object} args - { site?, type?, sampleSize? }. `type` defaults to "article".
+ * @param {object} args - { site?, type, sampleSize? }. `type` is required.
  * @returns {Promise<object>} Orphaned-reference findings plus scan metadata.
  * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function orphanedReferences({ site: siteName, type, sampleSize = 50 }) {
+  const contentType = requireContentType(type, "drupal_report_orphaned_references");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const entities = await collectEntities(
     backend,
     { entityType: "node", bundle: contentType, sort: [{ field: "changed", dir: "desc" }] },
@@ -331,7 +355,7 @@ export const definitions = [
       type: "object",
       properties: {
         site:  { type: "string" },
-        type:  { type: "string", description: "Content type machine name (default: article)" },
+        type:  { type: "string", description: "Content type machine name. Omit to read every node bundle (results merged, newest first; unreadable bundles listed in bundleErrors)." },
         limit: { type: "number", default: 50, description: "Max unpublished nodes to return" },
       },
     },
@@ -340,10 +364,10 @@ export const definitions = [
     name: "drupal_report_missing_field",
     description: "Find entities of a content type where a given field is empty (e.g. a missing meta description, image, or summary). Works for scalar fields and entity-reference fields. Sampling-bounded — flags 'approximate' when the scan is capped. An absent field is not an empty one: JSON:API leaves out a field this account may not view. When the field is absent from every sampled entity the result is `notVisible: true` with no findings (the field may be denied to this account, not exist on the bundle, or be misspelled) instead of every entity counted as missing. Otherwise each finding has `reason` 'empty' (key present, no value) or 'absent' (key missing, possibly access-denied).",
     inputSchema: {
-      type: "object", required: ["field"],
+      type: "object", required: ["field", "type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type machine name (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         field:      { type: "string", description: "Field machine name to check for emptiness, e.g. 'field_meta_description', 'field_image'" },
         sampleSize: { type: "number", default: 100, description: "Max entities to scan" },
       },
@@ -353,10 +377,10 @@ export const definitions = [
     name: "drupal_report_orphaned_references",
     description: "Find entities whose entity-reference fields point at targets that no longer exist (orphaned references). Best-effort: samples entities and probes each distinct referenced target via JSON:API. A 404 (or unaddressable ref) is an orphan; 401/403 and connector policy denials are counted as unverifiable, not missing. uid/revision_uid are skipped when the policy denies user. Flags 'approximate' when sampling-bounded.",
     inputSchema: {
-      type: "object",
+      type: "object", required: ["type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type machine name to scan (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         sampleSize: { type: "number", default: 50, description: "Max entities to scan for broken references" },
       },
     },
