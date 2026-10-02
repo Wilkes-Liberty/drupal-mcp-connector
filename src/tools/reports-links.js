@@ -18,7 +18,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
-import { collectEntities, gatedReport, fieldValue } from "../lib/reports-support.js";
+import { collectEntities, gatedReport, fieldValue, requireContentType } from "../lib/reports-support.js";
 import { runPrivileged } from "../lib/audit-sources.js";
 import { sshDrush, parseDrush } from "./drush.js";
 import {
@@ -258,11 +258,11 @@ async function redirectHealth({ site: siteName, limit = 1000 }) {
  * @returns {Promise<object>} Link inventory plus optional live results.
  */
 async function brokenLinks({ site: siteName, type, sampleSize = 100, checkLive = false, includeExternal = false }) {
+  const contentType = requireContentType(type, "drupal_report_broken_links");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const baseUrl = site.baseUrl;
   const baseHost = hostOf(baseUrl);
 
@@ -345,11 +345,11 @@ async function brokenLinks({ site: siteName, type, sampleSize = 100, checkLive =
  * @returns {Promise<object>} Alias-coverage findings.
  */
 async function aliasCoverage({ site: siteName, type, sampleSize = 200 }) {
+  const contentType = requireContentType(type, "drupal_report_alias_coverage");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
 
   const nodes = await collectEntities(
     backend,
@@ -463,11 +463,11 @@ async function menuIntegrity({ site: siteName, limit = 1000 }) {
  * @returns {Promise<object>} Embed inventory and any malformed embeds.
  */
 async function brokenEmbeds({ site: siteName, type, sampleSize = 100 }) {
+  const contentType = requireContentType(type, "drupal_report_broken_embeds");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
 
   const entities = await collectEntities(
     backend,
@@ -538,10 +538,10 @@ export const definitions = [
     name: "drupal_report_broken_links",
     description: "Inventory links in published body content (internal/external/images), aggregate external hosts, and flag malformed hrefs. With checkLive:true, verifies links via bounded, SSRF-guarded outbound HTTP (internal always; external only if includeExternal and host-allowlisted). No network egress unless checkLive is set.",
     inputSchema: {
-      type: "object",
+      type: "object", required: ["type"],
       properties: {
         site:            { type: "string" },
-        type:            { type: "string", description: "Content type (default: article)" },
+        type:            { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         sampleSize:      { type: "number", default: 100, description: "Max nodes to scan" },
         checkLive:       { type: "boolean", default: false, description: "Perform live HTTP checks (off by default)" },
         includeExternal: { type: "boolean", default: false, description: "When checkLive, also check allowlisted external hosts" },
@@ -552,10 +552,10 @@ export const definitions = [
     name: "drupal_report_alias_coverage",
     description: "URL-alias coverage for a content type: nodes whose canonical URL is still /node/N (no alias / pathauto gap), plus conflicting aliases (one alias mapped to multiple system paths) when the path_alias entity is exposed.",
     inputSchema: {
-      type: "object",
+      type: "object", required: ["type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         sampleSize: { type: "number", default: 200, description: "Max nodes to scan" },
       },
     },
@@ -575,10 +575,10 @@ export const definitions = [
     name: "drupal_report_broken_embeds",
     description: "Scan published body content for embedded entities (media/entity embeds) and report usage by type, flagging embeds with a missing/malformed data-entity-uuid. Full target-existence verification is gated on a future server-tool.",
     inputSchema: {
-      type: "object",
+      type: "object", required: ["type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         sampleSize: { type: "number", default: 100, description: "Max nodes to scan" },
       },
     },

@@ -135,6 +135,12 @@ describe("reports-content", () => {
       const res = await handlers.drupal_report_scheduled_content({ type: "page" });
       expect(res.gated).toBe(true);
     });
+    it("keeps approximate on a gated bundle that hit the sample cap", async () => {
+      backend.listEntities.mockResolvedValue({ entities: [node({ id: "1" }), node({ id: "2" })], page: { hasNext: true } });
+      const res = await handlers.drupal_report_scheduled_content({ type: "page", sampleSize: 2 });
+      expect(res.gated).toBe(true);
+      expect(res.approximate).toBe(true);
+    });
     it("returns empty pending/overdue when Scheduler keys are present but null (#403)", async () => {
       backend.listEntities.mockResolvedValue(page([
         node({ id: "1", fields: { publish_on: null, unpublish_on: null } }),
@@ -144,6 +150,57 @@ describe("reports-content", () => {
       expect(res.gated).toBeUndefined();
       expect(res.summary).toEqual({ pending: 0, overdue: 0 });
       expect(res.scanned).toBe(2);
+    });
+    it("does not gate a bundle with no nodes: nothing is scheduled, presence unknown", async () => {
+      backend.listEntities.mockResolvedValue(page([]));
+      const res = await handlers.drupal_report_scheduled_content({ type: "event" });
+      expect(res.gated).toBeUndefined();
+      expect(res.summary).toEqual({ pending: 0, overdue: 0 });
+      expect(res.schedulerFields).toBe("unknown");
+    });
+    it("scans every node bundle in one call when type is omitted", async () => {
+      backend.listContentTypes = vi.fn(async () => [{ id: "basic_page" }, { id: "resource" }, { id: "event" }]);
+      backend.listEntities.mockImplementation(async ({ bundle }) => {
+        if (bundle === "basic_page") return page([node({ id: "p1", fields: { publish_on: daysAgo(-2), unpublish_on: null } })]);
+        if (bundle === "resource") return page([node({ id: "r1", fields: { publish_on: null, unpublish_on: daysAgo(1) } })]);
+        if (bundle === "event") throw Object.assign(new Error("Drupal 403 on GET /jsonapi/node/event: denied"), { status: 403 });
+        throw new Error(`unexpected bundle ${bundle}`);
+      });
+      const res = await handlers.drupal_report_scheduled_content({});
+      const bundles = backend.listEntities.mock.calls.map(([d]) => d.bundle);
+      expect(bundles).not.toContain("article");
+      expect(res.contentType).toBeNull();
+      expect(res.summary).toEqual({ pending: 1, overdue: 1 });
+      expect(res.findings.pending[0]).toMatchObject({ id: "p1", contentType: "basic_page" });
+      expect(res.findings.overdue[0]).toMatchObject({ id: "r1", contentType: "resource" });
+      const event = res.byContentType.find((b) => b.contentType === "event");
+      expect(event.error).toMatch(/403/);
+      delete backend.listContentTypes;
+    });
+  });
+
+  describe("bundle-scoped reports require a content type (#403)", () => {
+    const needType = [
+      "drupal_report_duplicate_content",
+      "drupal_report_workflow_bottlenecks",
+      "drupal_report_translation_coverage",
+      "drupal_report_readability",
+      "drupal_report_orphan_pages",
+      "drupal_report_pii_exposure",
+      "drupal_report_seo_meta_coverage",
+    ];
+    it.each(needType)("%s fails clearly without type instead of querying a guessed bundle", async (name) => {
+      await expect(handlers[name]({})).rejects.toThrow(/type.*drupal_list_content_types/);
+      expect(backend.listEntities).not.toHaveBeenCalled();
+      expect(backend.rawQuery).not.toHaveBeenCalled();
+    });
+    it("no definition advertises an article default", () => {
+      for (const def of definitions) {
+        expect(JSON.stringify(def)).not.toMatch(/default: article/);
+      }
+      for (const name of needType) {
+        expect(definitions.find((d) => d.name === name).inputSchema.required).toContain("type");
+      }
     });
   });
 

@@ -8,6 +8,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`drupal_schedule_publish` site refusals (#402).** A 422 such as
+  `publish_state: You do not have access to transition from Draft to
+  Published` was rewritten as "Scheduler fields are not available", because
+  any message naming a Scheduler field counted as a missing field. Only the
+  "The attribute X does not exist on the Y resource type" form counts now. Other 4xx refusals,
+  including MCP Sentinel denials, return the site's reason verbatim with the
+  HTTP status.
+- **`drupal_schedule_publish` no longer refuses on its own (#402).** A
+  moderated bundle without `publish_state` / `unpublish_state` is written and
+  the result carries a warning; Drupal and Sentinel decide. A date without
+  its state is still refused when the bundle has the state field, since
+  Drupal accepts that schedule and it never runs. That check now also applies
+  when `moderation_state` is not visible to the account.
+- **`drupal_report_scheduled_content` on an empty bundle (#403).** A bundle
+  with no nodes reports pending 0 / overdue 0 with `schedulerFields:
+  "unknown"` instead of `gated: true`. A gated bundle that hit the sample cap
+  keeps `approximate: true`.
+- **`listContentTypes` read only the first 50 node types (JSON:API).** It
+  now follows `links.next`, so all-bundle scans and
+  `drupal_report_content_summary` see every content type.
+
+### Changed
+- **No node tool defaults to the `article` bundle any more (#403).** On a
+  site without that bundle the old default returned a 404 or scanned nothing.
+  - Require `type`: `drupal_report_duplicate_content`, `_workflow_bottlenecks`,
+    `_translation_coverage`, `_readability`, `_orphan_pages`, `_pii_exposure`,
+    `_seo_meta_coverage`, `_stale_content`, `_content_by_author`,
+    `_revision_hotspots`, `_seo_audit`, `_accessibility_audit`,
+    `_broken_links`, `_alias_coverage`, `_broken_embeds`, `_missing_field` and
+    `_orphaned_references`. `drupal_report_taxonomy_usage` requires
+    `contentType`. The error points to `drupal_list_content_types`.
+  - Scan every node bundle when `type` is omitted:
+    `drupal_report_scheduled_content` (one row per bundle in `byContentType`),
+    `drupal_report_recently_published` and `drupal_report_unpublished`
+    (merged newest first; unreadable bundles in `bundleErrors`), and
+    `drupal_search` / `drupal_search_content` (merged newest first; a bundle
+    that cannot be read fails the search and is named).
+  - `drupal_audit_site_health` without `type` reports its content-type
+    sections as unavailable and still runs the site-wide ones.
 - **Local operator files stay untracked.** `config/config.*.json` is ignored
   except `config/config.example.json`. One-off `scripts/*-staging.mjs`
   loaders are ignored too.

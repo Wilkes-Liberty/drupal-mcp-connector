@@ -1,6 +1,6 @@
 ---
 description: "Scan published body content for accidentally exposed PII (emails, US SSNs, phone numbers). Matched values are masked in the output so the report itself doesn't leak data."
-argument-hint: "[site] [type] [sampleSize] [kinds]"
+argument-hint: "<type> [site] [sampleSize] [kinds]"
 ---
 
 Call the MCP tool `drupal_report_pii_exposure`.
@@ -9,9 +9,11 @@ Scan published body content for accidentally exposed PII (emails, US SSNs, phone
 
 Parse the arguments supplied with this command into this tool's parameters:
 
+**Required:**
+- `type` (string): Content type machine name (required; see drupal_list_content_types)
+
 **Optional:**
 - `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
-- `type` (string): Content type (default: article)
 - `sampleSize` (number)
 - `kinds` (array (pass as JSON)): PII kinds to scan (default: all)
 

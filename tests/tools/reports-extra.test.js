@@ -75,12 +75,6 @@ describe("reports-extra tools", () => {
       expect(out.findings[0]).toMatchObject({ id: "u1", title: "Draft", status: "unpublished" });
     });
 
-    it("defaults the content type to article", async () => {
-      backend.listEntities.mockResolvedValue({ entities: [], page: { total: 0 }, approximate: false });
-      await handlers.drupal_report_unpublished({});
-      expect(backend.listEntities.mock.calls[0][0]).toMatchObject({ bundle: "article" });
-    });
-
     it("propagates approximate from the backend", async () => {
       backend.listEntities.mockResolvedValue({ entities: [], page: { total: 0 }, approximate: true });
       const out = await handlers.drupal_report_unpublished({ type: "page" });

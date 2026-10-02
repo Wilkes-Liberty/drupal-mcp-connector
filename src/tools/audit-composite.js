@@ -26,16 +26,16 @@ import * as reportsContent from "./reports-content.js";
 const SECTIONS = [
   // Content
   { key: "content_summary", group: "content", run: (o) => reports.handlers.drupal_report_content_summary({ site: o.site }), score: () => ({ issues: 0, high: 0 }) },
-  { key: "stale_content", group: "content", run: (o) => reports.handlers.drupal_report_stale_content({ site: o.site, type: o.type, days: 180, limit: o.sampleSize }), score: (r) => ({ issues: (r.findings || r.nodes || []).length, high: 0 }) },
-  { key: "seo_audit", group: "content", run: (o) => reports.handlers.drupal_report_seo_audit({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: sumIssueCounts(r.issues), high: 0 }) },
-  { key: "accessibility", group: "content", run: (o) => reports.handlers.drupal_report_accessibility_audit({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: sumIssueCounts(r.issues), high: 0 }) },
-  { key: "duplicate_content", group: "content", run: (o) => reportsContent.handlers.drupal_report_duplicate_content({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: r.duplicateGroups || 0, high: 0 }) },
-  { key: "readability", group: "content", run: (o) => reportsContent.handlers.drupal_report_readability({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: (r.hardToRead || []).length, high: 0 }) },
-  { key: "pii_exposure", group: "content", run: (o) => reportsContent.handlers.drupal_report_pii_exposure({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: r.flaggedNodes || 0, high: r.flaggedNodes || 0 }) },
+  { key: "stale_content", needsType: true, group: "content", run: (o) => reports.handlers.drupal_report_stale_content({ site: o.site, type: o.type, days: 180, limit: o.sampleSize }), score: (r) => ({ issues: (r.findings || r.nodes || []).length, high: 0 }) },
+  { key: "seo_audit", needsType: true, group: "content", run: (o) => reports.handlers.drupal_report_seo_audit({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: sumIssueCounts(r.issues), high: 0 }) },
+  { key: "accessibility", needsType: true, group: "content", run: (o) => reports.handlers.drupal_report_accessibility_audit({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: sumIssueCounts(r.issues), high: 0 }) },
+  { key: "duplicate_content", needsType: true, group: "content", run: (o) => reportsContent.handlers.drupal_report_duplicate_content({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: r.duplicateGroups || 0, high: 0 }) },
+  { key: "readability", needsType: true, group: "content", run: (o) => reportsContent.handlers.drupal_report_readability({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: (r.hardToRead || []).length, high: 0 }) },
+  { key: "pii_exposure", needsType: true, group: "content", run: (o) => reportsContent.handlers.drupal_report_pii_exposure({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: r.flaggedNodes || 0, high: r.flaggedNodes || 0 }) },
   // Links
-  { key: "broken_links", group: "links", run: (o) => reportsLinks.handlers.drupal_report_broken_links({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: r.summary?.malformed || 0, high: 0 }) },
+  { key: "broken_links", needsType: true, group: "links", run: (o) => reportsLinks.handlers.drupal_report_broken_links({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: r.summary?.malformed || 0, high: 0 }) },
   { key: "redirect_health", group: "links", run: (o) => reportsLinks.handlers.drupal_report_redirect_health({ site: o.site }), score: (r) => ({ issues: (r.summary?.duplicateSources || 0) + (r.summary?.chains || 0) + (r.summary?.loops || 0), high: r.summary?.loops || 0 }) },
-  { key: "alias_coverage", group: "links", run: (o) => reportsLinks.handlers.drupal_report_alias_coverage({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: (r.totalMissingAlias || 0) + (r.aliasConflicts?.conflicting?.length || 0), high: 0 }) },
+  { key: "alias_coverage", needsType: true, group: "links", run: (o) => reportsLinks.handlers.drupal_report_alias_coverage({ site: o.site, type: o.type, sampleSize: o.sampleSize }), score: (r) => ({ issues: (r.totalMissingAlias || 0) + (r.aliasConflicts?.conflicting?.length || 0), high: 0 }) },
   { key: "log_404", group: "links", run: (o) => reportsLinks.handlers.drupal_report_404_log({ site: o.site }), score: (r) => ({ issues: (r.findings || []).length, high: 0 }) },
   // Config
   { key: "config_best_practices", group: "config", run: (o) => reportsConfig.handlers.drupal_audit_config_best_practices({ site: o.site }), score: (r) => ({ issues: (r.counts?.high || 0) + (r.counts?.medium || 0) + (r.counts?.low || 0), high: r.counts?.high || 0 }) },
@@ -81,10 +81,13 @@ function grade(high, issues) {
 /**
  * Run a battery of audits and roll the results into a scored dashboard.
  *
+ * Sections that audit one content type (`needsType`) are reported unavailable
+ * when `type` is omitted; there is no default bundle (#403).
+ *
  * @param {object} args - { site?, type?, sampleSize?, sections? }.
  * @returns {Promise<object>} The dashboard: per-section status + a roll-up grade.
  */
-async function siteHealth({ site: siteName, type = "article", sampleSize = 50, sections }) {
+async function siteHealth({ site: siteName, type, sampleSize = 50, sections }) {
   const site = getSiteConfig(siteName);
   const selected = sections && sections.length
     ? SECTIONS.filter((s) => sections.includes(s.key))
@@ -95,6 +98,13 @@ async function siteHealth({ site: siteName, type = "article", sampleSize = 50, s
   let totalHigh = 0;
   let totalIssues = 0;
   for (const section of selected) {
+    if (section.needsType && !type) {
+      results.push({
+        key: section.key, group: section.group, status: "unavailable",
+        reason: "This section audits one content type: pass type. Call drupal_list_content_types to see the bundles on this site.",
+      });
+      continue;
+    }
     try {
       const result = await section.run(opts);
       if (isGated(result)) {
@@ -113,7 +123,7 @@ async function siteHealth({ site: siteName, type = "article", sampleSize = 50, s
   const byStatus = (s) => results.filter((r) => r.status === s).length;
   return {
     site: site._name,
-    type,
+    type: type || null,
     grade: grade(totalHigh, totalIssues),
     summary: {
       sectionsRun: results.length,
@@ -139,7 +149,7 @@ export const definitions = [
       type: "object",
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Primary content type for content/link sections (default: article)" },
+        type:       { type: "string", description: "Content type for the content/link sections. Omit it and those sections are reported unavailable; site-wide sections still run." },
         sampleSize: { type: "number", default: 50, description: "Per-section scan cap (kept small for a fast roll-up)" },
         sections:   { type: "array", items: { type: "string", enum: SECTION_KEYS }, description: `Subset of sections to run (default: all). Available: ${SECTION_KEYS.join(", ")}` },
       },

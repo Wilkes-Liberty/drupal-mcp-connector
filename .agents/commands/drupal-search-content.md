@@ -14,7 +14,7 @@ Parse the arguments supplied with this command into this tool's parameters:
 
 **Optional:**
 - `site` (string): Named site from connector config. Omit only on reads: multi-site configs fall back to defaultSite (often local/dev, not production). Writes require an explicit site when more than one site is configured. Every response includes `_target` { name, baseUrl, source } (`hint` when you passed site, `default` when you did not).
-- `type` (string): Limit to this content type (default: article)
+- `type` (string): Content type machine name. Omit to search every node bundle (merged, newest first); if any bundle cannot be read the search fails and names it.
 - `status` (boolean (true/false)): Filter by publish status
 - `limit` (number)
 

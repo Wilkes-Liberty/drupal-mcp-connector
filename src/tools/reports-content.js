@@ -6,6 +6,10 @@
  * scheduled-content state, body readability, orphan pages (no inbound internal
  * links), accidental PII exposure, and structured-meta (SEO) coverage.
  *
+ * Each report except scheduled content scans one node bundle named by `type`
+ * (there is no default bundle; #403). Scheduled content scans every bundle when
+ * `type` is omitted.
+ *
  * Each handler asserts read access in-handler, samples via collectEntities, and
  * flags `approximate: true` when the scan is sampling-bounded. Audits that need a
  * field the site doesn't expose (moderation state, scheduler dates, metatag
@@ -17,6 +21,7 @@ import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
 import {
   collectEntities, fieldValue, fieldPresence, isEmptyFieldValue, requestedFieldNames, FIELDS_NOT_VISIBLE_NOTE, daysSince,
+  requireContentType,
 } from "../lib/reports-support.js";
 import { bodyHtml, extractAnchors, classifyLink, normalizePath } from "../lib/audit-support.js";
 import {
@@ -61,11 +66,11 @@ function scalar(entity, candidates) {
  * @returns {Promise<object>} Duplicate-title groups.
  */
 async function duplicateContent({ site: siteName, type, sampleSize = 200 }) {
+  const contentType = requireContentType(type, "drupal_report_duplicate_content");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const nodes = await collectEntities(
     backend,
     { entityType: "node", bundle: contentType, sort: [{ field: "changed", dir: "desc" }] },
@@ -106,11 +111,11 @@ async function duplicateContent({ site: siteName, type, sampleSize = 200 }) {
  * @returns {Promise<object>} Stuck-content findings.
  */
 async function workflowBottlenecks({ site: siteName, type, days = 30, states, sampleSize = 200, langcode }) {
+  const contentType = requireContentType(type, "drupal_report_workflow_bottlenecks");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const targetStates = (states && states.length ? states : ["draft", "needs_review", "review"]).map((s) => s.toLowerCase());
   const targetLang = langcode ? assertDraftLangcode(langcode) : null;
 
@@ -200,11 +205,11 @@ async function workflowBottlenecks({ site: siteName, type, days = 30, states, sa
  * @returns {Promise<object>} Coverage, or unavailable.
  */
 async function translationCoverage({ site: siteName, type, sampleSize = 100 }) {
+  const contentType = requireContentType(type, "drupal_report_translation_coverage");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const nodes = await collectEntities(
     backend,
     { entityType: "node", bundle: contentType, sort: [{ field: "changed", dir: "desc" }] },
@@ -283,19 +288,18 @@ async function translationCoverage({ site: siteName, type, sampleSize = 100 }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Report content with Scheduler publish/unpublish dates set, split into pending
- * (date in the future) and overdue (date in the past but the action hasn't run).
- * Gated when the scheduler fields aren't exposed.
+ * Scan one bundle for Scheduler dates.
  *
- * @param {object} args - { site?, type?, sampleSize? }.
- * @returns {Promise<object>} Pending and overdue scheduled items.
+ * Whether Scheduler is exposed is decided from the attribute key, not its
+ * value: a node with `publish_on: null` has the field and nothing scheduled
+ * (#403). A bundle with no nodes cannot show either way, so it reports zero
+ * pending and overdue with `schedulerFields: "unknown"`.
+ * @param {object} backend Resolved backend.
+ * @param {string} contentType Node bundle.
+ * @param {number} sampleSize Max nodes to scan.
+ * @returns {Promise<object>} Per-bundle result.
  */
-async function scheduledContent({ site: siteName, type, sampleSize = 200 }) {
-  const site = getSiteConfig(siteName);
-  const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
-  const backend = await resolveBackend(site);
-  const contentType = type || "article";
+async function scanScheduledBundle(backend, contentType, sampleSize) {
   const nodes = await collectEntities(
     backend,
     { entityType: "node", bundle: contentType, sort: [{ field: "changed", dir: "desc" }] },
@@ -308,7 +312,6 @@ async function scheduledContent({ site: siteName, type, sampleSize = 200 }) {
   const overdue = [];
   for (const n of nodes) {
     for (const [field, action] of [["publish_on", "publish"], ["unpublish_on", "unpublish"]]) {
-      // Presence of the key (even null) means Scheduler is exposed (#403).
       const { present, value } = fieldPresence(n, field);
       if (present) sawField = true;
       const raw = value && typeof value === "object" && "value" in value ? value.value : value;
@@ -321,14 +324,72 @@ async function scheduledContent({ site: siteName, type, sampleSize = 200 }) {
     }
   }
 
-  if (!sawField) {
-    return { contentType, gated: true, reason: "No Scheduler publish_on/unpublish_on fields exposed.", scanned: nodes.length };
+  if (nodes.length && !sawField) {
+    return {
+      contentType,
+      gated: true,
+      schedulerFields: "absent",
+      reason: "No sampled node carries a publish_on or unpublish_on key: Scheduler is not enabled for this content type, or this account cannot view those fields.",
+      scanned: nodes.length,
+      approximate: nodes.length >= sampleSize,
+    };
   }
   return {
     contentType,
+    schedulerFields: sawField ? "present" : "unknown",
     scanned: nodes.length,
     approximate: nodes.length >= sampleSize,
     summary: { pending: pending.length, overdue: overdue.length },
+    findings: { pending, overdue },
+  };
+}
+
+/**
+ * Report content with Scheduler publish/unpublish dates set, split into pending
+ * (date in the future) and overdue (date in the past but the action hasn't run).
+ *
+ * With `type`, scans that bundle. Without it, scans every node bundle and
+ * returns a combined summary plus one row per bundle; a bundle that cannot be
+ * read is listed with its error rather than failing the whole report.
+ *
+ * @param {object} args - { site?, type?, sampleSize? }.
+ * @returns {Promise<object>} Pending and overdue scheduled items.
+ */
+async function scheduledContent({ site: siteName, type, sampleSize = 200 }) {
+  const site = getSiteConfig(siteName);
+  const sec = resolveSecurityConfig(site);
+  assertReadAllowed(sec, "node", type);
+  const backend = await resolveBackend(site);
+  if (type) return scanScheduledBundle(backend, type, sampleSize);
+
+  const bundles = (await backend.listContentTypes()).map((ct) => ct.id).filter(Boolean);
+  const byContentType = [];
+  const pending = [];
+  const overdue = [];
+  let approximate = false;
+  for (const bundle of bundles) {
+    let row;
+    try {
+      assertReadAllowed(sec, "node", bundle);
+      row = await scanScheduledBundle(backend, bundle, sampleSize);
+    } catch (err) {
+      byContentType.push({ contentType: bundle, error: err?.message || String(err) });
+      continue;
+    }
+    approximate = approximate || Boolean(row.approximate);
+    for (const rec of row.findings?.pending ?? []) pending.push({ ...rec, contentType: bundle });
+    for (const rec of row.findings?.overdue ?? []) overdue.push({ ...rec, contentType: bundle });
+    const summaryRow = { ...row };
+    delete summaryRow.findings;
+    byContentType.push(summaryRow);
+  }
+  return {
+    contentType: null,
+    scannedBundles: bundles.length,
+    scanned: byContentType.reduce((n, r) => n + (r.scanned || 0), 0),
+    approximate,
+    summary: { pending: pending.length, overdue: overdue.length },
+    byContentType,
     findings: { pending, overdue },
   };
 }
@@ -358,11 +419,11 @@ function toMillis(raw) {
  * @returns {Promise<object>} Per-node scores and aggregate.
  */
 async function readability({ site: siteName, type, sampleSize = 100, hardThreshold = 30 }) {
+  const contentType = requireContentType(type, "drupal_report_readability");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const nodes = await collectEntities(
     backend,
     { entityType: "node", bundle: contentType, filters: [{ field: "status", op: "eq", value: true }] },
@@ -440,11 +501,11 @@ function countSyllables(word) {
  * @returns {Promise<object>} Orphan pages.
  */
 async function orphanPages({ site: siteName, type, sampleSize = 200 }) {
+  const contentType = requireContentType(type, "drupal_report_orphan_pages");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const baseUrl = site.baseUrl;
   const nodes = await collectEntities(
     backend,
@@ -493,11 +554,11 @@ const PII_PATTERNS = new Map([
  * @returns {Promise<object>} PII findings, masked.
  */
 async function piiExposure({ site: siteName, type, sampleSize = 100, kinds }) {
+  const contentType = requireContentType(type, "drupal_report_pii_exposure");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const active = (kinds && kinds.length ? kinds : [...PII_PATTERNS.keys()]).filter((k) => PII_PATTERNS.has(k));
   const nodes = await collectEntities(
     backend,
@@ -570,11 +631,11 @@ const DEFAULT_META_FIELDS = ["field_meta_tags", "field_metatag", "metatag", "fie
  * @returns {Promise<object>} Per-field coverage and nodes missing all meta.
  */
 async function seoMetaCoverage({ site: siteName, type, fields, sampleSize = 100 }) {
+  const contentType = requireContentType(type, "drupal_report_seo_meta_coverage");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const named = requestedFieldNames(fields);
   const requested = named.length > 0;
   const metaFields = requested ? named : DEFAULT_META_FIELDS;
@@ -638,9 +699,10 @@ export const definitions = [
     description: "Find duplicate / near-duplicate titles within a content type (normalized title grouping). Surfaces accidental re-publishing and content cannibalization.",
     inputSchema: {
       type: "object",
+      required: ["type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         sampleSize: { type: "number", default: 200, description: "Max nodes to scan" },
       },
     },
@@ -650,9 +712,10 @@ export const definitions = [
     description: "Find content stuck in a non-published moderation state (draft/needs_review) beyond N days — editorial bottlenecks. Reads moderation_state; gated when content_moderation isn't exposed.",
     inputSchema: {
       type: "object",
+      required: ["type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         days:       { type: "number", default: 30, description: "Days-in-state threshold" },
         states:     { type: "array", items: { type: "string" }, description: "Moderation states to treat as bottlenecks" },
         langcode:   { type: "string", description: "Limit to this translation (Sentinel inventory). Omit for the default-language field on each node." },
@@ -665,22 +728,23 @@ export const definitions = [
     description: "Per-node translation coverage from Sentinel's inventory (missing non-default language, outdated core flag, language counts). Without Sentinel the report is unavailable — JSON:API only shows the default language, so a histogram would be misleading.",
     inputSchema: {
       type: "object",
+      required: ["type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         sampleSize: { type: "number", default: 100, description: "Max nodes to inventory" },
       },
     },
   },
   {
     name: "drupal_report_scheduled_content",
-    description: "Report content with Scheduler publish/unpublish dates set, split into pending (future) and overdue (past, action not run). Gated when scheduler fields aren't exposed.",
+    description: "Report content with Scheduler publish/unpublish dates set, split into pending (future) and overdue (past, action not run). Omit type to scan every node bundle in one call (one row per bundle in byContentType). A bundle is gated only when sampled nodes carry no publish_on/unpublish_on key at all; fields that exist but are empty report pending 0 / overdue 0. A bundle with no nodes reports zero counts with schedulerFields 'unknown'.",
     inputSchema: {
       type: "object",
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type (default: article)" },
-        sampleSize: { type: "number", default: 200 },
+        type:       { type: "string", description: "Content type machine name. Omit to scan every node bundle." },
+        sampleSize: { type: "number", default: 200, description: "Max nodes to scan per content type" },
       },
     },
   },
@@ -689,9 +753,10 @@ export const definitions = [
     description: "Score body readability (Flesch Reading Ease) for a content type and flag hard-to-read content and structural issues (no H2 subheadings, multiple H1s).",
     inputSchema: {
       type: "object",
+      required: ["type"],
       properties: {
         site:          { type: "string" },
-        type:          { type: "string", description: "Content type (default: article)" },
+        type:          { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         sampleSize:    { type: "number", default: 100 },
         hardThreshold: { type: "number", default: 30, description: "Flag content scoring below this" },
       },
@@ -702,9 +767,10 @@ export const definitions = [
     description: "Find published pages with no inbound internal links from other sampled pages — content islands. Best-effort over the sampled set.",
     inputSchema: {
       type: "object",
+      required: ["type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         sampleSize: { type: "number", default: 200 },
       },
     },
@@ -714,9 +780,10 @@ export const definitions = [
     description: "Scan published body content for accidentally exposed PII (emails, US SSNs, phone numbers). Matched values are masked in the output so the report itself doesn't leak data.",
     inputSchema: {
       type: "object",
+      required: ["type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         sampleSize: { type: "number", default: 100 },
         kinds:      { type: "array", items: { type: "string", enum: ["email", "ssn", "phone"] }, description: "PII kinds to scan (default: all)" },
       },
@@ -727,9 +794,10 @@ export const definitions = [
     description: "Report structured-meta (SEO) coverage for a content type: how many sampled nodes populate each meta field (metatag, meta description). Complements drupal_report_seo_audit with explicit per-field coverage. Reads scalar and entity-reference fields. A field absent from every sampled node has `present: false` and `coverage: null` (unknown, not 0), and is listed in `notVisible` when you named it. When none of the checked fields is visible, no node is flagged and `nodesMissingAllMeta` is null: JSON:API leaves out a field this account may not view.",
     inputSchema: {
       type: "object",
+      required: ["type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         fields:     { type: "array", items: { type: "string" }, description: "Meta field machine names to check" },
         sampleSize: { type: "number", default: 100 },
       },

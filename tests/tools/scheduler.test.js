@@ -101,7 +101,7 @@ describe("scheduler tools", () => {
   });
 
   it("surfaces a clear capability error when the backend reports an unknown field", async () => {
-    backend.updateEntity.mockRejectedValue(new Error("Field 'publish_on' is unknown."));
+    backend.updateEntity.mockRejectedValue(new Error("The attribute publish_on does not exist on the node--article resource type."));
     await expect(handlers.drupal_schedule_publish({ type: "article", id: "n1", publishOn: "2026-07-01T12:00:00Z" }))
       .rejects.toThrow(/Scheduler/i);
   });
@@ -139,15 +139,108 @@ describe("scheduler tools", () => {
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
-  it("refuses a moderated bundle that has no publish_state field (#402)", async () => {
+  it("does not refuse on its own when a moderated bundle has no publish_state field (#402)", async () => {
     backend.getEntity.mockResolvedValue(canonicalNode({
       status: false,
       fields: { moderation_state: "draft", publish_on: null },
     }));
-    await expect(handlers.drupal_schedule_publish({
+    backend.updateEntity.mockResolvedValue(canonicalNode());
+    const out = await handlers.drupal_schedule_publish({
       type: "page", id: "n1", publishOn: "2026-07-01T12:00:00Z", publishState: "published",
-    })).rejects.toThrow(/Content Moderation Integration|publish_state/);
+    });
+    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
+    expect(backend.updateEntity.mock.calls[0][0].attributes).toMatchObject({
+      publish_on: "2026-07-01T12:00:00Z", publish_state: "published",
+    });
+    expect(out.id).toBe("n1");
+  });
+
+  it("warns, without refusing, when a moderated date is written with no state field to pair it with (#402)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({
+      status: false,
+      fields: { moderation_state: "draft", publish_on: null },
+    }));
+    backend.updateEntity.mockResolvedValue(canonicalNode());
+    const out = await handlers.drupal_schedule_publish({ type: "page", id: "n1", publishOn: "2026-07-01T12:00:00Z" });
+    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
+    expect(out.warnings.join(" ")).toMatch(/Scheduler Content Moderation Integration/);
+  });
+
+  it("requires unpublishState when the bundle exposes unpublish_state, even if moderation_state is not visible (#402)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({
+      fields: { unpublish_on: null, unpublish_state: null },
+    }));
+    await expect(handlers.drupal_schedule_publish({
+      type: "page", id: "n1", unpublishOn: "2026-08-01T12:00:00Z",
+    })).rejects.toThrow(/unpublishState.*never runs|never runs.*unpublishState/s);
     expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a site 422 transition refusal verbatim, not as a missing-field error (#402)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({
+      fields: { moderation_state: "draft", publish_on: null, publish_state: null },
+    }));
+    const reason = "publish_state: You do not have access to transition from Draft to Published";
+    backend.updateEntity.mockRejectedValue(Object.assign(
+      new Error(`Drupal 422 on PATCH /jsonapi/node/page/n1: ${reason}`), { status: 422 },
+    ));
+    const err = await handlers.drupal_schedule_publish({
+      type: "page", id: "n1", publishOn: "2026-07-01T12:00:00Z", publishState: "published",
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toContain(reason);
+    expect(err.message).toMatch(/refused/i);
+    expect(err.message).not.toMatch(/not available|not installed/i);
+    expect(err.status).toBe(422);
+  });
+
+  it("surfaces a Sentinel policy denial verbatim (#402)", async () => {
+    backend.getEntity.mockResolvedValue(canonicalNode({
+      fields: { moderation_state: "draft", publish_on: null, publish_state: null },
+    }));
+    const reason = "MCP Sentinel: policy denies scheduling a transition to published for this principal.";
+    backend.updateEntity.mockRejectedValue(Object.assign(
+      new Error(`Drupal 403 on PATCH /jsonapi/node/page/n1: ${reason}`), { status: 403 },
+    ));
+    const err = await handlers.drupal_schedule_publish({
+      type: "page", id: "n1", publishOn: "2026-07-01T12:00:00Z", publishState: "published",
+    }).catch((e) => e);
+    expect(err.message).toContain(reason);
+    expect(err.message).not.toMatch(/not available|not installed/i);
+    expect(err.status).toBe(403);
+  });
+
+  it.each([
+    "publish_state: invalid field value for this transition",
+    "publish_state: The field value is unknown for this workflow",
+    "publish_state: unknown property in transition",
+  ])("surfaces a 422 that merely mentions a field verbatim: %s", async (detail) => {
+    backend.updateEntity.mockRejectedValue(Object.assign(
+      new Error(`Drupal 422 on PATCH /jsonapi/node/page/n1: ${detail}`), { status: 422 },
+    ));
+    const err = await handlers.drupal_schedule_publish({
+      type: "page", id: "n1", publishOn: "2026-07-01T12:00:00Z", publishState: "published",
+    }).catch((e) => e);
+    expect(err.message).toContain(detail);
+    expect(err.message).toMatch(/refused/i);
+    expect(err.message).not.toMatch(/not available/i);
+  });
+
+  it("does not label a 404 as a policy refusal", async () => {
+    const original = Object.assign(new Error("Drupal 404 on PATCH /jsonapi/node/page/n1: Not Found"), { status: 404 });
+    backend.updateEntity.mockRejectedValue(original);
+    const err = await handlers.drupal_schedule_publish({ type: "page", id: "n1", publishOn: "2026-07-01T12:00:00Z" })
+      .catch((e) => e);
+    expect(err).toBe(original);
+  });
+
+  it("still reports a missing Scheduler capability when JSON:API says the attribute does not exist", async () => {
+    backend.updateEntity.mockRejectedValue(Object.assign(
+      new Error("Drupal 422 on PATCH /jsonapi/node/page/n1: The attribute publish_on does not exist on the node--page resource type."),
+      { status: 422 },
+    ));
+    await expect(handlers.drupal_schedule_publish({ type: "page", id: "n1", publishOn: "2026-07-01T12:00:00Z" }))
+      .rejects.toThrow(/Scheduler module/);
   });
 
   it("uses the entity-type-aware write assertion", () => {

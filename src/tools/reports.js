@@ -11,7 +11,7 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertReadAllowed } from "../lib/security.js";
-import { collectEntities, gatedReport, fieldValue, fieldPresence, isEmptyFieldValue, requestedFieldNames, FIELDS_NOT_VISIBLE_NOTE, daysSince } from "../lib/reports-support.js";
+import { collectEntities, gatedReport, fieldValue, fieldPresence, isEmptyFieldValue, requestedFieldNames, FIELDS_NOT_VISIBLE_NOTE, daysSince, requireContentType, readableNodeBundles } from "../lib/reports-support.js";
 import { fetchRenderedMetaDescriptions } from "../lib/metatag-audit.js";
 
 // ---------------------------------------------------------------------------
@@ -68,11 +68,11 @@ async function contentSummary({ site: siteName }) {
  * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function staleContent({ site: siteName, type, days = 180, status, limit = 50 }) {
+  const contentType = requireContentType(type, "drupal_report_stale_content");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   // `changed` is an integer Unix timestamp (seconds). Filter with epoch seconds,
   // not an ISO string — PostgreSQL rejects the string against an integer column.
   const cutoffMs = Date.now() - days * 86400000;
@@ -112,11 +112,11 @@ async function staleContent({ site: siteName, type, days = 180, status, limit = 
  * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function contentByAuthor({ site: siteName, type, limit = 100 }) {
+  const contentType = requireContentType(type, "drupal_report_content_by_author");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const entities = await collectEntities(
     backend,
     { entityType: "node", bundle: contentType, include: ["uid"] },
@@ -141,7 +141,10 @@ async function contentByAuthor({ site: siteName, type, limit = 100 }) {
 }
 
 /**
- * Recently published content of a given type, newest first.
+ * Recently published content, newest first. With `type`, reads that bundle.
+ * Without it, reads every node bundle the connector may read, merges by
+ * `created`, and keeps the newest `limit`; a bundle that fails to load is
+ * listed in `bundleErrors` (#403).
  *
  * @param {object} args - { site?, type?, limit? }.
  * @returns {Promise<object>} The most recently created published nodes.
@@ -152,22 +155,42 @@ async function recentlyPublished({ site: siteName, type, limit = 20 }) {
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "node", type);
   const backend = await resolveBackend(site);
-  const res = await backend.listEntities({
-    entityType: "node", bundle: type || "article",
-    filters: [{ field: "status", op: "eq", value: true }],
-    sort: [{ field: "created", dir: "desc" }],
-    page: { limit },
-  });
+  const bundles = type ? [type] : await readableNodeBundles(backend, sec);
+  const nodes = [];
+  const bundleErrors = [];
+  let approximate = false;
+  for (const bundle of bundles) {
+    let res;
+    try {
+      res = await backend.listEntities({
+        entityType: "node", bundle,
+        filters: [{ field: "status", op: "eq", value: true }],
+        sort: [{ field: "created", dir: "desc" }],
+        page: { limit },
+      });
+    } catch (err) {
+      if (type) throw err;
+      bundleErrors.push({ contentType: bundle, error: err?.message || String(err) });
+      continue;
+    }
+    approximate = approximate || (res.approximate ?? false);
+    for (const n of res.entities) {
+      nodes.push({
+        id: n.id,
+        title: n.title,
+        created: n.created,
+        changed: n.changed,
+        path: n.url,
+        ...(type ? {} : { contentType: bundle }),
+      });
+    }
+  }
+  if (!type) nodes.sort((x, y) => String(y.created ?? "").localeCompare(String(x.created ?? "")));
   return {
-    contentType: type || "article",
-    approximate: res.approximate ?? false,
-    nodes: res.entities.map((n) => ({
-      id: n.id,
-      title: n.title,
-      created: n.created,
-      changed: n.changed,
-      path: n.url,
-    })),
+    contentType: type || null,
+    approximate,
+    nodes: nodes.slice(0, limit),
+    ...(bundleErrors.length ? { bundleErrors } : {}),
   };
 }
 
@@ -255,12 +278,13 @@ async function fieldCompleteness({ site: siteName, type, fields, sampleSize = 10
  * Per-term counts that error out are reported as null nodeCount.
  *
  * @param {object} args - { site?, vocabulary, contentType?, referenceField?, limit? }.
- *   `referenceField` defaults to `field_{vocabulary}`; `contentType` to "article".
+ *   `referenceField` defaults to `field_{vocabulary}`; `contentType` is required.
  * @returns {Promise<object>} Terms sorted by usage, plus an unused-term count.
  * @throws {Error} If no vocabulary is supplied.
  * @throws {SecurityError} If reading the vocabulary is not permitted.
  */
 async function taxonomyUsage({ site: siteName, vocabulary, contentType, referenceField, limit = 100 }) {
+  const ctype = requireContentType(contentType, "drupal_report_taxonomy_usage", "contentType");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "taxonomy_term", vocabulary);
@@ -272,7 +296,6 @@ async function taxonomyUsage({ site: siteName, vocabulary, contentType, referenc
     limit
   );
   const field = referenceField || `field_${vocabulary}`;
-  const ctype = contentType || "article";
   let approximate = false;
   const results = await Promise.all(terms.map(async (term) => {
     try {
@@ -306,9 +329,10 @@ async function taxonomyUsage({ site: siteName, vocabulary, contentType, referenc
  * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function revisionHotspots({ site: siteName, type, limit = 20 }) {
+  const contentType = requireContentType(type, "drupal_report_revision_hotspots");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
   if (!backend.capabilities().revisions) {
     return gatedReport(
@@ -317,7 +341,6 @@ async function revisionHotspots({ site: siteName, type, limit = 20 }) {
       "This backend does not expose entity revisions. Use a JSON:API site."
     );
   }
-  const contentType = type || "article";
   const recent = await backend.listEntities({
     entityType: "node", bundle: contentType,
     sort: [{ field: "changed", dir: "desc" }],
@@ -431,11 +454,11 @@ async function userActivity({ site: siteName, inactiveDays = 90, limit = 50 }) {
  * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function seoAudit({ site: siteName, type, sampleSize = 100 }) {
+  const contentType = requireContentType(type, "drupal_report_seo_audit");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const issueKeys = ["missingMetaDescription", "titleTooLong", "titleTooShort", "thinContent"];
   const issues = new Map(issueKeys.map((k) => [k, []]));
   const entities = await collectEntities(
@@ -524,11 +547,11 @@ function resolveJsonapiMetaSource(entities) {
  * @throws {SecurityError} If reading the content type is not permitted.
  */
 async function accessibilityAudit({ site: siteName, type, sampleSize = 100 }) {
+  const contentType = requireContentType(type, "drupal_report_accessibility_audit");
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
-  assertReadAllowed(sec, "node", type);
+  assertReadAllowed(sec, "node", contentType);
   const backend = await resolveBackend(site);
-  const contentType = type || "article";
   const issueKeys = ["imagesWithoutAlt", "inlineH1", "nonDescriptiveLinkText", "tablesWithoutCaption"];
   const issues = new Map(issueKeys.map((k) => [k, []]));
   const badLinkText = />\s*(click here|read more|learn more|here|more|link)\s*</i;
@@ -572,10 +595,10 @@ export const definitions = [
     name: "drupal_report_stale_content",
     description: "Find content that hasn't been updated in N days. Returns a sorted list with titles, status, and days-since-update.",
     inputSchema: {
-      type: "object",
+      type: "object", required: ["type"],
       properties: {
         site:   { type: "string" },
-        type:   { type: "string", description: "Content type (default: article)" },
+        type:   { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         days:   { type: "number", default: 180, description: "Stale threshold in days" },
         status: { type: "boolean", description: "Filter by publish status" },
         limit:  { type: "number", default: 50 },
@@ -586,10 +609,10 @@ export const definitions = [
     name: "drupal_report_content_by_author",
     description: "Count nodes per author for a given content type. Returns author UUIDs and counts sorted by most prolific.",
     inputSchema: {
-      type: "object",
+      type: "object", required: ["type"],
       properties: {
         site:  { type: "string" },
-        type:  { type: "string", description: "Content type (default: article)" },
+        type:  { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         limit: { type: "number", default: 100, description: "Max nodes to scan" },
       },
     },
@@ -601,7 +624,7 @@ export const definitions = [
       type: "object",
       properties: {
         site:  { type: "string" },
-        type:  { type: "string", description: "Content type (default: article)" },
+        type:  { type: "string", description: "Content type machine name. Omit to read every node bundle (results merged, newest first; unreadable bundles listed in bundleErrors)." },
         limit: { type: "number", default: 20 },
       },
     },
@@ -623,11 +646,11 @@ export const definitions = [
     name: "drupal_report_taxonomy_usage",
     description: "Count how many nodes use each term in a vocabulary. Identifies over-used, under-used, and orphaned terms.",
     inputSchema: {
-      type: "object", required: ["vocabulary"],
+      type: "object", required: ["vocabulary", "contentType"],
       properties: {
         site:           { type: "string" },
         vocabulary:     { type: "string", description: "Vocabulary machine name, e.g. 'tags', 'category'" },
-        contentType:    { type: "string", description: "Content type to count references from (default: article)" },
+        contentType:    { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         referenceField: { type: "string", description: "Field referencing the vocabulary (default: field_{vocabulary})" },
         limit:          { type: "number", default: 100 },
       },
@@ -637,10 +660,10 @@ export const definitions = [
     name: "drupal_report_revision_hotspots",
     description: "Find nodes with the most revision activity — useful for spotting churn or content that needs editorial process review. Requires Drupal 9.3+ JSON:API revisions.",
     inputSchema: {
-      type: "object",
+      type: "object", required: ["type"],
       properties: {
         site:  { type: "string" },
-        type:  { type: "string", description: "Content type (default: article)" },
+        type:  { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         limit: { type: "number", default: 20 },
       },
     },
@@ -661,10 +684,10 @@ export const definitions = [
     name: "drupal_report_seo_audit",
     description: "SEO audit for a content type: missing meta descriptions, title length issues, and thin content (under 300 words). Returns node lists for each issue category. Meta descriptions use the rendered Metatag output via GraphQL when available (reported as `metaSource`); when no description source is readable it reports the meta check as unavailable rather than a false zero.",
     inputSchema: {
-      type: "object",
+      type: "object", required: ["type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         sampleSize: { type: "number", default: 100 },
       },
     },
@@ -673,10 +696,10 @@ export const definitions = [
     name: "drupal_report_accessibility_audit",
     description: "Accessibility audit for body content: images without alt text, inline H1 tags, non-descriptive link text ('click here', 'read more'), and tables without captions.",
     inputSchema: {
-      type: "object",
+      type: "object", required: ["type"],
       properties: {
         site:       { type: "string" },
-        type:       { type: "string", description: "Content type (default: article)" },
+        type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
         sampleSize: { type: "number", default: 100 },
       },
     },

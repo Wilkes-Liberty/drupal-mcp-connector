@@ -16,9 +16,15 @@
  * forward it unchanged (the JSON:API backend coerces datetime fields as needed).
  *
  * Capability degradation: if the Scheduler module is not installed, or the bundle
- * does not have the publish_on / unpublish_on fields, the backend write fails with
- * an "unknown field" error. We catch that and re-throw a clear, actionable message
- * (while still surfacing the underlying backend error) rather than a raw stack.
+ * does not have the publish_on / unpublish_on fields, JSON:API rejects the write
+ * because the attribute does not exist. We catch that and re-throw a clear,
+ * actionable message (while still surfacing the underlying backend error).
+ *
+ * The connector does not decide who may schedule which transition. Drupal's
+ * validation (SchedulerModerationTransitionAccess) and the site's MCP Sentinel
+ * policy are the gate; their refusals are surfaced verbatim. The only local
+ * refusal is a date with no matching state on a bundle that exposes the state
+ * field, because Drupal accepts that write and the schedule then never runs.
  */
 
 import { getSiteConfig } from "../lib/config.js";
@@ -26,18 +32,43 @@ import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertWriteAllowed, redactCanonicalEntity } from "../lib/security.js";
 import { entityLooksModerated } from "../lib/moderation-default.js";
 import { fieldPresence } from "../lib/reports-support.js";
+import { httpStatusOf } from "../lib/error-status.js";
 
 /**
- * Heuristic: does this backend error look like a missing/unknown field? Scheduler
- * fields are absent unless the module is installed and enabled for the bundle, so
- * an unknown-field error almost always means a missing Scheduler capability.
+ * Does this backend error say a Scheduler attribute does not exist on the
+ * bundle? Only Drupal JSON:API's explicit form counts ("The attribute
+ * publish_on does not exist on the node--page resource type."). A 422
+ * validation detail names the field too (`publish_state: …`) and may say
+ * "invalid" or "unknown"; that is a refusal by the site, surfaced verbatim,
+ * not a missing capability (#402).
  *
  * @param {Error} err - The error thrown by the backend write.
  * @returns {boolean}
  */
 export function looksLikeUnknownField(err) {
-  const msg = String(err?.message || err || "");
-  return /unknown|not exist|no field|invalid field|unrecognized|publish_on|unpublish_on|publish_state|unpublish_state/i.test(msg);
+  const msg = String(err?.message || err || "").slice(0, 2000);
+  return /\battribute [\w.-]{1,128} does not exist on the [\w.-]{1,128} resource type\b/i.test(msg);
+}
+
+/**
+ * Wrap a site refusal so the reason is the first thing the caller reads. The
+ * original message (with Drupal's or Sentinel's reason) is kept verbatim and
+ * the HTTP status is carried over.
+ *
+ * @param {Error} err - The error thrown by the backend write.
+ * @param {string} type - Bundle machine name.
+ * @returns {Error}
+ */
+function siteRefusal(err, type) {
+  const status = httpStatusOf(err);
+  const reason = err?.message || String(err);
+  const out = new Error(
+    `The site refused the schedule on '${type}'${status ? ` (HTTP ${status})` : ""}. ` +
+    `Drupal validation or the site's MCP Sentinel policy decides scheduled transitions; the connector does not. Reason: ${reason}`,
+  );
+  if (status) out.status = status;
+  out.cause = err;
+  return out;
 }
 
 /**
@@ -59,14 +90,17 @@ function schedulerFieldPresent(entity, schema, field) {
  * canonical updateEntity. At least one of publishOn / unpublishOn must be given.
  * Each value is forwarded unchanged (ISO 8601 string or epoch integer).
  *
- * On a moderated bundle, `publishState` / `unpublishState` are required when
- * the matching date is set and the Scheduler CM state field exists (#402).
+ * `publishState` / `unpublishState` are written as `publish_state` /
+ * `unpublish_state`. When the bundle exposes the matching state field, a date
+ * without its state is refused locally (#402); every other decision is Drupal's.
  *
  * @param {object} args - { site?, type, id, publishOn?, unpublishOn?, publishState?, unpublishState? }.
- * @returns {Promise<object>} The redacted, updated node descriptor.
- * @throws {Error} If neither timestamp is supplied, if the policy forbids the
- *   write, if a moderated schedule is missing its target state, or — degraded —
- *   if the Scheduler fields are unknown on the bundle.
+ * @returns {Promise<object>} The redacted, updated node descriptor, with
+ *   `warnings` when a moderated bundle has no state field to pair a date with.
+ * @throws {Error} If neither timestamp is supplied, if connector policy forbids
+ *   the write, if a date is missing its state on a bundle with the state field,
+ *   if the site refuses the write (reason kept verbatim), or — degraded — if the
+ *   Scheduler fields are unknown on the bundle.
  */
 async function schedulePublish({
   site: siteName, type, id, publishOn, unpublishOn, publishState, unpublishState,
@@ -96,40 +130,28 @@ async function schedulePublish({
     }
   }
 
-  const moderated = entityLooksModerated(existing);
-  if (moderated) {
-    if (publishOn !== undefined) {
-      const hasStateField = schedulerFieldPresent(existing, schema, "publish_state");
-      if (!hasStateField) {
-        throw new Error(
-          `Could not schedule publish on moderated '${type}': the publish_state field is not available. ` +
-          "Moderated bundles need the Scheduler Content Moderation Integration module, and a publishState " +
-          "(e.g. 'published') whenever publishOn is set. Without that state, cron logs 'Publishing failed' " +
-          "and the node never goes live. See connector #402."
-        );
-      }
-      if (publishState === undefined) {
-        throw new Error(
-          "Moderated content requires publishState (the workflow state to enter at publishOn, e.g. 'published'). " +
-          "Scheduler dates without a target state are accepted by Drupal and then fail at cron. See connector #402."
-        );
-      }
+  // A state field on the bundle means Scheduler Content Moderation Integration
+  // is active there. Drupal accepts a date with no state, and the schedule then
+  // fails at every cron run, so that one case is refused here (#402).
+  const pairs = [
+    ["publishOn", publishOn, "publishState", publishState, "publish_state", "published"],
+    ["unpublishOn", unpublishOn, "unpublishState", unpublishState, "unpublish_state", "archived"],
+  ];
+  const warnings = [];
+  for (const [dateArg, date, stateArg, state, stateField, example] of pairs) {
+    if (date === undefined || state !== undefined) continue;
+    if (schedulerFieldPresent(existing, schema, stateField)) {
+      throw new Error(
+        `'${type}' is a moderated bundle with Scheduler Content Moderation Integration: pass ${stateArg} ` +
+        `(the moderation state to enter at ${dateArg}, e.g. '${example}'). A schedule without a state never runs: ` +
+        "Drupal accepts it, then cron logs 'Publishing failed' on every run.",
+      );
     }
-    if (unpublishOn !== undefined) {
-      const hasStateField = schedulerFieldPresent(existing, schema, "unpublish_state");
-      if (!hasStateField) {
-        throw new Error(
-          `Could not schedule unpublish on moderated '${type}': the unpublish_state field is not available. ` +
-          "Moderated bundles need the Scheduler Content Moderation Integration module, and an unpublishState " +
-          "(e.g. 'draft') whenever unpublishOn is set. See connector #402."
-        );
-      }
-      if (unpublishState === undefined) {
-        throw new Error(
-          "Moderated content requires unpublishState (the workflow state to enter at unpublishOn, e.g. 'draft'). " +
-          "Scheduler dates without a target state are accepted by Drupal and then fail at cron. See connector #402."
-        );
-      }
+    if (entityLooksModerated(existing)) {
+      warnings.push(
+        `'${type}' is moderated but exposes no ${stateField} field. Scheduler cannot change a moderated node ` +
+        `without the Scheduler Content Moderation Integration module and a ${stateArg}, so this ${dateArg} may never take effect.`,
+      );
     }
   }
 
@@ -145,15 +167,20 @@ async function schedulePublish({
   } catch (err) {
     if (looksLikeUnknownField(err)) {
       throw new Error(
-        `Could not set Scheduler dates on '${type}': the publish_on / unpublish_on fields are not available. ` +
-        "This tool requires the Drupal Scheduler module to be installed and enabled for this content type. " +
-        "Moderated bundles also need Scheduler Content Moderation Integration (publish_state / unpublish_state). " +
+        `Could not set Scheduler dates on '${type}': a Scheduler field is not available on this bundle. ` +
+        "publish_on / unpublish_on need the Drupal Scheduler module enabled for this content type; " +
+        "publish_state / unpublish_state also need Scheduler Content Moderation Integration. " +
         `Backend error: ${err?.message || err}`,
       );
     }
+    // 403 (access or Sentinel policy) and 422 (validation) are the site's
+    // decision on this write. Other failures pass through unchanged.
+    const status = httpStatusOf(err);
+    if (status === 403 || status === 422) throw siteRefusal(err, type);
     throw err;
   }
-  return updated ? redactCanonicalEntity(updated, sec, "node") : updated;
+  const out = updated ? redactCanonicalEntity(updated, sec, "node") : updated;
+  return out && warnings.length ? { ...out, warnings } : out;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,15 +192,16 @@ export const definitions = [
     name: "drupal_schedule_publish",
     description:
       "Schedule a content node to publish and/or unpublish at a future time using the Drupal Scheduler module. " +
-      "Sets the publish_on and unpublish_on fields on the node. " +
-      "On a bundle under Content Moderation, also set publishState / unpublishState " +
-      "(written as publish_state / unpublish_state) — dates alone never go live. " +
-      "Requires the Scheduler module to be installed and enabled for the content type, with the publish_on / " +
-      "unpublish_on fields present on the bundle — otherwise the call fails with a clear capability error. " +
-      "Moderated bundles additionally need Scheduler Content Moderation Integration; when those state fields " +
-      "exist, the matching state is required whenever a date is set. " +
-      "Timestamps accept ISO 8601 (e.g. '2026-07-01T12:00:00Z') or a Unix epoch and are passed through unchanged. " +
-      "Provide at least one of publishOn or unpublishOn.",
+      "Sets the publish_on and unpublish_on fields on the node. Provide at least one of publishOn or unpublishOn. " +
+      "Moderated bundles (Content Moderation) also need a target state: pass publishState / unpublishState " +
+      "(moderation state machine names, e.g. 'published', 'archived'), written as publish_state / unpublish_state. " +
+      "These fields exist only when the Scheduler Content Moderation Integration module is enabled. When the bundle " +
+      "exposes a state field and its date is set without the state, the call fails, because Drupal would accept a " +
+      "schedule that never runs. When a moderated bundle has no state field, the dates are written and the result " +
+      "carries a warning. Whether this account may schedule a given transition is decided by the site (Drupal " +
+      "validation and MCP Sentinel policy), not the connector; a refusal returns the site's reason verbatim. " +
+      "Without the Scheduler module on the content type, the call fails with a capability error. " +
+      "Timestamps accept ISO 8601 (e.g. '2026-07-01T12:00:00Z') or a Unix epoch and are passed through unchanged.",
     inputSchema: {
       type: "object", required: ["type", "id"],
       properties: {
@@ -182,8 +210,8 @@ export const definitions = [
         id:             { type: "string", description: "Node UUID" },
         publishOn:      { type: ["string", "number"], description: "When to publish — ISO 8601 datetime or Unix epoch. Sets the Scheduler publish_on field." },
         unpublishOn:    { type: ["string", "number"], description: "When to unpublish — ISO 8601 datetime or Unix epoch. Sets the Scheduler unpublish_on field." },
-        publishState:   { type: "string", description: "Moderation state to enter at publishOn (e.g. 'published'). Required on moderated bundles when publishOn is set." },
-        unpublishState: { type: "string", description: "Moderation state to enter at unpublishOn (e.g. 'draft'). Required on moderated bundles when unpublishOn is set." },
+        publishState:   { type: "string", description: "Moderation state machine name to enter at publishOn (e.g. 'published'). Written as publish_state. Required when publishOn is set and the bundle has a publish_state field." },
+        unpublishState: { type: "string", description: "Moderation state machine name to enter at unpublishOn (e.g. 'archived'). Written as unpublish_state. Required when unpublishOn is set and the bundle has an unpublish_state field." },
       },
     },
   },
