@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     that cannot be read fails the search and is named).
   - `drupal_audit_site_health` without `type` reports its content-type
     sections as unavailable and still runs the site-wide ones.
+- **Local operator files stay untracked.** `config/config.*.json` is ignored
+  except `config/config.example.json`. One-off `scripts/*-staging.mjs`
+  loaders are ignored too.
 
 ## [2.26.0] - 2026-10-01
 
