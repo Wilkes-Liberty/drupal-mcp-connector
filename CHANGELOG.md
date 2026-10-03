@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`drupal_update_node` `components` (#416).** Field changes for paragraphs
+  the node references (hero, text blocks, CTA banners) are saved in the same
+  unpublished draft revision as the node fields. The live page does not
+  change until the draft is published. Opens the working copy from live when
+  none exists. Requires MCP Sentinel 2.29.0 (`draft_components`,
+  `open_draft`); older hosts are refused before any write, and there is no
+  fallback to a direct paragraph write. The result lists each component's
+  live and working revision pins, and a write that left a pin on its live
+  revision is reported as an error.
 - **stdio Cursor plugin scaffold (DEV-751).** `.cursor-plugin/plugin.json`,
   root `mcp.json` (`npx -y drupal-mcp-connector`, no `url`), one short
   skill, and [PRIVACY.md](PRIVACY.md). No hosted MCP URL and no listing
