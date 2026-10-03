@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI and release run the advertised quality gate.** `npm run check` is
   lint + high-severity `npm audit` + `syntax-check` + test. CI and the
   release workflow both run that command, so a high advisory fails CI and
-  a tag that fails syntax-check does not publish.
+  a tag that fails syntax-check does not publish. Lockfile pins
+  `brace-expansion` `5.0.12` so the new audit step is clean.
 
 ## [3.0.1] - 2026-10-01
 
