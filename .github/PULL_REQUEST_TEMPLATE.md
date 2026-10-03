@@ -15,7 +15,7 @@
 - [ ] docs/tools-reference.md updated (if adding tools)
 - [ ] `config/config.example.json` updated (if adding config options)
 - [ ] No credentials committed
-- [ ] `npm test` passes
+- [ ] `npm run check` passes
 
 ## Drupal compatibility
 <!-- Which Drupal versions were tested? -->

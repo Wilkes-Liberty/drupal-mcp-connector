@@ -6,11 +6,19 @@ on:
   pull_request:
     branches: [master]
 
+# Explicit read-only token. actions: read lets setup-node restore the npm cache.
+# The repository default is already read; do not grant write here.
+permissions:
+  contents: read
+  actions: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Display name is the master required status check. Renaming it without
+  # updating branch protection blocks every pull request.
   lint-and-syntax:
     name: Lint, Syntax & Unit (Node 20)
     runs-on: ubuntu-latest
@@ -28,11 +36,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Syntax check all source files
-        run: npm run syntax-check
-
-      - name: Lint
-        run: npm run lint --if-present
-
-      - name: Unit tests
-        run: npm test --if-present
+      - name: npm run check
+        run: npm run check

@@ -29,11 +29,11 @@ npm run test:watch                # re-run tests on change
 npm run lint                      # eslint — must be clean
 npm run lint:fix                  # auto-fix what eslint can
 npm run audit                     # fail on high-severity dependency advisories
-npm run check                     # lint + audit together
-npm run syntax-check              # node --check over src/** (CI runs this)
+npm run syntax-check              # node --check over src/**
+npm run check                     # lint + audit + syntax-check + test (CI and release quality gate)
 ```
 
-Before pushing, run `npm run check` and `npm test` — these mirror what CI enforces.
+Before pushing, run `npm run check` — this is the CI and release quality gate.
 
 ## Tests
 
@@ -116,7 +116,7 @@ docs: update getting-started for DDEV setup
   enforces this; a trivial PR that genuinely needs no entry can carry the
   `no-changelog` label to bypass it. (Dependabot PRs are exempt automatically.)
 - Update [docs/tools-reference.md](docs/tools-reference.md) if you add or change tools.
-- CI must pass before merge: lint + unit tests (Node 20). (CodeQL also runs
+- CI must pass before merge: `npm run check` (Node 20). (CodeQL also runs
   and reports, but is not a required gate — it skips dependency-only PRs, so
   requiring it would permanently block Dependabot.)
 - Any review conversations must be resolved before merging (a branch-protection
@@ -146,7 +146,7 @@ created **after** the merge, on the resulting `master` commit:
 6. Update local master and tag the merge commit:
    `git checkout master && git pull && git tag -a vX.Y.Z -m "vX.Y.Z"`.
 7. Push the tag: `git push origin vX.Y.Z`.
-   The tag push triggers `release.yml`, which re-runs lint + tests, verifies the
+   The tag push triggers `release.yml`, which re-runs `npm run check`, verifies the
    tag matches `package.json`, and publishes with provenance.
 8. Create the GitHub Release for the tag with the CHANGELOG notes:
    `gh release create vX.Y.Z --title vX.Y.Z --verify-tag --latest --notes-file -`.

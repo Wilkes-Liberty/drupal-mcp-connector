@@ -19,13 +19,13 @@ npm run test:watch
 npm run lint             # eslint src/
 npm run lint:fix
 npm run audit            # fail on high-severity npm advisories
-npm run check            # lint + audit (mirrors CI quality gate)
-npm run syntax-check     # node --check over src/** (CI runs this)
+npm run syntax-check     # node --check over src/**
+npm run check            # lint + audit + syntax-check + test (CI and release quality gate)
 npm run generate:commands  # regenerate slash stubs under .agents/commands/
 npm run install:commands   # copy stubs into ~/.claude/commands, ~/.grok/commands, and ~/.agents/skills/drupal-mcp/
 ```
 
-Before treating work as done: `npm test` and `npm run lint` must pass. Prefer
+Before treating work as done: `npm run check` must pass. Prefer
 targeted tests while iterating (`npx vitest run tests/tools/nodes.test.js`).
 
 ## Layout
