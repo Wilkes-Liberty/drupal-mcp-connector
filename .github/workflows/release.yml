@@ -58,11 +58,8 @@ jobs:
           fi
           echo "Tag and package.json agree on $PKG"
 
-      - name: Lint
-        run: npm run lint --if-present
-
-      - name: Unit tests
-        run: npm test --if-present
+      - name: npm run check
+        run: npm run check
 
       # Re-pushing or moving a release tag is a normal recovery operation — a
       # tag pushed before its commit reached the default branch, a tag deleted
