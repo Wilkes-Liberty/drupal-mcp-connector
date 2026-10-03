@@ -71,6 +71,13 @@ describe("normalizeComponents", () => {
       .toEqual(["paragraph--hero", "paragraph--text_block"]);
   });
 
+  it("treats UUIDs that differ only in case as duplicates", () => {
+    expect(() => normalizeComponents([
+      { id: HERO, type: "hero", attributes: { a: 1 } },
+      { id: HERO.toUpperCase(), type: "hero", attributes: { b: 1 } },
+    ])).toThrow(/more than once/);
+  });
+
   it.each([
     ["not a list", { id: HERO }],
     ["empty list", []],
@@ -109,8 +116,7 @@ describe("writeComponentDraft", () => {
     const body = JSON.parse(write.options.body);
     expect(body.data).toMatchObject({ type: "node--page", id: "node-uuid", attributes: args.attributes });
     expect(body.meta.mcp_components).toEqual(normalizeComponents(args.components));
-    expect(result.preflight).toBe("sentinel_draft");
-    expect(result.components).toEqual([
+    expect(result._components).toEqual([
       { id: HERO, type: "paragraph--hero", livePin: "5", workingPin: "7", verified: ["field_title"] },
       { id: TEXT, type: "paragraph--text_block", livePin: "6", workingPin: "8", verified: ["field_body"] },
     ]);
@@ -125,9 +131,33 @@ describe("writeComponentDraft", () => {
       live: pinned(5, 6),
       working: pinned(9, 8),
     });
+    // The pre-write working copy (id:11) pins 4 and 3; the new one (id:12) 9 and 8.
+    b.getEntity.mockImplementation(async ({ entityType, id, resourceVersion }) => {
+      if (entityType === "paragraph") return paragraphs[`${id}@${resourceVersion}`] ?? null;
+      if (resourceVersion === "id:11") return pinned(4, 3);
+      return resourceVersion ? pinned(9, 8) : pinned(5, 6);
+    });
     await writeComponentDraft(b, args);
     const write = b.rawQuery.mock.calls.map(([c]) => c).filter((c) => c.path.endsWith("/mcp-draft"))[1];
     expect(write.options.headers["If-Match"]).toBe('"10:11"');
+  });
+
+  it("measures a continued draft against the working copy's earlier pins", async () => {
+    const workingInventory = inventory({
+      working: { vid: "11", translations: [{ langcode: "en", status: false, moderation_state: "draft", default: true }] },
+    });
+    const b = backend({
+      inventoryMeta: workingInventory,
+      draftResponses: [{ meta: { draft_preflight: true, live: "10", working: "11" } }, written],
+      live: pinned(5, 6),
+      working: pinned(9, 8),
+    });
+    // The pre-write working copy (id:11) already pinned 9 and 8: nothing moved.
+    b.getEntity.mockImplementation(async ({ entityType, id, resourceVersion }) => {
+      if (entityType === "paragraph") return paragraphs[`${id}@${resourceVersion}`] ?? null;
+      return resourceVersion ? pinned(9, 8) : pinned(5, 6);
+    });
+    await expect(writeComponentDraft(b, args)).rejects.toThrow(/earlier revision/);
   });
 
   it("stops after the preflight on dryRun", async () => {

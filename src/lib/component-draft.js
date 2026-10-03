@@ -48,8 +48,10 @@ export function normalizeComponents(components) {
     }
     const id = String(component.id ?? "");
     if (!UUID_RE.test(id)) throw new Error(`${where}.id must be the paragraph UUID.`);
-    if (seen.has(id)) throw new Error(`${where}: paragraph ${id} is listed more than once.`);
-    seen.add(id);
+    // UUID text is case-insensitive; dedupe on one canonical form.
+    const key = id.toLowerCase();
+    if (seen.has(key)) throw new Error(`${where}: paragraph ${id} is listed more than once.`);
+    seen.add(key);
     const rawType = String(component.type ?? "");
     const bundle = rawType.startsWith("paragraph--") ? rawType.slice("paragraph--".length) : rawType;
     if (rawType.includes("--") && !rawType.startsWith("paragraph--")) {
@@ -159,7 +161,8 @@ function pinMap(entity) {
  * @param {string} [input.langcode] Must be the default language when given.
  * @param {{dryRun?: boolean}} [options]
  * @returns {Promise<object>} Preview on dryRun; otherwise the written entity
- *   plus `components` (live and working pins per paragraph).
+ *   plus `_components` (live and working pins and verified fields per
+ *   paragraph).
  */
 export async function writeComponentDraft(backend, input, { dryRun = false } = {}) {
   const { entityType, bundle, id, attributes = {}, relationships } = input;
@@ -214,6 +217,12 @@ export async function writeComponentDraft(backend, input, { dryRun = false } = {
     };
   }
 
+  // The pins each component held before this save. Continuing a working copy
+  // starts from that copy's pins, not live's.
+  const baselineEntity = working
+    ? await backend.getEntity({ entityType, bundle, id, resourceVersion: `id:${working}` })
+    : null;
+
   const result = await draftRequest(backend, { ...request, preflight: false });
   if (!result?.data || result.data.id !== id || result.data.type !== data.type) {
     throw new Error("The draft write response did not identify the node. The outcome is uncertain; re-read before retrying.");
@@ -229,6 +238,7 @@ export async function writeComponentDraft(backend, input, { dryRun = false } = {
   ]);
   const livePins = pinMap(liveEntity);
   const workingPins = pinMap(workingEntity);
+  const baselinePins = working ? pinMap(baselineEntity) : livePins;
   // Every paragraph on the host gets a new revision when the host does, so a
   // moved pin alone proves nothing. Read each component at its working pin and
   // compare the submitted values.
@@ -236,9 +246,10 @@ export async function writeComponentDraft(backend, input, { dryRun = false } = {
   for (const { id: uuid, type, attributes: submitted } of components) {
     const livePin = livePins.get(uuid) ?? null;
     const workingPin = workingPins.get(uuid) ?? null;
-    if (!workingPin || workingPin === livePin) {
+    const baselinePin = baselinePins.get(uuid) ?? null;
+    if (!workingPin || workingPin === livePin || workingPin === baselinePin) {
       throw new Error(
-        `The draft was saved as revision ${workingVid}, but it still pins the live revision of component ${uuid}. ` +
+        `The draft was saved as revision ${workingVid}, but it still pins the earlier revision of component ${uuid}. ` +
         "Re-read the working copy before retrying.",
       );
     }
@@ -263,10 +274,10 @@ export async function writeComponentDraft(backend, input, { dryRun = false } = {
     }
     report.push({ id: uuid, type, livePin, workingPin, verified: Object.keys(submitted) });
   }
+  // `_`-prefixed keys survive `returning: "minimal"`.
   return {
     ...entity,
     _revisions: { live, working: workingVid },
-    preflight: PREFLIGHT_SENTINEL_DRAFT,
-    components: report,
+    _components: report,
   };
 }

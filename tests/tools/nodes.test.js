@@ -1052,6 +1052,32 @@ describe("drupal_update_node components policy", () => {
     expect(backend.rawQuery).not.toHaveBeenCalled();
   });
 
+  it("keeps the component report and summary warning on a minimal response", async () => {
+    const HEROX = "11111111-1111-4111-8111-111111111111";
+    backend.getEntity.mockImplementation(async ({ entityType, resourceVersion }) => {
+      if (entityType === "paragraph") return { id: HEROX, fields: { field_title: "x" } };
+      const pin = resourceVersion ? 7 : 5;
+      return canonicalNode({ relationships: { field_components: [{ id: HEROX, type: "paragraph--p_hero", meta: { target_revision_id: pin } }] } });
+    });
+    backend.getEntitySchema.mockResolvedValue(schemaWithBody("text_with_summary"));
+    backend.rawQuery.mockImplementation(async ({ path, options }) => {
+      if (path.endsWith("/mcp-translations")) {
+        return { meta: { defaultLangcode: "en", live: { vid: "10", translations: [] }, working: null, operations: ["open_draft", "draft_components"] } };
+      }
+      if (options.headers["X-MCP-Draft-Preflight"] === "1") {
+        return { meta: { draft_preflight: true, live: "10", working: "", operation: "open_draft" } };
+      }
+      return { data: { id: "n1", type: "node--article", attributes: { drupal_internal__vid: 12 } } };
+    });
+    const out = await handlers.drupal_update_node({
+      type: "article", id: "n1", moderationState: "draft", body: "B", summary: "S", returning: "minimal",
+      components: [{ id: HEROX, type: "p_hero", attributes: { field_title: "x" } }],
+    });
+    expect(out._components).toEqual([{ id: HEROX, type: "paragraph--p_hero", livePin: "5", workingPin: "7", verified: ["field_title"] }]);
+    expect(out._revisions).toEqual({ live: "10", working: 12 });
+    expect(out._warnings?.length).toBeGreaterThan(0);
+  });
+
   it("refuses malformed components before any request", async () => {
     await expect(handlers.drupal_update_node({
       type: "article", id: "n1", moderationState: "draft",
