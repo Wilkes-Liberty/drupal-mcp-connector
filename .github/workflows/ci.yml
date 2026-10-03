@@ -6,13 +6,21 @@ on:
   pull_request:
     branches: [master]
 
+# Explicit read-only token. actions: read lets setup-node restore the npm cache.
+# The repository default is already read; do not grant write here.
+permissions:
+  contents: read
+  actions: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  quality-gate:
-    name: Quality gate (Node 20)
+  # Display name is the master required status check. Renaming it without
+  # updating branch protection blocks every pull request.
+  lint-and-syntax:
+    name: Lint, Syntax & Unit (Node 20)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
