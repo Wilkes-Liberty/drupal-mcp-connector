@@ -239,6 +239,20 @@ Drupal. See **[docs/mcp-clients.md](docs/mcp-clients.md)**.
 entry — this repo does not submit listings. If the client only shows
 `drupal_list_sites` and `drupal_governance_status`, run `doctor`.
 
+### Cursor plugin (stdio)
+
+Local skeleton only (`.cursor-plugin/plugin.json` + root `mcp.json`): the client
+launches `npx -y drupal-mcp-connector` on this machine. No hosted URL.
+
+```bash
+npx -y drupal-mcp-connector init --preset local-stdio
+npx -y drupal-mcp-connector doctor
+```
+
+`requireGovernance: true` is the listing default. `--preset public-https` stays
+gated. Marketplace listing submit is **operator-only** — this repo does not submit.
+See [PRIVACY.md](PRIVACY.md).
+
 ### Two-minute happy path
 
 After `init` and a green `doctor`, in the MCP client (real tool names):

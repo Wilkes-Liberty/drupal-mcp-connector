@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "drupal": {
+      "command": "npx",
+      "args": ["-y", "drupal-mcp-connector"]
+    }
+  }
+}
