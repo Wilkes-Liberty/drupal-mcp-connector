@@ -1,0 +1,19 @@
+{
+  "name": "drupal-mcp-connector",
+  "version": "3.0.1",
+  "description": "Local stdio MCP server for Drupal. Client launches npx -y drupal-mcp-connector on this machine. No hosted Wilkes & Liberty MCP URL.",
+  "author": {
+    "name": "Wilkes & Liberty, LLC",
+    "email": "opensource@wilkesliberty.com"
+  },
+  "homepage": "https://github.com/Wilkes-Liberty/drupal-mcp-connector",
+  "repository": "https://github.com/Wilkes-Liberty/drupal-mcp-connector",
+  "license": "MIT",
+  "keywords": [
+    "drupal",
+    "mcp",
+    "stdio",
+    "jsonapi",
+    "graphql"
+  ]
+}

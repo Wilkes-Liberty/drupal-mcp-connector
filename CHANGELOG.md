@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **stdio Cursor plugin scaffold (DEV-751).** `.cursor-plugin/plugin.json`,
+  root `mcp.json` (`npx -y drupal-mcp-connector`, no `url`), one short
+  skill, and [PRIVACY.md](PRIVACY.md). No hosted MCP URL and no listing
+  submit.
+
+### Changed
+- **SECURITY.md supported versions** now list 3.x (not 0.x).
+
 ## [3.0.1] - 2026-10-01
 
 ### Fixed
