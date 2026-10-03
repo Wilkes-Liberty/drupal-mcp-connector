@@ -1,6 +1,6 @@
 {
   "name": "drupal-mcp-connector",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "Local stdio MCP server for Drupal. Client launches npx -y drupal-mcp-connector on this machine. No hosted Wilkes & Liberty MCP URL.",
   "author": {
     "name": "Wilkes & Liberty, LLC",
