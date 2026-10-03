@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   normalizeComponents,
   writeComponentDraft,
@@ -30,9 +30,18 @@ function backend({ inventoryMeta = inventory(), draftResponses = [], working, li
     }),
     resourcePath: (entityType, bundle) => `/jsonapi/${entityType}/${bundle}`,
     toCanonical: vi.fn((x) => x),
-    getEntity: vi.fn(async ({ resourceVersion }) => (resourceVersion ? working : live)),
+    getEntity: vi.fn(async ({ entityType, id, resourceVersion }) => {
+      if (entityType === "paragraph") return paragraphs[`${id}@${resourceVersion}`] ?? null;
+      return resourceVersion ? working : live;
+    }),
   };
 }
+
+/** Stored paragraph revisions, keyed `uuid@id:vid`. */
+let paragraphs = {};
+const stored = (uuid, vid, fields) => {
+  paragraphs[`${uuid}@id:${vid}`] = { id: uuid, entityType: "paragraph", fields };
+};
 
 const pinned = (heroVid, textVid) => ({
   id: "node-uuid",
@@ -78,6 +87,13 @@ describe("normalizeComponents", () => {
 });
 
 describe("writeComponentDraft", () => {
+  beforeEach(() => {
+    paragraphs = {};
+    stored(HERO, 7, { field_title: "New hero" });
+    stored(HERO, 9, { field_title: "New hero" });
+    stored(TEXT, 8, { field_body: { value: "<p>x</p>", format: "basic_html", processed: "<p>x</p>" } });
+  });
+
   it("opens the first draft with a live-only If-Match and components in meta", async () => {
     const b = backend({
       draftResponses: [preflightOpen, written],
@@ -95,8 +111,8 @@ describe("writeComponentDraft", () => {
     expect(body.meta.mcp_components).toEqual(normalizeComponents(args.components));
     expect(result.preflight).toBe("sentinel_draft");
     expect(result.components).toEqual([
-      { id: HERO, type: "paragraph--hero", livePin: "5", workingPin: "7" },
-      { id: TEXT, type: "paragraph--text_block", livePin: "6", workingPin: "8" },
+      { id: HERO, type: "paragraph--hero", livePin: "5", workingPin: "7", verified: ["field_title"] },
+      { id: TEXT, type: "paragraph--text_block", livePin: "6", workingPin: "8", verified: ["field_body"] },
     ]);
   });
 
@@ -172,6 +188,26 @@ describe("writeComponentDraft", () => {
     const b = backend({ draftResponses: [{ meta: { draft_preflight: true, live: "10", working: "" } }] });
     await expect(writeComponentDraft(b, args)).rejects.toThrow(/did not confirm/);
     expect(b.rawQuery.mock.calls.filter(([c]) => c.path.endsWith("/mcp-draft"))).toHaveLength(1);
+  });
+
+  it("reports a component whose submitted value did not read back from the working pin", async () => {
+    stored(TEXT, 8, { field_body: { value: "<p>old</p>", format: "basic_html" } });
+    const b = backend({
+      draftResponses: [preflightOpen, written],
+      live: pinned(5, 6),
+      working: pinned(7, 8),
+    });
+    await expect(writeComponentDraft(b, args)).rejects.toThrow(new RegExp(`${TEXT}.*field_body`));
+  });
+
+  it("reports a component it cannot read back", async () => {
+    delete paragraphs[`${HERO}@id:7`];
+    const b = backend({
+      draftResponses: [preflightOpen, written],
+      live: pinned(5, 6),
+      working: pinned(7, 8),
+    });
+    await expect(writeComponentDraft(b, args)).rejects.toThrow(/could not read back/);
   });
 
   it("reports a write whose working copy still pins the live revision of a component", async () => {

@@ -99,6 +99,39 @@ function draftRequest(backend, { entityType, bundle, id, data, components, live,
 }
 
 /**
+ * Whether a stored field value carries every submitted part.
+ *
+ * Submitted objects are compared key by key, so read-only extras such as
+ * `processed` or `resolvable_uri` do not count. An empty submitted `options`
+ * matches any stored empty options. A single submitted item matches a
+ * single-value field read back as an object.
+ * @param {unknown} submitted
+ * @param {unknown} actual
+ * @returns {boolean}
+ */
+export function valueMatches(submitted, actual) {
+  if (submitted === null || typeof submitted !== "object") {
+    if (actual !== null && typeof actual === "object" && !Array.isArray(actual) && "value" in actual) {
+      return valueMatches(submitted, actual.value);
+    }
+    return submitted === actual;
+  }
+  if (Array.isArray(submitted)) {
+    const list = Array.isArray(actual) ? actual : actual === null || actual === undefined ? [] : [actual];
+    return list.length === submitted.length && submitted.every((item, i) => valueMatches(item, list.at(i)));
+  }
+  if (actual === null || typeof actual !== "object") return false;
+  const stored = new Map(Object.entries(actual));
+  return Object.entries(submitted).every(([key, part]) => {
+    const isEmpty = (v) => v === null || v === undefined
+      || (Array.isArray(v) && v.length === 0)
+      || (typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0);
+    if (key === "options" && isEmpty(part)) return isEmpty(stored.get(key));
+    return valueMatches(part, stored.get(key));
+  });
+}
+
+/**
  * Pins keyed by paragraph UUID.
  * @param {?object} entity
  * @returns {Map<string, string>}
@@ -196,7 +229,11 @@ export async function writeComponentDraft(backend, input, { dryRun = false } = {
   ]);
   const livePins = pinMap(liveEntity);
   const workingPins = pinMap(workingEntity);
-  const report = components.map(({ id: uuid, type }) => {
+  // Every paragraph on the host gets a new revision when the host does, so a
+  // moved pin alone proves nothing. Read each component at its working pin and
+  // compare the submitted values.
+  const report = [];
+  for (const { id: uuid, type, attributes: submitted } of components) {
     const livePin = livePins.get(uuid) ?? null;
     const workingPin = workingPins.get(uuid) ?? null;
     if (!workingPin || workingPin === livePin) {
@@ -205,8 +242,27 @@ export async function writeComponentDraft(backend, input, { dryRun = false } = {
         "Re-read the working copy before retrying.",
       );
     }
-    return { id: uuid, type, livePin, workingPin };
-  });
+    const paragraph = await backend.getEntity({
+      entityType: "paragraph", bundle: type.slice("paragraph--".length), id: uuid, resourceVersion: `id:${workingPin}`,
+    });
+    if (!paragraph) {
+      throw new Error(
+        `The draft was saved as revision ${workingVid}, but component ${uuid} could not read back at revision ${workingPin}. ` +
+        "Check the working copy before retrying.",
+      );
+    }
+    const values = new Map(Object.entries({ ...(paragraph.attributes ?? {}), ...(paragraph.fields ?? {}) }));
+    const mismatched = Object.entries(submitted)
+      .filter(([name, value]) => !valueMatches(value, values.get(name)))
+      .map(([name]) => name);
+    if (mismatched.length) {
+      throw new Error(
+        `The draft was saved as revision ${workingVid}, but component ${uuid} does not hold the submitted ` +
+        `${mismatched.join(", ")} at revision ${workingPin}. Check the working copy before retrying.`,
+      );
+    }
+    report.push({ id: uuid, type, livePin, workingPin, verified: Object.keys(submitted) });
+  }
   return {
     ...entity,
     _revisions: { live, working: workingVid },

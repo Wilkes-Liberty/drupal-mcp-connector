@@ -1034,3 +1034,29 @@ describe("update_node after revise over a working copy (#400)", () => {
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 });
+
+describe("drupal_update_node components policy", () => {
+  const HERO = "11111111-1111-4111-8111-111111111111";
+
+  it("applies the paragraph write policy to each component before any request", async () => {
+    const { resolveSecurityConfig } = await import("../../src/lib/security.js");
+    resolveSecurityConfig.mockReturnValueOnce({
+      readOnly: false, allowDestructive: true, allowPublish: true,
+      allowedEntityTypes: null, deniedEntityTypes: ["paragraph"],
+      globalRedactedFields: [], entityRules: {},
+    });
+    await expect(handlers.drupal_update_node({
+      type: "article", id: "n1", moderationState: "draft", dryRun: true,
+      components: [{ id: HERO, type: "p_hero", attributes: { field_title: "x" } }],
+    })).rejects.toThrow(/paragraph/);
+    expect(backend.rawQuery).not.toHaveBeenCalled();
+  });
+
+  it("refuses malformed components before any request", async () => {
+    await expect(handlers.drupal_update_node({
+      type: "article", id: "n1", moderationState: "draft",
+      components: [{ id: "not-a-uuid", type: "p_hero", attributes: { field_title: "x" } }],
+    })).rejects.toThrow(/UUID/);
+    expect(backend.rawQuery).not.toHaveBeenCalled();
+  });
+});

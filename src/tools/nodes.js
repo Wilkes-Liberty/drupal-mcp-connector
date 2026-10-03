@@ -28,7 +28,7 @@ import { assertBodySummaryWritable, attachSummaryDeprecation } from "../lib/body
 import { buildRedirectAttributes, REDIRECT_ENTITY_TYPE } from "./redirects.js";
 import { applyAllowedFormatsToAttributes, attributesOmitTextFormat } from "../lib/field-definition.js";
 import { normalizeAlias, PATH_ALIAS_ENTITY_TYPE } from "../lib/path-alias.js";
-import { writeComponentDraft } from "../lib/component-draft.js";
+import { writeComponentDraft, normalizeComponents } from "../lib/component-draft.js";
 
 /** Fallback language for an alias when the node exposes none. */
 const DEFAULT_ALIAS_LANGCODE = "en";
@@ -469,6 +469,12 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", "node", type);
+  // #416: a component change is a paragraph write; the paragraph policy
+  // applies to each one, as it does on drupal_update_paragraph.
+  const normalizedComponents = components === undefined ? undefined : normalizeComponents(components);
+  for (const component of normalizedComponents ?? []) {
+    assertWriteAllowed(sec, "update", "paragraph", component.type.slice("paragraph--".length));
+  }
   const backend = await resolveBackend(site);
   const summaryWrite = await assertBodySummaryWritable(backend, type, summary);
   let attributes = { ...fields };
@@ -506,9 +512,10 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
   // #416: component paragraph changes ride the same draft save as the node
   // fields through Sentinel. There is no core PATCH or alias step on this path.
-  if (components !== undefined) {
+  if (normalizedComponents !== undefined) {
     const written = await writeComponentDraft(backend, {
-      entityType: "node", bundle: type, id, attributes, relationships: resolvedRelationships, components, langcode,
+      entityType: "node", bundle: type, id, attributes, relationships: resolvedRelationships,
+      components: normalizedComponents, langcode,
     }, { dryRun });
     if (dryRun) return written;
     return shapeWriteResponse(written, returning);
@@ -684,7 +691,7 @@ export const definitions = [
         relationships: { type: "object", description: "Entity-reference fields as JSON:API relationships, keyed by field machine name. Single-value uses { data: { type, id } }; multi-value uses { data: [{ type, id }, …] }. Paragraph / ERR items must carry meta.target_revision_id — the connector injects it when missing, and fails the write if it cannot. Image alt on a translation uses the existing file UUID plus meta.alt; replacing the file is refused." },
         components: {
           type: "array",
-          description: "Field changes for paragraphs this node already references directly (hero, text blocks, CTA banners), saved in the same unpublished draft revision as the node fields. Each entry is { id: paragraph UUID, type: paragraph bundle such as 'p_hero', attributes: { field: value } }. Each changed paragraph gets a new revision that only the draft points at; the live page does not change until the draft is published. Opens the working copy from live when none exists. Default language only. Attribute values only: references (for example a media field) are refused, as are nested paragraphs and paragraphs the node does not reference. Requires MCP Sentinel 2.29.0 or later; older hosts are refused before any write, with no direct paragraph write. A `path` change is refused on this path. The result lists each component's live and working revision pins.",
+          description: "Field changes for paragraphs this node already references directly (hero, text blocks, CTA banners), saved in the same unpublished draft revision as the node fields. Each entry is { id: paragraph UUID, type: paragraph bundle such as 'p_hero', attributes: { field: value } }. Each changed paragraph gets a new revision that only the draft points at; the live page does not change until the draft is published. Opens the working copy from live when none exists. Default language only. Attribute values only: references (for example a media field) are refused, as are nested paragraphs and paragraphs the node does not reference. Requires MCP Sentinel 2.29.0 or later; older hosts are refused before any write, with no direct paragraph write. A `path` change is refused on this path. The connector's paragraph write policy applies to each component. After the write each component is read back at its working revision and the submitted values compared; a value that did not land is an error. The result lists each component's live and working pins and the fields verified.",
           items: {
             type: "object",
             required: ["id", "type", "attributes"],

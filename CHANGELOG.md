@@ -14,9 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change until the draft is published. Opens the working copy from live when
   none exists. Requires MCP Sentinel 2.29.0 (`draft_components`,
   `open_draft`); older hosts are refused before any write, and there is no
-  fallback to a direct paragraph write. The result lists each component's
-  live and working revision pins, and a write that left a pin on its live
-  revision is reported as an error.
+  fallback to a direct paragraph write. The paragraph write policy applies to
+  each component. After the write, each component is read back at its
+  working revision and the submitted values are compared; a value that did
+  not land is reported as an error, not a success.
 - **stdio Cursor plugin scaffold (DEV-751).** `.cursor-plugin/plugin.json`,
   root `mcp.json` (`npx -y drupal-mcp-connector`, no `url`), one short
   skill, and [PRIVACY.md](PRIVACY.md). No hosted MCP URL and no listing
