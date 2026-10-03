@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-03
+
 ### Added
 - **`drupal_update_node` `components` (#416).** Field changes for paragraphs
   the node references (hero, text blocks, CTA banners) are saved in the same
@@ -18,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each component. After the write, each component is read back at its
   working revision and the submitted values are compared; a value that did
   not land is reported as an error, not a success.
-- **stdio Cursor plugin scaffold (DEV-751).** `.cursor-plugin/plugin.json`,
+- **stdio Cursor plugin scaffold.** `.cursor-plugin/plugin.json`,
   root `mcp.json` (`npx -y drupal-mcp-connector`, no `url`), one short
   skill, and [PRIVACY.md](PRIVACY.md). No hosted MCP URL and no listing
   submit.
