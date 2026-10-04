@@ -573,6 +573,126 @@ describe("draftNestedComponents", () => {
     expect(error.message).toMatch(/prepared revision/);
     expect(callsEnding(b, "/mcp-draft")).toHaveLength(0);
   });
+
+  const atomicInventory = nodeInventory({
+    operations: ["open_draft", "create_translation", "nested_replacement"],
+  });
+  const atomicPreflight = {
+    meta: { draft_preflight: true, live: "10", working: "", operation: "nested_replacement" },
+  };
+  const atomicParent = {
+    id: NEW_PARENT,
+    entityType: "paragraph",
+    bundle: "p_faq_group",
+    status: false,
+    fields: { moderation_state: "draft", drupal_internal__revision_id: 200, field_title: "Questions" },
+    relationships: {
+      field_items: [
+        pin(NEW_CHILD, "p_faq_item", 201),
+        pin(CHILD_B, "p_faq_item", 71),
+      ],
+    },
+  };
+  const atomicChildEntity = {
+    id: NEW_CHILD,
+    entityType: "paragraph",
+    bundle: "p_faq_item",
+    status: false,
+    fields: { moderation_state: "draft", drupal_internal__revision_id: 201, field_title: "New question" },
+  };
+
+  it("uses one atomic nested replacement when the host advertises it", async () => {
+    const b = backend({
+      nodeInventory: atomicInventory,
+      draftResponses: [atomicPreflight, written],
+      afterWorking: host(12, [pin(NEW_PARENT, "p_faq_group", 200), pin(SIBLING, "p_text_block", 60)]),
+      extraParagraphs: { [NEW_PARENT]: atomicParent, [NEW_CHILD]: atomicChildEntity },
+    });
+    const result = await draftNestedComponents(b, input);
+    expect(b.createEntity).not.toHaveBeenCalled();
+    const drafts = callsEnding(b, "/mcp-draft").filter((call) => !call.path.endsWith("/translations"));
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0].options.headers["X-MCP-Draft-Preflight"]).toBe("1");
+    expect(drafts[1].options.headers["X-MCP-Draft-Preflight"]).toBe("0");
+    expect(drafts[1].options.headers["If-Match"]).toBe('"10"');
+    for (const call of drafts) {
+      const body = JSON.parse(call.options.body);
+      expect(body.data.relationships).toBeUndefined();
+      expect(body.data.attributes).toEqual({ moderation_state: "draft" });
+      expect(body.meta.mcp_nested_replacement.parent).toBe(PARENT);
+      expect(body.meta.mcp_nested_replacement.children[0]).toMatchObject({
+        op: "replace", id: CHILD_A, type: "paragraph--p_faq_item",
+      });
+      expect(body.meta.mcp_nested_replacement.children[1]).toEqual({ op: "keep", id: CHILD_B });
+    }
+    expect(result.atomic).toBe(true);
+    expect(result.publishedPinsUnchanged).toBe(true);
+    expect(result.draftParentId).toBe(NEW_PARENT);
+    expect(result.prepared.every((row) => row.atomic === true)).toBe(true);
+    expect(result.prepared.map((row) => row.id)).toEqual([NEW_PARENT, NEW_CHILD]);
+    expect(result._revisions).toEqual({ live: "10", working: "12" });
+  });
+
+  it("keeps the client sequence when nested_replacement is not advertised", async () => {
+    const b = backend({ afterWorking: host(12, landedPins) });
+    await draftNestedComponents(b, input);
+    expect(b.createEntity).toHaveBeenCalled();
+    const save = callsEnding(b, "/mcp-draft").find((call) => call.options.headers["X-MCP-Draft-Preflight"] === "0");
+    const body = JSON.parse(save.options.body);
+    expect(body.meta).toBeUndefined();
+    expect(body.data.relationships.field_components).toBeDefined();
+  });
+
+  it("keeps resumeParentId on the client sequence even when nested_replacement is advertised", async () => {
+    const b = backend({
+      nodeInventory: nodeInventory({
+        operations: ["open_draft", "create_translation", "nested_replacement"],
+        working: { vid: "11", translations: [{ langcode: "en", status: false, moderation_state: "draft", default: true }] },
+      }),
+      workingHost: host(11, publishedPins),
+      afterWorking: host(12, landedPins),
+      draftResponses: [
+        { meta: { draft_preflight: true, live: "10", working: "11" } },
+        written,
+      ],
+      extraParagraphs: {
+        [NEW_PARENT]: resumedParent(),
+        [NEW_CHILD]: resumedChild(),
+      },
+    });
+    await draftNestedComponents(b, { ...input, resumeParentId: NEW_PARENT });
+    expect(b.createEntity).not.toHaveBeenCalled();
+    const save = callsEnding(b, "/mcp-draft").find((call) => call.options.headers["X-MCP-Draft-Preflight"] === "0");
+    const body = JSON.parse(save.options.body);
+    expect(body.meta).toBeUndefined();
+    expect(body.data.relationships.field_components.data[0].id).toBe(NEW_PARENT);
+  });
+
+  it("preflights an advertised nested replacement on dryRun and creates nothing", async () => {
+    const b = backend({
+      nodeInventory: atomicInventory,
+      draftResponses: [atomicPreflight],
+    });
+    const result = await draftNestedComponents(b, input, { dryRun: true });
+    expect(result.hostPayloadEvaluated).toBe(true);
+    expect(result.createsParagraphs).toBe(false);
+    expect(result.atomic).toBe(true);
+    expect(result.checks.serverPreflight).toBe("sentinel_draft");
+    expect(b.createEntity).not.toHaveBeenCalled();
+    const drafts = callsEnding(b, "/mcp-draft");
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].options.headers["X-MCP-Draft-Preflight"]).toBe("1");
+  });
+
+  it("says no write was attempted when the atomic preflight is rejected", async () => {
+    const b = backend({
+      nodeInventory: atomicInventory,
+      draftResponses: [new Error("Drupal 422 on PATCH /mcp-draft: validation failed")],
+    });
+    await expect(draftNestedComponents(b, input)).rejects.toThrow(/No write was attempted/);
+    expect(b.createEntity).not.toHaveBeenCalled();
+    expect(callsEnding(b, "/mcp-draft")).toHaveLength(1);
+  });
 });
 
 /**

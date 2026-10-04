@@ -27,6 +27,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pinned. Reusable library items are refused; update those with
   `drupal_entity_update`.
 
+### Changed
+- **Advertised library and custom-block drafts (#420, #422).** When the host
+  inventory lists `open_draft`, `drupal_entity_update` opens and continues a
+  published moderated `paragraphs_library_item` or `block_content` through
+  `/mcp-draft`. The body has no `mcp_components`. `If-Match` is the live
+  revision, or `live:working` when a forward draft already exists. The
+  published revision and its paragraph pins are re-read. A continuation
+  compares the forward revision with the pre-write working pins unless
+  relationships were submitted. When `open_draft` is not advertised, the
+  canonical draft PATCH remains, and an existing forward draft is still
+  refused before any write.
+- **Advertised nested replacement (#421, #422).** When the host inventory
+  lists `nested_replacement`, `drupal_draft_nested_components` sends one
+  `/mcp-draft` with `meta.mcp_nested_replacement`. `parentId` is sent as
+  `parent`. The connector creates no paragraphs and does not also send the
+  host paragraph field. `dryRun` uses that non-saving preflight. Hosts that
+  do not advertise the operation keep the client sequence, including
+  `resumeParentId`.
+
 ### Fixed
 - **Reusable library and custom-block revision identity (#420).**
   `drupal_internal__revision_id` is kept for `paragraphs_library_item` and

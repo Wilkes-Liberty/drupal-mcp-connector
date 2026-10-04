@@ -9,16 +9,24 @@
  * The first host draft needs Sentinel open_draft (2.29.0). An existing
  * working copy continues through /mcp-draft. There is no mcp_components
  * payload and no direct paragraph update.
+ *
+ * When the host inventory advertises nested_replacement, one /mcp-draft
+ * carries meta.mcp_nested_replacement and this module creates no paragraphs.
+ * parentId is sent as parent. The host paragraph field is not also sent.
+ * resumeParentId stays on the client sequence: those paragraphs already exist.
  */
 
 import { readNodeDraftInventory, readTranslationInventory, isMissingTranslationEndpoint, createTranslationDraft } from "./sentinel-draft.js";
 import { entityRevisionId } from "./write-revision.js";
 import { embedParagraphRef, paragraphRevisionId } from "./err-relationships.js";
 import { httpStatusOf } from "./error-status.js";
-import { OPEN_DRAFT_OPERATION, MIN_SENTINEL_COMPONENTS_VERSION } from "./component-draft.js";
-import { PREFLIGHT_NONE, dryRunChecks } from "./dry-run-checks.js";
+import { OPEN_DRAFT_OPERATION, MIN_SENTINEL_COMPONENTS_VERSION, valueMatches } from "./component-draft.js";
+import { PREFLIGHT_NONE, PREFLIGHT_SENTINEL_DRAFT, dryRunChecks } from "./dry-run-checks.js";
 
 export const NESTED_DRAFT_PARTIAL_CODE = "NESTED_DRAFT_PARTIAL";
+
+/** Inventory operation: one atomic nested paragraph replacement. */
+export const NESTED_REPLACEMENT_OPERATION = "nested_replacement";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NAME_RE = /^[a-z][a-z0-9_]*$/;
@@ -176,6 +184,12 @@ export async function draftNestedComponents(backend, input, { dryRun = false, as
     for (const bundle of bundles) assertParagraphCreate?.(bundle);
   }
 
+  if (!spec.resumeParentId && operations.includes(NESTED_REPLACEMENT_OPERATION)) {
+    return writeAtomicNestedReplacement(backend, {
+      spec, dryRun, live, working, defaultLang, publishedPins, slot, childPins,
+    });
+  }
+
   if (dryRun) {
     return {
       dryRun: true,
@@ -263,6 +277,363 @@ export async function draftNestedComponents(backend, input, { dryRun = false, as
     throw recoveryError(landed, "the working copy did not pin the new component", prepared);
   }
   return finished(spec, live, landed.workingVid, draftParent, prepared, !working);
+}
+
+/**
+ * One server-side nested replacement. The connector creates nothing.
+ *
+ * @param {object} backend
+ * @param {object} args
+ * @returns {Promise<object>}
+ */
+async function writeAtomicNestedReplacement(backend, {
+  spec, dryRun, live, working, defaultLang, publishedPins, slot, childPins,
+}) {
+  const data = {
+    type: `${spec.entityType}--${spec.bundle}`,
+    id: spec.id,
+    attributes: { moderation_state: "draft" },
+  };
+  const request = {
+    ...spec,
+    data,
+    meta: {
+      mcp_nested_replacement: {
+        field: spec.field,
+        parent: spec.parentId,
+        childField: spec.childField,
+        children: spec.children.map(atomicChild),
+      },
+    },
+    live,
+    working,
+    langcode: defaultLang,
+  };
+  try {
+    await confirmAtomicPreflight(backend, request);
+  } catch (err) {
+    throw noWriteError(err);
+  }
+  if (dryRun) {
+    return {
+      dryRun: true,
+      operation: "update",
+      entityType: spec.entityType,
+      bundle: spec.bundle,
+      id: spec.id,
+      hostPayloadEvaluated: true,
+      createsParagraphs: false,
+      opensWorkingCopy: !working,
+      replacesParentId: spec.parentId,
+      atomic: true,
+      ...dryRunChecks({ operation: "update", preflight: PREFLIGHT_SENTINEL_DRAFT }),
+    };
+  }
+  let result;
+  try {
+    result = await atomicDraftRequest(backend, { ...request, preflight: false });
+  } catch (err) {
+    const confirmed = await confirmAtomicLanded(backend, spec, live, working, publishedPins, slot, childPins);
+    if (confirmed.ok) return atomicFinished(spec, live, confirmed, !working);
+    throw atomicFailure(confirmed, messageOf(err));
+  }
+  if (!result?.data || result.data.id !== spec.id) {
+    const confirmed = await confirmAtomicLanded(backend, spec, live, working, publishedPins, slot, childPins);
+    if (confirmed.ok) return atomicFinished(spec, live, confirmed, !working);
+    throw atomicFailure(confirmed, "the host draft response did not identify the node");
+  }
+  const landed = await confirmAtomicLanded(backend, spec, live, working, publishedPins, slot, childPins);
+  if (!landed.ok) throw atomicFailure(landed, "the working copy did not show the nested replacement");
+  return atomicFinished(spec, live, landed, !working);
+}
+
+/**
+ * @param {object} child
+ * @returns {object}
+ */
+function atomicChild(child) {
+  if (child.op === "keep") return { op: "keep", id: child.id };
+  const entry = {
+    op: child.op,
+    type: `paragraph--${child.type}`,
+    attributes: child.attributes,
+  };
+  if (child.op === "replace") entry.id = child.id;
+  if (child.translations?.length) entry.translations = child.translations;
+  return entry;
+}
+
+/**
+ * @param {object} backend
+ * @param {object} request
+ * @returns {Promise<object>}
+ */
+function atomicDraftRequest(backend, { entityType, bundle, id, data, meta, live, working, langcode, preflight }) {
+  return backend.rawQuery({
+    path: `${backend.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}/mcp-draft`,
+    options: {
+      method: "PATCH",
+      headers: {
+        "If-Match": working ? `"${live}:${working}"` : `"${live}"`,
+        "X-MCP-Draft-Preflight": preflight ? "1" : "0",
+        "X-MCP-Draft-Langcode": langcode,
+      },
+      body: JSON.stringify({ data, meta }),
+    },
+  });
+}
+
+/**
+ * @param {object} backend
+ * @param {object} request
+ * @returns {Promise<void>}
+ */
+async function confirmAtomicPreflight(backend, request) {
+  const checked = await atomicDraftRequest(backend, { ...request, preflight: true });
+  const meta = checked?.meta;
+  if (meta?.draft_preflight !== true || String(meta.live) !== request.live
+    || String(meta.working ?? "") !== request.working
+    || meta.operation !== NESTED_REPLACEMENT_OPERATION) {
+    throw new Error("The site did not confirm a non-saving nested replacement preflight. No write was attempted.");
+  }
+}
+
+/**
+ * @param {object} backend
+ * @param {object} spec
+ * @param {string} live
+ * @param {string} previousWorking
+ * @param {object[]} publishedPins
+ * @param {number} slot
+ * @param {object[]} childPins
+ * @returns {Promise<object>}
+ */
+async function confirmAtomicLanded(backend, spec, live, previousWorking, publishedPins, slot, childPins) {
+  let published;
+  let workingEntity;
+  try {
+    published = await backend.getEntity({ entityType: spec.entityType, bundle: spec.bundle, id: spec.id });
+    workingEntity = await backend.getEntity({
+      entityType: spec.entityType, bundle: spec.bundle, id: spec.id, resourceVersion: "rel:working-copy",
+    });
+  } catch (err) {
+    return { ok: false, uncertain: true, publishedIntact: false, detail: messageOf(err) };
+  }
+  if (!published || !workingEntity) {
+    return { ok: false, uncertain: true, publishedIntact: false, detail: "a host revision was not returned" };
+  }
+  const publishedVid = entityRevisionId(published);
+  const publishedNow = fieldList(published, spec.field);
+  const publishedIntact = publishedVid !== null && String(publishedVid) === String(live)
+    && samePinList(publishedNow, publishedPins);
+  if (!publishedIntact) {
+    return { ok: false, uncertain: true, publishedIntact: false, detail: "the published revision changed" };
+  }
+  const workingPins = fieldList(workingEntity, spec.field);
+  const newParentRef = workingPins[slot];
+  const stillOriginal = !newParentRef || sameId(newParentRef.id, spec.parentId);
+  const workingVid = entityRevisionId(workingEntity);
+  const advanced = workingVid !== null && String(workingVid) !== String(live)
+    && (!previousWorking || String(workingVid) !== String(previousWorking));
+  if (stillOriginal) {
+    return {
+      ok: false, uncertain: false, publishedIntact: true,
+      detail: "the published host still pins the original component",
+    };
+  }
+  if (!advanced || workingPins.length !== publishedPins.length
+    || workingPins.some((ref, index) => index !== slot && pinKey(ref) !== pinKey(publishedPins[index]))) {
+    return {
+      ok: false, uncertain: true, publishedIntact: true,
+      detail: advanced
+        ? "a new pin appeared without a verifiable component list"
+        : "a new pin appeared but the working revision did not advance",
+    };
+  }
+  const bundle = paragraphBundle(newParentRef);
+  const revisionId = revisionOf(newParentRef);
+  let parent;
+  try {
+    parent = await backend.getEntity({
+      entityType: "paragraph",
+      bundle,
+      id: newParentRef.id,
+      ...(revisionId ? { resourceVersion: `id:${revisionId}` } : {}),
+    });
+  } catch (err) {
+    return { ok: false, uncertain: true, publishedIntact: true, detail: messageOf(err) };
+  }
+  if (!isUnpublishedParagraph(parent)) {
+    return {
+      ok: false, uncertain: true, publishedIntact: true,
+      detail: "the new parent was not an unpublished paragraph",
+    };
+  }
+  const nextChildren = fieldList(parent, spec.childField);
+  const childDetail = await verifyAtomicChildren(backend, spec, childPins, nextChildren);
+  if (childDetail) {
+    return { ok: false, uncertain: true, publishedIntact: true, detail: childDetail };
+  }
+  const prepared = [{
+    id: newParentRef.id, bundle, role: "parent", revisionId, atomic: true,
+  }];
+  spec.children.forEach((child, index) => {
+    if (child.op === "keep") return;
+    const pin = nextChildren[index];
+    prepared.push({
+      id: pin.id, bundle: paragraphBundle(pin), role: "child", revisionId: revisionOf(pin), atomic: true,
+    });
+  });
+  return {
+    ok: true,
+    workingVid: String(workingVid),
+    parent: { id: newParentRef.id, bundle, revisionId },
+    prepared,
+  };
+}
+
+/**
+ * @param {object} backend
+ * @param {object} spec
+ * @param {object[]} originalPins
+ * @param {object[]} nextPins
+ * @returns {Promise<?string>}
+ */
+async function verifyAtomicChildren(backend, spec, originalPins, nextPins) {
+  if (nextPins.length !== spec.children.length) {
+    return "the new parent child list does not match the request";
+  }
+  for (let index = 0; index < spec.children.length; index += 1) {
+    const child = spec.children[index];
+    const pin = nextPins[index];
+    if (child.op === "keep") {
+      const original = originalPins.find((ref) => sameId(ref?.id, child.id));
+      if (!sameId(pin?.id, child.id) || String(revisionOf(pin)) !== String(revisionOf(original))) {
+        return `kept child ${child.id} was not pinned at its original revision`;
+      }
+      continue;
+    }
+    if (child.op === "replace" && sameId(pin?.id, child.id)) {
+      return `replaced child ${child.id} was not a new paragraph`;
+    }
+    if (paragraphBundle(pin) !== child.type) return "a new child has the wrong paragraph type";
+    let entity;
+    try {
+      const revisionId = revisionOf(pin);
+      entity = await backend.getEntity({
+        entityType: "paragraph",
+        bundle: child.type,
+        id: pin.id,
+        ...(revisionId ? { resourceVersion: `id:${revisionId}` } : {}),
+      });
+    } catch (err) {
+      return messageOf(err);
+    }
+    if (!isUnpublishedParagraph(entity)) return "a new child was not unpublished";
+    const stored = entity.fields ?? entity.attributes ?? {};
+    const mismatch = Object.entries(child.attributes ?? {}).find(([key, value]) => !valueMatches(value, stored[key]));
+    if (mismatch) return `child field ${mismatch[0]} did not match`;
+  }
+  return null;
+}
+
+/**
+ * @param {?object} entity
+ * @returns {boolean}
+ */
+function isUnpublishedParagraph(entity) {
+  if (!entity || typeof entity !== "object") return false;
+  const state = String(entity.fields?.moderation_state ?? entity.moderation_state ?? "").toLowerCase();
+  if (entity.status === true || state === "published") return false;
+  return entity.status === false || state === "draft" || state === "review";
+}
+
+/**
+ * @param {object[]} left
+ * @param {object[]} right
+ * @returns {boolean}
+ */
+function samePinList(left, right) {
+  return left.length === right.length && left.every((ref, index) => pinKey(ref) === pinKey(right[index]));
+}
+
+/**
+ * @param {unknown} err
+ * @returns {Error}
+ */
+function noWriteError(err) {
+  const message = messageOf(err);
+  if (/no write was attempted/i.test(message)) return err instanceof Error ? err : new Error(message);
+  return new Error(`${message} No write was attempted.`);
+}
+
+/**
+ * @param {object} confirmed
+ * @param {string} fallback
+ * @returns {Error}
+ */
+function atomicFailure(confirmed, fallback) {
+  const detail = confirmed.detail && confirmed.detail !== fallback
+    ? `${fallback} (${confirmed.detail})`
+    : (confirmed.detail || fallback);
+  if (confirmed.uncertain || !confirmed.publishedIntact) return atomicUncertain(detail);
+  return atomicPartial(detail);
+}
+
+/**
+ * @param {string} detail
+ * @returns {Error}
+ */
+function atomicPartial(detail) {
+  const err = new Error(
+    `The nested replacement did not finish (${detail}). The published host still pins the original component. ` +
+    "No paragraph was prepared by the connector. Do not edit the published child paragraphs."
+  );
+  err.name = "NestedDraftPartialError";
+  err.code = NESTED_DRAFT_PARTIAL_CODE;
+  err.prepared = [];
+  err.atomic = true;
+  return err;
+}
+
+/**
+ * @param {string} detail
+ * @returns {Error}
+ */
+function atomicUncertain(detail) {
+  const err = new Error(
+    `The nested replacement outcome is uncertain (${detail}). ` +
+    "Re-read the published revision and rel:working-copy before retrying. " +
+    "Do not assume the published revision is unchanged. No paragraph was prepared by the connector."
+  );
+  err.name = "NestedDraftPartialError";
+  err.code = NESTED_DRAFT_PARTIAL_CODE;
+  err.prepared = [];
+  err.uncertain = true;
+  err.atomic = true;
+  return err;
+}
+
+/**
+ * @param {object} spec
+ * @param {string} live
+ * @param {object} confirmed
+ * @param {boolean} opened
+ * @returns {object}
+ */
+function atomicFinished(spec, live, confirmed, opened) {
+  return {
+    id: spec.id,
+    entityType: spec.entityType,
+    bundle: spec.bundle,
+    publishedParentId: spec.parentId,
+    draftParentId: confirmed.parent.id,
+    publishedPinsUnchanged: true,
+    opensWorkingCopy: opened,
+    atomic: true,
+    prepared: confirmed.prepared,
+    _revisions: { live, working: confirmed.workingVid },
+  };
 }
 
 /**
