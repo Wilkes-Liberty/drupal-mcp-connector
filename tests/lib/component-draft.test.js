@@ -161,7 +161,7 @@ describe("writeComponentDraft", () => {
   });
 
   it("stops after the preflight on dryRun", async () => {
-    const b = backend({ draftResponses: [preflightOpen] });
+    const b = backend({ draftResponses: [preflightOpen], live: pinned(5, 6) });
     const result = await writeComponentDraft(b, args, { dryRun: true });
     expect(result.dryRun).toBe(true);
     const draftCalls = b.rawQuery.mock.calls.filter(([c]) => c.path.endsWith("/mcp-draft"));
@@ -214,8 +214,21 @@ describe("writeComponentDraft", () => {
     expect(b.rawQuery.mock.calls.filter(([c]) => c.path.endsWith("/mcp-draft"))).toHaveLength(0);
   });
 
+  it("refuses a paragraph the host does not pin directly, before any draft request", async () => {
+    const nested = "33333333-3333-4333-8333-333333333333";
+    const b = backend({ live: pinned(5, 6) });
+    await expect(writeComponentDraft(b, {
+      ...args,
+      components: [{ id: nested, type: "p_faq_item", attributes: { field_title: "Question" } }],
+    })).rejects.toThrow(/not a direct paragraph.*drupal_draft_nested_components/s);
+    expect(b.rawQuery.mock.calls.filter(([call]) => call.path.endsWith("/mcp-draft"))).toHaveLength(0);
+  });
+
   it("refuses a preflight that does not confirm the open operation", async () => {
-    const b = backend({ draftResponses: [{ meta: { draft_preflight: true, live: "10", working: "" } }] });
+    const b = backend({
+      draftResponses: [{ meta: { draft_preflight: true, live: "10", working: "" } }],
+      live: pinned(5, 6),
+    });
     await expect(writeComponentDraft(b, args)).rejects.toThrow(/did not confirm/);
     expect(b.rawQuery.mock.calls.filter(([c]) => c.path.endsWith("/mcp-draft"))).toHaveLength(1);
   });

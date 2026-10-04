@@ -22,6 +22,7 @@ describe("isWriteLikeTool / isWriteLikeCall", () => {
     expect(isWriteLikeTool("drupal_entity_update")).toBe(true);
     expect(isWriteLikeTool("drupal_entity_delete")).toBe(true);
     expect(isWriteLikeTool("drupal_config_set")).toBe(true);
+    expect(isWriteLikeTool("drupal_draft_nested_components")).toBe(true);
     expect(isWriteLikeTool("drupal_list_nodes")).toBe(false);
     expect(isWriteLikeTool("drupal_graphql")).toBe(false);
 

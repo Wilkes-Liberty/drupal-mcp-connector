@@ -198,6 +198,22 @@ export async function writeComponentDraft(backend, input, { dryRun = false } = {
     }
   }
 
+  const pinHost = working
+    ? await backend.getEntity({ entityType, bundle, id, resourceVersion: `id:${working}` })
+    : await backend.getEntity({ entityType, bundle, id });
+  if (!pinHost) {
+    throw new Error("The host revision could not be read. No write was attempted, and no direct paragraph write was tried.");
+  }
+  const directIds = new Set(paragraphPinsFromEntity(pinHost).map((pin) => pin.id.toLowerCase()));
+  for (const component of components) {
+    if (!directIds.has(component.id.toLowerCase())) {
+      throw new Error(
+        `${component.id} is not a direct paragraph of this host. Nested paragraphs are not component edits. ` +
+        "Use drupal_draft_nested_components. No write was attempted, and no direct paragraph write was tried."
+      );
+    }
+  }
+
   const data = { type: `${entityType}--${bundle}`, id, attributes };
   if (relationships && Object.keys(relationships).length) data.relationships = relationships;
   const request = { entityType, bundle, id, data, components, live, working, langcode: defaultLang };
