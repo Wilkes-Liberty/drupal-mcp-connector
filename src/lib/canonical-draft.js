@@ -10,11 +10,15 @@
  *
  * rel:working-copy is the latest revision. When its id differs from the
  * default, a forward draft already exists. rel:latest-version is the latest
- * default revision, not that draft. A 404 or Drupal's "No pending revision"
- * 403 on rel:working-copy means no draft. Any other 401/403, a timeout, or a
- * missing revision id fails closed. After the PATCH the published revision,
- * rel:working-copy, and the published paragraph pins are re-read. A lost
- * response is reported from that re-read, not treated as a rollback.
+ * default revision, not that draft. A 404, or a 403 whose message is
+ * Drupal's "No pending revision", on rel:working-copy means no draft. The
+ * same phrase at any other status fails closed. Any other 401/403, a
+ * timeout, or a missing revision id fails closed. After the PATCH the
+ * published revision, rel:working-copy, and the published paragraph pins
+ * (including order) are re-read. A completed 4xx is returned when that
+ * re-read matches the pre-write state. A lost response, or a 4xx whose
+ * re-read shows a change, is reported from the re-read and is not called a
+ * rollback. An unmoderated entity keeps the ordinary update.
  */
 
 import { entityRevisionId } from "./write-revision.js";
@@ -186,6 +190,13 @@ export async function resolveCanonicalDraftIdentity(backend, { entityType, bundl
 export async function writeCanonicalModeratedEntity(backend, input) {
   const { entityType, bundle, id, attributes = {}, relationships } = input;
   const ref = { entityType, bundle, id };
+  const preview = await readVersion(backend, ref);
+  if (preview.kind === "ok" && !entityLooksModerated(preview.entity)) {
+    return backend.updateEntity(input);
+  }
+  if (preview.kind !== "ok") {
+    throw new RevisionIdentityError(entityType, preview.detail || "the default revision could not be read");
+  }
   const before = await readPair(backend, ref, "before");
   if (before.workingVid !== null && String(before.workingVid) !== String(before.liveVid)) {
     throw new UnsupportedDraftContinuationError(entityType, before.liveVid, before.workingVid);
@@ -204,6 +215,16 @@ export async function writeCanonicalModeratedEntity(backend, input) {
   try {
     result = await backend.updateEntity(input);
   } catch (err) {
+    if (isDefinitiveClientError(err)) {
+      const unchanged = await publishedStateUnchanged(backend, ref, before);
+      if (unchanged === true) {
+        if (err instanceof Error) {
+          err.message +=
+            " Re-read matched the published revision, rel:working-copy, and paragraph pins from before the request.";
+        }
+        throw err;
+      }
+    }
     throw uncertainWriteError(entityType, await lossDetail(backend, ref, err));
   }
   if (!result || result.id !== id) {
@@ -225,8 +246,9 @@ export async function writeCanonicalModeratedEntity(backend, input) {
 
 /**
  * Drupal's working-copy alias reports a missing draft as 403
- * "No pending revision", not as 404. That phrase is absence.
- * Any other 401/403 is a denied read.
+ * "No pending revision", not as 404. That phrase is absence only on 403.
+ * Any other 401/403 is a denied read. The phrase on 5xx or a timeout is a
+ * failed read.
  *
  * @param {object} backend
  * @param {{entityType: string, bundle: string, id: string}} ref
@@ -250,7 +272,10 @@ async function readVersion(backend, ref, resourceVersion) {
   } catch (err) {
     const status = httpStatusOf(err);
     const message = String(err?.message || err || "");
-    if (status === 404 || (resourceVersion === "rel:working-copy" && /no pending revision/i.test(message))) {
+    const missingDraft = resourceVersion === "rel:working-copy"
+      && status === 403
+      && /no pending revision/i.test(message);
+    if (status === 404 || missingDraft) {
       return { kind: "absent", detail: `${label} was not found` };
     }
     if (status === 401 || status === 403) {
@@ -424,6 +449,40 @@ function isForwardModerationState(state) {
 }
 
 /**
+ * A completed 4xx names a rejected request. 408 and 429 do not: the write
+ * may still have been accepted. 5xx and transport errors stay uncertain.
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isDefinitiveClientError(err) {
+  const status = httpStatusOf(err);
+  if (status === null || status < 400 || status >= 500) return false;
+  return status !== 408 && status !== 429;
+}
+
+/**
+ * Whether the published revision, its pins, and the absence of a new
+ * forward draft still match the pre-write read. Null means the re-read
+ * itself failed, which is not proof that nothing changed.
+ * @param {object} backend
+ * @param {{entityType: string, bundle: string, id: string}} ref
+ * @param {{liveVid: number|string, pins: object[]}} before
+ * @returns {Promise<?boolean>}
+ */
+async function publishedStateUnchanged(backend, ref, before) {
+  try {
+    const after = await readPair(backend, ref, "after");
+    if (String(after.liveVid) !== String(before.liveVid)) return false;
+    if (String(after.latestVid) !== String(after.liveVid)) return false;
+    if (pinKey(after.pins) !== pinKey(before.pins)) return false;
+    if (after.workingVid !== null && String(after.workingVid) !== String(before.liveVid)) return false;
+    return true;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {?object} entity
  * @returns {Array<{field: string, id: string, revisionId: ?string}>}
  */
@@ -477,8 +536,14 @@ function submittedParagraphPins(relationships) {
  * @returns {string}
  */
 function pinKey(pins) {
-  return pins
-    .map((pin) => `${pin.field}\0${pin.id}\0${pin.revisionId ?? ""}`)
-    .sort()
-    .join("\n");
+  const groups = new Map();
+  for (const pin of pins) {
+    const row = `${pin.id}\0${pin.revisionId ?? ""}`;
+    if (!groups.has(pin.field)) groups.set(pin.field, []);
+    groups.get(pin.field).push(row);
+  }
+  return [...groups.keys()].sort().map((field) => {
+    const rows = groups.get(field) ?? [];
+    return `${field}\0${rows.join("\n")}`;
+  }).join("\n\n");
 }

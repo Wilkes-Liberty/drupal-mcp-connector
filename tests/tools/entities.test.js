@@ -490,6 +490,77 @@ describe("reusable library revision identity (#420)", () => {
     expect(backend.updateEntity).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects a forward revision whose paragraph order does not match the request", async () => {
+    const pinA = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", revisionId: 30 };
+    const pinB = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", revisionId: 31 };
+    let written = false;
+    backend.getEntity.mockImplementation(async ({ entityType, id: entityId, resourceVersion }) => {
+      if (entityType === "paragraph") {
+        const pin = entityId === pinB.id ? pinB : pinA;
+        return {
+          id: pin.id, entityType: "paragraph", bundle: "p_text_block",
+          fields: { drupal_internal__revision_id: pin.revisionId },
+        };
+      }
+      if (resourceVersion === "rel:working-copy") {
+        if (written) return library(21, false, [pinB, pinA]);
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return library(20, true, publishedPins);
+    });
+    backend.updateEntity.mockImplementation(async () => {
+      written = true;
+      return { id, entityType: "paragraphs_library_item", bundle: "paragraphs_library_item" };
+    });
+    await expect(handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { label: "Reusable" },
+      relationships: {
+        paragraphs: {
+          data: [
+            { type: "paragraph--p_text_block", id: pinA.id },
+            { type: "paragraph--p_text_block", id: pinB.id },
+          ],
+        },
+      },
+    })).rejects.toThrow(/does not pin the submitted paragraphs/);
+  });
+
+  it("returns a Drupal 422 when the re-read matches the published revision", async () => {
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return library(20, true, publishedPins);
+    });
+    backend.updateEntity.mockRejectedValue(new Error(
+      "Drupal 422 on PATCH /jsonapi/paragraphs_library_item/paragraphs_library_item/x: cannot be referenced"
+    ));
+    await expect(handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { label: "Reusable" },
+    })).rejects.toThrow(/Drupal 422[\s\S]*Re-read matched the published revision/);
+  });
+
+  it("does not trust a 422 when a forward revision appeared", async () => {
+    let landed = false;
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        if (landed) return library(21, false, publishedPins);
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return library(20, true, publishedPins);
+    });
+    backend.updateEntity.mockImplementation(async () => {
+      landed = true;
+      throw new Error("Drupal 422 on PATCH /jsonapi/x: validation failed");
+    });
+    await expect(handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { label: "Reusable" },
+    })).rejects.toThrow(/uncertain[\s\S]*Drupal 422[\s\S]*forward revision is present/);
+  });
+
   it("does not report success when no forward revision appears", async () => {
     versionedLibrary();
     await expect(handlers.drupal_entity_update({

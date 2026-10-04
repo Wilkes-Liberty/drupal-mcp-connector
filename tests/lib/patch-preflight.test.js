@@ -954,6 +954,38 @@ describe("revision identity (#420)", () => {
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
+  it("does not treat a non-403 pending-revision phrase as a missing draft", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => {
+        if (resourceVersion === "rel:working-copy") {
+          throw new Error("Drupal 500 on GET /jsonapi/x: No pending revision for moderated entity.");
+        }
+        return published;
+      }),
+    });
+    await expect(resolveWorkingCopyPatchTarget(backend, {
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id: "lib-1",
+      existing: published,
+    })).rejects.toBeInstanceOf(RevisionIdentityError);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("updates an unmoderated custom block without version-alias reads", async () => {
+    const block = {
+      id: "lib-1", status: true,
+      fields: { info: "Banner", drupal_internal__revision_id: 3 },
+    };
+    const backend = backendStub({
+      getEntity: vi.fn(async () => block),
+      updateEntity: vi.fn(async () => block),
+    });
+    await updateEntityGuarded(backend, {
+      entityType: "block_content", bundle: "basic", id: "lib-1", attributes: { info: "Banner" },
+    });
+    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
+    expect(backend.getEntity.mock.calls.map(([call]) => call.resourceVersion).every((version) => !version)).toBe(true);
+  });
+
   it("fails closed when latest-version is not the default revision", async () => {
     const backend = backendStub({
       getEntity: vi.fn(async ({ resourceVersion }) => {

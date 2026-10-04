@@ -247,6 +247,17 @@ export async function loadWorkingCopy(backend, { entityType, bundle, id }) {
  */
 export async function resolveWorkingCopyPatchTarget(backend, { entityType, bundle, id, existing }) {
   if (isCanonicalDraftType(entityType)) {
+    // A readable unmoderated block or library item has no draft alias to
+    // prove. Identity resolution stays fail-closed when the entity is
+    // moderated or could not be read.
+    if (existing && !entityLooksModerated(existing)) {
+      return {
+        resourceVersion: undefined,
+        workingCopy: null,
+        liveVid: entityRevisionId(existing, entityType),
+        workingVid: null,
+      };
+    }
     return resolveCanonicalDraftIdentity(backend, { entityType, bundle, id, existing });
   }
   const workingCopy = await loadWorkingCopy(backend, { entityType, bundle, id });
