@@ -24,10 +24,17 @@ const ent = { id: "p1", entityType: "paragraph", bundle: "text", title: null, st
 
 beforeEach(() => {
   Object.values(backend).forEach((f) => f.mockReset());
-  backend.rawQuery.mockRejectedValue(new Error(
-    "Drupal 400 on PATCH /jsonapi/node/article/n1: The selected entity (n1) " +
-    "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
-  ));
+  backend.rawQuery.mockImplementation(async ({ path }) => {
+    const text = String(path);
+    if (/\/jsonapi\/(?:paragraphs_library_item|block_content)\//.test(text)
+      && text.endsWith("/mcp-translations")) {
+      throw new Error("Drupal 404 inventory unavailable");
+    }
+    throw new Error(
+      "Drupal 400 on PATCH /jsonapi/node/article/n1: The selected entity (n1) " +
+      "does not match the ID in the payload (00000000-0000-4000-a000-000000000001)."
+    );
+  });
   backend.resourcePath.mockImplementation((entityType, bundle) => `/jsonapi/${entityType}/${bundle}`);
   backend.toCanonical.mockImplementation(x => x);
 });
@@ -645,6 +652,140 @@ describe("reusable library revision identity (#420)", () => {
     expect(out.id).toBe(id);
     expect(backend.updateEntity).toHaveBeenCalledTimes(1);
     expect(out._revisions).toBeUndefined();
+  });
+
+  /**
+   * @param {{continuation?: boolean}} [options]
+   */
+  function installAdvertisedLibrary({ continuation = false } = {}) {
+    let saved = false;
+    const published = library(20, true, publishedPins);
+    const beforeWorking = library(21, false, draftPins);
+    const afterWorking = library(continuation ? 22 : 21, false, draftPins);
+    backend.getEntity.mockImplementation(async ({ entityType, resourceVersion }) => {
+      if (entityType === "paragraph") {
+        return {
+          id: draftPins[0].id, entityType: "paragraph", bundle: "p_text_block",
+          fields: { drupal_internal__revision_id: 30 },
+        };
+      }
+      if (resourceVersion === "rel:working-copy") {
+        if (continuation) return saved ? afterWorking : beforeWorking;
+        if (!saved) throw new Error("Drupal 403: No pending revision for moderated entity.");
+        return afterWorking;
+      }
+      return published;
+    });
+    backend.rawQuery.mockImplementation(async ({ path, options }) => {
+      const text = String(path);
+      if (text.endsWith("/mcp-translations")) {
+        return {
+          meta: {
+            defaultLangcode: "en",
+            operations: ["open_draft"],
+            live: { vid: "20" },
+            working: continuation ? {
+              vid: "21",
+              translations: [{ langcode: "en", status: false, moderation_state: "draft" }],
+            } : null,
+          },
+        };
+      }
+      if (!text.endsWith("/mcp-draft")) throw new Error(`unexpected ${text}`);
+      if (options?.headers?.["X-MCP-Draft-Preflight"] === "0") saved = true;
+      if (options?.headers?.["X-MCP-Draft-Preflight"] === "1") {
+        return {
+          meta: {
+            draft_preflight: true,
+            live: "20",
+            working: continuation ? "21" : "",
+            operation: continuation ? null : "open_draft",
+          },
+        };
+      }
+      return { data: { id, type: "paragraphs_library_item--paragraphs_library_item" } };
+    });
+  }
+
+  function draftCalls() {
+    return backend.rawQuery.mock.calls.map(([call]) => call).filter((call) => call.path.endsWith("/mcp-draft"));
+  }
+
+  it("opens an advertised library draft through /mcp-draft and leaves the canonical update unused", async () => {
+    installAdvertisedLibrary();
+    const out = await handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { label: "Reusable" },
+      relationships: { paragraphs: { data: [{ type: "paragraph--p_text_block", id: draftPins[0].id }] } },
+    });
+    const drafts = draftCalls();
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0].options.headers["X-MCP-Draft-Preflight"]).toBe("1");
+    expect(drafts[1].options.headers["X-MCP-Draft-Preflight"]).toBe("0");
+    expect(drafts[0].options.headers["If-Match"]).toBe('"20"');
+    expect(drafts[1].options.headers["If-Match"]).toBe('"20"');
+    for (const call of drafts) {
+      const body = JSON.parse(call.options.body);
+      expect(body.meta).toBeUndefined();
+      expect(body.data.attributes.moderation_state).toBe("draft");
+    }
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(out._revisions).toEqual({ live: 20, working: 21 });
+    expect(out.fields.drupal_internal__revision_id).toBe(21);
+  });
+
+  it("continues an advertised library draft and compares forward pins with the working copy", async () => {
+    installAdvertisedLibrary({ continuation: true });
+    const out = await handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { label: "Reusable" },
+    });
+    const drafts = draftCalls();
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0].options.headers["If-Match"]).toBe('"20:21"');
+    expect(drafts[1].options.headers["If-Match"]).toBe('"20:21"');
+    expect(JSON.parse(drafts[1].options.body).meta).toBeUndefined();
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(out._revisions).toEqual({ live: 20, working: 22 });
+    expect(out.relationships.paragraphs[0].id).toBe(draftPins[0].id);
+    expect(out.relationships.paragraphs[0].meta.target_revision_id).toBe(30);
+  });
+
+  it("refuses a denied library inventory before any draft write", async () => {
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return library(20, true, publishedPins);
+    });
+    backend.rawQuery.mockImplementation(async ({ path }) => {
+      if (String(path).endsWith("/mcp-translations")) {
+        throw new Error("Drupal 403 on GET /jsonapi/paragraphs_library_item/paragraphs_library_item/x/mcp-translations");
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    await expect(handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { label: "Reusable" },
+    })).rejects.toThrow(/reading the draft inventory was denied/);
+    expect(draftCalls()).toHaveLength(0);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("dry-runs an advertised library draft on the real /mcp-draft preflight", async () => {
+    installAdvertisedLibrary();
+    const out = await handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { label: "Reusable" }, dryRun: true,
+    });
+    const drafts = draftCalls();
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].options.headers["X-MCP-Draft-Preflight"]).toBe("1");
+    expect(drafts[0].options.headers["If-Match"]).toBe('"20"');
+    expect(out.checks.serverPreflight).toBe("sentinel_draft");
+    expect(out.checks.fieldAccess).toBe("checked");
+    expect(out).not.toHaveProperty("caveat");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 });
 

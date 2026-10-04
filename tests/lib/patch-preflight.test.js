@@ -935,10 +935,15 @@ describe("revision identity (#420)", () => {
     expect(out.resourceVersion).toBeUndefined();
     expect(out.liveVid).toBe(20);
     expect(out.workingVid).toBe(20);
-    expect(backend.rawQuery).not.toHaveBeenCalled();
+    expect(out.governedDraft).toBeUndefined();
+    const queries = backend.rawQuery.mock.calls.map(([call]) => call);
+    expect(queries).toHaveLength(1);
+    expect(queries[0].path).toMatch(/\/mcp-translations$/);
+    expect(queries.some((call) => String(call.path).includes("mcp-draft"))).toBe(false);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
-  it("refuses a library forward draft before any request", async () => {
+  it("refuses a library forward draft before any write", async () => {
     const backend = backendStub({
       getEntity: vi.fn(async ({ resourceVersion }) => {
         if (resourceVersion === "rel:working-copy") {
@@ -950,8 +955,58 @@ describe("revision identity (#420)", () => {
     await expect(resolveWorkingCopyPatchTarget(backend, {
       entityType: "block_content", bundle: "basic", id: "lib-1", existing: published,
     })).rejects.toBeInstanceOf(UnsupportedDraftContinuationError);
-    expect(backend.rawQuery).not.toHaveBeenCalled();
+    const queries = backend.rawQuery.mock.calls.map(([call]) => call);
+    expect(queries).toHaveLength(1);
+    expect(queries[0].path).toMatch(/\/mcp-translations$/);
+    expect(queries.some((call) => String(call.path).includes("mcp-draft"))).toBe(false);
     expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("preflights an advertised library continuation through /mcp-draft", async () => {
+    const working = {
+      ...published,
+      status: false,
+      fields: { ...published.fields, moderation_state: "draft", drupal_internal__revision_id: 21 },
+    };
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => (
+        resourceVersion === "rel:working-copy" ? working : published
+      )),
+      rawQuery: vi.fn(async ({ path, options }) => {
+        if (String(path).endsWith("/mcp-translations")) {
+          return {
+            meta: {
+              defaultLangcode: "en",
+              live: { vid: "20" },
+              working: {
+                vid: "21",
+                translations: [{ langcode: "en", status: false, moderation_state: "draft" }],
+              },
+              operations: ["open_draft"],
+            },
+          };
+        }
+        expect(String(path)).toMatch(/\/mcp-draft$/);
+        expect(options.headers["If-Match"]).toBe('"20:21"');
+        expect(options.headers["X-MCP-Draft-Preflight"]).toBe("1");
+        expect(options.headers["X-MCP-Draft-Langcode"]).toBe("en");
+        const body = JSON.parse(options.body);
+        expect(body.meta).toBeUndefined();
+        return { meta: { draft_preflight: true, live: "20", working: "21", operation: null } };
+      }),
+    });
+    const out = await prepareGuardedPatch(backend, {
+      entityType: "paragraphs_library_item",
+      bundle: "paragraphs_library_item",
+      id: "lib-1",
+      existing: published,
+      attributes: { label: "Reusable", moderation_state: "draft" },
+    });
+    expect(out.resourceVersion).toBeUndefined();
+    expect(out.preflight).toBe("sentinel_draft");
+    expect(out.governedDraft).toEqual({ live: "20", working: "21", langcode: "en" });
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(backend.rawQuery.mock.calls.filter(([call]) => String(call.path).includes("mcp-draft"))).toHaveLength(1);
   });
 
   it("does not treat a non-403 pending-revision phrase as a missing draft", async () => {

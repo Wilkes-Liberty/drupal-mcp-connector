@@ -24,7 +24,12 @@
 
 import { entityLooksModerated, hasExplicitModerationState } from "./moderation-default.js";
 import { entityRevisionId } from "./write-revision.js";
-import { isCanonicalDraftType, resolveCanonicalDraftIdentity, writeCanonicalModeratedEntity } from "./canonical-draft.js";
+import {
+  isCanonicalDraftType,
+  preflightGovernedCanonicalDraft,
+  resolveCanonicalDraftIdentity,
+  writeCanonicalModeratedEntity,
+} from "./canonical-draft.js";
 import { httpStatusOf } from "./error-status.js";
 import {
   writeDraft,
@@ -487,6 +492,17 @@ export async function prepareGuardedPatch(backend, {
         entityType, bundle, id, attributes, relationships, langcode,
         draftRevision: target.draftRevision,
       }, true);
+    } catch (err) {
+      throw rewriteStaleCopyError(err);
+    }
+    target.preflight = PREFLIGHT_SENTINEL_DRAFT;
+    return target;
+  }
+  if (target.governedDraft) {
+    try {
+      await preflightGovernedCanonicalDraft(backend, {
+        entityType, bundle, id, attributes, relationships, governedDraft: target.governedDraft,
+      });
     } catch (err) {
       throw rewriteStaleCopyError(err);
     }

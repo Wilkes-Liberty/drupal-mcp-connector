@@ -1,20 +1,28 @@
 /**
- * Canonical draft open for moderated entities Sentinel cannot continue (#420).
+ * Draft open and continuation for library items and custom blocks (#420, #422).
  *
  * paragraphs_library_item and block_content use drupal_internal__revision_id.
- * MCP Sentinel has no /mcp-draft route for them. A published entity with no
- * forward revision is opened by a canonical JSON:API PATCH whose
- * moderation_state is draft or review. A real forward revision is refused
- * before that PATCH: saving the published default again creates another
- * forward revision from the live copy and drops the existing draft.
+ * When the host inventory advertises open_draft, the first draft and a later
+ * continuation both use /mcp-draft. The body is the entity only: no meta and
+ * no mcp_components. If-Match is the live revision, or live:working when a
+ * forward draft already exists. The published revision and its paragraph
+ * pins are re-read afterwards. A continuation compares the forward pins with
+ * the pre-write working copy unless the caller submitted relationships.
+ *
+ * When that operation is absent, a published entity with no forward revision
+ * is still opened by a canonical JSON:API PATCH whose moderation_state is
+ * draft or review. A real forward revision is refused before that PATCH:
+ * saving the published default again creates another forward revision from
+ * the live copy and drops the existing draft.
  *
  * rel:working-copy is the latest revision. When its id differs from the
  * default, a forward draft already exists. rel:latest-version is the latest
  * default revision, not that draft. A 404, or a 403 whose message is
  * Drupal's "No pending revision", on rel:working-copy means no draft. The
  * same phrase at any other status fails closed. Any other 401/403, a
- * timeout, or a missing revision id fails closed. After the PATCH the
- * published revision, rel:working-copy, and the published paragraph pins
+ * timeout, or a missing revision id fails closed. A draft-inventory 404 or
+ * 405 is absence. Any other inventory failure fails closed. After the write
+ * the published revision, rel:working-copy, and the published paragraph pins
  * (including order) are re-read. A completed 4xx is returned when that
  * re-read matches the pre-write state. A lost response, or a 4xx whose
  * re-read shows a change, is reported from the re-read and is not called a
@@ -25,8 +33,10 @@ import { entityRevisionId } from "./write-revision.js";
 import { httpStatusOf } from "./error-status.js";
 import { paragraphPinsFromEntity } from "./err-relationships.js";
 import { entityLooksModerated } from "./moderation-default.js";
+import { supportsSentinelDraft } from "./sentinel-draft.js";
+import { OPEN_DRAFT_OPERATION } from "./component-draft.js";
 
-/** Entity types whose first draft is a canonical PATCH, not /mcp-draft. */
+/** Entity types that stay on the canonical PATCH unless open_draft is advertised. */
 export const CANONICAL_DRAFT_TYPES = new Set(["paragraphs_library_item", "block_content"]);
 
 /** @param {?string} entityType */
@@ -155,9 +165,6 @@ export async function resolveCanonicalDraftIdentity(backend, { entityType, bundl
   if (working.kind === "ok" && (aliasVid === null || liveVid === null)) {
     throw new RevisionIdentityError(entityType, "rel:working-copy omitted a revision id");
   }
-  if (aliasVid !== null && liveVid !== null && String(aliasVid) !== String(liveVid)) {
-    throw new UnsupportedDraftContinuationError(entityType, liveVid, aliasVid);
-  }
 
   const latest = await readVersion(backend, ref, "rel:latest-version");
   if (latest.kind !== "ok") {
@@ -171,11 +178,20 @@ export async function resolveCanonicalDraftIdentity(backend, { entityType, bundl
   if (String(latestVid) !== String(liveVid)) {
     throw new RevisionIdentityError(entityType, "rel:latest-version did not match the default revision");
   }
+  const continuing = aliasVid !== null && String(aliasVid) !== String(liveVid);
+  const openingPublished = entityLooksModerated(live) && live.status === true && !continuing;
+  const governedDraft = (continuing || openingPublished)
+    ? await selectGovernedDraft(backend, ref, { liveVid, workingVid: aliasVid })
+    : null;
+  if (!governedDraft && continuing) {
+    throw new UnsupportedDraftContinuationError(entityType, liveVid, aliasVid);
+  }
   return {
     resourceVersion: undefined,
     workingCopy: working.kind === "ok" ? working.entity : null,
     liveVid,
     workingVid: aliasVid,
+    ...(governedDraft ? { governedDraft } : {}),
   };
 }
 
@@ -198,18 +214,25 @@ export async function writeCanonicalModeratedEntity(backend, input) {
     throw new RevisionIdentityError(entityType, preview.detail || "the default revision could not be read");
   }
   const before = await readPair(backend, ref, "before");
-  if (before.workingVid !== null && String(before.workingVid) !== String(before.liveVid)) {
-    throw new UnsupportedDraftContinuationError(entityType, before.liveVid, before.workingVid);
-  }
   if (String(before.latestVid) !== String(before.liveVid)) {
     throw new RevisionIdentityError(entityType, "rel:latest-version did not match the default revision");
   }
+  const continuing = before.workingVid !== null && String(before.workingVid) !== String(before.liveVid);
   const openingDraft = entityLooksModerated(before.entity) && before.entity.status === true;
   if (openingDraft && !isForwardModerationState(attributes.moderation_state)) {
     throw new RevisionIdentityError(
       entityType,
       "a published moderated entity requires moderation_state draft or review"
     );
+  }
+  const governed = (continuing || openingDraft)
+    ? await selectGovernedDraft(backend, ref, before)
+    : null;
+  if (governed) {
+    return writeGovernedCanonicalDraft(backend, input, before, governed);
+  }
+  if (continuing) {
+    throw new UnsupportedDraftContinuationError(entityType, before.liveVid, before.workingVid);
   }
   let result;
   try {
@@ -240,6 +263,221 @@ export async function writeCanonicalModeratedEntity(backend, input) {
       ? after.working
       : after.entity;
     assertSubmittedPins(entityType, written, relationships);
+  }
+  return annotatedResult(result, before, after);
+}
+
+const VID_RE = /^[1-9]\d*$/;
+
+/**
+ * @param {unknown} vid
+ * @returns {boolean}
+ */
+function validVid(vid) {
+  return VID_RE.test(String(vid ?? "")) && Number.isSafeInteger(Number(vid));
+}
+
+/**
+ * Library and custom-block inventory. A 404 or 405 is absence. Permission,
+ * transport, and a malformed inventory fail closed. Node and media inventory
+ * stays on readNodeDraftInventory.
+ *
+ * @param {object} backend
+ * @param {{entityType: string, bundle: string, id: string}} ref
+ * @returns {Promise<?object>}
+ */
+async function readCanonicalDraftInventory(backend, ref) {
+  if (!isCanonicalDraftType(ref.entityType) || !supportsSentinelDraft(backend)) return null;
+  if (typeof backend.rawQuery !== "function" || typeof backend.resourcePath !== "function") {
+    throw new RevisionIdentityError(ref.entityType, "the backend cannot read the draft inventory");
+  }
+  let result;
+  try {
+    result = await backend.rawQuery({
+      path: `${backend.resourcePath(ref.entityType, ref.bundle)}/${encodeURIComponent(ref.id)}/mcp-translations`,
+      options: { method: "GET" },
+    });
+  } catch (error) {
+    const status = httpStatusOf(error);
+    if (status === 404 || status === 405) return null;
+    const detail = status === 401 || status === 403
+      ? "reading the draft inventory was denied"
+      : "the draft inventory could not be read";
+    throw new RevisionIdentityError(ref.entityType, detail);
+  }
+  const inventory = result?.meta;
+  if (!inventory || typeof inventory !== "object" || !validVid(inventory.live?.vid)
+    || (inventory.working && !validVid(inventory.working.vid))) {
+    throw new RevisionIdentityError(ref.entityType, "the draft inventory omitted a revision id");
+  }
+  return inventory;
+}
+
+/**
+ * Select /mcp-draft only when this host advertises open_draft and the
+ * inventory vids agree with the JSON:API default and working copy.
+ *
+ * @param {object} backend
+ * @param {{entityType: string, bundle: string, id: string}} ref
+ * @param {{liveVid: number|string, workingVid: ?number|string}} identity
+ * @returns {Promise<?{live: string, working: string, langcode: string}>}
+ */
+async function selectGovernedDraft(backend, ref, identity) {
+  const inventory = await readCanonicalDraftInventory(backend, ref);
+  if (!inventory) return null;
+  const operations = Array.isArray(inventory.operations) ? inventory.operations : [];
+  if (!operations.includes(OPEN_DRAFT_OPERATION)) return null;
+  if (String(inventory.live.vid) !== String(identity.liveVid)) {
+    throw new RevisionIdentityError(
+      ref.entityType,
+      "the draft inventory live revision did not match the default revision"
+    );
+  }
+  const continuing = identity.workingVid !== null
+    && identity.workingVid !== undefined
+    && String(identity.workingVid) !== String(identity.liveVid);
+  if (continuing) {
+    if (inventory.working?.vid === undefined || inventory.working?.vid === null
+      || String(inventory.working.vid) !== String(identity.workingVid)) {
+      throw new RevisionIdentityError(
+        ref.entityType,
+        "the draft inventory working revision did not match rel:working-copy"
+      );
+    }
+  } else if (inventory.working?.vid && String(inventory.working.vid) !== String(identity.liveVid)) {
+    throw new RevisionIdentityError(
+      ref.entityType,
+      "the draft inventory reported a working revision rel:working-copy did not"
+    );
+  }
+  const langcode = typeof inventory.defaultLangcode === "string" ? inventory.defaultLangcode : "";
+  if (!langcode || /[\r\n]/.test(langcode)) {
+    throw new RevisionIdentityError(ref.entityType, "the draft inventory omitted the default language");
+  }
+  if (continuing) {
+    const row = (inventory.working?.translations ?? []).find((entry) => entry?.langcode === langcode);
+    const state = typeof row?.moderation_state === "string" ? row.moderation_state : "";
+    if (!row || row.status === true || state === "published") {
+      throw new RevisionIdentityError(ref.entityType, "the working language is not an unpublished draft");
+    }
+  }
+  return {
+    live: String(identity.liveVid),
+    working: continuing ? String(identity.workingVid) : "",
+    langcode,
+  };
+}
+
+/**
+ * One /mcp-draft for a library item or custom block. No meta.
+ *
+ * @param {object} backend
+ * @param {object} spec
+ * @returns {Promise<object>}
+ */
+function governedCanonicalDraftRequest(backend, {
+  entityType, bundle, id, attributes, relationships, live, working, langcode, preflight,
+}) {
+  const data = { type: `${entityType}--${bundle}`, id, attributes: attributes ?? {} };
+  if (relationships && typeof relationships === "object" && Object.keys(relationships).length) {
+    data.relationships = relationships;
+  }
+  return backend.rawQuery({
+    path: `${backend.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}/mcp-draft`,
+    options: {
+      method: "PATCH",
+      headers: {
+        "If-Match": working ? `"${live}:${working}"` : `"${live}"`,
+        "X-MCP-Draft-Preflight": preflight ? "1" : "0",
+        "X-MCP-Draft-Langcode": langcode,
+      },
+      body: JSON.stringify({ data }),
+    },
+  });
+}
+
+/**
+ * Non-saving /mcp-draft check for a library item or custom block.
+ * The saving request reads the inventory again and does not reuse this result.
+ *
+ * @param {object} backend
+ * @param {object} input
+ * @returns {Promise<void>}
+ */
+export async function preflightGovernedCanonicalDraft(backend, input) {
+  const governed = input.governedDraft;
+  const checked = await governedCanonicalDraftRequest(backend, {
+    entityType: input.entityType,
+    bundle: input.bundle,
+    id: input.id,
+    attributes: input.attributes,
+    relationships: input.relationships,
+    live: governed.live,
+    working: governed.working,
+    langcode: governed.langcode,
+    preflight: true,
+  });
+  const meta = checked?.meta;
+  const working = governed.working || "";
+  if (meta?.draft_preflight !== true || String(meta.live) !== String(governed.live)
+    || String(meta.working ?? "") !== working
+    || (!working && meta.operation !== OPEN_DRAFT_OPERATION)) {
+    throw new Error("The site did not confirm a non-saving draft preflight. No write was attempted.");
+  }
+}
+
+/**
+ * Saving /mcp-draft after a fresh inventory read.
+ *
+ * @param {object} backend
+ * @param {object} input
+ * @param {object} before
+ * @param {{live: string, working: string, langcode: string}} governed
+ * @returns {Promise<object>}
+ */
+async function writeGovernedCanonicalDraft(backend, input, before, governed) {
+  const { entityType, bundle, id, attributes = {}, relationships } = input;
+  const ref = { entityType, bundle, id };
+  const continuing = governed.working !== "";
+  let result;
+  try {
+    result = await governedCanonicalDraftRequest(backend, {
+      entityType, bundle, id, attributes, relationships,
+      live: governed.live,
+      working: governed.working,
+      langcode: governed.langcode,
+      preflight: false,
+    });
+  } catch (err) {
+    if (isDefinitiveClientError(err)) {
+      const unchanged = await publishedStateUnchanged(backend, ref, before);
+      if (unchanged === true) {
+        if (err instanceof Error) {
+          err.message +=
+            " Re-read matched the published revision, rel:working-copy, and paragraph pins from before the request.";
+        }
+        throw err;
+      }
+    }
+    throw uncertainWriteError(entityType, await lossDetail(backend, ref, err));
+  }
+  const writtenId = result?.data?.id ?? result?.id;
+  if (!result || writtenId !== id) {
+    throw uncertainWriteError(entityType, await lossDetail(
+      backend, ref, new Error("the write response did not identify this entity")
+    ));
+  }
+  const after = await readPair(backend, ref, "after");
+  if (entityLooksModerated(before.entity) && before.entity.status === true) {
+    assertPublishedPreserved(entityType, before, after, relationships);
+  } else if (submittedParagraphPins(relationships)) {
+    const written = after.workingVid !== null && String(after.workingVid) !== String(after.liveVid)
+      ? after.working
+      : after.entity;
+    assertSubmittedPins(entityType, written, relationships);
+  }
+  if (continuing && String(after.workingVid) === String(before.workingVid)) {
+    throw uncertainWriteError(entityType, "the working revision did not advance");
   }
   return annotatedResult(result, before, after);
 }
@@ -364,17 +602,21 @@ function assertPublishedPreserved(entityType, before, after, relationships) {
   if (pinKey(after.pins) !== pinKey(before.pins)) {
     problems.push("published paragraph pins changed");
   }
+  const continuing = before.workingVid !== null && String(before.workingVid) !== String(before.liveVid);
   if (after.workingVid === null || String(after.workingVid) === String(before.liveVid)) {
     problems.push("no forward revision was verified");
+  } else if (continuing && String(after.workingVid) === String(before.workingVid)) {
+    problems.push("the working revision did not advance");
   }
   const submitted = submittedParagraphPins(relationships);
   const forwardPins = normalizedPins(after.working);
+  const baseline = continuing ? normalizedPins(before.working) : before.pins;
   if (submitted) {
     const landed = forwardPins.filter((pin) => submitted.fields.has(pin.field));
     if (pinKey(landed) !== pinKey(submitted.pins)) {
       problems.push("the forward revision does not pin the submitted paragraphs");
     }
-  } else if (pinKey(forwardPins) !== pinKey(before.pins)) {
+  } else if (pinKey(forwardPins) !== pinKey(baseline)) {
     problems.push("the forward revision changed paragraph pins that were not submitted");
   }
   if (problems.length) {
@@ -475,6 +717,10 @@ async function publishedStateUnchanged(backend, ref, before) {
     if (String(after.liveVid) !== String(before.liveVid)) return false;
     if (String(after.latestVid) !== String(after.liveVid)) return false;
     if (pinKey(after.pins) !== pinKey(before.pins)) return false;
+    const continuing = before.workingVid !== null && String(before.workingVid) !== String(before.liveVid);
+    if (continuing) {
+      return after.workingVid !== null && String(after.workingVid) === String(before.workingVid);
+    }
     if (after.workingVid !== null && String(after.workingVid) !== String(before.liveVid)) return false;
     return true;
   } catch {
