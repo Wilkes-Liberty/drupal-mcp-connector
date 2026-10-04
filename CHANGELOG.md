@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`drupal_draft_nested_components` (#421).** Replaces a nested paragraph
+  by creating new unpublished paragraphs and pinning a new direct parent
+  from the host's unpublished draft. The published host and the paragraphs
+  it already pins are not edited. `children` is the full new list (`keep`,
+  `replace`, `insert`; omit a child to leave it off the draft only). The
+  first host draft requires MCP Sentinel 2.29.0 (`open_draft`); an existing
+  working copy continues through `/mcp-draft`. There is no `mcp_components`
+  payload and no direct paragraph write. `dryRun` creates nothing and does
+  not evaluate the host payload. A host write that fails after preparation
+  reports the new paragraph UUIDs. When a parent was prepared, recovery is
+  `resumeParentId` with the same child list; that retry checks the prepared
+  paragraph's fields, other references, and child revision pins before any
+  host write. A failure before a parent exists says to delete the prepared
+  paragraphs. New paragraphs are created in the host's default language, and
+  the new parent keeps the published parent's other references. A lost
+  response stays uncertain until a re-read proves the prepared revision is
+  pinned. Reusable library items are refused; update those with
+  `drupal_entity_update`.
+
 ### Fixed
 - **Reusable library and custom-block revision identity (#420).**
   `drupal_internal__revision_id` is kept for `paragraphs_library_item` and

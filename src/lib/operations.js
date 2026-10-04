@@ -18,7 +18,7 @@ const WRITE_PREFIXES = ["drupal_create_", "drupal_update_", "drupal_upload_",
   "drupal_drush_updatedb", "drupal_drush_module_enable",
   "drupal_drush_module_disable", "drupal_drush_user_create",
   // v1.0 feature tools that perform writes but don't start with create_/update_:
-  "drupal_bulk_", "drupal_revert_", "drupal_schedule_", "drupal_set_",
+  "drupal_bulk_", "drupal_revert_", "drupal_schedule_", "drupal_set_", "drupal_draft_",
   // Governed config write (also gated inside the handler by the config-write cap):
   "drupal_config_set"];
 

@@ -29,6 +29,7 @@ import * as references   from "./references.js";
 import * as bulk         from "./bulk.js";
 import * as translations from "./translations.js";
 import * as paragraphs   from "./paragraphs.js";
+import * as nested       from "./nested.js";
 import * as structure    from "./structure.js";
 import * as redirects    from "./redirects.js";
 import * as search       from "./search.js";
@@ -42,7 +43,7 @@ import * as codegen      from "./codegen.js";
 import { SITE_PARAM } from "../lib/site-target.js";
 
 const allModules = [nodes, taxonomy, users, media, graphql, site, entities, reports, drush,
-  revisions, moderation, scheduler, fields, references, bulk, translations, paragraphs, structure, redirects, search, reportsExtra,
+  revisions, moderation, scheduler, fields, references, bulk, translations, paragraphs, nested, structure, redirects, search, reportsExtra,
   reportsLinks, reportsConfig, reportsContent, auditComposite, config, codegen];
 
 /**

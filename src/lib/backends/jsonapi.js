@@ -597,18 +597,28 @@ export class JsonApiBackend extends Backend {
   /**
    * Create an entity via JSON:API POST. Retries without `status` on moderated
    * bundles — see writeWithModerationFallback.
-   * @param {{entityType: string, bundle: string, attributes?: object, relationships?: object}} input
+   * @param {{entityType: string, bundle: string, attributes?: object, relationships?: object, langcode?: string}} input
+   *   `langcode` creates the entity in that language (URL prefix, then language headers).
    * @returns {Promise<import("../canonical.js").CanonicalEntity>} The created entity.
    */
-  async createEntity({ entityType, bundle, attributes = {}, relationships }) {
+  async createEntity({ entityType, bundle, attributes = {}, relationships, langcode }) {
     const buildPayload = (attrs) => {
       const payload = { data: { type: `${entityType}--${bundle}`, attributes: attrs } };
       const rels = grantActorUid(entityType, relationships);
       if (rels) payload.data.relationships = rels;
       return payload;
     };
-    const data = await this.writeWithModerationFallback(this.resourcePath(entityType, bundle), "POST", buildPayload, attributes);
-    return this.toCanonical(data.data);
+    const data = await this.writeWithModerationFallback(
+      this.resourcePath(entityType, bundle), "POST", buildPayload, attributes, langcode,
+    );
+    const entity = this.toCanonical(data.data);
+    try {
+      assertServedLanguage(entity, langcode);
+    } catch (err) {
+      if (err && typeof err === "object") err.entity = entity;
+      throw err;
+    }
+    return entity;
   }
 
   /**
