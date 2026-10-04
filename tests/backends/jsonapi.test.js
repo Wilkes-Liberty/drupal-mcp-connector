@@ -184,6 +184,24 @@ describe("JsonApiBackend.toCanonical", () => {
     expect(c.fields.field_body.value).toBe("x");
   });
 
+  it("keeps drupal_internal__revision_id on library items and custom blocks (#420)", () => {
+    for (const type of ["paragraphs_library_item--paragraphs_library_item", "block_content--basic"]) {
+      const resource = {
+        type,
+        id: "lib-1",
+        attributes: {
+          drupal_internal__id: 9,
+          drupal_internal__revision_id: 20,
+          drupal_internal__vid: 3,
+          label: "Reusable",
+        },
+      };
+      const canonical = backend.toCanonical(resource);
+      expect(canonical.fields.drupal_internal__revision_id).toBe(20);
+      expect(canonical.fields).not.toHaveProperty("drupal_internal__id");
+    }
+  });
+
   it("keeps relationship meta.target_revision_id (#192)", () => {
     const node = {
       type: "node--article",

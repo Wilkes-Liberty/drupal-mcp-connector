@@ -24,6 +24,7 @@
 
 import { entityLooksModerated, hasExplicitModerationState } from "./moderation-default.js";
 import { entityRevisionId } from "./write-revision.js";
+import { isCanonicalDraftType, resolveCanonicalDraftIdentity, writeCanonicalModeratedEntity } from "./canonical-draft.js";
 import { httpStatusOf } from "./error-status.js";
 import {
   writeDraft,
@@ -245,6 +246,9 @@ export async function loadWorkingCopy(backend, { entityType, bundle, id }) {
  * @throws {PatchTargetAmbiguousError}
  */
 export async function resolveWorkingCopyPatchTarget(backend, { entityType, bundle, id, existing }) {
+  if (isCanonicalDraftType(entityType)) {
+    return resolveCanonicalDraftIdentity(backend, { entityType, bundle, id, existing });
+  }
   const workingCopy = await loadWorkingCopy(backend, { entityType, bundle, id });
   if (workingCopy?.id && workingCopy.id !== id) {
     throw new PatchTargetAmbiguousError(id, workingCopy.id);
@@ -584,6 +588,9 @@ function explainDefaultLanguageRefusal(err, inferredLangcode) {
  * @throws {PatchBlockedError|WorkingCopyStaleError|*}
  */
 export async function updateEntityGuarded(backend, input) {
+  if (isCanonicalDraftType(input?.entityType) && !input?.draftRevision && !input?.resourceVersion) {
+    return writeCanonicalModeratedEntity(backend, input);
+  }
   try {
     if (input?.draftRevision) return await writeDraft(backend, input);
     if (input?.resourceVersion) {

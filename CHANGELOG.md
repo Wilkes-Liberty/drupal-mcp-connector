@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Reusable library and custom-block revision identity (#420).**
+  `drupal_internal__revision_id` is kept for `paragraphs_library_item` and
+  `block_content`. A published item with no forward revision is updated by a
+  canonical draft (`moderation_state: draft` or `review`); the connector then
+  re-reads the published revision, `rel:working-copy`, and the published
+  paragraph pins. Success requires a new working revision and an unchanged
+  published revision. `rel:latest-version` is the latest default revision, so
+  a difference there fails closed instead of being treated as the draft. An
+  existing forward draft is refused before any write, because these types
+  have no governed continuation endpoint. A missing revision id, a denied
+  version read, or a lost response fails closed. A lost response is described
+  from a follow-up re-read and is not called a rollback. Drupal's working-copy
+  "No pending revision" response is still treated as no draft.
+
 ## [3.1.0] - 2026-10-03
 
 ### Added
