@@ -521,6 +521,23 @@ describe("JsonApiBackend fetch methods", () => {
     expect(JSON.parse(opts.body)).toEqual({ data: { type: "node--article", attributes: { title: "N", status: false } } });
   });
 
+  it("createEntity with langcode POSTs the language-prefixed path", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({
+      data: { type: "paragraph--p_faq_item", id: "new", attributes: { field_title: "N", langcode: "es" } },
+    });
+    const c = await backend.createEntity({
+      entityType: "paragraph",
+      bundle: "p_faq_item",
+      attributes: { field_title: "N" },
+      langcode: "es",
+    });
+    expect(c.langcode).toBe("es");
+    const [, path, opts] = vi.mocked(drupalFetch).mock.calls[0];
+    expect(path).toBe("/es/jsonapi/paragraph/p_faq_item");
+    expect(opts.method).toBe("POST");
+    expect(opts.headers).toMatchObject({ "Accept-Language": "es", "Content-Language": "es" });
+  });
+
   it("createEntity binds uid from the grant-stamped actor and overwrites a caller uid", async () => {
     vi.mocked(drupalFetch).mockResolvedValue({ data: { type: "node--article", id: "new", attributes: { title: "N" } } });
     const actor = "11111111-1111-4111-8111-111111111111";

@@ -108,12 +108,13 @@ function backend(options = {}) {
     updateEntity: vi.fn(async () => {
       throw new Error("updateEntity must not run");
     }),
-    createEntity: vi.fn(async ({ bundle, attributes, relationships }) => {
+    createEntity: vi.fn(async ({ bundle, attributes, relationships, langcode }) => {
       const id = createdIds[createdCount] ?? `created-${createdCount}`;
       createdCount += 1;
       return {
         id,
         bundle,
+        langcode: langcode ?? null,
         entityType: "paragraph",
         attributes,
         relationships,
@@ -181,8 +182,11 @@ describe("draftNestedComponents", () => {
     expect(b.updateEntity).not.toHaveBeenCalled();
     expect(b.createEntity).toHaveBeenCalledTimes(2);
     const [childCall, parentCall] = b.createEntity.mock.calls.map(([call]) => call);
-    expect(childCall).toMatchObject({ entityType: "paragraph", bundle: "p_faq_item" });
+    expect(childCall).toMatchObject({ entityType: "paragraph", bundle: "p_faq_item", langcode: "en" });
     expect(childCall.relationships).toBeUndefined();
+    const paragraphInventory = callsEnding(b, "/mcp-translations")
+      .find((call) => call.path.includes("/paragraph/"));
+    expect(paragraphInventory.options.headers["If-Match"]).toBe('"50"');
     expect(parentCall.bundle).toBe("p_faq_group");
     expect(parentCall.attributes.field_title).toBe("Questions");
     expect(parentCall.relationships.field_items.data.map((ref) => ref.id)).toEqual([NEW_CHILD, CHILD_B]);
@@ -204,7 +208,10 @@ describe("draftNestedComponents", () => {
 
   it("omits a child from the draft parent and can reorder the ones that stay", async () => {
     const b = backend({
-      afterWorking: host(12, landedPins),
+      afterWorking: host(12, [
+        pin(NEW_PARENT, "p_faq_group", 101),
+        pin(SIBLING, "p_text_block", 60),
+      ]),
       createdIds: [NEW_PARENT],
     });
     await draftNestedComponents(b, {
@@ -268,6 +275,7 @@ describe("draftNestedComponents", () => {
     });
     await draftNestedComponents(b, input);
     expect(callsEnding(b, "/mcp-draft/translations")).toHaveLength(0);
+    expect(b.createEntity.mock.calls.every(([call]) => call.langcode === "es")).toBe(true);
   });
 
   it("treats a missing paragraph translation endpoint as no extra languages", async () => {
@@ -384,11 +392,8 @@ describe("draftNestedComponents", () => {
         written,
       ],
       extraParagraphs: {
-        [NEW_PARENT]: {
-          id: NEW_PARENT,
-          bundle: "p_faq_group",
-          fields: { drupal_internal__revision_id: 102 },
-        },
+        [NEW_PARENT]: resumedParent(),
+        [NEW_CHILD]: resumedChild(),
       },
     });
     const result = await draftNestedComponents(b, { ...input, resumeParentId: NEW_PARENT });
@@ -407,11 +412,8 @@ describe("draftNestedComponents", () => {
       workingHost: host(11, landedPins),
       afterWorking: host(12, landedPins),
       extraParagraphs: {
-        [NEW_PARENT]: {
-          id: NEW_PARENT,
-          bundle: "p_faq_group",
-          fields: { drupal_internal__revision_id: 102 },
-        },
+        [NEW_PARENT]: resumedParent(),
+        [NEW_CHILD]: resumedChild(),
       },
     });
     const result = await draftNestedComponents(b, { ...input, resumeParentId: NEW_PARENT });
@@ -429,4 +431,177 @@ describe("draftNestedComponents", () => {
     })).rejects.toThrow(/cannot change references/);
     expect(b.rawQuery).not.toHaveBeenCalled();
   });
+
+  it("refuses a canonical library reference before requiring a paragraph revision", async () => {
+    const library = "99999999-9999-4999-8999-999999999999";
+    const b = backend({
+      parent: {
+        ...parentEntity(),
+        relationships: {
+          field_items: [
+            { id: library, entityType: "paragraphs_library_item", bundle: "paragraphs_library_item" },
+          ],
+        },
+      },
+    });
+    await expect(draftNestedComponents(b, input)).rejects.toThrow(/drupal_entity_update/);
+    expect(b.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("copies the parent's other references onto the new parent", async () => {
+    const media = "88888888-8888-4888-8888-888888888888";
+    const b = backend({
+      afterWorking: host(12, landedPins),
+      parent: {
+        ...parentEntity(),
+        relationships: {
+          ...parentEntity().relationships,
+          field_image: {
+            id: media,
+            entityType: "media",
+            bundle: "image",
+            meta: { alt: "Door" },
+          },
+        },
+      },
+    });
+    await draftNestedComponents(b, input);
+    const parentCall = b.createEntity.mock.calls[1][0];
+    expect(parentCall.relationships.field_image).toEqual({
+      data: { type: "media--image", id: media, meta: { alt: "Door" } },
+    });
+    expect(parentCall.relationships.field_items.data[0].id).toBe(NEW_CHILD);
+  });
+
+  it("checks every new paragraph bundle before dryRun and before any create", async () => {
+    const seen = [];
+    const deny = (bundle) => {
+      seen.push(bundle);
+      if (bundle === "p_faq_group") throw new Error("paragraph create denied");
+    };
+    const dry = backend();
+    await expect(draftNestedComponents(dry, input, { dryRun: true, assertParagraphCreate: deny }))
+      .rejects.toThrow(/paragraph create denied/);
+    expect(dry.createEntity).not.toHaveBeenCalled();
+    expect(seen).toEqual(["p_faq_item", "p_faq_group"]);
+
+    const real = backend();
+    await expect(draftNestedComponents(real, input, { assertParagraphCreate: deny }))
+      .rejects.toThrow(/paragraph create denied/);
+    expect(real.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("does not offer resumeParentId when the parent was never created", async () => {
+    const b = backend();
+    b.createEntity.mockImplementation(async (call) => {
+      if (call.bundle === "p_faq_group") throw new Error("parent create failed");
+      return {
+        id: NEW_CHILD,
+        bundle: call.bundle,
+        langcode: call.langcode,
+        entityType: "paragraph",
+        fields: { drupal_internal__revision_id: 101, ...(call.attributes ?? {}) },
+      };
+    });
+    const error = await draftNestedComponents(b, input).catch((err) => err);
+    expect(error.code).toBe(NESTED_DRAFT_PARTIAL_CODE);
+    expect(error.prepared.map((row) => row.id)).toEqual([NEW_CHILD]);
+    expect(error.message).toMatch(/no prepared parent to pin/);
+    expect(error.message).not.toMatch(/retry the host pin with resumeParentId/);
+    expect(callsEnding(b, "/mcp-draft")).toHaveLength(0);
+  });
+
+  it("reports a paragraph created in the wrong language and does not continue", async () => {
+    const b = backend({
+      nodeInventory: nodeInventory({ defaultLangcode: "es" }),
+      paragraphInventory: {
+        live: { vid: "50", translations: [{ langcode: "es", status: true, default: true }] },
+      },
+    });
+    b.createEntity.mockResolvedValue({
+      id: NEW_CHILD,
+      bundle: "p_faq_item",
+      langcode: "en",
+      entityType: "paragraph",
+      fields: { drupal_internal__revision_id: 101 },
+    });
+    const error = await draftNestedComponents(b, input).catch((err) => err);
+    expect(error.code).toBe(NESTED_DRAFT_PARTIAL_CODE);
+    expect(error.message).toMatch(/created in "en", not es/);
+    expect(error.message).toMatch(/no prepared parent to pin/);
+    expect(b.createEntity).toHaveBeenCalledTimes(1);
+    expect(callsEnding(b, "/mcp-draft")).toHaveLength(0);
+  });
+
+  it("refuses a resume parent that does not match the requested children", async () => {
+    const b = backend({
+      nodeInventory: nodeInventory({
+        working: { vid: "11", translations: [{ langcode: "en", status: false, moderation_state: "draft", default: true }] },
+      }),
+      workingHost: host(11, publishedPins),
+      extraParagraphs: {
+        [NEW_PARENT]: {
+          id: NEW_PARENT,
+          bundle: "p_faq_group",
+          fields: { drupal_internal__revision_id: 102, field_title: "Other" },
+          relationships: { field_items: [] },
+        },
+      },
+    });
+    await expect(draftNestedComponents(b, { ...input, resumeParentId: NEW_PARENT }))
+      .rejects.toThrow(/does not match/);
+    expect(callsEnding(b, "/mcp-draft")).toHaveLength(0);
+  });
+
+  it("does not treat another revision of the prepared parent as a landed pin", async () => {
+    const b = backend({
+      nodeInventory: nodeInventory({
+        working: { vid: "11", translations: [{ langcode: "en", status: false, moderation_state: "draft", default: true }] },
+      }),
+      workingHost: host(11, landedPins),
+      afterWorking: host(12, [
+        pin(NEW_PARENT, "p_faq_group", 999),
+        pin(SIBLING, "p_text_block", 60),
+      ]),
+      extraParagraphs: {
+        [NEW_PARENT]: resumedParent(),
+        [NEW_CHILD]: resumedChild(),
+      },
+    });
+    const error = await draftNestedComponents(b, { ...input, resumeParentId: NEW_PARENT }).catch((err) => err);
+    expect(error.code).toBe(NESTED_DRAFT_PARTIAL_CODE);
+    expect(error.message).toMatch(/prepared revision/);
+    expect(callsEnding(b, "/mcp-draft")).toHaveLength(0);
+  });
 });
+
+/**
+ * @returns {object}
+ */
+function resumedParent() {
+  return {
+    id: NEW_PARENT,
+    bundle: "p_faq_group",
+    entityType: "paragraph",
+    fields: { drupal_internal__revision_id: 102, field_title: "Questions" },
+    relationships: {
+      field_items: [
+        pin(NEW_CHILD, "p_faq_item", 101),
+        pin(CHILD_B, "p_faq_item", 71),
+      ],
+    },
+  };
+}
+
+/**
+ * @returns {object}
+ */
+function resumedChild() {
+  return {
+    id: NEW_CHILD,
+    bundle: "p_faq_item",
+    entityType: "paragraph",
+    langcode: "en",
+    fields: { drupal_internal__revision_id: 101, field_title: "New question" },
+  };
+}

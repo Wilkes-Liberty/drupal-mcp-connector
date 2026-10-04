@@ -17,9 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   working copy continues through `/mcp-draft`. There is no `mcp_components`
   payload and no direct paragraph write. `dryRun` creates nothing and does
   not evaluate the host payload. A host write that fails after preparation
-  reports the new paragraph UUIDs and the recovery (`resumeParentId`, or
-  delete them). A lost response stays uncertain until a re-read proves the
-  pin. Reusable library items are refused; update those with
+  reports the new paragraph UUIDs. When a parent was prepared, recovery is
+  `resumeParentId` with the same child list; that retry checks the prepared
+  paragraph's fields, other references, and child revision pins before any
+  host write. A failure before a parent exists says to delete the prepared
+  paragraphs. New paragraphs are created in the host's default language, and
+  the new parent keeps the published parent's other references. A lost
+  response stays uncertain until a re-read proves the prepared revision is
+  pinned. Reusable library items are refused; update those with
   `drupal_entity_update`.
 
 ### Fixed

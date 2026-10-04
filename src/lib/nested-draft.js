@@ -22,6 +22,7 @@ export const NESTED_DRAFT_PARTIAL_CODE = "NESTED_DRAFT_PARTIAL";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NAME_RE = /^[a-z][a-z0-9_]*$/;
+const SKIP_RELATIONSHIPS = new Set(["uid", "revision_uid"]);
 const SKIPPED_FIELDS = new Set([
   "status", "moderation_state", "langcode", "default_langcode", "created", "changed",
   "parent_id", "parent_type", "parent_field_name", "behavior_settings",
@@ -35,10 +36,14 @@ const SKIPPED_FIELDS = new Set([
  * @returns {Error}
  */
 export function nestedDraftPartial(detail, prepared) {
-  const ids = prepared.map((row) => row.id).join(", ");
+  const ids = prepared.map((row) => row.id).filter(Boolean).join(", ") || "none";
+  const hasParent = prepared.some((row) => row.role === "parent" && row.id);
+  const recovery = hasParent
+    ? "Delete them or retry the host pin with resumeParentId."
+    : "Delete them. There is no prepared parent to pin.";
   const err = new Error(
     `The nested draft did not finish (${detail}). Prepared paragraphs (${ids}) are not ` +
-    "referenced by the published host. Delete them or retry the host pin with resumeParentId. " +
+    `referenced by the published host. ${recovery} ` +
     "Do not edit the published child paragraphs."
   );
   err.name = "NestedDraftPartialError";
@@ -110,7 +115,6 @@ export async function draftNestedComponents(backend, input, { dryRun = false, as
     throw new Error("The host revision changed while reading it. No write was attempted.");
   }
   const publishedPins = fieldList(publishedHost, spec.field);
-  for (const ref of publishedPins) requirePinRevision(ref, "A direct component pin");
   const publishedSlot = publishedPins.findIndex((ref) => sameId(ref?.id, spec.parentId));
   if (publishedSlot < 0) {
     throw new Error(
@@ -118,6 +122,8 @@ export async function draftNestedComponents(backend, input, { dryRun = false, as
       "Nested paragraphs are not edited in place. No write was attempted."
     );
   }
+  if (isReusable(publishedPins[publishedSlot])) throw reusableError();
+  for (const ref of publishedPins) requirePinRevision(ref, "A direct component pin");
   let draftPins = publishedPins;
   if (working) {
     const workingHost = await readHost(backend, spec, working);
@@ -145,21 +151,30 @@ export async function draftNestedComponents(backend, input, { dryRun = false, as
     throw new Error("The working copy does not keep this component in the published slot. No write was attempted.");
   }
   const parentRef = publishedPins[publishedSlot];
-  if (isReusable(parentRef)) throw reusableError();
   const parentBundle = paragraphBundle(parentRef);
   if (!parentBundle) throw new Error("The direct component has no paragraph type. No write was attempted.");
-  const parent = await readParagraph(backend, parentBundle, spec.parentId, revisionOf(parentRef));
+  const parentRevision = revisionOf(parentRef);
+  const parent = await readParagraph(backend, parentBundle, spec.parentId, parentRevision);
   if (!sameId(parent?.id, spec.parentId)) {
     throw new Error("The component read did not match the requested paragraph. No write was attempted.");
   }
   const childPins = fieldList(parent, spec.childField);
+  if (childPins.some(isReusable)) throw reusableError();
   for (const ref of childPins) requirePinRevision(ref, ref?.id || "A nested component");
-  if (childPins.some(isReusable) || isReusable(parent)) throw reusableError();
   if (spec.resumeParentId && liveParagraphIds(publishedPins, childPins).has(spec.resumeParentId.toLowerCase())) {
     throw new Error("resumeParentId is a paragraph the published host already pins. No write was attempted.");
   }
-  const requiredLangs = await requiredTranslationLangs(backend, parentBundle, spec.parentId, defaultLang);
+  const requiredLangs = await requiredTranslationLangs(
+    backend, parentBundle, spec.parentId, defaultLang, parentRevision,
+  );
   assertChildren(spec.children, childPins, requiredLangs);
+  if (!spec.resumeParentId) {
+    const bundles = [
+      ...spec.children.filter((child) => child.op !== "keep").map((child) => child.type),
+      parentBundle,
+    ];
+    for (const bundle of bundles) assertParagraphCreate?.(bundle);
+  }
 
   if (dryRun) {
     return {
@@ -181,12 +196,9 @@ export async function draftNestedComponents(backend, input, { dryRun = false, as
   const childRefs = [];
   if (spec.resumeParentId) {
     const resumed = await readParagraph(backend, parentBundle, spec.resumeParentId);
-    const revisionId = paragraphRevisionId(resumed);
-    if (revisionId === null) {
-      throw nestedDraftPartial("the prepared parent has no revision id", [{
-        id: spec.resumeParentId, bundle: parentBundle, role: "parent",
-      }]);
-    }
+    const revisionId = await assertResumeMatches(
+      backend, spec, parent, childPins, resumed, requiredLangs, defaultLang,
+    );
     prepared.push({ id: spec.resumeParentId, bundle: parentBundle, role: "parent", revisionId });
   } else {
     for (const child of spec.children) {
@@ -201,7 +213,7 @@ export async function draftNestedComponents(backend, input, { dryRun = false, as
       op: "insert",
       type: parentBundle,
       attributes: copiedAttributes(parent),
-      relationships: { [spec.childField]: { data: childRefs } },
+      relationships: copiedRelationships(parent, spec.childField, childRefs),
       translations: [],
     }, prepared, assertParagraphCreate, defaultLang, "parent");
     await copyParentTranslations(backend, parent, prepared.find((row) => row.role === "parent"), requiredLangs, prepared);
@@ -382,12 +394,30 @@ async function createParagraph(backend, child, prepared, assertParagraphCreate, 
     created = await backend.createEntity({
       entityType: "paragraph",
       bundle: child.type,
+      langcode: defaultLang,
       attributes: child.attributes,
       ...(child.relationships ? { relationships: child.relationships } : {}),
     });
   } catch (err) {
+    const orphan = err?.entity;
+    if (orphan?.id) {
+      prepared.push({
+        id: orphan.id, bundle: child.type, role, revisionId: paragraphRevisionId(orphan),
+      });
+    }
     if (prepared.length) throw nestedDraftPartial(messageOf(err), prepared);
     throw err;
+  }
+  const servedLang = created?.langcode ?? created?.fields?.langcode ?? "";
+  if (servedLang !== defaultLang) {
+    prepared.push({
+      id: created?.id, bundle: child.type, role, revisionId: paragraphRevisionId(created),
+    });
+    const reported = servedLang || "an unreported language";
+    throw nestedDraftPartial(
+      `paragraph ${created?.id} was created in "${reported}", not ${defaultLang}`,
+      prepared,
+    );
   }
   const revisionId = paragraphRevisionId(created);
   if (revisionId === null) {
@@ -482,10 +512,10 @@ async function confirmLanded(backend, spec, live, expectedWorkingPins) {
   if (workingVid === null || String(workingVid) === String(live)) {
     return { ok: false, uncertain: false, detail: "no forward revision was found" };
   }
-  const workingIds = fieldList(workingEntity, spec.field).map((ref) => ref?.id?.toLowerCase());
-  const expectedIds = expectedWorkingPins.map((ref) => ref?.id?.toLowerCase());
-  if (workingIds.length !== expectedIds.length || workingIds.some((id, index) => id !== expectedIds[index])) {
-    return { ok: false, uncertain: false, detail: "the working copy did not pin the new component" };
+  const workingKeys = fieldList(workingEntity, spec.field).map(pinKey);
+  const expectedKeys = expectedWorkingPins.map(pinKey);
+  if (workingKeys.length !== expectedKeys.length || workingKeys.some((key, index) => key !== expectedKeys[index])) {
+    return { ok: false, uncertain: false, detail: "the working copy did not pin the prepared revision" };
   }
   return { ok: true, workingVid: String(workingVid) };
 }
@@ -620,13 +650,14 @@ async function readHost(backend, spec, working) {
  * @param {?number|string} [revisionId]
  * @returns {Promise<object>}
  */
-async function readParagraph(backend, bundle, id, revisionId) {
+async function readParagraph(backend, bundle, id, revisionId, langcode) {
   try {
     const entity = await backend.getEntity({
       entityType: "paragraph",
       bundle,
       id,
       ...(revisionId ? { resourceVersion: `id:${revisionId}` } : {}),
+      ...(langcode ? { langcode } : {}),
     });
     if (!entity) throw new Error(`Paragraph ${id} was not returned.`);
     return entity;
@@ -643,11 +674,14 @@ async function readParagraph(backend, bundle, id, revisionId) {
  * @param {string} bundle
  * @param {string} id
  * @param {string} defaultLang
+ * @param {number|string|null} revisionId Pinned paragraph revision, not a later canonical revision.
  * @returns {Promise<Set<string>>}
  */
-async function requiredTranslationLangs(backend, bundle, id, defaultLang) {
+async function requiredTranslationLangs(backend, bundle, id, defaultLang, revisionId) {
   try {
-    const inventory = await readTranslationInventory(backend, { entityType: "paragraph", bundle, id });
+    const inventory = await readTranslationInventory(backend, {
+      entityType: "paragraph", bundle, id, revisionId,
+    });
     const langs = new Set();
     for (const row of inventory?.live?.translations ?? []) {
       if (row?.langcode && row.langcode !== defaultLang) langs.add(row.langcode);
@@ -671,6 +705,191 @@ function copiedAttributes(entity) {
     attributes[key] = value;
   }
   return attributes;
+}
+
+/**
+ * Copy every content relationship except the child field being replaced.
+ * Authorship relationships are left for the create policy to stamp.
+ * @param {?object} entity
+ * @param {string} childField
+ * @param {object[]} childData
+ * @returns {object}
+ */
+function copiedRelationships(entity, childField, childData) {
+  const rels = entity?.relationships && typeof entity.relationships === "object" ? entity.relationships : {};
+  const out = {};
+  for (const [key, value] of Object.entries(rels)) {
+    if (key === childField || SKIP_RELATIONSHIPS.has(key)) continue;
+    const payload = relationshipPayload(value);
+    if (payload) out[key] = payload;
+  }
+  out[childField] = { data: childData };
+  return out;
+}
+
+/**
+ * The resumed paragraph must be the one this request would have created:
+ * same copied fields, same other references, and the requested child pins.
+ * @param {object} backend
+ * @param {object} spec
+ * @param {object} parent
+ * @param {object[]} childPins
+ * @param {object} resumed
+ * @param {Set<string>} requiredLangs
+ * @param {string} defaultLang
+ * @returns {Promise<number|string>}
+ */
+async function assertResumeMatches(backend, spec, parent, childPins, resumed, requiredLangs, defaultLang) {
+  const revisionId = paragraphRevisionId(resumed);
+  if (revisionId === null || !sameId(resumed?.id, spec.resumeParentId)) {
+    throw new Error("resumeParentId has no verified revision. No host draft was written.");
+  }
+  if (!sameAttributes(copiedAttributes(parent), copiedAttributes(resumed))
+    || !sameRelationships(parent, resumed, spec.childField)) {
+    throw new Error(
+      "resumeParentId does not match the published component's fields and references. No host draft was written."
+    );
+  }
+  const pins = fieldList(resumed, spec.childField);
+  if (pins.length !== spec.children.length) {
+    throw new Error("resumeParentId does not match the requested child list. No host draft was written.");
+  }
+  const publishedChildIds = new Set(childPins.map((ref) => ref?.id?.toLowerCase()).filter(Boolean));
+  for (let index = 0; index < spec.children.length; index += 1) {
+    const child = spec.children[index];
+    const pin = pins[index];
+    requirePinRevision(pin, "A resumed child pin");
+    if (child.op === "keep") {
+      const live = childPins.find((ref) => sameId(ref?.id, child.id));
+      if (!sameId(pin?.id, child.id) || String(revisionOf(pin)) !== String(revisionOf(live))) {
+        throw new Error("resumeParentId does not keep the requested child revision. No host draft was written.");
+      }
+      continue;
+    }
+    if (publishedChildIds.has(String(pin?.id ?? "").toLowerCase()) || sameId(pin?.id, child.id)) {
+      throw new Error("resumeParentId still pins a published child. No host draft was written.");
+    }
+    const created = await readParagraph(backend, child.type, pin.id, revisionOf(pin));
+    if (!sameId(created?.id, pin.id)
+      || created?.bundle !== child.type
+      || String(paragraphRevisionId(created)) !== String(revisionOf(pin))
+      || !sameAttributes(child.attributes, copiedAttributes(created))) {
+      throw new Error("resumeParentId does not match the requested child fields. No host draft was written.");
+    }
+    for (const translation of child.translations) {
+      if (translation.langcode === defaultLang) continue;
+      const translated = await readParagraph(backend, child.type, pin.id, revisionOf(pin), translation.langcode);
+      const served = translated?.langcode ?? translated?.fields?.langcode ?? "";
+      if (served !== translation.langcode || !sameAttributes(translation.attributes, copiedAttributes(translated))) {
+        throw new Error(
+          `resumeParentId is missing the ${translation.langcode} child translation. No host draft was written.`
+        );
+      }
+    }
+  }
+  for (const lang of requiredLangs) {
+    const source = await readParagraph(backend, parent.bundle, parent.id, paragraphRevisionId(parent), lang);
+    const copy = await readParagraph(backend, resumed.bundle || parent.bundle, resumed.id, revisionId, lang);
+    const sourceLang = source?.langcode ?? source?.fields?.langcode ?? "";
+    const copyLang = copy?.langcode ?? copy?.fields?.langcode ?? "";
+    if (sourceLang !== lang || copyLang !== lang || !sameAttributes(copiedAttributes(source), copiedAttributes(copy))) {
+      throw new Error(`resumeParentId is missing the ${lang} translation. No host draft was written.`);
+    }
+  }
+  return revisionId;
+}
+
+/**
+ * @param {object} expected
+ * @param {object} actual
+ * @returns {boolean}
+ */
+function sameAttributes(expected, actual) {
+  const left = Object.keys(expected).sort();
+  const right = Object.keys(actual).sort();
+  if (left.length !== right.length || left.some((key, index) => key !== right[index])) return false;
+  return left.every((key) => JSON.stringify(expected[key]) === JSON.stringify(actual[key]));
+}
+
+/**
+ * @param {?object} left
+ * @param {?object} right
+ * @param {string} childField
+ * @returns {boolean}
+ */
+function sameRelationships(left, right, childField) {
+  const a = contentRelationshipKeys(left, childField);
+  const b = contentRelationshipKeys(right, childField);
+  const keys = Object.keys(a).sort();
+  const other = Object.keys(b).sort();
+  if (keys.length !== other.length || keys.some((key, index) => key !== other[index])) return false;
+  return keys.every((key) => a[key] === b[key]);
+}
+
+/**
+ * @param {?object} entity
+ * @param {string} childField
+ * @returns {object}
+ */
+function contentRelationshipKeys(entity, childField) {
+  const rels = entity?.relationships && typeof entity.relationships === "object" ? entity.relationships : {};
+  const out = {};
+  for (const [key, value] of Object.entries(rels)) {
+    if (key === childField || SKIP_RELATIONSHIPS.has(key)) continue;
+    out[key] = linkageKey(value);
+  }
+  return out;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function linkageKey(value) {
+  return asList(value).map((ref) => {
+    const type = typeof ref?.type === "string" && ref.type
+      ? ref.type
+      : (ref?.entityType && ref?.bundle ? `${ref.entityType}--${ref.bundle}` : "");
+    const alt = typeof ref?.meta?.alt === "string" ? ref.meta.alt : "";
+    return `${type}:${String(ref?.id ?? "").toLowerCase()}:${revisionOf(ref) ?? ""}:${alt}`;
+  }).join("|");
+}
+
+/**
+ * @param {unknown} value
+ * @returns {?object}
+ */
+function relationshipPayload(value) {
+  const wrapped = value && typeof value === "object" && Object.hasOwn(value, "data") ? value.data : value;
+  if (Array.isArray(wrapped)) return { data: wrapped.map(toLinkage).filter(Boolean) };
+  if (wrapped && typeof wrapped === "object") {
+    const one = toLinkage(wrapped);
+    return one ? { data: one } : null;
+  }
+  if (wrapped === null) return { data: null };
+  return null;
+}
+
+/**
+ * @param {?object} ref
+ * @returns {?object}
+ */
+function toLinkage(ref) {
+  if (!ref || typeof ref !== "object") return null;
+  const type = typeof ref.type === "string" && ref.type.includes("--")
+    ? ref.type
+    : (ref.entityType && ref.bundle ? `${ref.entityType}--${ref.bundle}` : "");
+  if (!type || !ref.id) return null;
+  const out = { type, id: ref.id };
+  const meta = {};
+  const revisionId = ref.meta?.target_revision_id;
+  if (revisionId !== undefined && revisionId !== null && revisionId !== "" && Number.isFinite(Number(revisionId))) {
+    meta.target_revision_id = Number(revisionId);
+  }
+  if (typeof ref.meta?.alt === "string") meta.alt = ref.meta.alt;
+  if (typeof ref.meta?.title === "string") meta.title = ref.meta.title;
+  if (Object.keys(meta).length > 0) out.meta = meta;
+  return out;
 }
 
 /**
@@ -728,6 +947,7 @@ function paragraphType(type, where) {
  * @returns {boolean}
  */
 function isReusable(ref) {
+  if (ref?.entityType === "paragraphs_library_item") return true;
   const type = typeof ref?.type === "string" ? ref.type : "";
   return type.startsWith("paragraphs_library_item") || paragraphBundle(ref) === "from_library";
 }
@@ -758,6 +978,16 @@ function revisionOf(ref) {
 function pinRef(ref) {
   const bundle = paragraphBundle(ref);
   return embedParagraphRef(bundle, ref.id, revisionOf(ref));
+}
+
+/**
+ * UUID plus the pinned paragraph revision. The same UUID at another revision
+ * is not the prepared draft.
+ * @param {?object} ref
+ * @returns {string}
+ */
+function pinKey(ref) {
+  return `${String(ref?.id ?? "").toLowerCase()}#${String(revisionOf(ref) ?? "")}`;
 }
 
 /**
