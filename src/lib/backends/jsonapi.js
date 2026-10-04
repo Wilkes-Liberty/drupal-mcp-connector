@@ -349,12 +349,15 @@ export class JsonApiBackend extends Backend {
           // Node reads expose the numeric nid advertised by schema discovery
           // while the UUID remains the canonical top-level id (#237).
           // Paragraph ERR attach needs the current revision id (#192).
+          // Library items and custom blocks use revision_id, not vid (#420).
           // Node / revisionable writes need the working vs live vid (#166).
           // Menu-link admin edit URLs need the numeric id (#398).
           // Other drupal_internal__* attributes stay stripped.
           return (entityType === "node" && k === "drupal_internal__nid")
             || k === "drupal_internal__vid"
-            || (entityType === "paragraph" && k === "drupal_internal__revision_id")
+            || ((entityType === "paragraph"
+              || entityType === "paragraphs_library_item"
+              || entityType === "block_content") && k === "drupal_internal__revision_id")
             || (entityType === "menu_link_content" && k === "drupal_internal__id");
         }
         return true;

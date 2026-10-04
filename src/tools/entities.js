@@ -11,13 +11,14 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { shapeWriteResponse, flagUnrequestedStatusChange, RETURNING_SCHEMA } from "../lib/entity-response.js";
-import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
+import { applySafeDraftDefault } from "../lib/moderation-default.js";
 import {
   resolveErrRelationships, relationshipsWereSent, embedParagraphRef,
   resolveParagraphRevisionId, missingParagraphRevisionError,
 } from "../lib/err-relationships.js";
 import { attachWrittenRevisionPair, readWrittenRevision } from "../lib/write-revision.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
+import { readUpdateTarget } from "../lib/canonical-draft.js";
 import { dryRunChecks, PREFLIGHT_NONE } from "../lib/dry-run-checks.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
@@ -111,14 +112,7 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   // One pre-write read serves both the #131 draft default and the #171
   // unrequested-status-change flag. Skipped when the caller pinned the
   // moderation state explicitly (same condition the draft default uses).
-  let existing = null;
-  if (!hasExplicitModerationState(attributes)) {
-    try {
-      existing = (await backend.getEntity({ entityType, bundle, id })) ?? null;
-    } catch {
-      existing = null; // Unreadable target: server-side gates stay authoritative.
-    }
-  }
+  const existing = await readUpdateTarget(backend, { entityType, bundle, id, attributes });
   const safeAttributes = await applySafeDraftDefault({
     backend, entityType, bundle, id, attributes, existingEntity: existing,
   });
@@ -297,7 +291,7 @@ export const definitions = [
   },
   {
     name: "drupal_entity_update",
-    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision). Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved. On moderated targets a non-saving PATCH preflight runs first (including dryRun) against the same URL the write will hit. An addressable node draft uses Sentinel's governed draft endpoint with live/working revision preconditions (#166); a stray revision with no addressable working copy still fails with revision-surgery language (#201). Preflight does not un-orphan paragraphs already created — probe the host before creating dependents. A dryRun that returns without a refusal is not proof the write will succeed: field access and entity validation are checked only when Sentinel's draft endpoint ran, and the result's `checks` block says which checks ran.",
+    description: "Update an existing entity of any Drupal entity type. Only include attributes/relationships you want to change. Published moderated targets without an explicit attributes.moderation_state default to moderation_state 'draft' (forward revision). Paragraph / ERR identifiers are resolved to include meta.target_revision_id before PATCH; the write fails if any ref cannot be resolved. On moderated targets a non-saving PATCH preflight runs first (including dryRun) against the same URL the write will hit. An addressable node draft uses Sentinel's governed draft endpoint with live/working revision preconditions (#166); a stray revision with no addressable working copy still fails with revision-surgery language (#201). Preflight does not un-orphan paragraphs already created — probe the host before creating dependents. A dryRun that returns without a refusal is not proof the write will succeed: field access and entity validation are checked only when Sentinel's draft endpoint ran, and the result's `checks` block says which checks ran. A published moderated paragraphs_library_item or block_content with no forward revision is saved by that canonical draft PATCH, then the published revision, rel:working-copy, and paragraph pins (including order) are re-read. The result fails if the published revision changed or no forward revision appeared. An existing forward draft, a missing revision id, or a denied version read is refused before any write. An unmoderated item keeps the ordinary update. A completed 4xx is returned when that re-read matches the pre-write revision and pins; a lost response stays uncertain (#420).",
     inputSchema: {
       type: "object", required: ["entityType", "bundle", "id"],
       properties: {

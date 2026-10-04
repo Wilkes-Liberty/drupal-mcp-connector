@@ -14,7 +14,8 @@
 import { getSiteConfig } from "../lib/config.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import { resolveSecurityConfig, assertWriteAllowed, assertPublishAllowed, withUnpublishedDefault } from "../lib/security.js";
-import { applySafeDraftDefault, hasExplicitModerationState } from "../lib/moderation-default.js";
+import { applySafeDraftDefault } from "../lib/moderation-default.js";
+import { readUpdateTarget } from "../lib/canonical-draft.js";
 import {
   resolveErrRelationships, embedParagraphRef,
   resolveParagraphRevisionId, missingParagraphRevisionError,
@@ -103,14 +104,9 @@ async function bulkUpdate({ site: siteName, entityType, bundle, items = [] }) {
     const item = rawItem || {};
     try {
       if (!item.id) throw new Error("Missing 'id' for update item");
-      let existing = null;
-      if (!hasExplicitModerationState(item.attributes ?? {})) {
-        try {
-          existing = (await backend.getEntity({ entityType, bundle, id: item.id })) ?? null;
-        } catch {
-          existing = null;
-        }
-      }
+      const existing = await readUpdateTarget(backend, {
+        entityType, bundle, id: item.id, attributes: item.attributes ?? {},
+      });
       const attributes = await applySafeDraftDefault({
         backend, entityType, bundle, id: item.id,
         attributes: item.attributes ?? {},

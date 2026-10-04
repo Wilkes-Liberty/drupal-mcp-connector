@@ -11,25 +11,71 @@
  */
 
 /**
- * Read a revision id off a canonical (or raw-ish) entity body.
- * @param {?object} entity
+ * JSON:API revision attribute for entity types whose revision key is known.
+ * `taxonomy_term`'s `drupal_internal__vid` is the vocabulary id, not a revision.
+ * Node and media revisions use `vid`. Paragraphs, library items, and custom
+ * blocks use `revision_id`.
+ */
+const REVISION_ATTRIBUTE = {
+  node: "drupal_internal__vid",
+  media: "drupal_internal__vid",
+  paragraph: "drupal_internal__revision_id",
+  paragraphs_library_item: "drupal_internal__revision_id",
+  block_content: "drupal_internal__revision_id",
+};
+
+/**
+ * @param {object} entity
+ * @param {object} fields
+ * @param {object} attrs
+ * @param {string} key
+ * @returns {unknown}
+ */
+function readRevisionAttribute(entity, fields, attrs, key) {
+  if (key === "drupal_internal__vid") {
+    return entity.vid
+      ?? fields.drupal_internal__vid
+      ?? attrs.drupal_internal__vid
+      ?? entity.drupal_internal__vid;
+  }
+  if (Object.prototype.hasOwnProperty.call(fields, key)) return fields[key];
+  if (Object.prototype.hasOwnProperty.call(attrs, key)) return attrs[key];
+  if (Object.prototype.hasOwnProperty.call(entity, key)) return entity[key];
+  return undefined;
+}
+
+/**
+ * @param {unknown} raw
  * @returns {?number|string}
  */
-export function entityRevisionId(entity) {
-  if (!entity || typeof entity !== "object") return null;
-  const fields = entity.fields && typeof entity.fields === "object"
-    ? entity.fields
-    : {};
-  const attrs = entity.attributes && typeof entity.attributes === "object"
-    ? entity.attributes
-    : {};
-  const raw = entity.vid
-    ?? fields.drupal_internal__vid
-    ?? attrs.drupal_internal__vid
-    ?? entity.drupal_internal__vid;
+function normalizeRevisionId(raw) {
   if (raw === undefined || raw === null || raw === "") return null;
   const n = Number(raw);
   return Number.isFinite(n) ? n : raw;
+}
+
+/**
+ * Read a revision id off a canonical (or raw-ish) entity body.
+ * When `entityType` is known, only that type's revision attribute is read.
+ * When it is omitted, a node-style vid is kept and `revision_id` is used
+ * only if no vid is present, so existing callers stay unchanged.
+ *
+ * @param {?object} entity
+ * @param {?string} [entityType]
+ * @returns {?number|string}
+ */
+export function entityRevisionId(entity, entityType) {
+  if (!entity || typeof entity !== "object") return null;
+  const type = entityType || entity.entityType || null;
+  const fields = entity.fields && typeof entity.fields === "object" ? entity.fields : {};
+  const attrs = entity.attributes && typeof entity.attributes === "object" ? entity.attributes : {};
+  if (type === "taxonomy_term") return null;
+  if (type && REVISION_ATTRIBUTE[type]) {
+    return normalizeRevisionId(readRevisionAttribute(entity, fields, attrs, REVISION_ATTRIBUTE[type]));
+  }
+  const vid = readRevisionAttribute(entity, fields, attrs, "drupal_internal__vid");
+  if (vid !== undefined && vid !== null && vid !== "") return normalizeRevisionId(vid);
+  return normalizeRevisionId(readRevisionAttribute(entity, fields, attrs, "drupal_internal__revision_id"));
 }
 
 /**
@@ -65,7 +111,8 @@ export async function attachWrittenRevisionPair({
   backend, entityType, bundle, id, entity, liveVid,
 }) {
   if (liveVid === null || liveVid === undefined || !entity) return entity;
-  let workingVid = entityRevisionId(entity);
+  if (entity._revisions) return entity;
+  let workingVid = entityRevisionId(entity, entityType);
   if (workingVid !== null && String(workingVid) !== String(liveVid)) {
     return attachRevisionPair(entity, { live: liveVid, working: workingVid });
   }
@@ -74,7 +121,7 @@ export async function attachWrittenRevisionPair({
       const wc = await backend.getEntity({
         entityType, bundle, id, resourceVersion: "rel:working-copy",
       });
-      workingVid = entityRevisionId(wc);
+      workingVid = entityRevisionId(wc, entityType);
     } catch {
       workingVid = null;
     }
@@ -106,6 +153,9 @@ export async function readWrittenRevision({
   // Sentinel returned the requested translation; a canonical read would replace
   // it with live English, and the core working-copy alias may not address it.
   if (langcode && patchResult) return patchResult;
+  if (patchResult?._revision?.source === "working-copy" || patchResult?._revision?.source === "latest-version") {
+    return patchResult;
+  }
   if (!relationshipsSent) {
     if (preferCanonical && typeof backend.getEntity === "function") {
       const fresh = await backend.getEntity({

@@ -23,8 +23,13 @@ import {
 import {
   attachRevisionPair,
   attachWrittenRevisionPair,
+  entityRevisionId,
   readWrittenRevision,
 } from "../../src/lib/write-revision.js";
+import {
+  RevisionIdentityError,
+  UnsupportedDraftContinuationError,
+} from "../../src/lib/canonical-draft.js";
 
 const WC_400 = new Error(
   "Drupal 400 on PATCH /jsonapi/node/solution/n1: Updating a resource object " +
@@ -891,5 +896,152 @@ describe("prepareGuardedPatch default-language draft on a multilingual node (#37
       draftRevision: { liveVid: 10, workingVid: 20, langcode: "en" },
     });
     expect(backend.rawQuery).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("revision identity (#420)", () => {
+  const published = {
+    id: "lib-1", status: true,
+    fields: { moderation_state: "published", drupal_internal__revision_id: 20 },
+  };
+
+  it("reads each supported revision attribute and ignores a term vid", () => {
+    expect(entityRevisionId({
+      fields: { drupal_internal__vid: 10, drupal_internal__revision_id: 20 },
+    }, "node")).toBe(10);
+    expect(entityRevisionId({
+      fields: { drupal_internal__revision_id: 20, drupal_internal__vid: 99 },
+    }, "paragraphs_library_item")).toBe(20);
+    expect(entityRevisionId({
+      fields: { drupal_internal__revision_id: 8 },
+    }, "block_content")).toBe(8);
+    expect(entityRevisionId({
+      fields: { drupal_internal__vid: 4 },
+    }, "taxonomy_term")).toBeNull();
+    expect(entityRevisionId({ fields: { drupal_internal__vid: 4 } })).toBe(4);
+    expect(entityRevisionId({ fields: { drupal_internal__revision_id: 6 } })).toBe(6);
+  });
+
+  it("treats an echoed library default confirmed by latest-version as not a draft", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => (
+        resourceVersion ? { ...published } : published
+      )),
+    });
+    const out = await resolveWorkingCopyPatchTarget(backend, {
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id: "lib-1",
+      existing: published,
+    });
+    expect(out.resourceVersion).toBeUndefined();
+    expect(out.liveVid).toBe(20);
+    expect(out.workingVid).toBe(20);
+    expect(backend.rawQuery).not.toHaveBeenCalled();
+  });
+
+  it("refuses a library forward draft before any request", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => {
+        if (resourceVersion === "rel:working-copy") {
+          return { ...published, fields: { ...published.fields, drupal_internal__revision_id: 22 } };
+        }
+        return published;
+      }),
+    });
+    await expect(resolveWorkingCopyPatchTarget(backend, {
+      entityType: "block_content", bundle: "basic", id: "lib-1", existing: published,
+    })).rejects.toBeInstanceOf(UnsupportedDraftContinuationError);
+    expect(backend.rawQuery).not.toHaveBeenCalled();
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a non-403 pending-revision phrase as a missing draft", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => {
+        if (resourceVersion === "rel:working-copy") {
+          throw new Error("Drupal 500 on GET /jsonapi/x: No pending revision for moderated entity.");
+        }
+        return published;
+      }),
+    });
+    await expect(resolveWorkingCopyPatchTarget(backend, {
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id: "lib-1",
+      existing: published,
+    })).rejects.toBeInstanceOf(RevisionIdentityError);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("updates an unmoderated custom block without version-alias reads", async () => {
+    const block = {
+      id: "lib-1", status: true,
+      fields: { info: "Banner", drupal_internal__revision_id: 3 },
+    };
+    const backend = backendStub({
+      getEntity: vi.fn(async () => block),
+      updateEntity: vi.fn(async () => block),
+    });
+    await updateEntityGuarded(backend, {
+      entityType: "block_content", bundle: "basic", id: "lib-1", attributes: { info: "Banner" },
+    });
+    expect(backend.updateEntity).toHaveBeenCalledTimes(1);
+    expect(backend.getEntity.mock.calls.map(([call]) => call.resourceVersion).every((version) => !version)).toBe(true);
+  });
+
+  it("fails closed when latest-version is not the default revision", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => {
+        if (resourceVersion === "rel:working-copy") {
+          throw new Error("Drupal 403: No pending revision for moderated entity.");
+        }
+        if (resourceVersion === "rel:latest-version") {
+          return { ...published, fields: { ...published.fields, drupal_internal__revision_id: 22 } };
+        }
+        return published;
+      }),
+    });
+    await expect(resolveWorkingCopyPatchTarget(backend, {
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id: "lib-1",
+      existing: published,
+    })).rejects.toBeInstanceOf(RevisionIdentityError);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the working-copy body has no revision id", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => (
+        resourceVersion === "rel:working-copy" ? { id: "lib-1", fields: {} } : published
+      )),
+    });
+    await expect(resolveWorkingCopyPatchTarget(backend, {
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id: "lib-1",
+      existing: published,
+    })).rejects.toBeInstanceOf(RevisionIdentityError);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on a denied or failed version read", async () => {
+    const denied = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => {
+        if (resourceVersion === "rel:working-copy") throw new Error("Drupal 403 on GET /jsonapi/x");
+        return published;
+      }),
+    });
+    await expect(resolveWorkingCopyPatchTarget(denied, {
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id: "lib-1",
+      existing: published,
+    })).rejects.toThrow(/was denied/);
+
+    const failed = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => {
+        if (resourceVersion === "rel:latest-version") throw new Error("socket hang up");
+        if (resourceVersion === "rel:working-copy") {
+          throw new Error("Drupal 404 on GET /jsonapi/x");
+        }
+        return published;
+      }),
+    });
+    await expect(resolveWorkingCopyPatchTarget(failed, {
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id: "lib-1",
+      existing: published,
+    })).rejects.toThrow(/could not be read/);
   });
 });
