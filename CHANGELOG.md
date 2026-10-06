@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-05
+
 ### Added
 - **`drupal_draft_nested_components` (#421).** Replaces a nested paragraph
   by creating new unpublished paragraphs and pinning a new direct parent
