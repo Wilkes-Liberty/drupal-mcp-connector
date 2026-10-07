@@ -278,8 +278,8 @@ the allowlist or Sentinel profile excludes the type — run `doctor` and
 ### From npm (recommended for operators)
 
 ```bash
-npm install -g drupal-mcp-connector
-# or: npx -y drupal-mcp-connector
+npm install -g drupal-mcp-connector@3.2.0
+# or: npx -y drupal-mcp-connector@3.2.0
 ```
 
 Point your MCP client at the installed binary (path from `which drupal-mcp-connector`
@@ -302,8 +302,9 @@ unbounded range.
 4. Run `npm audit --omit=dev` against the lockfile and read any advisory
    before you upgrade. There is no separate scanner to install.
 
-Restart the MCP client after the upgrade and run `drupal-mcp-doctor` against
-the site.
+Restart the MCP client after the upgrade. Run `drupal-mcp-doctor` when the
+package is on your PATH, or `npx -y drupal-mcp-connector@3.2.0 doctor` when
+you launch it with npx.
 
 ### From a git clone (development)
 
