@@ -15,6 +15,7 @@ import { resolveSecurityConfig, assertNotReadOnly,
 import { toolError, toolResult } from "./errors.js";
 import { BackendCapabilityError, BackendResolutionError } from "./backends/errors.js";
 import { inferOperation } from "./operations.js";
+import { ensureTextFormatContext, toolNeedsTextFormatContext } from "./text-format-context.js";
 import { assertSourceGovernance, GovernanceError } from "./governance.js";
 import {
   assertPrincipalEntitlement, callerTargetHints, DIAGNOSTIC_TOOLS,
@@ -186,6 +187,12 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
   });
   return runWithDataFlow(flow, async () => {
     await assertCallAllowed();
+    // Content-tier tokens cannot read field_config. Load Sentinel's schema
+    // before a handler that resolves text formats (#429). Other writes do
+    // not wait. A miss leaves the historical unknown-list path in place.
+    if (toolNeedsTextFormatContext(toolName)) {
+      await ensureTextFormatContext(site);
+    }
     // Charge only after governance and policy gates pass, so an outage or a
     // local deny cannot exhaust the window. Diagnostics do not consume.
     if (!DIAGNOSTIC_TOOLS.has(toolName)) {

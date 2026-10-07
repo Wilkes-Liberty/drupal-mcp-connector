@@ -19,6 +19,7 @@ import {
 } from "../lib/sentinel-draft.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
 import { entityRevisionId } from "../lib/write-revision.js";
+import { applyAllowedFormatsToAttributes } from "../lib/field-definition.js";
 
 /**
  * List all media types (bundles of the media entity type).
@@ -110,8 +111,11 @@ async function createMedia({ site: siteName, type, name, status = false, fields 
   // Layer name/status after fields so they win, matching prior behaviour.
   attributes.name = name;
   attributes.status = status;
-  assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
+  await applyAllowedFormatsToAttributes({
+    backend, site, entityType: "media", bundle: type, attributes, defaultBodyFormat: false,
+  });
+  assertPublishAllowed(sec, attributes);
   return backend.createEntity({
     entityType: "media", bundle: type, attributes,
     ...(relationships ? { relationships } : {}),
@@ -134,8 +138,11 @@ async function updateMedia({ site: siteName, type, id, name, status, fields = {}
   const { attributes, relationships } = splitReferenceFields(fields);
   if (name !== undefined) attributes.name = name;
   if (status !== undefined) attributes.status = status;
-  assertPublishAllowed(sec, attributes);
   const backend = await resolveBackend(site);
+  await applyAllowedFormatsToAttributes({
+    backend, site, entityType: "media", bundle: type, attributes, defaultBodyFormat: false,
+  });
+  assertPublishAllowed(sec, attributes);
   if (langcode) {
     const targetLang = assertDraftLangcode(langcode);
     const patchTarget = await prepareGuardedPatch(backend, {

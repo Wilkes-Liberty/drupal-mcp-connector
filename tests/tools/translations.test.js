@@ -15,6 +15,10 @@ vi.mock("../../src/lib/config.js", () => ({
 import { resolveBackend } from "../../src/lib/backends/index.js";
 import { supportsSentinelDraft } from "../../src/lib/sentinel-draft.js";
 import { handlers, definitions } from "../../src/tools/translations.js";
+import {
+  clearTextFormatContextCache,
+  rememberTextFormatContext,
+} from "../../src/lib/text-format-context.js";
 
 const UUID = "11111111-2222-3333-4444-555555555555";
 
@@ -51,6 +55,7 @@ function toCanonicalEntity(data) {
 }
 
 beforeEach(() => {
+  clearTextFormatContextCache();
   backend.getEntity.mockReset();
   backend.updateEntity.mockReset();
   backend.rawQuery.mockReset();
@@ -187,6 +192,30 @@ describe("translations tools", () => {
     expect(body.data.attributes.title).toBe("Hallo");
     expect(out.langcode).toBe("de");
     expect(out._revisions).toEqual({ live: "10", working: 12 });
+  });
+
+  it("refuses a translation field_summary format the context list does not allow (#429)", async () => {
+    rememberTextFormatContext(
+      { _name: "d", baseUrl: "https://x" },
+      {
+        content_types: {
+          article: {
+            fields: { field_summary: { type: "text_long", allowed_formats: ["plain_text"] } },
+          },
+        },
+      },
+    );
+    backend.getEntity.mockResolvedValue({
+      id: UUID, entityType: "node", bundle: "article", langcode: "en", status: true,
+      fields: { drupal_internal__vid: 10, moderation_state: "published" },
+    });
+    await expect(handlers.drupal_create_translation({
+      type: "article",
+      id: UUID,
+      langcode: "de",
+      attributes: { field_summary: { value: "Resumen", format: "headless_clean" } },
+    })).rejects.toThrow(/field_summary[\s\S]*headless_clean[\s\S]*plain_text/s);
+    expect(backend.rawQuery.mock.calls.some((c) => String(c[0].path).endsWith("/mcp-draft/translations"))).toBe(false);
   });
 
   it("create_translation dryRun sends the real fields to the non-saving preflight and says what it checked (#336)", async () => {

@@ -633,6 +633,45 @@ describe("draftNestedComponents", () => {
     expect(result._revisions).toEqual({ live: "10", working: "12" });
   });
 
+  it("refuses a disallowed nested translation format before creating paragraphs (#429)", async () => {
+    const b = backend();
+    b.getFieldDefinition = vi.fn(async ({ fieldName }) => (
+      fieldName === "field_body"
+        ? { fieldName, fieldType: "text_long", allowedFormats: ["plain_text"] }
+        : null
+    ));
+    await expect(draftNestedComponents(b, {
+      ...input,
+      children: [{
+        ...replaceChild,
+        translations: [{
+          langcode: "es",
+          attributes: { field_body: { value: "Hola", format: "headless_clean" } },
+        }],
+      }, { op: "keep", id: CHILD_B }],
+    }, { site: { _name: "t", baseUrl: "https://example.test" } })).rejects.toThrow(
+      /field_body[\s\S]*headless_clean[\s\S]*plain_text/,
+    );
+    expect(b.createEntity).not.toHaveBeenCalled();
+    expect(callsEnding(b, "/mcp-draft")).toHaveLength(0);
+  });
+
+  it("does not rewrite a format copied from the existing parent (#429)", async () => {
+    const b = backend({
+      afterWorking: host(12, landedPins),
+      parent: parentEntity({ field_body: { value: "Kept", format: "headless_clean" } }),
+    });
+    b.getFieldDefinition = vi.fn(async ({ fieldName }) => (
+      fieldName === "field_body"
+        ? { fieldName, fieldType: "text_long", allowedFormats: ["plain_text"] }
+        : null
+    ));
+    await draftNestedComponents(b, input, { site: { _name: "t", baseUrl: "https://example.test" } });
+    const parentCall = b.createEntity.mock.calls.map(([call]) => call)
+      .find((call) => call.bundle === "p_faq_group");
+    expect(parentCall.attributes.field_body).toEqual({ value: "Kept", format: "headless_clean" });
+  });
+
   it("keeps the client sequence when nested_replacement is not advertised", async () => {
     const b = backend({ afterWorking: host(12, landedPins) });
     await draftNestedComponents(b, input);

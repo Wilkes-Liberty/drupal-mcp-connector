@@ -157,9 +157,14 @@ Drupal `{ value, format }` items. Represent them in tool payloads as:
 `format` is a Field API machine name. Before create/update (including
 `dryRun`) the connector resolves the field's `allowed_formats` from JSON:API
 `field_config`, then `base_field_override` (node body is a base field; its
-allowed formats are not on `field_config`). Both reads are internal
-introspection, not `drupal_entity_get`. If JSON:API has neither row, Drush
-`config:get` tries `field.field.{entity}.{bundle}.{field}` and then
+allowed formats are not on `field_config`). A row whose `field_name` is not
+the requested field is ignored. Both reads are internal introspection, not
+`drupal_entity_get`. If JSON:API has neither row, a cached
+`GET /drupal-mcp/context` document supplies the list for node fields when
+that field includes `allowed_formats` (#429). A missing key means an older
+Sentinel and stays an unknown list. An empty array means the field does not
+restrict formats. If that document has no list either, Drush `config:get`
+tries `field.field.{entity}.{bundle}.{field}` and then
 `core.base_field_override.{entity}.{bundle}.{field}`.
 
 - Exactly one allowed format → used when the caller omits `format`.
@@ -168,13 +173,22 @@ introspection, not `drupal_entity_get`. If JSON:API has neither row, Drush
 - Several allowed formats and `format` omitted → site `defaultTextFormat` is
   used only if it is in the list; otherwise the write is refused.
 - If `allowed_formats` cannot be resolved at all, the connector does **not**
-  invent a list. A **create** keeps the historical default (`defaultTextFormat`,
-  then `full_html`). An **update** reuses the format already stored on that
-  field, and uses the historical default only when the entity has none. The
-  preview and the save use that same format, including when the server
-  preflight is the published-node core PATCH guard (that probe does not send
-  fields, so it cannot catch a format 422). A known list never persists
-  `full_html` (or any other format) when it is not in that list.
+  invent a list. On the node tools, a **create** keeps the historical default
+  (`defaultTextFormat`, then `full_html`). An **update** reuses the format
+  already stored on that field, and uses the historical default only when the
+  entity has none. The preview and the save use that same format, including
+  when the server preflight is the published-node core PATCH guard (that probe
+  does not send fields, so it cannot catch a format 422). A known list never
+  persists `full_html` (or any other format) when it is not in that list.
+- A one-element array of `{ value, format }` is checked the same way. An
+  update that sends that one-element shape without `format` reuses the stored
+  format when the allowed list is unknown, including when `moderationState`
+  is set. Entity, translation, bulk, paragraph, and media writes use this
+  check too. Those tools do not invent `full_html` for a string body when the
+  list is unknown. `drupal_update_node` components and the caller-supplied
+  children and translations of `drupal_draft_nested_components` are checked
+  before preflight or create. Attributes copied from an existing paragraph
+  are not rewritten.
 
 Dry-run previews return the validated/defaulted `format` on each formatted
 attribute so you can see what would be persisted.

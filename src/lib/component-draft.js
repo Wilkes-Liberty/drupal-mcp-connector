@@ -16,6 +16,7 @@
 import { readNodeDraftInventory, assertDraftLangcode } from "./sentinel-draft.js";
 import { entityRevisionId } from "./write-revision.js";
 import { paragraphPinsFromEntity } from "./err-relationships.js";
+import { applyParagraphTextFormats } from "./field-definition.js";
 import { PREFLIGHT_SENTINEL_DRAFT, dryRunChecks } from "./dry-run-checks.js";
 
 /** Inventory operation: component paragraph changes inside a draft save. */
@@ -159,14 +160,19 @@ function pinMap(entity) {
  * @param {object} [input.relationships]
  * @param {Array} input.components Entries for {@link normalizeComponents}.
  * @param {string} [input.langcode] Must be the default language when given.
- * @param {{dryRun?: boolean}} [options]
+ * @param {{dryRun?: boolean, site?: object}} [options]
  * @returns {Promise<object>} Preview on dryRun; otherwise the written entity
  *   plus `_components` (live and working pins and verified fields per
  *   paragraph).
  */
-export async function writeComponentDraft(backend, input, { dryRun = false } = {}) {
+export async function writeComponentDraft(backend, input, { dryRun = false, site = {} } = {}) {
   const { entityType, bundle, id, attributes = {}, relationships } = input;
   const components = normalizeComponents(input.components);
+  // Refuse a disallowed paragraph format before inventory or the draft preflight.
+  for (const component of components) {
+    const paragraphBundle = component.type.slice("paragraph--".length);
+    await applyParagraphTextFormats(backend, site, paragraphBundle, component.attributes);
+  }
   if (Object.hasOwn(attributes, "path")) {
     throw new Error("Aliases are not revisioned. Change the alias in a separate update; no write was attempted.");
   }

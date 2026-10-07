@@ -19,6 +19,7 @@ import {
 import { attachWrittenRevisionPair, readWrittenRevision } from "../lib/write-revision.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
 import { readUpdateTarget } from "../lib/canonical-draft.js";
+import { applyAllowedFormatsToAttributes } from "../lib/field-definition.js";
 import { dryRunChecks, PREFLIGHT_NONE } from "../lib/dry-run-checks.js";
 import {
   resolveSecurityConfig, assertReadAllowed, assertWriteAllowed, assertDeleteAllowed, assertPublishAllowed,
@@ -70,9 +71,12 @@ async function createEntity({ site: siteName, entityType, bundle, attributes: ca
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", entityType, bundle);
-  assertPublishAllowed(sec, callerAttributes);
-  const attributes = withUnpublishedDefault(sec, entityType, callerAttributes);
   const backend = await resolveBackend(site);
+  const formatted = await applyAllowedFormatsToAttributes({
+    backend, site, entityType, bundle, attributes: { ...callerAttributes }, defaultBodyFormat: false,
+  });
+  assertPublishAllowed(sec, formatted);
+  const attributes = withUnpublishedDefault(sec, entityType, formatted);
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
   if (dryRun) {
     return {
@@ -113,8 +117,12 @@ async function updateEntity({ site: siteName, entityType, bundle, id, attributes
   // unrequested-status-change flag. Skipped when the caller pinned the
   // moderation state explicitly (same condition the draft default uses).
   const existing = await readUpdateTarget(backend, { entityType, bundle, id, attributes });
+  const formatted = await applyAllowedFormatsToAttributes({
+    backend, site, entityType, bundle, attributes: { ...attributes }, existingEntity: existing,
+    defaultBodyFormat: false,
+  });
   const safeAttributes = await applySafeDraftDefault({
-    backend, entityType, bundle, id, attributes, existingEntity: existing,
+    backend, entityType, bundle, id, attributes: formatted, existingEntity: existing,
   });
   assertPublishAllowed(sec, safeAttributes);
   const resolvedRelationships = await resolveErrRelationships(backend, relationships);
