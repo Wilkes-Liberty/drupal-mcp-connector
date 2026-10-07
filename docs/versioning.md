@@ -67,6 +67,12 @@ That pin does not limit northbound clients to the same revision.
 - **Node.js 20+** (`engines.node`). CI runs the suite on Node 20.
 - **Drupal 10 / 11** for the Drupal side.
 
+## Before you upgrade
+
+Consumers pin an exact version, confirm `dist.integrity` from the npm registry,
+read the changelog, and run `npm audit --omit=dev` before upgrading. The steps
+are in the README section **Before you upgrade**.
+
 ## Deprecation policy
 
 When something on the stable surface must change:
