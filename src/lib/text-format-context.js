@@ -50,7 +50,7 @@ const TEXT_FORMAT_TOOLS = new Set([
 /** @type {Map<string, {at: number, document: ?object, ttl: number}>} */
 const cache = new Map();
 
-/** @type {Map<string, Promise<void>>} */
+/** @type {Map<string, {slot: object, promise: Promise<void>}>} */
 const inflight = new Map();
 
 /** @type {(site: object) => Promise<?object>} */
@@ -129,13 +129,20 @@ export async function ensureTextFormatContext(site) {
   const key = cacheKey(site);
   if (fresh(key)) return;
   const pending = inflight.get(key);
-  if (pending) return pending;
-  const job = loadTextFormatContext(site, key);
-  inflight.set(key, job);
+  if (pending) {
+    await pending.promise;
+    return;
+  }
+  // Identity is a plain object. Comparing the promise itself is what CodeQL
+  // reports as a missing await.
+  const slot = {};
+  const promise = loadTextFormatContext(site, key);
+  inflight.set(key, { slot, promise });
   try {
-    await job;
+    await promise;
   } finally {
-    if (inflight.get(key) === job) inflight.delete(key);
+    const row = inflight.get(key);
+    if (row?.slot === slot) inflight.delete(key);
   }
 }
 
