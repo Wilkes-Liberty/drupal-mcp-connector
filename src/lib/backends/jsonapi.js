@@ -884,7 +884,10 @@ export class JsonApiBackend extends Backend {
       try {
         const data = await drupalFetch(this.site, `/jsonapi/${resource}/${resource}?${params}`);
         const row = Array.isArray(data?.data) ? data.data[0] : data?.data;
-        return parseFieldConfigObject(row?.attributes, fieldName);
+        // A filter that is ignored would return some other field. Using that
+        // row's allowed_formats would persist the wrong format (#429).
+        if (row?.attributes?.field_name !== fieldName) return null;
+        return parseFieldConfigObject(row.attributes, fieldName);
       } catch {
         return null;
       }

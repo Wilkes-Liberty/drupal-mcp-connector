@@ -28,6 +28,7 @@ import {
 } from "../lib/security.js";
 import { validateUuid, validateMachineName } from "../lib/validate.js";
 import { applySafeDraftDefault } from "../lib/moderation-default.js";
+import { applyAllowedFormatsToAttributes } from "../lib/field-definition.js";
 import { omitLiveComputedMetatag } from "../lib/entity-response.js";
 import { entityRevisionId } from "../lib/write-revision.js";
 import { paragraphRevisionId } from "../lib/err-relationships.js";
@@ -160,7 +161,10 @@ async function createTranslation({
   }
 
   let draftRevision;
-  let drafted = { ...attributes };
+  let drafted = await applyAllowedFormatsToAttributes({
+    backend, site, entityType, bundle: type, attributes: { ...attributes }, existingEntity: existing,
+    defaultBodyFormat: false,
+  });
   delete drafted.langcode;
   if (entityType === "paragraph") {
     const pinned = revisionId ?? paragraphRevisionId(existing);

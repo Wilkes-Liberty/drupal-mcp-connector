@@ -21,6 +21,7 @@ import {
   resolveParagraphRevisionId, missingParagraphRevisionError,
 } from "../lib/err-relationships.js";
 import { prepareGuardedPatch, updateEntityGuarded } from "../lib/patch-preflight.js";
+import { applyAllowedFormatsToAttributes } from "../lib/field-definition.js";
 
 /**
  * Normalize an unknown thrown value into a human-readable message.
@@ -53,11 +54,15 @@ async function bulkCreate({ site: siteName, entityType, bundle, items = [] }) {
   for (const [index, rawItem] of items.entries()) {
     const item = rawItem || {};
     try {
-      assertPublishAllowed(sec, item.attributes ?? {});
+      const formatted = await applyAllowedFormatsToAttributes({
+        backend, site, entityType, bundle, attributes: { ...(item.attributes ?? {}) },
+        defaultBodyFormat: false,
+      });
+      assertPublishAllowed(sec, formatted);
       const resolvedRelationships = await resolveErrRelationships(backend, item.relationships ?? {});
       const entity = await backend.createEntity({
         entityType, bundle,
-        attributes: withUnpublishedDefault(sec, entityType, item.attributes ?? {}),
+        attributes: withUnpublishedDefault(sec, entityType, formatted),
         relationships: resolvedRelationships,
       });
       created += 1;
@@ -107,9 +112,13 @@ async function bulkUpdate({ site: siteName, entityType, bundle, items = [] }) {
       const existing = await readUpdateTarget(backend, {
         entityType, bundle, id: item.id, attributes: item.attributes ?? {},
       });
+      const formatted = await applyAllowedFormatsToAttributes({
+        backend, site, entityType, bundle, attributes: { ...(item.attributes ?? {}) },
+        existingEntity: existing, defaultBodyFormat: false,
+      });
       const attributes = await applySafeDraftDefault({
         backend, entityType, bundle, id: item.id,
-        attributes: item.attributes ?? {},
+        attributes: formatted,
         existingEntity: existing,
       });
       assertPublishAllowed(sec, attributes);

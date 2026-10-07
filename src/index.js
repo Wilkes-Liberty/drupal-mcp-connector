@@ -50,6 +50,7 @@ import { createLegacySessionHandler, createMcpRequestHandler } from "./lib/http-
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
 import { createRateLimiter } from "./lib/rate-limit.js";
 import { callTool, invokeReadTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
+import { fetchTextFormatContext, installTextFormatContextFetcher } from "./lib/text-format-context.js";
 import { filterDiscoverableTools } from "./lib/governance.js";
 import {
   filterPromptsByPrincipal,
@@ -74,6 +75,8 @@ import {
 import { builtinWorkflowProvider } from "./lib/workflows/builtin.js";
 import { runWizardCli } from "./lib/wizard.js";
 import { runDoctorCli } from "./lib/doctor.js";
+
+installTextFormatContextFetcher(fetchTextFormatContext);
 
 const cliCommand = process.argv[2];
 if (cliCommand === "wizard" || cliCommand === "init") {

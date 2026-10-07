@@ -11,10 +11,14 @@
  *      `base_field_override` (node body is a base field; its allowed_formats
  *      are not on `field_config`). Internal adapter fetch, not
  *      `drupal_entity_get` (`field_config` is on the agent deny list).
- *   2. Drush `config:get field.field.{entityType}.{bundle}.{field}`, then
+ *      A row whose `field_name` is not the requested field is a miss.
+ *   2. Cached Sentinel `GET /drupal-mcp/context`, for node bundles, when the
+ *      field entry includes `allowed_formats` (#429). A content-tier token
+ *      cannot read `field_config`. Dispatch fills this cache before a write.
+ *   3. Drush `config:get field.field.{entityType}.{bundle}.{field}`, then
  *      `core.base_field_override.{entityType}.{bundle}.{field}`, when a Drush
  *      bridge is configured.
- *   3. If the definition cannot be resolved: return null. Creates keep the
+ *   4. If the definition cannot be resolved: return null. Creates keep the
  *      historical default chain only while the list is unknown. Updates reuse
  *      the format already stored on that field (#327) so a dry run cannot
  *      preview a fallback the save will reject. Once the list is known, never
@@ -22,6 +26,7 @@
  */
 
 import { drushConfigured } from "./audit-sources.js";
+import { textFormatDefinitionFromContext } from "./text-format-context.js";
 import { validateMachineName } from "./validate.js";
 import { parseDrush, sshDrush } from "../tools/drush.js";
 
@@ -137,15 +142,19 @@ export async function resolveFieldDefinition(backend, site, entityType, bundle, 
   if (typeof backend?.getFieldDefinition === "function") {
     try {
       const def = await backend.getFieldDefinition({ entityType, bundle, fieldName });
-      if (def) return parseFieldConfigObject({
-        field_name: def.fieldName,
-        field_type: def.fieldType,
-        settings: { allowed_formats: def.allowedFormats },
-      }, fieldName) ?? def;
+      if (def?.fieldName === fieldName) {
+        return parseFieldConfigObject({
+          field_name: def.fieldName,
+          field_type: def.fieldType,
+          settings: { allowed_formats: def.allowedFormats },
+        }, fieldName) ?? def;
+      }
     } catch {
-      // JSON:API field_config is optional; try Drush next.
+      // JSON:API field_config is optional; try the next source.
     }
   }
+  const fromContext = textFormatDefinitionFromContext(site, entityType, bundle, fieldName);
+  if (fromContext) return fromContext;
   if (drushConfigured(site)) {
     const def = await fieldDefinitionFromDrush(site, entityType, bundle, fieldName);
     if (def) return def;
@@ -295,6 +304,44 @@ function normalizeFormattedValue(raw, format) {
 }
 
 /**
+ * Resolve one formatted value, or return it unchanged when it is not text.
+ * @param {string} fieldName
+ * @param {*} value
+ * @param {?object} def
+ * @param {boolean} treatAsBody
+ * @param {object} site
+ * @param {?object} existingEntity
+ * @returns {*}
+ */
+function resolveFormattedItem(fieldName, value, def, treatAsBody, site, existingEntity) {
+  const formattedType = Boolean(def?.fieldType && FORMATTED_FIELD_TYPES.has(def.fieldType));
+  const restricted = Boolean(def?.allowedFormats?.length);
+  const shaped = isFormattedShape(value);
+  if (typeof value !== "string" && (typeof value !== "object" || value === null || Array.isArray(value))) {
+    return value;
+  }
+  if (def && !formattedType && !restricted && !treatAsBody) return value;
+  if (!def && !shaped && !treatAsBody) return value;
+
+  const allowedFormats = def ? def.allowedFormats : null;
+  const listUnknown = !Array.isArray(allowedFormats) || allowedFormats.length === 0;
+  let requested = requestedFormatOf(value);
+  if ((requested === undefined || requested === null || requested === "") && listUnknown) {
+    const stored = storedTextFormat(existingEntity, fieldName);
+    if (stored) requested = stored;
+  }
+  const format = resolveTextFormat({
+    fieldName,
+    requested,
+    allowedFormats,
+    site,
+    defaultWhenUnknown: treatAsBody,
+  });
+  if (format === undefined && !formattedType && !treatAsBody && !shaped) return value;
+  return normalizeFormattedValue(value, format);
+}
+
+/**
  * Default and validate text formats on a write attribute map (mutates it).
  * Same checks run for dry-run and real writes so a disallowed format never
  * reaches create/update.
@@ -303,46 +350,44 @@ function normalizeFormattedValue(raw, format) {
  * caller omitted a format, the format already stored on that field is reused.
  * The same choice is what dryRun previews and what the save sends (#327).
  *
- * @param {{backend: object, site: object, entityType: string, bundle: string, attributes: object, existingEntity?: ?object}} input
+ * `defaultBodyFormat` is true for the node tools, which keep the historical
+ * body fallback when the list is unknown. Other write tools pass false so a
+ * string body is not rewritten to `full_html`.
+ *
+ * A one-element array is checked too (#429). Callers sometimes send the
+ * JSON:API list shape for a single-value text field; skipping the array let
+ * a disallowed format through.
+ *
+ * @param {{backend: object, site: object, entityType: string, bundle: string, attributes: object, existingEntity?: ?object, defaultBodyFormat?: boolean}} input
  * @returns {Promise<object>} The same attributes object, with formats resolved.
  */
 export async function applyAllowedFormatsToAttributes({
   backend, site, entityType, bundle, attributes, existingEntity = null,
+  defaultBodyFormat = true,
 }) {
   const names = Object.keys(attributes).filter((name) => !SKIP_FORMAT_FIELDS.has(name));
   for (const fieldName of names) {
     const value = new Map(Object.entries(attributes)).get(fieldName);
     if (value === undefined || value === null) continue;
-    if (typeof value !== "string" && (typeof value !== "object" || Array.isArray(value))) continue;
-
+    if (!Array.isArray(value) && typeof value !== "string" && typeof value !== "object") continue;
+    const treatAsBody = defaultBodyFormat && fieldName === "body";
     const def = await resolveFieldDefinition(backend, site, entityType, bundle, fieldName);
-    const formattedType = Boolean(def?.fieldType && FORMATTED_FIELD_TYPES.has(def.fieldType));
-    const restricted = Boolean(def?.allowedFormats?.length);
-    const isBody = fieldName === "body";
-    const shaped = isFormattedShape(value);
-
-    if (def && !formattedType && !restricted && !isBody) continue;
-    if (!def && !shaped && !isBody) continue;
-
-    const allowedFormats = def ? def.allowedFormats : null;
-    const listUnknown = !Array.isArray(allowedFormats) || allowedFormats.length === 0;
-    let requested = requestedFormatOf(value);
-    if ((requested === undefined || requested === null || requested === "") && listUnknown) {
-      const stored = storedTextFormat(existingEntity, fieldName);
-      if (stored) requested = stored;
+    if (Array.isArray(value)) {
+      const formattedType = Boolean(def?.fieldType && FORMATTED_FIELD_TYPES.has(def.fieldType));
+      const restricted = Boolean(def?.allowedFormats?.length);
+      const anyShaped = value.some((item) => isFormattedShape(item));
+      if (!formattedType && !restricted && !treatAsBody && !anyShaped) continue;
+      const next = value.map((item) => resolveFormattedItem(
+        fieldName, item, def, treatAsBody, site, existingEntity,
+      ));
+      Object.assign(attributes, Object.fromEntries([[fieldName, next]]));
+      continue;
     }
-    const format = resolveTextFormat({
-      fieldName,
-      requested,
-      allowedFormats,
-      site,
-      defaultWhenUnknown: isBody,
-    });
-
-    if (format === undefined && !formattedType && !isBody && !shaped) continue;
-    Object.assign(attributes, Object.fromEntries([
-      [fieldName, normalizeFormattedValue(value, format)],
-    ]));
+    if (typeof value !== "string" && typeof value !== "object") continue;
+    const next = resolveFormattedItem(fieldName, value, def, treatAsBody, site, existingEntity);
+    if (next !== value) {
+      Object.assign(attributes, Object.fromEntries([[fieldName, next]]));
+    }
   }
   return attributes;
 }

@@ -35,6 +35,7 @@
  */
 
 import { getSiteConfig } from "../lib/config.js";
+import { applyAllowedFormatsToAttributes } from "../lib/field-definition.js";
 import { resolveBackend } from "../lib/backends/index.js";
 import {
   resolveSecurityConfig, assertWriteAllowed, assertReadAllowed, redactCanonicalEntity,
@@ -93,7 +94,11 @@ async function createParagraph({ site: siteName, paragraphType, attributes = {} 
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "create", "paragraph", paragraphType);
   const backend = await resolveBackend(site);
-  const paragraph = await backend.createEntity({ entityType: "paragraph", bundle: paragraphType, attributes });
+  const formatted = await applyAllowedFormatsToAttributes({
+    backend, site, entityType: "paragraph", bundle: paragraphType,
+    attributes: { ...attributes }, defaultBodyFormat: false,
+  });
+  const paragraph = await backend.createEntity({ entityType: "paragraph", bundle: paragraphType, attributes: formatted });
   const bundle = paragraph.bundle || paragraphType;
   const revisionId = await resolveParagraphRevisionId(backend, paragraph, paragraphType);
   if (revisionId === null) throw missingParagraphRevisionError(paragraph.id);
@@ -122,6 +127,10 @@ async function updateParagraph({ site: siteName, paragraphType, id, attributes =
   const sec = resolveSecurityConfig(site);
   assertWriteAllowed(sec, "update", "paragraph", paragraphType);
   const backend = await resolveBackend(site);
+  const formatted = await applyAllowedFormatsToAttributes({
+    backend, site, entityType: "paragraph", bundle: paragraphType,
+    attributes: { ...attributes }, defaultBodyFormat: false,
+  });
   let paragraph;
   if (langcode) {
     const targetLang = assertDraftLangcode(langcode);
@@ -132,11 +141,11 @@ async function updateParagraph({ site: siteName, paragraphType, id, attributes =
       throw new Error("Paragraph translation update requires a paragraph revision ID (the host pin).");
     }
     paragraph = await writeDraft(backend, {
-      entityType: "paragraph", bundle: paragraphType, id, attributes, langcode: targetLang, draftState,
+      entityType: "paragraph", bundle: paragraphType, id, attributes: formatted, langcode: targetLang, draftState,
       draftRevision: { revisionId: pinned },
     });
   } else {
-    paragraph = await backend.updateEntity({ entityType: "paragraph", bundle: paragraphType, id, attributes });
+    paragraph = await backend.updateEntity({ entityType: "paragraph", bundle: paragraphType, id, attributes: formatted });
   }
   const bundle = paragraph.bundle || paragraphType;
   const resolvedRevisionId = await resolveParagraphRevisionId(backend, paragraph, paragraphType);

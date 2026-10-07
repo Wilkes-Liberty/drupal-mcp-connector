@@ -963,6 +963,24 @@ describe("JsonApiBackend.getFieldDefinition", () => {
     expect(out).toBeNull();
   });
 
+  it("returns null when the only row names a different field (#429)", async () => {
+    vi.mocked(drupalFetch).mockResolvedValue({
+      data: [{
+        type: "field_config--field_config",
+        id: "fc-other",
+        attributes: {
+          field_name: "body",
+          field_type: "text_with_summary",
+          settings: { allowed_formats: ["full_html"] },
+        },
+      }],
+    });
+    const out = await backend.getFieldDefinition({
+      entityType: "node", bundle: "solution", fieldName: "field_summary",
+    });
+    expect(out).toBeNull();
+  });
+
   it("returns null when field_config is not readable", async () => {
     vi.mocked(drupalFetch).mockRejectedValueOnce(
       new Error("Drupal 403 on GET /jsonapi/field_config/field_config")

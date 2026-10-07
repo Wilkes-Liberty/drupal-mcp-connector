@@ -15,6 +15,10 @@ import {
   resolveFieldDefinition,
   parseFieldConfigObject,
 } from "../../src/lib/field-definition.js";
+import {
+  clearTextFormatContextCache,
+  rememberTextFormatContext,
+} from "../../src/lib/text-format-context.js";
 
 describe("resolveTextFormat", () => {
   it("uses the single allowed format when the caller omits format", () => {
@@ -75,6 +79,14 @@ describe("resolveTextFormat", () => {
       site: { defaultTextFormat: "full_html" },
     })).toBeUndefined();
   });
+
+  it("treats an empty allowed list as unrestricted, not as deny-all", () => {
+    expect(resolveTextFormat({
+      fieldName: "field_summary",
+      requested: "headless_clean",
+      allowedFormats: [],
+    })).toBe("headless_clean");
+  });
 });
 
 describe("parseFieldConfigObject", () => {
@@ -102,7 +114,12 @@ describe("parseFieldConfigObject", () => {
 });
 
 describe("resolveFieldDefinition chain", () => {
-  beforeEach(() => vi.mocked(sshDrush).mockReset());
+  const site = { _name: "d", baseUrl: "https://x", drushSsh: { host: "x" } };
+
+  beforeEach(() => {
+    vi.mocked(sshDrush).mockReset();
+    clearTextFormatContextCache();
+  });
 
   it("prefers backend.getFieldDefinition over Drush", async () => {
     const backend = {
@@ -159,6 +176,60 @@ describe("resolveFieldDefinition chain", () => {
   it("returns null rather than inventing formats when both sources miss", async () => {
     const backend = { getFieldDefinition: vi.fn(async () => null) };
     const out = await resolveFieldDefinition(backend, { _name: "d" }, "node", "article", "body");
+    expect(out).toBeNull();
+    expect(sshDrush).not.toHaveBeenCalled();
+  });
+
+  it("prefers a matching JSON:API row over Sentinel context (#429)", async () => {
+    rememberTextFormatContext(site, {
+      content_types: {
+        solution: {
+          fields: { field_summary: { type: "text_long", allowed_formats: ["headless_clean"] } },
+        },
+      },
+    });
+    const backend = {
+      getFieldDefinition: vi.fn(async () => ({
+        fieldName: "field_summary", fieldType: "text_long", allowedFormats: ["plain_text"],
+      })),
+    };
+    const out = await resolveFieldDefinition(backend, site, "node", "solution", "field_summary");
+    expect(out.allowedFormats).toEqual(["plain_text"]);
+    expect(sshDrush).not.toHaveBeenCalled();
+  });
+
+  it("uses context when the JSON:API row names a different field (#429)", async () => {
+    rememberTextFormatContext(site, {
+      content_types: {
+        solution: {
+          fields: { field_summary: { type: "text_long", allowed_formats: ["plain_text"] } },
+        },
+      },
+    });
+    const backend = {
+      getFieldDefinition: vi.fn(async () => ({
+        fieldName: "body", fieldType: "text_with_summary", allowedFormats: ["full_html"],
+      })),
+    };
+    const out = await resolveFieldDefinition(backend, site, "node", "solution", "field_summary");
+    expect(out).toEqual({
+      fieldName: "field_summary",
+      fieldType: "text_long",
+      allowedFormats: ["plain_text"],
+    });
+    expect(sshDrush).not.toHaveBeenCalled();
+  });
+
+  it("treats a context field with no allowed_formats key as unknown (#429)", async () => {
+    rememberTextFormatContext(site, {
+      content_types: {
+        solution: { fields: { field_summary: { type: "text_long" } } },
+      },
+    });
+    const backend = { getFieldDefinition: vi.fn(async () => null) };
+    const out = await resolveFieldDefinition(
+      backend, { _name: "d", baseUrl: "https://x" }, "node", "solution", "field_summary",
+    );
     expect(out).toBeNull();
     expect(sshDrush).not.toHaveBeenCalled();
   });

@@ -37,6 +37,10 @@ vi.mock("../../src/lib/security.js", async (orig) => {
 });
 
 import { handlers } from "../../src/tools/nodes.js";
+import {
+  clearTextFormatContextCache,
+  rememberTextFormatContext,
+} from "../../src/lib/text-format-context.js";
 
 function canonicalNode(over = {}) {
   return { id: "n1", entityType: "node", bundle: "article", title: "T", status: true,
@@ -51,6 +55,7 @@ function pathInfo(over = {}) {
 }
 
 beforeEach(() => {
+  clearTextFormatContextCache();
   Object.values(backend).forEach((f) => f.mockReset());
   // Sane defaults so create/update can read path info + re-read the persisted node.
   backend.getPathInfo.mockResolvedValue(pathInfo());
@@ -81,6 +86,14 @@ function fieldDef(fieldName, allowedFormats, fieldType = "text_long") {
 function mockFieldDefs(defsByName) {
   const map = new Map(Object.entries(defsByName));
   backend.getFieldDefinition.mockImplementation(async ({ fieldName }) => map.get(fieldName) ?? null);
+}
+
+/** Sentinel context for the site mock `{ _name: "d", baseUrl: "https://x" }`. */
+function rememberSolutionFormats(fields) {
+  rememberTextFormatContext(
+    { _name: "d", baseUrl: "https://x" },
+    { content_types: { solution: { fields } } },
+  );
 }
 
 describe("nodes tools (migrated)", () => {
@@ -986,6 +999,54 @@ describe("#168 honor field allowed_formats on node writes", () => {
       type: "article", id: "n1", body: "<p>New</p>", moderationState: "draft", dryRun: true,
     })).rejects.toThrow(/body[\s\S]*full_html[\s\S]*client_html/s);
     expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("refuses field_summary headless_clean when context allows only plain_text (#429)", async () => {
+    rememberSolutionFormats({
+      field_summary: { type: "text_long", allowed_formats: ["plain_text"] },
+    });
+    await expect(handlers.drupal_update_node({
+      type: "solution", id: "n1",
+      fields: { field_summary: { value: "Deck", format: "headless_clean" } },
+    })).rejects.toThrow(/field_summary[\s\S]*headless_clean[\s\S]*plain_text/s);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(backend.createEntity).not.toHaveBeenCalled();
+  });
+
+  it("defaults an omitted field_summary format to the single context format (#429)", async () => {
+    rememberSolutionFormats({
+      field_summary: { type: "text_long", allowed_formats: ["plain_text"] },
+    });
+    const out = await handlers.drupal_update_node({
+      type: "solution", id: "n1", dryRun: true,
+      fields: { field_summary: "Deck" },
+    });
+    expect(out.dryRun).toBe(true);
+    expect(out.attributes.field_summary).toEqual({ value: "Deck", format: "plain_text" });
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("keeps an explicit format when context omits allowed_formats (#429)", async () => {
+    rememberSolutionFormats({
+      field_summary: { type: "text_long" },
+    });
+    const out = await handlers.drupal_update_node({
+      type: "solution", id: "n1", dryRun: true,
+      fields: { field_summary: { value: "Deck", format: "headless_clean" } },
+    });
+    expect(out.attributes.field_summary.format).toBe("headless_clean");
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("refuses a disallowed format sent as a one-element list (#429)", async () => {
+    rememberSolutionFormats({
+      field_summary: { type: "text_long", allowed_formats: ["plain_text"] },
+    });
+    await expect(handlers.drupal_create_node({
+      type: "solution", title: "T",
+      fields: { field_summary: [{ value: "Deck", format: "headless_clean" }] },
+    })).rejects.toThrow(/field_summary[\s\S]*headless_clean[\s\S]*plain_text/s);
+    expect(backend.createEntity).not.toHaveBeenCalled();
   });
 });
 
