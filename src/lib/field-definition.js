@@ -14,7 +14,8 @@
  *      A row whose `field_name` is not the requested field is a miss.
  *   2. Cached Sentinel `GET /drupal-mcp/context`, for node bundles, when the
  *      field entry includes `allowed_formats` (#429). A content-tier token
- *      cannot read `field_config`. Dispatch fills this cache before a write.
+ *      cannot read `field_config`. Dispatch fills this cache before a tool
+ *      that resolves text formats.
  *   3. Drush `config:get field.field.{entityType}.{bundle}.{field}`, then
  *      `core.base_field_override.{entityType}.{bundle}.{field}`, when a Drush
  *      bridge is configured.
@@ -252,7 +253,18 @@ function requestedFormatOf(value) {
 }
 
 /**
+ * @param {*} value
+ * @returns {string|undefined}
+ */
+function storedFormatName(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const format = new Map(Object.entries(value)).get("format");
+  return typeof format === "string" && format && format !== "0" ? format : undefined;
+}
+
+/**
  * Format Drupal already stored for a field, if the canonical entity has one.
+ * A one-element list is the JSON:API shape of a single-value text field.
  * @param {?object} entity
  * @param {string} fieldName
  * @returns {string|undefined}
@@ -261,9 +273,31 @@ function storedTextFormat(entity, fieldName) {
   const fields = entity?.fields;
   if (!fields || typeof fields !== "object" || Array.isArray(fields)) return undefined;
   const value = new Map(Object.entries(fields)).get(fieldName);
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const format = new Map(Object.entries(value)).get("format");
-  return typeof format === "string" && format && format !== "0" ? format : undefined;
+  if (Array.isArray(value)) {
+    if (value.length !== 1) return undefined;
+    return storedFormatName(value.at(0));
+  }
+  return storedFormatName(value);
+}
+
+/**
+ * A one-element JSON:API list omits its format when the only item is a
+ * string or a `{ value }` object without `format`. A longer list of bare
+ * strings is a list field, not an omitted text format. A formatted item
+ * inside a longer list still counts.
+ * @param {unknown[]} value
+ * @returns {boolean}
+ */
+function arrayOmitsTextFormat(value) {
+  if (value.length === 1) {
+    const item = value.at(0);
+    if (typeof item === "string") return true;
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    const hasValue = Object.prototype.hasOwnProperty.call(item, "value");
+    const hasFormat = Object.prototype.hasOwnProperty.call(item, "format") && item.format;
+    return hasValue && !hasFormat;
+  }
+  return value.some((item) => isFormattedShape(item) && !requestedFormatOf(item));
 }
 
 /**
@@ -276,8 +310,12 @@ export function attributesOmitTextFormat(attributes) {
   if (!attributes || typeof attributes !== "object") return false;
   for (const [name, value] of Object.entries(attributes)) {
     if (SKIP_FORMAT_FIELDS.has(name) || value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      if (arrayOmitsTextFormat(value)) return true;
+      continue;
+    }
     if (typeof value === "string") return true;
-    if (typeof value === "object" && !Array.isArray(value)) {
+    if (typeof value === "object") {
       const hasValue = Object.prototype.hasOwnProperty.call(value, "value");
       const hasFormat = Object.prototype.hasOwnProperty.call(value, "format") && value.format;
       if ((name === "body" || hasValue) && !hasFormat) return true;
@@ -356,7 +394,8 @@ function resolveFormattedItem(fieldName, value, def, treatAsBody, site, existing
  *
  * A one-element array is checked too (#429). Callers sometimes send the
  * JSON:API list shape for a single-value text field; skipping the array let
- * a disallowed format through.
+ * a disallowed format through. An update that omits the format on that
+ * one-element shape reuses the stored format when the allowed list is unknown.
  *
  * @param {{backend: object, site: object, entityType: string, bundle: string, attributes: object, existingEntity?: ?object, defaultBodyFormat?: boolean}} input
  * @returns {Promise<object>} The same attributes object, with formats resolved.
@@ -390,4 +429,25 @@ export async function applyAllowedFormatsToAttributes({
     }
   }
   return attributes;
+}
+
+/**
+ * Validate text formats on caller-supplied paragraph attributes.
+ * Paragraph writes do not invent `full_html`. Do not pass attributes copied
+ * from an existing paragraph: those already have the stored format.
+ * @param {object} backend
+ * @param {object} site
+ * @param {string} bundle Paragraph bundle machine name.
+ * @param {object} attributes Mutated in place.
+ * @returns {Promise<object>}
+ */
+export function applyParagraphTextFormats(backend, site, bundle, attributes) {
+  return applyAllowedFormatsToAttributes({
+    backend,
+    site,
+    entityType: "paragraph",
+    bundle,
+    attributes,
+    defaultBodyFormat: false,
+  });
 }

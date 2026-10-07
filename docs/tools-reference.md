@@ -180,9 +180,15 @@ tries `field.field.{entity}.{bundle}.{field}` and then
   when the server preflight is the published-node core PATCH guard (that probe
   does not send fields, so it cannot catch a format 422). A known list never
   persists `full_html` (or any other format) when it is not in that list.
-- A one-element array of `{ value, format }` is checked the same way. Entity,
-  translation, bulk, paragraph, and media writes use this check too. Those
-  tools do not invent `full_html` for a string body when the list is unknown.
+- A one-element array of `{ value, format }` is checked the same way. An
+  update that sends that one-element shape without `format` reuses the stored
+  format when the allowed list is unknown, including when `moderationState`
+  is set. Entity, translation, bulk, paragraph, and media writes use this
+  check too. Those tools do not invent `full_html` for a string body when the
+  list is unknown. `drupal_update_node` components and the caller-supplied
+  children and translations of `drupal_draft_nested_components` are checked
+  before preflight or create. Attributes copied from an existing paragraph
+  are not rewritten.
 
 Dry-run previews return the validated/defaulted `format` on each formatted
 attribute so you can see what would be persisted.

@@ -21,6 +21,7 @@ import { entityRevisionId } from "./write-revision.js";
 import { embedParagraphRef, paragraphRevisionId } from "./err-relationships.js";
 import { httpStatusOf } from "./error-status.js";
 import { OPEN_DRAFT_OPERATION, MIN_SENTINEL_COMPONENTS_VERSION, valueMatches } from "./component-draft.js";
+import { applyParagraphTextFormats } from "./field-definition.js";
 import { PREFLIGHT_NONE, PREFLIGHT_SENTINEL_DRAFT, dryRunChecks } from "./dry-run-checks.js";
 
 export const NESTED_DRAFT_PARTIAL_CODE = "NESTED_DRAFT_PARTIAL";
@@ -84,11 +85,14 @@ export function nestedDraftUncertain(detail, prepared) {
 /**
  * @param {object} backend
  * @param {object} input
- * @param {{dryRun?: boolean, assertParagraphCreate?: (bundle: string) => void}} [options]
+ * @param {{dryRun?: boolean, assertParagraphCreate?: (bundle: string) => void, site?: object}} [options]
  * @returns {Promise<object>}
  */
-export async function draftNestedComponents(backend, input, { dryRun = false, assertParagraphCreate } = {}) {
+export async function draftNestedComponents(backend, input, { dryRun = false, assertParagraphCreate, site = {} } = {}) {
   const spec = normalizeNestedInput(input);
+  // Caller-supplied children and translations only. Copied parent fields are
+  // the stored paragraph, not a new format choice, and are left unchanged.
+  await applyCallerParagraphFormats(backend, site, spec.children);
   const inventory = await readNodeDraftInventory(backend, spec);
   if (!inventory) {
     throw new Error(
@@ -730,9 +734,21 @@ function assertChildren(children, childPins, requiredLangs) {
 }
 
 /**
- * @param {object} child
- * @param {Set<string>} requiredLangs
+ * @param {object} backend
+ * @param {object} site
+ * @param {object[]} children
+ * @returns {Promise<void>}
  */
+async function applyCallerParagraphFormats(backend, site, children) {
+  for (const child of children) {
+    if (child.op === "keep") continue;
+    await applyParagraphTextFormats(backend, site, child.type, child.attributes);
+    for (const translation of child.translations ?? []) {
+      await applyParagraphTextFormats(backend, site, child.type, translation.attributes);
+    }
+  }
+}
+
 function assertLangs(child, requiredLangs) {
   const supplied = new Set(child.translations.map((row) => row.langcode));
   for (const lang of requiredLangs) {

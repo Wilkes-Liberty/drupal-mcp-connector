@@ -10,8 +10,11 @@
  * report the restriction — the caller must not treat that as "all formats".
  * An empty array means the field has no format restriction.
  *
- * The process cache is filled by dispatch before a write. Unit tests that
- * call handlers directly can seed it with `rememberTextFormatContext`.
+ * Dispatch fills the process cache before a tool that resolves text formats.
+ * A failed fetch is remembered only briefly so a Sentinel outage does not
+ * add the timeout to every later write, and concurrent writes share one
+ * request. Unit tests that call handlers directly can seed a successful
+ * document with `rememberTextFormatContext`.
  */
 
 import { authHeadersAsync, clientHeaders } from "./config.js";
@@ -19,11 +22,36 @@ import { authHeadersAsync, clientHeaders } from "./config.js";
 /** How long a successful context document is reused. */
 const CONTEXT_TTL_MS = 10 * 60 * 1000;
 
-/** Context fetch budget. A miss must not stall the write. */
+/** How long a miss is remembered. Short, so a recovered Sentinel is retried. */
+const FAILURE_TTL_MS = 30 * 1000;
+
+/** Context fetch budget. A miss must not stall the write past this. */
 const CONTEXT_TIMEOUT_MS = 8000;
 
-/** @type {Map<string, {at: number, document: object}>} */
+/**
+ * Tools whose handlers call the text-format resolver. Other writes must not
+ * wait on this document.
+ */
+const TEXT_FORMAT_TOOLS = new Set([
+  "drupal_create_node",
+  "drupal_update_node",
+  "drupal_entity_create",
+  "drupal_entity_update",
+  "drupal_create_translation",
+  "drupal_bulk_create",
+  "drupal_bulk_update",
+  "drupal_create_paragraph",
+  "drupal_update_paragraph",
+  "drupal_create_media",
+  "drupal_update_media",
+  "drupal_draft_nested_components",
+]);
+
+/** @type {Map<string, {at: number, document: ?object, ttl: number}>} */
 const cache = new Map();
+
+/** @type {Map<string, Promise<void>>} */
+const inflight = new Map();
 
 /** @type {(site: object) => Promise<?object>} */
 let fetcher = async () => null;
@@ -45,16 +73,36 @@ function cacheKey(site) {
  */
 export function clearTextFormatContextCache() {
   cache.clear();
+  inflight.clear();
 }
 
 /**
- * Seed the cache without a network call.
+ * Whether this tool resolves text formats and should wait for context.
+ * @param {string} toolName
+ * @returns {boolean}
+ */
+export function toolNeedsTextFormatContext(toolName) {
+  return TEXT_FORMAT_TOOLS.has(toolName);
+}
+
+/**
+ * Seed the cache without a network call. A seeded document uses the success TTL.
  * @param {object} site Resolved site config.
  * @param {object} document Sentinel context JSON.
  * @returns {void}
  */
 export function rememberTextFormatContext(site, document) {
-  cache.set(cacheKey(site), { at: Date.now(), document });
+  cache.set(cacheKey(site), { at: Date.now(), document, ttl: CONTEXT_TTL_MS });
+}
+
+/**
+ * @param {string} key
+ * @returns {boolean}
+ */
+function fresh(key) {
+  const hit = cache.get(key);
+  if (!hit) return false;
+  return Date.now() - hit.at < hit.ttl;
 }
 
 /**
@@ -69,25 +117,46 @@ export function installTextFormatContextFetcher(next) {
 }
 
 /**
- * Load `GET /drupal-mcp/context` when the cache is cold. Failures are a
- * miss: the write keeps the historical path for an unknown format list.
+ * Load `GET /drupal-mcp/context` when the cache is cold. A failure is cached
+ * as a miss for 30 seconds: the write keeps the historical path
+ * for an unknown format list, and the next write does not wait again.
+ * Concurrent callers share one in-flight request.
  * @param {object} site Resolved site config.
  * @returns {Promise<void>}
  */
 export async function ensureTextFormatContext(site) {
   if (!site?.baseUrl) return;
   const key = cacheKey(site);
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < CONTEXT_TTL_MS) return;
+  if (fresh(key)) return;
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const job = loadTextFormatContext(site, key);
+  inflight.set(key, job);
+  try {
+    await job;
+  } finally {
+    if (inflight.get(key) === job) inflight.delete(key);
+  }
+}
+
+/**
+ * @param {object} site
+ * @param {string} key
+ * @returns {Promise<void>}
+ */
+async function loadTextFormatContext(site, key) {
   let document = null;
   try {
-    document = await fetcher(site);
+    const loaded = await fetcher(site);
+    if (loaded && typeof loaded === "object" && !Array.isArray(loaded)) document = loaded;
   } catch {
     document = null;
   }
-  if (document && typeof document === "object") {
-    cache.set(key, { at: Date.now(), document });
-  }
+  cache.set(key, {
+    at: Date.now(),
+    document,
+    ttl: document ? CONTEXT_TTL_MS : FAILURE_TTL_MS,
+  });
 }
 
 /**
@@ -140,7 +209,8 @@ export async function fetchTextFormatContext(site) {
 export function textFormatDefinitionFromContext(site, entityType, bundle, fieldName) {
   if (entityType !== "node") return null;
   const hit = cache.get(cacheKey(site));
-  if (!hit || Date.now() - hit.at >= CONTEXT_TTL_MS) return null;
+  // A cached miss (document null) is not a schema. Do not invent a list.
+  if (!hit?.document || !fresh(cacheKey(site))) return null;
   const types = hit.document?.content_types;
   if (!types || typeof types !== "object" || Array.isArray(types)) return null;
   const schema = new Map(Object.entries(types)).get(bundle);

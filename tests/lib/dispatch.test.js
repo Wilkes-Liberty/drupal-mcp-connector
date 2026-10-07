@@ -33,6 +33,10 @@ vi.mock("../../src/lib/config.js", async (orig) => {
 import fetch from "node-fetch";
 import { getSiteConfig, listSiteNames } from "../../src/lib/config.js";
 import { securityMiddleware, callTool, invokeReadTool, listResolvableSiteConfigs } from "../../src/lib/dispatch.js";
+import {
+  clearTextFormatContextCache,
+  installTextFormatContextFetcher,
+} from "../../src/lib/text-format-context.js";
 import { GovernanceError, clearGovernanceCache } from "../../src/lib/governance.js";
 import { SecurityError } from "../../src/lib/security.js";
 import { withResolvedTarget } from "../../src/lib/site-target.js";
@@ -137,6 +141,30 @@ describe("securityMiddleware source-governance gate", () => {
     await expect(
       securityMiddleware("drupal_governance_status", { site: "gov" }, handler),
     ).resolves.toEqual({ sites: [] });
+  });
+});
+
+describe("text-format context preload (#429)", () => {
+  const handler = vi.fn(async () => ({ ok: true }));
+
+  beforeEach(() => {
+    clearTextFormatContextCache();
+    installTextFormatContextFetcher(async () => null);
+    handler.mockClear();
+  });
+
+  it("loads context for a text-format write and not for unrelated writes", async () => {
+    const fetcher = vi.fn(async () => ({ content_types: {} }));
+    installTextFormatContextFetcher(fetcher);
+    await securityMiddleware("drupal_create_node", { site: "open", title: "T" }, handler);
+    await securityMiddleware("drupal_create_node", { site: "open", title: "U" }, handler);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await securityMiddleware("drupal_drush_cache_rebuild", { site: "open" }, handler);
+    await securityMiddleware("drupal_upload_file", { site: "open", path: "/tmp/a.png" }, handler);
+    await securityMiddleware("drupal_config_set", { site: "open", name: "system.site", values: {} }, handler);
+    await securityMiddleware("drupal_graphql", { site: "open", query: "mutation { ping }" }, handler);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalled();
   });
 });
 

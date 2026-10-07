@@ -29,6 +29,7 @@ async function draftNestedComponentsTool({
     liveRevisionId, resumeParentId,
   }, {
     dryRun,
+    site,
     assertParagraphCreate(paragraphBundle) {
       assertWriteAllowed(sec, "create", "paragraph", paragraphBundle);
     },

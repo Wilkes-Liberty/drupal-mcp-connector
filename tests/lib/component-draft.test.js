@@ -261,4 +261,30 @@ describe("writeComponentDraft", () => {
     });
     await expect(writeComponentDraft(b, args)).rejects.toThrow(new RegExp(`still pins.*${TEXT}`));
   });
+
+  it("refuses a disallowed component format before the draft preflight (#429)", async () => {
+    const b = backend({
+      draftResponses: [preflightOpen, written],
+      live: pinned(5, 6),
+      working: pinned(7, 8),
+    });
+    b.getFieldDefinition = vi.fn(async ({ fieldName }) => (
+      fieldName === "field_body"
+        ? { fieldName, fieldType: "text_long", allowedFormats: ["plain_text"] }
+        : null
+    ));
+    await expect(writeComponentDraft(b, {
+      ...args,
+      components: [{
+        id: TEXT,
+        type: "text_block",
+        attributes: { field_body: { value: "<p>x</p>", format: "headless_clean" } },
+      }],
+    }, { site: { _name: "t", baseUrl: "https://example.test" } })).rejects.toThrow(
+      /field_body[\s\S]*headless_clean[\s\S]*plain_text/,
+    );
+    const drafts = b.rawQuery.mock.calls.map(([call]) => call)
+      .filter((call) => call.path.endsWith("/mcp-draft"));
+    expect(drafts).toHaveLength(0);
+  });
 });

@@ -11,6 +11,8 @@ vi.mock("../../src/tools/drush.js", () => ({
 import { sshDrush } from "../../src/tools/drush.js";
 import {
   FALLBACK_TEXT_FORMAT,
+  applyAllowedFormatsToAttributes,
+  attributesOmitTextFormat,
   resolveTextFormat,
   resolveFieldDefinition,
   parseFieldConfigObject,
@@ -232,5 +234,35 @@ describe("resolveFieldDefinition chain", () => {
     );
     expect(out).toBeNull();
     expect(sshDrush).not.toHaveBeenCalled();
+  });
+});
+
+describe("omitted formats on one-element text arrays (#429)", () => {
+  it("reuses the stored format from a one-element array when the caller omits it", async () => {
+    const attributes = { body: [{ value: "<p>New</p>" }] };
+    await applyAllowedFormatsToAttributes({
+      backend: { getFieldDefinition: async () => null },
+      site: { _name: "s", baseUrl: "https://x" },
+      entityType: "node",
+      bundle: "article",
+      attributes,
+      existingEntity: { fields: { body: [{ value: "<p>Old</p>", format: "client_html" }] } },
+    });
+    expect(attributes.body).toEqual([{ value: "<p>New</p>", format: "client_html" }]);
+  });
+
+  it("does not treat a long list of strings as an omitted text format", () => {
+    expect(attributesOmitTextFormat({ field_tags: ["a", "b", "c"] })).toBe(false);
+    expect(attributesOmitTextFormat({ body: ["<p>New</p>"] })).toBe(true);
+    expect(attributesOmitTextFormat({ body: [{ value: "<p>New</p>" }] })).toBe(true);
+    expect(attributesOmitTextFormat({
+      body: [{ value: "<p>New</p>", format: "client_html" }],
+    })).toBe(false);
+    expect(attributesOmitTextFormat({
+      field_notes: [
+        { value: "a", format: "plain_text" },
+        { value: "b", summary: "s" },
+      ],
+    })).toBe(true);
   });
 });

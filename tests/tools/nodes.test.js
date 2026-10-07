@@ -977,6 +977,29 @@ describe("#168 honor field allowed_formats on node writes", () => {
     });
   });
 
+  it("reuses the stored format for a one-element body array when moderation state is explicit (#429)", async () => {
+    backend.getFieldDefinition.mockResolvedValue(null);
+    backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
+      if (resourceVersion === "rel:working-copy") {
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return canonicalNode({
+        status: true,
+        fields: {
+          moderation_state: "published",
+          drupal_internal__vid: 10,
+          body: { value: "<p>Old</p>", format: "client_html" },
+        },
+      });
+    });
+    const preview = await handlers.drupal_update_node({
+      type: "article", id: "n1", moderationState: "draft", dryRun: true,
+      fields: { body: [{ value: "<p>New</p>" }] },
+    });
+    expect(preview.attributes.body).toEqual([{ value: "<p>New</p>", format: "client_html" }]);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
   it("refuses an omitted body format on the core-guard path when it is not allowed (#327)", async () => {
     mockFieldDefs({ body: fieldDef("body", ["client_html", "basic_html"], "text_with_summary") });
     const { getSiteConfig } = await import("../../src/lib/config.js");

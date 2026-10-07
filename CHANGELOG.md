@@ -15,8 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list, so an older Sentinel still passes an explicit format through.
   Entity, translation, bulk, paragraph, and media writes use the same
   check and do not invent `full_html` for a string body. A JSON:API row
-  whose field name does not match the request is ignored. Hosts stay on
-  the previous behavior until a Sentinel release emits the key.
+  whose field name does not match the request is ignored. A context miss
+  is remembered for 30 seconds, and only tools that resolve text formats
+  wait on that document. Component drafts and nested paragraph children,
+  including their translations, are checked before preflight or create.
+  An update that sends a one-element text array without a format reuses
+  the stored format. Hosts stay on the previous behavior until a Sentinel
+  release emits the key.
+
 ### Added
 - **Consumers pin a version and check advisories before upgrade (#423).**
   The README tells operators to pin an exact version, confirm the registry

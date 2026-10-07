@@ -516,7 +516,7 @@ async function updateNode({ site: siteName, type, id, title, body, summary, form
     const written = await writeComponentDraft(backend, {
       entityType: "node", bundle: type, id, attributes, relationships: resolvedRelationships,
       components: normalizedComponents, langcode,
-    }, { dryRun });
+    }, { dryRun, site });
     const shaped = dryRun ? written : shapeWriteResponse(written, returning);
     return summaryWrite.deprecated && bodyAttr ? attachSummaryDeprecation(shaped) : shaped;
   }
