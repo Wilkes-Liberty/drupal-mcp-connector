@@ -287,6 +287,24 @@ or `node_modules/.bin/drupal-mcp-connector`). For multi-site or non-env config,
 clone the repo (or copy `config/config.example.json` beside a small launcher) and
 pass a config path — see **[docs/getting-started.md](docs/getting-started.md)**.
 
+### Before you upgrade
+
+Pin the version you run. Do not point a client you depend on at `latest` or an
+unbounded range.
+
+1. Pin an exact version in the lockfile (`package-lock.json` or
+   `npm-shrinkwrap.json`), or in `package.json` as
+   `"drupal-mcp-connector": "3.2.0"` (use the version you intend to run).
+2. Confirm the registry checksum before you install.
+   `npm view drupal-mcp-connector@3.2.0 dist.integrity` prints the integrity
+   npm checks. A lockfile install fails when the tarball does not match.
+3. Read [CHANGELOG.md](CHANGELOG.md) for that version.
+4. Run `npm audit --omit=dev` against the lockfile and read any advisory
+   before you upgrade. There is no separate scanner to install.
+
+Restart the MCP client after the upgrade and run `drupal-mcp-doctor` against
+the site.
+
 ### From a git clone (development)
 
 ```bash

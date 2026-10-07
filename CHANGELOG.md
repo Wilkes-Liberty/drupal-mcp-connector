@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Consumers pin a version and check advisories before upgrade (#423).**
+  The README tells operators to pin an exact version, confirm the registry
+  integrity checksum, read the changelog, and run `npm audit --omit=dev`
+  before upgrading. No separate scanner.
+
 ## [3.2.0] - 2026-10-05
 
 ### Added
