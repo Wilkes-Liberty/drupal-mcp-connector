@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check and do not invent `full_html` for a string body. A JSON:API row
   whose field name does not match the request is ignored. Hosts stay on
   the previous behavior until a Sentinel release emits the key.
+### Added
+- **Consumers pin a version and check advisories before upgrade (#423).**
+  The README tells operators to pin an exact version, confirm the registry
+  integrity checksum, read the changelog, and run `npm audit --omit=dev`
+  before upgrading. No separate scanner.
 
 ## [3.2.0] - 2026-10-05
 
