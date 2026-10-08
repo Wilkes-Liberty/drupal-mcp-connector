@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Library draft paragraph revisions (#420).** Entity Reference Revisions
+  saves a new paragraph revision when an existing host saves a new revision.
+  A library or custom-block draft matches when it pins that same paragraph,
+  in order, at the submitted revision or a newer one. An older revision, a
+  different paragraph, or a different order still fails. The published
+  revision's pins must still match exactly.
+
 ## [3.2.1] - 2026-10-07
 
 ### Fixed

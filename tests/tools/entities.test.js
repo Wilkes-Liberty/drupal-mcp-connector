@@ -533,6 +533,94 @@ describe("reusable library revision identity (#420)", () => {
     })).rejects.toThrow(/does not pin the submitted paragraphs/);
   });
 
+  it("accepts the later paragraph revision saved with the new library draft", async () => {
+    const paragraphId = draftPins[0].id;
+    versionedLibrary({
+      afterWorking: library(21, false, [{ id: paragraphId, revisionId: 31 }]),
+    });
+    const out = await handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { label: "Reusable" },
+      relationships: { paragraphs: { data: [{ type: "paragraph--p_text_block", id: paragraphId }] } },
+    });
+    expect(out._revisions).toEqual({ live: 20, working: 21 });
+    expect(out.fields.drupal_internal__revision_id).toBe(21);
+  });
+
+  it("rejects a draft that pins an older revision of the submitted paragraph", async () => {
+    const paragraphId = draftPins[0].id;
+    let written = false;
+    backend.getEntity.mockImplementation(async ({ entityType, resourceVersion }) => {
+      if (entityType === "paragraph") {
+        return {
+          id: paragraphId, entityType: "paragraph", bundle: "p_text_block",
+          fields: { drupal_internal__revision_id: 31 },
+        };
+      }
+      if (resourceVersion === "rel:working-copy") {
+        if (written) return library(21, false, [{ id: paragraphId, revisionId: 30 }]);
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return library(20, true, publishedPins);
+    });
+    backend.updateEntity.mockImplementation(async () => {
+      written = true;
+      return { id, entityType: "paragraphs_library_item", bundle: "paragraphs_library_item" };
+    });
+    await expect(handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { label: "Reusable" },
+      relationships: { paragraphs: { data: [{ type: "paragraph--p_text_block", id: paragraphId }] } },
+    })).rejects.toThrow(/does not pin the submitted paragraphs/);
+  });
+
+  it("accepts that later revision on the advertised library draft", async () => {
+    const paragraphId = draftPins[0].id;
+    let written = false;
+    backend.getEntity.mockImplementation(async ({ entityType, resourceVersion }) => {
+      if (entityType === "paragraph") {
+        return {
+          id: paragraphId, entityType: "paragraph", bundle: "p_text_block",
+          fields: { drupal_internal__revision_id: 30 },
+        };
+      }
+      if (resourceVersion === "rel:working-copy") {
+        if (written) return library(21, false, [{ id: paragraphId, revisionId: 31 }]);
+        throw new Error("Drupal 403: No pending revision for moderated entity.");
+      }
+      return library(20, true, publishedPins);
+    });
+    backend.rawQuery.mockImplementation(async ({ path, options }) => {
+      const text = String(path);
+      if (text.endsWith("/mcp-translations")) {
+        return {
+          meta: {
+            defaultLangcode: "en",
+            live: { vid: "20" },
+            operations: ["open_draft"],
+          },
+        };
+      }
+      if (text.endsWith("/mcp-draft")) {
+        if (options?.headers?.["X-MCP-Draft-Preflight"] === "1") {
+          return { meta: { draft_preflight: true, live: "20", working: "", operation: "open_draft" } };
+        }
+        written = true;
+        return { data: { type: "paragraphs_library_item--paragraphs_library_item", id } };
+      }
+      throw new Error(`unexpected query ${text}`);
+    });
+    const out = await handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { label: "Reusable" },
+      relationships: { paragraphs: { data: [{ type: "paragraph--p_text_block", id: paragraphId }] } },
+    });
+    expect(out._revisions).toEqual({ live: 20, working: 21 });
+    const drafts = backend.rawQuery.mock.calls.filter(([call]) => String(call.path).endsWith("/mcp-draft"));
+    expect(drafts.map(([call]) => call.options.headers["X-MCP-Draft-Preflight"])).toEqual(["1", "0"]);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
   it("returns a Drupal 422 when the re-read matches the published revision", async () => {
     backend.getEntity.mockImplementation(async ({ resourceVersion }) => {
       if (resourceVersion === "rel:working-copy") {

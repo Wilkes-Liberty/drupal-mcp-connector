@@ -23,10 +23,14 @@
  * timeout, or a missing revision id fails closed. A draft-inventory 404 or
  * 405 is absence. Any other inventory failure fails closed. After the write
  * the published revision, rel:working-copy, and the published paragraph pins
- * (including order) are re-read. A completed 4xx is returned when that
- * re-read matches the pre-write state. A lost response, or a 4xx whose
- * re-read shows a change, is reported from the re-read and is not called a
- * rollback. An unmoderated entity keeps the ordinary update.
+ * (including order) are re-read. Entity Reference Revisions saves a new
+ * paragraph revision when an existing host saves a new revision, so the draft
+ * may pin a later revision of the submitted paragraph. That later revision
+ * matches. An older revision, a different paragraph, or a different order
+ * does not. A completed 4xx is returned when that re-read matches the
+ * pre-write state. A lost response, or a 4xx whose re-read shows a change,
+ * is reported from the re-read and is not called a rollback. An unmoderated
+ * entity keeps the ordinary update.
  */
 
 import { entityRevisionId } from "./write-revision.js";
@@ -613,7 +617,7 @@ function assertPublishedPreserved(entityType, before, after, relationships) {
   const baseline = continuing ? normalizedPins(before.working) : before.pins;
   if (submitted) {
     const landed = forwardPins.filter((pin) => submitted.fields.has(pin.field));
-    if (pinKey(landed) !== pinKey(submitted.pins)) {
+    if (!submittedPinsLanded(submitted.pins, landed)) {
       problems.push("the forward revision does not pin the submitted paragraphs");
     }
   } else if (pinKey(forwardPins) !== pinKey(baseline)) {
@@ -633,7 +637,7 @@ function assertSubmittedPins(entityType, latest, relationships) {
   const submitted = submittedParagraphPins(relationships);
   if (!submitted) return;
   const landed = normalizedPins(latest).filter((pin) => submitted.fields.has(pin.field));
-  if (pinKey(landed) !== pinKey(submitted.pins)) {
+  if (!submittedPinsLanded(submitted.pins, landed)) {
     throw uncertainWriteError(entityType, "the written revision does not pin the submitted paragraphs");
   }
 }
@@ -792,4 +796,66 @@ function pinKey(pins) {
     const rows = groups.get(field) ?? [];
     return `${field}\0${rows.join("\n")}`;
   }).join("\n\n");
+}
+
+/**
+ * Group pins by field, preserving submission and re-read order inside a field.
+ * @param {object[]} pins
+ * @returns {Map<string, object[]>}
+ */
+function pinsByField(pins) {
+  const groups = new Map();
+  for (const pin of pins) {
+    if (!groups.has(pin.field)) groups.set(pin.field, []);
+    groups.get(pin.field).push(pin);
+  }
+  return groups;
+}
+
+/**
+ * Entity Reference Revisions creates a new paragraph revision when an existing
+ * host saves a new revision, then points the host at that revision. The
+ * submitted id is the earlier one. A missing revision on either side matches
+ * only another missing revision.
+ * @param {?string} submittedId
+ * @param {?string} landedId
+ * @returns {boolean}
+ */
+function sameRevisionOrNewer(submittedId, landedId) {
+  const submittedMissing = submittedId === null || submittedId === undefined || submittedId === "";
+  const landedMissing = landedId === null || landedId === undefined || landedId === "";
+  if (submittedMissing || landedMissing) return submittedMissing && landedMissing;
+  const submitted = Number(submittedId);
+  const landed = Number(landedId);
+  if (!Number.isSafeInteger(submitted) || !Number.isSafeInteger(landed)) {
+    return String(submittedId) === String(landedId);
+  }
+  return landed >= submitted;
+}
+
+/**
+ * Whether the re-read pins the submitted paragraphs, in order. A later
+ * revision of the same paragraph counts. An older revision does not.
+ * @param {object[]} submittedPins
+ * @param {object[]} landedPins
+ * @returns {boolean}
+ */
+function submittedPinsLanded(submittedPins, landedPins) {
+  const submitted = pinsByField(submittedPins);
+  const landed = pinsByField(landedPins);
+  const submittedFields = [...submitted.keys()].sort();
+  const landedFields = [...landed.keys()].sort();
+  if (submittedFields.length !== landedFields.length
+    || submittedFields.some((field, index) => field !== landedFields[index])) {
+    return false;
+  }
+  return submittedFields.every((field) => {
+    const left = submitted.get(field) ?? [];
+    const right = landed.get(field) ?? [];
+    if (left.length !== right.length) return false;
+    return left.every((pin, index) => {
+      const got = right[index];
+      return got.id === pin.id && sameRevisionOrNewer(pin.revisionId, got.revisionId);
+    });
+  });
 }
