@@ -278,8 +278,8 @@ the allowlist or Sentinel profile excludes the type — run `doctor` and
 ### From npm (recommended for operators)
 
 ```bash
-npm install -g drupal-mcp-connector@3.2.0
-# or: npx -y drupal-mcp-connector@3.2.0
+npm install -g drupal-mcp-connector@3.2.1
+# or: npx -y drupal-mcp-connector@3.2.1
 ```
 
 Point your MCP client at the installed binary (path from `which drupal-mcp-connector`
@@ -294,16 +294,16 @@ unbounded range.
 
 1. Pin an exact version in the lockfile (`package-lock.json` or
    `npm-shrinkwrap.json`), or in `package.json` as
-   `"drupal-mcp-connector": "3.2.0"` (use the version you intend to run).
+   `"drupal-mcp-connector": "3.2.1"` (use the version you intend to run).
 2. Confirm the registry checksum before you install.
-   `npm view drupal-mcp-connector@3.2.0 dist.integrity` prints the integrity
+   `npm view drupal-mcp-connector@3.2.1 dist.integrity` prints the integrity
    npm checks. A lockfile install fails when the tarball does not match.
 3. Read [CHANGELOG.md](CHANGELOG.md) for that version.
 4. Run `npm audit --omit=dev` against the lockfile and read any advisory
    before you upgrade. There is no separate scanner to install.
 
 Restart the MCP client after the upgrade. Run `drupal-mcp-doctor` when the
-package is on your PATH, or `npx -y drupal-mcp-connector@3.2.0 doctor` when
+package is on your PATH, or `npx -y drupal-mcp-connector@3.2.1 doctor` when
 you launch it with npx.
 
 ### From a git clone (development)

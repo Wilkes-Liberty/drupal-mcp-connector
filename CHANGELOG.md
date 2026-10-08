@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-10-07
+
 ### Fixed
 - **Text formats from Sentinel context (#429).** Node writes read
   `allowed_formats` from `GET /drupal-mcp/context` when JSON:API field
@@ -20,8 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wait on that document. Component drafts and nested paragraph children,
   including their translations, are checked before preflight or create.
   An update that sends a one-element text array without a format reuses
-  the stored format. Hosts stay on the previous behavior until a Sentinel
-  release emits the key.
+  the stored format. Hosts stay on the previous behavior until Sentinel
+  2.32.0, which emits the key, is deployed.
 
 ### Added
 - **Consumers pin a version and check advisories before upgrade (#423).**
