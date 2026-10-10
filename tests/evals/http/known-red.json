@@ -1,0 +1,4 @@
+{
+  "_comment": "Strict expected-failure list: case id -> ticket key. A listed case must FAIL on the green run. If it passes while still listed, the pack fails until the entry is removed (flip detection). Do not add an entry without a ticket.",
+  "T1n": "DEV-845"
+}

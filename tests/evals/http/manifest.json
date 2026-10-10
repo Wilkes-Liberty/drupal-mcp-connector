@@ -1,0 +1,4 @@
+{
+  "_comment": "Exact list of case ids the pack must run (DEV-866 increment 1). The run fails if the discovered ids differ from this list.",
+  "cases": ["T1", "T1n", "T7"]
+}

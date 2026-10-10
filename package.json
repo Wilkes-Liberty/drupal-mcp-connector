@@ -61,6 +61,7 @@
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval:http": "node tests/evals/http/run-pack.js",
     "audit": "npm audit --audit-level=high",
     "check": "npm run lint && npm run audit && npm run syntax-check && npm test",
     "syntax-check": "find src -name '*.js' -exec sh -c 'node --input-type=module --check < \"$1\" && echo \"$1 ✓\"' _ {} \\;",
