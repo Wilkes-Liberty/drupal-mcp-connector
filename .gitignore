@@ -53,3 +53,6 @@ docs/superpowers/
 
 # Playwright MCP throwaway page snapshots
 .playwright-mcp/
+
+# DEV-866 HTTP eval pack report (generated)
+evals-http-report.json

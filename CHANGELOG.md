@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **HTTP transport eval harness skeleton (DEV-866, increment 1).**
+  `npm run eval:http` runs a test-only pack over the hosted HTTP request
+  handler with a stub token issuer (not Paladin), a fake loopback upstream, and
+  synthetic keys. T1 checks that a missing identity gets 401 before dispatch,
+  T7 is its allow twin, and T1n records the unauthenticated non-loopback start
+  (DEV-845) as an expected failure that fails the pack if it ever passes.
+  Nothing under `src/` changes.
+
 ## [3.2.2] - 2026-10-07
 
 ### Fixed
