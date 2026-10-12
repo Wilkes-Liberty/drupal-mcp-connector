@@ -15,7 +15,7 @@
 
 import { timingSafeEqual } from "crypto";
 import { readFileSync, statSync, writeFileSync } from "fs";
-import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
+import { createRemoteJWKSet, customFetch, decodeProtectedHeader, jwtVerify } from "jose";
 
 /** Inbound IdP HTTP timeout. Matches Drupal/Drush outbound HTTP. */
 export const INBOUND_IDP_TIMEOUT_MS = 30_000;
@@ -302,7 +302,8 @@ export function validateBearerTimeClaims(claims, {
   if (typeof claims?.iat !== "number" || !Number.isFinite(claims.iat)) {
     return { ok: false, reason: "Token is missing iat" };
   }
-  if (claims.exp < now - clockTolerance) {
+  // `exp` is an exclusive boundary (RFC 7519 §4.1.4), matching jose.
+  if (claims.exp <= now - clockTolerance) {
     return { ok: false, reason: "Token has expired" };
   }
   if (typeof claims.nbf === "number" && claims.nbf > now + clockTolerance) {
@@ -318,6 +319,31 @@ export function validateBearerTimeClaims(claims, {
     return { ok: false, reason: "Token is too old" };
   }
   return { ok: true };
+}
+
+/**
+ * Refuse a compact JWS whose protected header names an algorithm outside
+ * the allowlist before any introspection fallback, so a token the local
+ * verifier rejected for its algorithm cannot be re-admitted as "opaque".
+ * A token that is not a decodable three-segment JWS is left to
+ * introspection.
+ * @param {string} token
+ * @param {string[]} allowedAlgs
+ * @returns {?string} Refusal reason, or null when the token may proceed.
+ */
+export function compactJwtAlgorithmRefusal(token, allowedAlgs) {
+  if (typeof token !== "string" || token.split(".").length !== 3) return null;
+  let header;
+  try {
+    header = decodeProtectedHeader(token);
+  } catch {
+    return null;
+  }
+  if (!header || typeof header !== "object") return null;
+  if (typeof header.alg !== "string" || !allowedAlgs.includes(header.alg)) {
+    return "Token algorithm is not allowed";
+  }
+  return null;
 }
 
 function audienceMatches(aud, expected) {
@@ -592,6 +618,10 @@ export function createResourceAuthenticator({
     if (!jwtOk) {
       if (!introspect) {
         return fail(401, { error: "invalid_token", errorDescription: "Token validation failed" });
+      }
+      const algorithmRefusal = compactJwtAlgorithmRefusal(token, allowedAlgs);
+      if (algorithmRefusal) {
+        return fail(401, { error: "invalid_token", errorDescription: algorithmRefusal });
       }
       try {
         claims = await introspect(token);

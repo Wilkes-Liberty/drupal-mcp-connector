@@ -13,6 +13,7 @@ import {
   createResourceAuthenticator,
   createInboundHttpsAuth,
   validateBearerTimeClaims,
+  compactJwtAlgorithmRefusal,
   authorizationServerDiscoveryUrls,
   discoverAuthorizationServer,
   introspectToken,
@@ -598,6 +599,57 @@ describe("createResourceAuthenticator", () => {
     expect(hsDenied.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
   });
 
+  it("does not fall back to introspection for a compact JWT whose algorithm is not allowed (DEV-876)", async () => {
+    const { publicKey, jwks } = await fixture();
+    const now = Math.floor(Date.now() / 1000);
+    const claims = {
+      sub: "agent-1", iss: issuer, aud: audience, iat: now, exp: now + 300, scope: "mcp_read",
+    };
+    const introspected = [];
+    const authenticate = createResourceAuthenticator({
+      issuer,
+      audience,
+      jwks,
+      resourceMetadataUrl: metadata,
+      introspect: async (token) => {
+        introspected.push(token);
+        return { active: true, ...claims };
+      },
+    });
+
+    const hmacSecret = new TextEncoder().encode(await exportSPKI(publicKey));
+    const hs256 = await signedToken({
+      privateKey: hmacSecret, key: hmacSecret, alg: "HS256", issuer, audience, claims,
+    });
+    const hsDenied = await authenticate(`Bearer ${hs256}`);
+    expect(hsDenied.ok).toBe(false);
+    expect(hsDenied.status).toBe(401);
+    expect(hsDenied.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
+
+    const noneToken = compactJwt({ alg: "none", typ: "JWT" }, claims);
+    const noneDenied = await authenticate(`Bearer ${noneToken}`);
+    expect(noneDenied.ok).toBe(false);
+    expect(noneDenied.status).toBe(401);
+
+    expect(introspected).toEqual([]);
+
+    // A token that is not a decodable JWS is still an opaque token.
+    const opaque = await authenticate("Bearer not.a.jws");
+    expect(opaque.ok).toBe(true);
+    expect(introspected).toEqual(["not.a.jws"]);
+  });
+
+  it("compactJwtAlgorithmRefusal only refuses a decodable JWS with a disallowed alg", () => {
+    const allowed = ["RS256"];
+    expect(compactJwtAlgorithmRefusal(compactJwt({ alg: "HS256" }, {}), allowed)).toMatch(/not allowed/);
+    expect(compactJwtAlgorithmRefusal(compactJwt({ alg: "none" }, {}), allowed)).toMatch(/not allowed/);
+    expect(compactJwtAlgorithmRefusal(compactJwt({ typ: "JWT" }, {}), allowed)).toMatch(/not allowed/);
+    expect(compactJwtAlgorithmRefusal(compactJwt({ alg: "RS256" }, {}), allowed)).toBeNull();
+    expect(compactJwtAlgorithmRefusal("opaque-token", allowed)).toBeNull();
+    expect(compactJwtAlgorithmRefusal("not.a.jws", allowed)).toBeNull();
+    expect(compactJwtAlgorithmRefusal("a.b.c.d.e", allowed)).toBeNull();
+  });
+
   it("refuses introspection active:true when exp is missing or already past (DEV-876)", async () => {
     const now = Math.floor(Date.now() / 1000);
     const authenticate = createResourceAuthenticator({
@@ -706,6 +758,21 @@ describe("createResourceAuthenticator", () => {
 
 describe("validateBearerTimeClaims", () => {
   const now = 1_800_000_000;
+
+  it("treats exp as an exclusive boundary, matching jose (DEV-876)", () => {
+    expect(validateBearerTimeClaims(
+      { iat: now - 300, exp: now },
+      { now, clockTolerance: 0 },
+    )).toEqual({ ok: false, reason: "Token has expired" });
+    expect(validateBearerTimeClaims(
+      { iat: now - 300, exp: now - 5 },
+      { now, clockTolerance: 5 },
+    )).toEqual({ ok: false, reason: "Token has expired" });
+    expect(validateBearerTimeClaims(
+      { iat: now - 300, exp: now + 1 },
+      { now, clockTolerance: 0 },
+    )).toEqual({ ok: true });
+  });
 
   it("refuses a future iat even when exp minus iat is within the cap", () => {
     expect(validateBearerTimeClaims(

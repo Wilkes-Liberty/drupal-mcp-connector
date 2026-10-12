@@ -71,7 +71,13 @@ so a JWKS public key cannot be treated as a shared secret. Env overrides:
 space-separated). **Breaking:** an authorization server that mints tokens
 without `exp`/`iat`, or with a lifetime longer than the cap, gets
 `401 invalid_token`. Raise the cap only when the issuer cannot issue shorter
-access tokens.
+access tokens. `exp` is an exclusive boundary on both paths: a token is
+refused from its `exp` second onward (less `clockTolerance`). When
+introspection is configured, a compact JWS whose protected header names an
+algorithm outside `auth.algorithms` (or `none`) is refused before the
+introspection call, so the allowlist cannot be bypassed by letting local
+verification fail and treating the token as opaque. Tokens that are not a
+decodable three-segment JWS are still introspected.
 
 **Missing `iss` on introspection is refused.** When `auth.issuer` is
 configured, an RFC 7662 result without `iss` (or with a different issuer) is
