@@ -4,21 +4,69 @@
  * Two modes, never mixed on a governed product path:
  *   - Shared bearer (`makeBearerCheck`) — loopback / stdio-adjacent only.
  *   - OAuth resource server (`createResourceAuthenticator`) — network-facing
- *     HTTPS. JWT via issuer discovery + JWKS, optional RFC 7662 introspection,
- *     and a hot-reloaded revocation file. Bearer tokens must carry `exp` and
- *     `iat`, stay within `auth.maxTokenLifetime`, and use an algorithm on
- *     `auth.algorithms`. The same time checks apply to introspection results;
- *     a missing `iss` is refused when an issuer is configured. Caller-supplied
- *     identity headers never become the principal. IdP HTTP (discovery, JWKS,
- *     introspection) aborts after `INBOUND_IDP_TIMEOUT_MS` (30s).
+ *     HTTPS. Every authenticated network call is validated by RFC 7662
+ *     introspection at the single configured issuer (DEV-844). There is no
+ *     positive cache: a revoke takes effect on the next call. Introspection
+ *     unreachable / timeout / error is 503 and does not dispatch; inactive is
+ *     401. `iss` must be present and equal the configured issuer; audience is
+ *     an exact match against the one configured plane. JWT algorithms are
+ *     pinned (`none` never; `HS*` only when explicitly configured). The
+ *     revocation file is not an authority on network surfaces (stdio-dev
+ *     additional deny only). Bearer tokens must carry `exp` and `iat` and
+ *     stay within `auth.maxTokenLifetime`. Caller-supplied identity headers
+ *     never become the principal. Issuer discovery / JWKS abort after
+ *     `INBOUND_IDP_TIMEOUT_MS` (30s). Introspection aborts after
+ *     `DEFAULT_INTROSPECTION_TIMEOUT_MS` (2s, configurable).
  */
 
 import { timingSafeEqual } from "crypto";
 import { readFileSync, statSync, writeFileSync } from "fs";
 import { createRemoteJWKSet, customFetch, decodeProtectedHeader, jwtVerify } from "jose";
 
-/** Inbound IdP HTTP timeout. Matches Drupal/Drush outbound HTTP. */
+/** Inbound IdP HTTP timeout (discovery / JWKS). Matches Drupal/Drush outbound HTTP. */
 export const INBOUND_IDP_TIMEOUT_MS = 30_000;
+
+/**
+ * Default RFC 7662 introspection timeout. A stuck issuer fails closed with
+ * 503; operators raise `auth.introspectionTimeoutMs` or
+ * `MCP_INTROSPECTION_TIMEOUT_MS` when the authorization server is known to
+ * be slower. There is no positive cache.
+ */
+export const DEFAULT_INTROSPECTION_TIMEOUT_MS = 2000;
+
+/**
+ * Test-only guard (DEV-844). Production callers never flip this. When
+ * `required` is false, the resource-server path may admit a JWT without a
+ * live introspection result — the pre-DEV-844 behavior used to prove deny
+ * tests can fail. Vitest can also set
+ * `MCP_TEST_DISABLE_INTROSPECTION_GUARD=1`.
+ */
+export const NETWORK_INTROSPECTION_GUARD = { required: true };
+
+/**
+ * Flip {@link NETWORK_INTROSPECTION_GUARD} for a red-run. Restore `true`
+ * after the assertion; production code never calls this.
+ *
+ * @param {boolean} required
+ * @returns {void}
+ */
+export function setNetworkIntrospectionGuard(required) {
+  NETWORK_INTROSPECTION_GUARD.required = Boolean(required);
+}
+
+/**
+ * Whether the hosted resource-server path must introspect every bearer.
+ * Never honors an env flag outside Vitest.
+ *
+ * @returns {boolean}
+ */
+export function networkIntrospectionRequired() {
+  if (!NETWORK_INTROSPECTION_GUARD.required) return false;
+  if (process.env.VITEST && process.env.MCP_TEST_DISABLE_INTROSPECTION_GUARD === "1") {
+    return false;
+  }
+  return true;
+}
 
 /**
  * Default maximum bearer lifetime in seconds (`exp - iat`). One hour is
@@ -31,7 +79,8 @@ export const DEFAULT_MAX_TOKEN_LIFETIME = 3600;
  * Default JWS algorithms accepted on the hosted resource-server path.
  * Asymmetric only — `none` and HMAC (`HS*`) are excluded so a public JWKS
  * key cannot be reused as a shared secret. Operators pin a narrower list
- * with `auth.algorithms` when the issuer uses a subset.
+ * with `auth.algorithms` when the issuer uses a subset. `HS*` is accepted
+ * only when the operator names it explicitly.
  */
 export const DEFAULT_TOKEN_ALGORITHMS = Object.freeze([
   "RS256", "RS384", "RS512",
@@ -41,16 +90,18 @@ export const DEFAULT_TOKEN_ALGORITHMS = Object.freeze([
 ]);
 
 const FORBIDDEN_TOKEN_ALGS = new Set(["none"]);
+const HMAC_TOKEN_ALGS = new Set(["HS256", "HS384", "HS512"]);
 
 /**
- * Attach the inbound IdP abort timeout. A caller `signal` wins.
+ * Attach an inbound IdP abort timeout. A caller `signal` wins.
  * @param {RequestInit} [options]
+ * @param {number} [timeoutMs]
  * @returns {RequestInit}
  */
-function withInboundTimeout(options = {}) {
+function withInboundTimeout(options = {}, timeoutMs = INBOUND_IDP_TIMEOUT_MS) {
   return {
     ...options,
-    signal: options.signal ?? AbortSignal.timeout(INBOUND_IDP_TIMEOUT_MS),
+    signal: options.signal ?? AbortSignal.timeout(timeoutMs),
   };
 }
 
@@ -292,6 +343,27 @@ export function denyAuth(status, {
 }
 
 /**
+ * Fail-closed response when the issuer cannot be reached. Not a 401: the
+ * bearer was not proven inactive; dispatch must not run.
+ *
+ * @param {object} [fields]
+ * @param {string} [fields.body]
+ * @param {number} [fields.retryAfterSec]
+ * @returns {{ok: false, status: 503, headers: object, body: string}}
+ */
+export function denyUnavailable({
+  body = "Authorization server unavailable",
+  retryAfterSec = 2,
+} = {}) {
+  return {
+    ok: false,
+    status: 503,
+    headers: { "Retry-After": String(retryAfterSec) },
+    body,
+  };
+}
+
+/**
  * @param {object} identity
  * @returns {{ok: true, identity: object}}
  */
@@ -313,11 +385,14 @@ export function normalizeMaxTokenLifetime(value) {
 
 /**
  * Normalize a configured JWS algorithm allowlist. `none` is stripped even
- * when an operator names it. An empty list after filtering uses the default.
+ * when an operator names it. HMAC (`HS*`) is kept only when the operator
+ * names it; the implicit default never includes it. An empty list after
+ * filtering uses the default.
  * @param {unknown} value
  * @returns {string[]}
  */
 export function normalizeTokenAlgorithms(value) {
+  const explicit = Array.isArray(value) || (typeof value === "string" && value.trim());
   let list;
   if (Array.isArray(value)) {
     list = value.map(String);
@@ -326,8 +401,24 @@ export function normalizeTokenAlgorithms(value) {
   } else {
     list = [...DEFAULT_TOKEN_ALGORITHMS];
   }
-  const allowed = list.filter((alg) => alg && !FORBIDDEN_TOKEN_ALGS.has(alg.toLowerCase()));
+  const allowed = list.filter((alg) => {
+    if (!alg || FORBIDDEN_TOKEN_ALGS.has(alg.toLowerCase())) return false;
+    if (!explicit && HMAC_TOKEN_ALGS.has(alg)) return false;
+    return true;
+  });
   return allowed.length ? allowed : [...DEFAULT_TOKEN_ALGORITHMS];
+}
+
+/**
+ * Normalize a configured introspection timeout to a positive integer.
+ * Invalid or missing values fall back to {@link DEFAULT_INTROSPECTION_TIMEOUT_MS}.
+ * @param {unknown} value
+ * @returns {number}
+ */
+export function normalizeIntrospectionTimeoutMs(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_INTROSPECTION_TIMEOUT_MS;
+  return Math.floor(n);
 }
 
 /**
@@ -572,6 +663,9 @@ export async function discoverAuthorizationServer(issuer, fetchFn = fetch) {
 
 /**
  * RFC 7662 token introspection. Returns claims when active, otherwise null.
+ * HTTP errors, timeouts, and unreadable bodies throw so the caller can fail
+ * closed with 503. `active !== true` is inactive (401), not an outage.
+ *
  * @param {string} token
  * @param {object} options
  * @returns {Promise<object|null>}
@@ -581,6 +675,7 @@ export async function introspectToken(token, {
   clientId,
   clientSecret,
   fetchFn = fetch,
+  timeoutMs = DEFAULT_INTROSPECTION_TIMEOUT_MS,
 }) {
   const creds = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   const res = await fetchFn(url, withInboundTimeout({
@@ -591,8 +686,10 @@ export async function introspectToken(token, {
       accept: "application/json",
     },
     body: new URLSearchParams({ token }).toString(),
-  }));
-  if (!res.ok) return null;
+  }, timeoutMs));
+  if (!res.ok) {
+    throw new Error(`introspection HTTP ${res.status}`);
+  }
   const body = await res.json();
   if (body.active !== true) return null;
   return body;
@@ -616,6 +713,8 @@ export async function introspectToken(token, {
  * @param {number} [options.clockTolerance]
  * @param {number} [options.maxTokenLifetime] Seconds; default {@link DEFAULT_MAX_TOKEN_LIFETIME}.
  * @param {string[]} [options.algorithms] JWS allowlist; default {@link DEFAULT_TOKEN_ALGORITHMS}.
+ * @param {boolean} [options.requireIntrospection] Network path (DEV-844): introspect
+ *   every bearer, 503 on issuer outage, ignore the revocation file.
  * @returns {(authorizationHeader: unknown, requestHeaders?: object) => Promise<object>}
  */
 export function createResourceAuthenticator({
@@ -630,6 +729,7 @@ export function createResourceAuthenticator({
   clockTolerance = 5,
   maxTokenLifetime = DEFAULT_MAX_TOKEN_LIFETIME,
   algorithms = DEFAULT_TOKEN_ALGORITHMS,
+  requireIntrospection = false,
 }) {
   const fail = (status, extra) => denyAuth(status, { resourceMetadata: resourceMetadataUrl, ...extra });
   const expectedIssuer = issuer ? normalizeIssuer(issuer) : "";
@@ -657,40 +757,53 @@ export function createResourceAuthenticator({
       return fail(401, { error: "invalid_token", errorDescription: "Bearer token required" });
     }
 
-    let claims = null;
-    let jwtOk = false;
-    try {
-      claims = await claimsFromJwt(token);
-      jwtOk = true;
-    } catch {
-      claims = null;
+    const algorithmRefusal = compactJwtAlgorithmRefusal(token, allowedAlgs);
+    if (algorithmRefusal) {
+      return fail(401, { error: "invalid_token", errorDescription: algorithmRefusal });
     }
 
-    if (!jwtOk) {
-      if (!introspect) {
-        return fail(401, { error: "invalid_token", errorDescription: "Token validation failed" });
-      }
-      const algorithmRefusal = compactJwtAlgorithmRefusal(token, allowedAlgs);
-      if (algorithmRefusal) {
-        return fail(401, { error: "invalid_token", errorDescription: algorithmRefusal });
-      }
+    let claims = null;
+    if (requireIntrospection) {
+      if (!introspect) return denyUnavailable();
       try {
         claims = await introspect(token);
       } catch {
-        claims = null;
+        return denyUnavailable();
       }
       if (!claims) {
         return fail(401, { error: "invalid_token", errorDescription: "Token is not active" });
       }
-    } else if (introspect) {
-      let active;
+    } else {
+      let jwtOk = false;
       try {
-        active = await introspect(token);
+        claims = await claimsFromJwt(token);
+        jwtOk = true;
       } catch {
-        active = null;
+        claims = null;
       }
-      if (!active) {
-        return fail(401, { error: "invalid_token", errorDescription: "Token is not active" });
+
+      if (!jwtOk) {
+        if (!introspect) {
+          return fail(401, { error: "invalid_token", errorDescription: "Token validation failed" });
+        }
+        try {
+          claims = await introspect(token);
+        } catch {
+          claims = null;
+        }
+        if (!claims) {
+          return fail(401, { error: "invalid_token", errorDescription: "Token is not active" });
+        }
+      } else if (introspect) {
+        let active;
+        try {
+          active = await introspect(token);
+        } catch {
+          active = null;
+        }
+        if (!active) {
+          return fail(401, { error: "invalid_token", errorDescription: "Token is not active" });
+        }
       }
     }
 
@@ -702,18 +815,18 @@ export function createResourceAuthenticator({
       return fail(401, { error: "invalid_token", errorDescription: timeCheck.reason });
     }
 
-    // Missing iss is refused when an issuer is configured. Audience was
-    // already fail-closed; issuer must be too so an introspection result
-    // cannot bind a token to this resource without naming the AS.
-    if (expectedIssuer && (!claims.iss || normalizeIssuer(claims.iss) !== expectedIssuer)) {
+    // Exactly one configured issuer: missing or unequal `iss` is 401.
+    if (!expectedIssuer || !claims.iss || normalizeIssuer(claims.iss) !== expectedIssuer) {
       return fail(401, { error: "invalid_token", errorDescription: "Issuer mismatch" });
     }
-    if (audience && !audienceMatches(claims.aud, audience)) {
+    if (!audience || !audienceMatches(claims.aud, audience)) {
       return fail(401, { error: "invalid_token", errorDescription: "Audience mismatch" });
     }
 
     const identity = buildIdentity(claims);
-    if (revocationStore?.isRevoked(identity)) {
+    // Revocation file is an additional stdio-dev deny only. Network admission
+    // is the live introspection result (DEV-844).
+    if (!requireIntrospection && revocationStore?.isRevoked(identity)) {
       return fail(401, { error: "invalid_token", errorDescription: "Token has been revoked" });
     }
     if (!identityHasScopes(identity, requiredScopes)) {
@@ -748,11 +861,38 @@ export const NON_LOOPBACK_UNAUTHENTICATED_REASON =
   "Bind to 127.0.0.1 or configure an inbound OAuth resource server (auth.issuer and auth.audience).";
 
 /**
+ * Named fatal reason when a network bind is missing the single issuer,
+ * audience, or RFC 7662 introspection credentials (DEV-844).
+ */
+export const NETWORK_INTROSPECTION_REQUIRED_REASON =
+  "Network-facing HTTPS requires an inbound OAuth resource server with exactly one issuer, " +
+  "one audience, and RFC 7662 introspection (auth.issuer, auth.audience, auth.introspectionUrl, " +
+  "and introspection client credentials). MCP_AUTH_TOKEN is not accepted on governed product paths. " +
+  "MCP_ALLOW_UNAUTHENTICATED is loopback-only. Bind to 127.0.0.1 or configure the resource server.";
+
+/**
+ * Complete resource-server config for a network bind (DEV-844).
+ *
+ * @param {object|null|undefined} resourceServer
+ * @returns {boolean}
+ */
+export function hasCompleteNetworkResourceServer(resourceServer) {
+  return Boolean(
+    resourceServer?.issuer
+    && resourceServer?.audience
+    && resourceServer?.introspectionUrl
+    && resourceServer?.introspectionClientId
+    && resourceServer?.introspectionClientSecret,
+  );
+}
+
+/**
  * Decide how inbound HTTPS /mcp is authenticated.
  *
- * Network-facing product paths require a resource server. MCP_AUTH_TOKEN is
- * accepted only on loopback. MCP_ALLOW_UNAUTHENTICATED is loopback-only;
- * a non-loopback bind with that flag is fatal (DEV-845).
+ * Network-facing product paths require a resource server with live
+ * introspection (DEV-844). MCP_AUTH_TOKEN is accepted only on loopback.
+ * MCP_ALLOW_UNAUTHENTICATED is loopback-only; a non-loopback bind with that
+ * flag is fatal (DEV-845).
  *
  * @param {object} options
  * @returns {{mode: "resource_server"|"shared_bearer"|"unauthenticated"|"fatal", reason?: string}}
@@ -765,7 +905,10 @@ export function resolveInboundAuthMode({
 }) {
   const isLoopback = isLoopbackBind(bindHost);
   const hasRs = Boolean(resourceServer?.issuer && resourceServer?.audience);
-  if (hasRs) return { mode: "resource_server" };
+  const ready = networkIntrospectionRequired()
+    ? hasCompleteNetworkResourceServer(resourceServer)
+    : hasRs;
+  if (ready) return { mode: "resource_server" };
   if (allowUnauth && !isLoopback) {
     return { mode: "fatal", reason: NON_LOOPBACK_UNAUTHENTICATED_REASON };
   }
@@ -775,10 +918,7 @@ export function resolveInboundAuthMode({
   }
   return {
     mode: "fatal",
-    reason:
-      "Network-facing HTTPS requires an inbound OAuth resource server (auth.issuer and auth.audience). " +
-      "MCP_AUTH_TOKEN is not accepted on governed product paths. " +
-      "MCP_ALLOW_UNAUTHENTICATED is loopback-only. Bind to 127.0.0.1 or configure the resource server.",
+    reason: NETWORK_INTROSPECTION_REQUIRED_REASON,
   };
 }
 
@@ -813,6 +953,12 @@ export function resolveInboundAuthConfig(cfg = {}, env = process.env) {
   const issuer = env.MCP_RESOURCE_ISSUER || auth.issuer || "";
   const audience = env.MCP_RESOURCE_AUDIENCE || auth.audience || "";
   const resource = env.MCP_RESOURCE || auth.resource || (String(audience).startsWith("https://") ? audience : "");
+  const namedId = auth.introspectionClientIdEnv
+    ? (env[auth.introspectionClientIdEnv] || "")
+    : "";
+  const namedSecret = auth.introspectionClientSecretEnv
+    ? (env[auth.introspectionClientSecretEnv] || "")
+    : "";
   return {
     issuer,
     audience,
@@ -822,6 +968,11 @@ export function resolveInboundAuthConfig(cfg = {}, env = process.env) {
     introspectionUrl: env.MCP_INTROSPECTION_URL || auth.introspectionUrl || "",
     introspectionClientIdEnv: auth.introspectionClientIdEnv || "",
     introspectionClientSecretEnv: auth.introspectionClientSecretEnv || "",
+    introspectionClientId: env.MCP_INTROSPECTION_CLIENT_ID || namedId || auth.introspectionClientId || "",
+    introspectionClientSecret: env.MCP_INTROSPECTION_CLIENT_SECRET || namedSecret || auth.introspectionClientSecret || "",
+    introspectionTimeoutMs: normalizeIntrospectionTimeoutMs(
+      env.MCP_INTROSPECTION_TIMEOUT_MS || auth.introspectionTimeoutMs,
+    ),
     maxTokenLifetime: normalizeMaxTokenLifetime(
       env.MCP_MAX_TOKEN_LIFETIME || auth.maxTokenLifetime || DEFAULT_MAX_TOKEN_LIFETIME,
     ),
@@ -850,7 +1001,19 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
   if (!isHttpsUrl(inboundCfg.issuer)) {
     throw new Error("auth.issuer must be an https URL");
   }
-  if (inboundCfg.introspectionUrl && !isHttpsUrl(inboundCfg.introspectionUrl)) {
+  const creds = resolveIntrospectionCredentials(inboundCfg);
+  const requireIntrospection = networkIntrospectionRequired();
+  if (requireIntrospection) {
+    if (!inboundCfg.introspectionUrl || !creds.clientId || !creds.clientSecret) {
+      throw new Error(
+        "createInboundHttpsAuth requires RFC 7662 introspection "
+        + "(auth.introspectionUrl plus introspection client credentials)",
+      );
+    }
+    if (!isHttpsUrl(inboundCfg.introspectionUrl)) {
+      throw new Error("auth.introspectionUrl must be an https URL");
+    }
+  } else if (inboundCfg.introspectionUrl && !isHttpsUrl(inboundCfg.introspectionUrl)) {
     throw new Error("auth.introspectionUrl must be an https URL");
   }
   const issuer = normalizeIssuer(inboundCfg.issuer);
@@ -863,20 +1026,21 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
     [customFetch]: (url, options) => fetchFn(url, withInboundTimeout(options)),
   });
   const resourceMetadataUrl = resourceMetadataUrlFor(resource);
+  // Keep the file store for stdio-dev revoke() and for the edge offboard
+  // API. Authenticate on the network path does not consult it (DEV-844).
   const revocationStore = inboundCfg.revocationFile
     ? createRevocationStore({ filePath: inboundCfg.revocationFile })
     : null;
 
   let introspect;
-  if (inboundCfg.introspectionUrl) {
-    const env = new Map(Object.entries(process.env));
-    const idKey = inboundCfg.introspectionClientIdEnv;
-    const secretKey = inboundCfg.introspectionClientSecretEnv;
+  if (requireIntrospection || inboundCfg.introspectionUrl) {
+    const timeoutMs = normalizeIntrospectionTimeoutMs(inboundCfg.introspectionTimeoutMs);
     introspect = (token) => introspectToken(token, {
       url: inboundCfg.introspectionUrl,
-      clientId: idKey ? env.get(idKey) || "" : "",
-      clientSecret: secretKey ? env.get(secretKey) || "" : "",
+      clientId: creds.clientId,
+      clientSecret: creds.clientSecret,
       fetchFn,
+      timeoutMs,
     });
   }
 
@@ -886,10 +1050,11 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
     requiredScopes: inboundCfg.requiredScopes,
     resourceMetadataUrl,
     jwks,
-    introspect,
-    revocationStore,
+    introspect: requireIntrospection ? introspect : undefined,
+    revocationStore: requireIntrospection ? null : revocationStore,
     maxTokenLifetime: inboundCfg.maxTokenLifetime,
     algorithms: inboundCfg.algorithms,
+    requireIntrospection,
   });
 
   return {
@@ -903,5 +1068,33 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
     ...(revocationStore ? {
       revoke: (jti) => revocationStore.revoke({ jti }),
     } : {}),
+  };
+}
+
+/**
+ * Resolve introspection client credentials from the inbound config or env.
+ * Secrets are never read from a committed config field name other than an
+ * env-var pointer.
+ *
+ * @param {object} inboundCfg
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {{clientId: string, clientSecret: string}}
+ */
+export function resolveIntrospectionCredentials(inboundCfg = {}, env = process.env) {
+  const namedId = inboundCfg.introspectionClientIdEnv
+    ? (env[inboundCfg.introspectionClientIdEnv] || "")
+    : "";
+  const namedSecret = inboundCfg.introspectionClientSecretEnv
+    ? (env[inboundCfg.introspectionClientSecretEnv] || "")
+    : "";
+  return {
+    clientId: inboundCfg.introspectionClientId
+      || env.MCP_INTROSPECTION_CLIENT_ID
+      || namedId
+      || "",
+    clientSecret: inboundCfg.introspectionClientSecret
+      || env.MCP_INTROSPECTION_CLIENT_SECRET
+      || namedSecret
+      || "",
   };
 }

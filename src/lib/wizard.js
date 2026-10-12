@@ -420,7 +420,7 @@ export function formatWizardReport(result, selected) {
     lines.push("  OAuth client secret stays in clientSecretEnv / a secrets manager — never in mcp.json.");
   }
   if (answers.transport === "https" && answers.auth === "token") {
-    lines.push("  MCP_AUTH_TOKEN is loopback-only. Network-facing HTTPS needs inbound OAuth (auth.issuer + audience).");
+    lines.push("  MCP_AUTH_TOKEN is loopback-only. Network-facing HTTPS needs inbound OAuth (auth.issuer + audience + RFC 7662 introspection).");
   }
   lines.push("");
 

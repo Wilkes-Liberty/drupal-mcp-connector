@@ -162,7 +162,9 @@ limiting run before body parsing and classification.
 HTTPS is mandatory; plain HTTP is refused on non-localhost unless
 `MCP_ALLOW_HTTP=1` is set explicitly (development only). Without TLS the server
 binds loopback only. Non-loopback TLS binds **require** an inbound OAuth
-resource server (`auth.issuer` + `auth.audience`). Bearer tokens must
+resource server (`auth.issuer` + `auth.audience` + RFC 7662 introspection).
+Every authenticated network call is introspected at the issuer (no positive
+cache; issuer down is 503). Bearer tokens must
 include `exp` and `iat` within `auth.maxTokenLifetime` and use an
 algorithm on `auth.algorithms`. `MCP_AUTH_TOKEN` is
 loopback-only. `MCP_ALLOW_UNAUTHENTICATED=1` is loopback-only; a non-loopback

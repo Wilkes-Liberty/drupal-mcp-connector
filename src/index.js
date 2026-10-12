@@ -349,7 +349,7 @@ if (transport === "stdio") {
       resourceMetadataUrl = inbound.resourceMetadataUrl;
       checkAuth = () => false;
       console.error(
-        `[drupal-mcp-connector] Inbound OAuth resource server: issuer ${inboundCfg.issuer}`
+        `[drupal-mcp-connector] Inbound OAuth resource server: issuer ${inboundCfg.issuer} (introspect every call)`
       );
     } catch (error) {
       console.error(

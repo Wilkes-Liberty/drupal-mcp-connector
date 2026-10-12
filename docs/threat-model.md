@@ -75,9 +75,9 @@ field-name validator — it would break legitimate relationship filters.
   consumer/role — the connector's presets are a second layer, not the first.
 - **Exposing the HTTPS transport** widens the attack surface; follow the
   pre-exposure checklist in [deployment.md](deployment.md). Non-loopback binds
-  **require** an inbound OAuth resource server (`auth.issuer` + `auth.audience`)
-  and `MCP_ALLOW_UNAUTHENTICATED=1` is loopback-only (a non-loopback bind with
-  that flag is fatal). `MCP_AUTH_TOKEN` is loopback-only.
+  **require** an inbound OAuth resource server (`auth.issuer` + `auth.audience`
+  + RFC 7662 introspection) and `MCP_ALLOW_UNAUTHENTICATED=1` is loopback-only
+  (a non-loopback bind with that flag is fatal). `MCP_AUTH_TOKEN` is loopback-only.
   Prefer TLS + tight `MCP_BIND_HOST` + rate limiting (default 120/min on
   non-loopback HTTPS) and/or a reverse-proxy allow-list.
 

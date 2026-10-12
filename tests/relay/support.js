@@ -12,28 +12,79 @@ import { mkdtempSync, writeFileSync, utimesSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { decodeJwt, exportJWK, generateKeyPair, SignJWT } from "jose";
 
 export const ISSUER = "https://idp.test";
 export const AUDIENCE = "https://edge.test/mcp";
+export const INTROSPECTION_URL = `${ISSUER}/introspect`;
+export const INTROSPECTION_CLIENT_ID = "edge-rs";
+export const INTROSPECTION_CLIENT_SECRET = "edge-rs-secret";
 
-/** JWKS + discovery served through an injected fetch; signer for test JWTs. */
+/** Inbound resource-server config for the relay edge (DEV-844). */
+export function resourceServerAuth(extra = {}) {
+  return {
+    issuer: ISSUER,
+    audience: AUDIENCE,
+    introspectionUrl: INTROSPECTION_URL,
+    introspectionClientId: INTROSPECTION_CLIENT_ID,
+    introspectionClientSecret: INTROSPECTION_CLIENT_SECRET,
+    ...extra,
+  };
+}
+
+/** JWKS + discovery + RFC 7662 served through an injected fetch; signer for test JWTs. */
 export async function createIssuerFixture() {
   const { publicKey, privateKey } = await generateKeyPair("RS256");
   const jwk = await exportJWK(publicKey);
   jwk.kid = "relay-test";
   jwk.alg = "RS256";
   jwk.use = "sig";
+  const revokedJti = new Set();
 
   const routes = new Map([
     [`${ISSUER}/.well-known/oauth-authorization-server`,
-      { issuer: ISSUER, jwks_uri: `${ISSUER}/jwks` }],
+      { issuer: ISSUER, jwks_uri: `${ISSUER}/jwks`, introspection_endpoint: INTROSPECTION_URL }],
     [`${ISSUER}/jwks`, { keys: [jwk] }],
   ]);
 
-  async function fetchFn(input) {
-    const url = String(input instanceof Request ? input.url : input);
-    const body = routes.get(url.split("?")[0]);
+  async function readBody(input, init) {
+    if (init?.body != null) return String(init.body);
+    if (input instanceof Request) return input.text();
+    return "";
+  }
+
+  async function fetchFn(input, init = {}) {
+    const url = String(input instanceof Request ? input.url : input).split("?")[0];
+    const method = String(init.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+    if (url === INTROSPECTION_URL && method === "POST") {
+      const token = new URLSearchParams(await readBody(input, init)).get("token") || "";
+      let claims;
+      try {
+        claims = decodeJwt(token);
+      } catch {
+        return new Response(JSON.stringify({ active: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (claims.jti && revokedJti.has(String(claims.jti))) {
+        return new Response(JSON.stringify({ active: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (typeof claims.exp === "number" && claims.exp * 1000 <= Date.now()) {
+        return new Response(JSON.stringify({ active: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ active: true, ...claims }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const body = routes.get(url);
     if (!body) return new Response("not found", { status: 404 });
     return new Response(JSON.stringify(body), {
       status: 200,
@@ -61,7 +112,13 @@ export async function createIssuerFixture() {
       .sign(privateKey);
   }
 
-  return { fetchFn, signToken };
+  return {
+    fetchFn,
+    signToken,
+    revokeJti(jti) {
+      revokedJti.add(String(jti));
+    },
+  };
 }
 
 export function sha256hex(value) {

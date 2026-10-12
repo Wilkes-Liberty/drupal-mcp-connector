@@ -60,6 +60,9 @@ const GRANTS = { "client-a": ["staging"] };
 const AUTH = {
   issuer: "https://idp.invalid",
   audience: "https://edge.invalid/mcp",
+  introspectionUrl: "https://idp.invalid/introspect",
+  introspectionClientId: "edge-rs",
+  introspectionClientSecret: "edge-rs-secret",
 };
 
 function channelFileIn(dir) {

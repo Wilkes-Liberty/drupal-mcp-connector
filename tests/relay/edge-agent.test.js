@@ -37,6 +37,7 @@ import {
   createChannelFile,
   createConnectionLedger,
   createIssuerFixture,
+  resourceServerAuth,
   sha256hex,
   startRecordingStub,
 } from "./support.js";
@@ -62,7 +63,7 @@ function track(closeable) {
 
 function baseEdgeOptions(overrides = {}) {
   return {
-    auth: { issuer: ISSUER, audience: AUDIENCE },
+    auth: resourceServerAuth(),
     grants: GRANTS,
     sites: SITES,
     defaultSite: "tenant-alpha",
@@ -83,12 +84,10 @@ async function startHarness({
   channel.write({ "tenant-a": { tokenSha256: sha256hex(token) } });
   const ledger = createConnectionLedger();
   const edge = await startEdge(baseEdgeOptions({
-    auth: {
-      issuer: ISSUER,
-      audience: AUDIENCE,
+    auth: resourceServerAuth({
       ...(requiredScopes ? { requiredScopes } : {}),
       ...(revocationFile ? { revocationFile } : {}),
-    },
+    }),
     grants,
     channelCredentials: createChannelCredentialStore({ filePath: channel.filePath }),
     ledger,
@@ -464,13 +463,12 @@ describe("northbound auth is real, through the edge entry point", () => {
     expect(before.tenant).toBe(true);
     expect(tenant.calls).toHaveLength(1);
 
-    writeFileSync(revocationFile, JSON.stringify({ jti: ["j-revoked"] }));
-    utimesSync(revocationFile, 1_700_000_100, 1_700_000_100);
+    issuer.revokeJti("j-revoked");
     const after = await modernCall(harness.edge.northboundUrl, jwt, {
       args: { site: "tenant-alpha" },
     });
     expect(after.status).toBe(401);
-    expect(after.headers["www-authenticate"]).toContain("revoked");
+    expect(after.headers["www-authenticate"]).toContain("invalid_token");
   });
 });
 
@@ -497,19 +495,19 @@ describe("DEV-877: edge 401s carry resource_metadata", () => {
     expectEdgeChallenge(missing, harness.edge.resourceMetadataUrl, "Bearer token required");
 
     const invalid = await modernCall(harness.edge.northboundUrl, "not-a-jwt");
-    expectEdgeChallenge(invalid, harness.edge.resourceMetadataUrl, "Token validation failed");
+    expectEdgeChallenge(invalid, harness.edge.resourceMetadataUrl, "Token is not active");
 
     const expired = await modernCall(
       harness.edge.northboundUrl,
       await issuer.signToken({ exp: Math.floor(Date.now() / 1000) - 3600 }),
     );
-    expectEdgeChallenge(expired, harness.edge.resourceMetadataUrl, "Token validation failed");
+    expectEdgeChallenge(expired, harness.edge.resourceMetadataUrl, "Token is not active");
 
     const wrongAudience = await modernCall(
       harness.edge.northboundUrl,
       await issuer.signToken({ audience: "https://other.test/mcp" }),
     );
-    expectEdgeChallenge(wrongAudience, harness.edge.resourceMetadataUrl, "Token validation failed");
+    expectEdgeChallenge(wrongAudience, harness.edge.resourceMetadataUrl, "Audience mismatch");
   });
 
   it("returns the same challenge when authenticate throws on /mcp, /usage, and /assessor", async () => {
@@ -2520,11 +2518,9 @@ describe("laboratory tenant onboarding (#265)", () => {
     });
     const ledger = createConnectionLedger();
     const edge = await startEdge(baseEdgeOptions({
-      auth: {
-        issuer: ISSUER,
-        audience: AUDIENCE,
+      auth: resourceServerAuth({
         ...(revocationFile ? { revocationFile } : {}),
-      },
+      }),
       grants: { "mcp-edge-alpha": ["tenant-alpha"] },
       tenantGrants: { "mcp-edge-alpha": ["mcp-edge-alpha"] },
       channelCredentials: createChannelCredentialStore({ filePath: channel.filePath }),
@@ -2633,8 +2629,7 @@ describe("laboratory tenant onboarding (#265)", () => {
     expect(byId.get("P9.8").evidence.approvalGated.receiptId).toBeTruthy();
     expect(byId.get("P8.7").state).toBe("evidenced");
 
-    writeFileSync(revocationFile, JSON.stringify({ jti: ["j-lab-onboard"] }));
-    utimesSync(revocationFile, 1_700_000_100, 1_700_000_100);
+    issuer.revokeJti("j-lab-onboard");
     const principalRevoked = await call("drupal_list_nodes", { site: "tenant-alpha" });
     expect(principalRevoked.status).toBe(401);
 
@@ -2753,7 +2748,8 @@ describe("laboratory tenant offboarding (#267)", () => {
       name: "drupal_list_nodes",
       args: { site: "tenant-alpha" },
     });
-    expect(stale.status).toBe(401);
+    expect(stale.status).toBe(403);
+    expect(JSON.parse(stale.body)).toEqual({ error: "offboarded" });
 
     const fresh = await issuer.signToken({
       clientId: "mcp-edge-alpha",
@@ -2893,11 +2889,9 @@ async function startOnboardHarness({
   const ledger = createConnectionLedger();
   const store = createChannelCredentialStore({ filePath: channel.filePath });
   const edge = await startEdge(baseEdgeOptions({
-    auth: {
-      issuer: ISSUER,
-      audience: AUDIENCE,
+    auth: resourceServerAuth({
       ...(revocationFile ? { revocationFile } : {}),
-    },
+    }),
     grants: { "mcp-edge-alpha": ["tenant-alpha"] },
     tenantGrants: tenantGrants ?? { "mcp-edge-alpha": ["mcp-edge-alpha"] },
     channelCredentials: wrapCredentials ? wrapCredentials(store) : store,

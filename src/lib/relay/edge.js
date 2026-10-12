@@ -69,6 +69,7 @@ import {
 } from "../evidence.js";
 import {
   createInboundHttpsAuth,
+  resolveIntrospectionCredentials,
   writeUnauthorized,
   SPOOFABLE_IDENTITY_HEADERS,
 } from "../http-auth.js";
@@ -685,6 +686,14 @@ export async function startEdge({
       "Relay edge requires an inbound OAuth resource server: set auth.issuer and "
       + "auth.audience. There is no shared-bearer or unauthenticated mode on this "
       + "entry point, at any bind host including loopback.",
+    );
+  }
+  const introspectCreds = resolveIntrospectionCredentials(auth);
+  if (!auth.introspectionUrl || !introspectCreds.clientId || !introspectCreds.clientSecret) {
+    throw new EdgeStartupError(
+      "Relay edge requires RFC 7662 introspection: set auth.introspectionUrl and "
+      + "introspection client credentials. The revocation file is not an authority "
+      + "on this network surface.",
     );
   }
   const grantTable = normalizeGrants(grants);

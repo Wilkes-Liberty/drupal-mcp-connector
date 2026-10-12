@@ -47,7 +47,7 @@ export const TRANSPORT_PRESETS = {
     exampleHost: "https://mcp.example.com/mcp",
     notes:
       "Gated / later. An operator-run connector with MCP_TRANSPORT=https, TLS, and " +
-      "inbound OAuth (auth.issuer + auth.audience). There is no public hosted " +
+      "inbound OAuth (auth.issuer + auth.audience + RFC 7662 introspection). There is no public hosted " +
       "Wilkes & Liberty MCP URL. Do not invent a marketplace remote until Path B exists.",
     gated: true,
   },
