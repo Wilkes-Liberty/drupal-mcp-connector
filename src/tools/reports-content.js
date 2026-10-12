@@ -200,12 +200,19 @@ async function workflowBottlenecks({ site: siteName, type, days = 30, states, sa
  * JSON:API serves one language per resource, so a histogram of `n.langcode`
  * looks like 100% default language even when translations exist. Without
  * Sentinel the report is `unavailable` rather than that misleading chart.
+ * A bundle with no readable nodes reports `populationEmpty: true` with zero
+ * counts; it is not `unavailable`, because no inventory read was attempted.
  *
  * @param {object} args - { site?, type?, sampleSize? }.
  * @returns {Promise<object>} Coverage, or unavailable.
  */
 async function translationCoverage({ site: siteName, type, sampleSize = 100 }) {
   const contentType = requireContentType(type, "drupal_report_translation_coverage");
+  // A zero or negative sample reads nothing, so it could not tell an empty
+  // bundle from an unread one. Refuse it instead of reporting populationEmpty.
+  if (!Number.isInteger(sampleSize) || sampleSize < 1) {
+    throw new Error("drupal_report_translation_coverage: sampleSize must be a positive integer.");
+  }
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "node", contentType);
@@ -251,7 +258,10 @@ async function translationCoverage({ site: siteName, type, sampleSize = 100 }) {
     }
   }
 
-  if (inventoried === 0) {
+  // An empty population attempted no inventory read, so it says nothing
+  // about the endpoint. Only a nonempty population with zero successful
+  // inventories means the endpoint is missing (#436).
+  if (inventoried === 0 && nodes.length > 0) {
     return {
       contentType,
       scanned: nodes.length,
@@ -273,6 +283,7 @@ async function translationCoverage({ site: siteName, type, sampleSize = 100 }) {
     contentType,
     scanned: nodes.length,
     inventoried,
+    ...(nodes.length === 0 ? { populationEmpty: true } : {}),
     approximate: nodes.length >= sampleSize || inventoried < nodes.length,
     languages: [...languageCounts.entries()]
       .map(([langcode, count]) => ({ langcode, count }))
@@ -725,14 +736,14 @@ export const definitions = [
   },
   {
     name: "drupal_report_translation_coverage",
-    description: "Per-node translation coverage from Sentinel's inventory (missing non-default language, outdated core flag, language counts). Without Sentinel the report is unavailable — JSON:API only shows the default language, so a histogram would be misleading.",
+    description: "Per-node translation coverage from Sentinel's inventory (missing non-default language, outdated core flag, language counts). Without Sentinel the report is unavailable — JSON:API only shows the default language, so a histogram would be misleading. A bundle with no readable nodes reports scanned 0 with populationEmpty true, not unavailable.",
     inputSchema: {
       type: "object",
       required: ["type"],
       properties: {
         site:       { type: "string" },
         type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
-        sampleSize: { type: "number", default: 100, description: "Max nodes to inventory" },
+        sampleSize: { type: "number", default: 100, minimum: 1, description: "Max nodes to inventory (at least 1)" },
       },
     },
   },

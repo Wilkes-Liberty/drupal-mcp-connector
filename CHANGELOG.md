@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Doctor loads local credentials through the same secret map as server startup (#439). An explicit config uses the map beside that file; exported credentials take precedence, help does not access Keychain, and a missing secret is reported without attempting OAuth acquisition.
+- **Empty translation coverage reports (#436).**
+  `drupal_report_translation_coverage` on a bundle with no readable nodes
+  reported `unavailable: true` and blamed the Sentinel inventory endpoint,
+  although no inventory read had been attempted. An empty population now
+  returns `scanned: 0`, `inventoried: 0`, `populationEmpty: true`, and empty
+  language, missing, outdated, and findings lists. A nonempty population whose
+  inventory endpoint is missing is still `unavailable`, and a denied inventory
+  still throws.
 
 ## [3.2.3] - 2026-10-11
 
