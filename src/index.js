@@ -340,11 +340,13 @@ if (transport === "stdio") {
   let checkAuth = makeBearerCheck(inboundMode.mode === "shared_bearer" ? authToken : "");
   let authenticate = null;
   let protectedResource = null;
+  let resourceMetadataUrl;
   if (inboundMode.mode === "resource_server") {
     try {
       const inbound = await createInboundHttpsAuth({ inboundCfg });
       authenticate = inbound.authenticate;
       protectedResource = inbound.protectedResource;
+      resourceMetadataUrl = inbound.resourceMetadataUrl;
       checkAuth = () => false;
       console.error(
         `[drupal-mcp-connector] Inbound OAuth resource server: issuer ${inboundCfg.issuer}`
@@ -398,6 +400,7 @@ if (transport === "stdio") {
     checkAuth,
     authenticate,
     protectedResource,
+    resourceMetadataUrl,
     allowLocalOperator: loopbackBind && (
       inboundMode.mode === "unauthenticated" || inboundMode.mode === "shared_bearer"
     ),

@@ -474,6 +474,90 @@ describe("northbound auth is real, through the edge entry point", () => {
   });
 });
 
+describe("DEV-877: edge 401s carry resource_metadata", () => {
+  function expectEdgeChallenge(denied, metadataUrl, errorDescription) {
+    expect(denied.status).toBe(401);
+    const challenge = denied.headers["www-authenticate"];
+    expect(challenge).toMatch(/^Bearer\b/i);
+    expect(challenge).toContain("error=\"invalid_token\"");
+    expect(challenge).toContain(`error_description="${errorDescription}"`);
+    expect(challenge).toContain(`resource_metadata="${metadataUrl}"`);
+    expect(new URL(metadataUrl).pathname).toBe("/.well-known/oauth-protected-resource/mcp");
+  }
+
+  it("denies missing, invalid, expired, and wrong-audience tokens on /mcp with the served metadata URL", async () => {
+    const harness = await startHarness();
+    const metadata = await fetch(
+      new URL("/.well-known/oauth-protected-resource/mcp", harness.edge.northboundUrl),
+    );
+    expect(metadata.status).toBe(200);
+    expect((await metadata.json()).resource).toBe(AUDIENCE);
+
+    const missing = await modernCall(harness.edge.northboundUrl, null);
+    expectEdgeChallenge(missing, harness.edge.resourceMetadataUrl, "Bearer token required");
+
+    const invalid = await modernCall(harness.edge.northboundUrl, "not-a-jwt");
+    expectEdgeChallenge(invalid, harness.edge.resourceMetadataUrl, "Token validation failed");
+
+    const expired = await modernCall(
+      harness.edge.northboundUrl,
+      await issuer.signToken({ exp: Math.floor(Date.now() / 1000) - 3600 }),
+    );
+    expectEdgeChallenge(expired, harness.edge.resourceMetadataUrl, "Token validation failed");
+
+    const wrongAudience = await modernCall(
+      harness.edge.northboundUrl,
+      await issuer.signToken({ audience: "https://other.test/mcp" }),
+    );
+    expectEdgeChallenge(wrongAudience, harness.edge.resourceMetadataUrl, "Token validation failed");
+  });
+
+  it("returns the same challenge when authenticate throws on /mcp, /usage, and /assessor", async () => {
+    const keys = generateNotaryKeys();
+    const edge = await startEdge(baseEdgeOptions({
+      usage: createUsageLedger(),
+      evidence: createEvidenceLedger(),
+      evidenceAnchor: { publicKey: keys.publicPin, submit: () => ({ ok: false }) },
+      inboundAuthenticate: async () => { throw new Error("corrupt revocation"); },
+    }));
+    closers.push(() => edge.close());
+
+    const metadata = await fetch(
+      new URL("/.well-known/oauth-protected-resource/mcp", edge.northboundUrl),
+    );
+    expect(metadata.status).toBe(200);
+
+    for (const denied of [
+      await modernCall(edge.northboundUrl, "not-a-jwt"),
+      await usageGet(edge.northboundUrl, "not-a-jwt"),
+      await assessorGet(edge.northboundUrl, "not-a-jwt"),
+    ]) {
+      expectEdgeChallenge(denied, edge.resourceMetadataUrl, "Token validation failed");
+    }
+  });
+
+  it("returns the same challenge for an unauthenticated /usage and /assessor read", async () => {
+    const keys = generateNotaryKeys();
+    const edge = await startEdge(baseEdgeOptions({
+      usage: createUsageLedger(),
+      evidence: createEvidenceLedger(),
+      evidenceAnchor: { publicKey: keys.publicPin, submit: () => ({ ok: false }) },
+    }));
+    closers.push(() => edge.close());
+
+    expectEdgeChallenge(
+      await usageGet(edge.northboundUrl, null),
+      edge.resourceMetadataUrl,
+      "Bearer token required",
+    );
+    expectEdgeChallenge(
+      await assessorGet(edge.northboundUrl, null),
+      edge.resourceMetadataUrl,
+      "Bearer token required",
+    );
+  });
+});
+
 describe("entitlement at the seam", () => {
   it("denies an unlisted client with zero targets before any fan-down or tenant leak", async () => {
     const harness = await startHarness();

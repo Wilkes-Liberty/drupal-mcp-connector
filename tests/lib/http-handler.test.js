@@ -85,7 +85,9 @@ describe("createMcpRequestHandler", () => {
     const res = mockRes();
     await h(rawBodyReq(["{not-json"], { authorization: "Bearer nope" }), res);
     expect(res.statusCode).toBe(401);
-    expect(res.headers["WWW-Authenticate"]).toBe("Bearer");
+    expect(res.headers["WWW-Authenticate"]).toMatch(/^Bearer\b/);
+    expect(res.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
+    expect(res.headers["WWW-Authenticate"]).toContain("error_description=\"Bearer token required\"");
     expect(modernHandler).not.toHaveBeenCalled();
     expect(legacyHandler).not.toHaveBeenCalled();
     expect(toWebRequestFn).not.toHaveBeenCalled();

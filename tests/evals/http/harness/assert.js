@@ -24,9 +24,14 @@ export function expectRefused(h, label, res, {
   body = "Unauthorized",
 } = {}) {
   check(h, () => expect(res.status, `${label}: status`).toBe(status));
+  check(h, () => expect(res.headers["www-authenticate"], `${label}: Bearer`).toMatch(/^Bearer\b/i));
   check(h, () => expect(res.headers["www-authenticate"], `${label}: error code`).toContain(`error="${error}"`));
   check(h, () => expect(res.headers["www-authenticate"], `${label}: description`)
     .toContain(`error_description="${description}"`));
+  if (h.resourceMetadataUrl) {
+    check(h, () => expect(res.headers["www-authenticate"], `${label}: resource_metadata`)
+      .toContain(`resource_metadata="${h.resourceMetadataUrl}"`));
+  }
   check(h, () => expect(res.text, `${label}: body`).toBe(body));
   check(h, () => expect(res.headers["mcp-session-id"], `${label}: no session issued`).toBeUndefined());
 }

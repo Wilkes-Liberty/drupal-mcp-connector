@@ -52,7 +52,9 @@ retrieval, and introspection abort after 30s (`AbortSignal.timeout`), matching
 outbound Drupal HTTP; a stuck IdP fails closed (startup throw, or 401 on `/mcp`).
 
 Unauthenticated clients receive `401` with a `WWW-Authenticate` challenge that
-points at RFC 9728 metadata:
+points at RFC 9728 metadata. The same pointer is on every network 401
+(missing, invalid, expired, or wrong-audience token; authenticator throw;
+unresolved identity; edge `/usage` and `/assessor`):
 
 `GET /.well-known/oauth-protected-resource` (and `/mcp` on that path).
 

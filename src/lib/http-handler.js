@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { isInitializeRequest, isJsonContentType, isLegacyRequest } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport, toWebRequest } from "@modelcontextprotocol/node";
-import { formatWwwAuthenticate } from "./http-auth.js";
+import { writeUnauthorized } from "./http-auth.js";
 import { LOCAL_OPERATOR, runWithIdentity } from "./principal.js";
 
 /**
@@ -40,13 +40,11 @@ export function isUnauthenticatedRoute(method, url) {
 }
 
 function refuseUnresolvedIdentity(res, resourceMetadataUrl) {
-  res.writeHead(401, {
-    "WWW-Authenticate": formatWwwAuthenticate({
-      error: "invalid_token",
-      errorDescription: "Bearer token required",
-      resourceMetadata: resourceMetadataUrl,
-    }),
-  }).end("Unauthorized");
+  writeUnauthorized(res, {
+    error: "invalid_token",
+    errorDescription: "Bearer token required",
+    resourceMetadata: resourceMetadataUrl,
+  });
 }
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
@@ -195,6 +193,8 @@ export function createLegacySessionHandler({
  *   unauthenticated only. After a successful check, attach the local-operator
  *   identity. Default false: missing identity is 401.
  * @param {object|null} [deps.protectedResource] RFC 9728 metadata served unauthenticated.
+ * @param {string} [deps.resourceMetadataUrl] RFC 9728 metadata URL included
+ *   on every 401 challenge (DEV-877).
  * @param {number} [deps.toolCount] Ignored; retained so existing call sites
  *   keep compiling. `/health` no longer exposes a tool count.
  * @param {(req: object, res: object, body?: unknown) => Promise<void>} deps.modernHandler
@@ -214,6 +214,7 @@ export function createMcpRequestHandler({
   authenticate = null,
   allowLocalOperator = false,
   protectedResource = null,
+  resourceMetadataUrl,
   toolCount: _toolCount,
   modernHandler = null,
   legacyHandler = null,
@@ -238,12 +239,11 @@ export function createMcpRequestHandler({
       try {
         result = await authenticate(req);
       } catch {
-        res.writeHead(401, {
-          "WWW-Authenticate": formatWwwAuthenticate({
-            error: "invalid_token",
-            errorDescription: "Token validation failed",
-          }),
-        }).end("Unauthorized");
+        writeUnauthorized(res, {
+          error: "invalid_token",
+          errorDescription: "Token validation failed",
+          resourceMetadata: resourceMetadataUrl,
+        });
         return false;
       }
       if (!result.ok) {
@@ -251,14 +251,18 @@ export function createMcpRequestHandler({
         return false;
       }
       if (!result.identity) {
-        refuseUnresolvedIdentity(res);
+        refuseUnresolvedIdentity(res, resourceMetadataUrl);
         return false;
       }
       req.mcpIdentity = result.identity;
       return true;
     }
     if (!checkAuth(req.headers["authorization"])) {
-      res.writeHead(401, { "WWW-Authenticate": "Bearer" }).end("Unauthorized");
+      writeUnauthorized(res, {
+        error: "invalid_token",
+        errorDescription: "Bearer token required",
+        resourceMetadata: resourceMetadataUrl,
+      });
       return false;
     }
     if (allowLocalOperator) {
@@ -266,7 +270,7 @@ export function createMcpRequestHandler({
       return true;
     }
     if (!req.mcpIdentity) {
-      refuseUnresolvedIdentity(res);
+      refuseUnresolvedIdentity(res, resourceMetadataUrl);
       return false;
     }
     return true;
