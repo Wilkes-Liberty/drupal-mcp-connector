@@ -8,15 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
-- **Every network 401 carries RFC 9728 `resource_metadata` (DEV-877).**
-  Standalone HTTP `/mcp` (modern and legacy), shared-bearer refusals,
-  authenticator throws, the DEV-845 unresolved-identity refusal, and
-  relay edge `/mcp`, `/usage`, and `/assessor` emit
-  `WWW-Authenticate: Bearer` with `resource_metadata` pointing at the
-  served `/.well-known/oauth-protected-resource` URL, plus RFC 6750
-  `error` / `error_description` where applicable. One shared writer
-  (`writeUnauthorized` / `unauthorizedChallenge`) is the only 401 path
-  so a future site cannot omit the pointer.
+- **Resource-server and relay 401s carry RFC 9728 `resource_metadata` (DEV-877).**
+  On a configured OAuth resource server (`auth.issuer` + `auth.audience`),
+  standalone HTTP `/mcp` (modern and legacy), authenticator throws, the
+  DEV-845 unresolved-identity refusal, and relay edge `/mcp`, `/usage`,
+  and `/assessor` emit `WWW-Authenticate: Bearer` with `resource_metadata`
+  pointing at the served `/.well-known/oauth-protected-resource` URL, plus
+  RFC 6750 `error` / `error_description` where applicable. One shared
+  writer (`writeUnauthorized` / `unauthorizedChallenge`) is the only 401
+  path so a future site cannot omit the pointer. Loopback shared-bearer
+  (`MCP_AUTH_TOKEN`) has no RFC 9728 document, so its refusal is now a
+  `Bearer` challenge with `error="invalid_token"` (previously a bare
+  `Bearer`) and no `resource_metadata`.
 - **Network listeners refuse a null principal before dispatch (DEV-845).**
   HTTP `/mcp` (modern and legacy), relay edge routes, and any non-stdio
   listener return 401 when no identity was resolved. No tool handler,

@@ -3,9 +3,16 @@
  * resource_metadata URL matches the served RFC 9728 document.
  *
  * These assertions are meant to fail on the sites that still write a bare
- * 401 (shared-bearer, authenticator throw, DEV-845 unresolved identity,
- * and any future writeHead(401) that skips the shared builder). Authenticator
- * denials that already go through denyAuth should stay green.
+ * 401 (authenticator throw, DEV-845 unresolved identity, and any future
+ * writeHead(401) that skips the shared builder). Authenticator denials that
+ * already go through denyAuth should stay green.
+ *
+ * Loopback shared-bearer (`MCP_AUTH_TOKEN`) has no RFC 9728 document and
+ * `src/index.js` leaves `resourceMetadataUrl` undefined in that mode, so its
+ * refusal is a Bearer challenge with `error="invalid_token"` and no
+ * `resource_metadata`. That case is asserted as such below, with the same
+ * wiring `src/index.js` uses, rather than inheriting a URL the live path
+ * never supplies.
  */
 
 import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet } from "jose";
@@ -16,6 +23,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createResourceAuthenticator,
   formatWwwAuthenticate,
+  makeBearerCheck,
   protectedResourceMetadata,
   resourceMetadataUrlFor,
 } from "../../src/lib/http-auth.js";
@@ -214,9 +222,30 @@ describe("DEV-877: 401 challenge matches served RFC 9728 metadata", () => {
     expectRfc9728Challenge(res, { errorDescription: "Token validation failed" });
   });
 
-  it("shared-bearer refusal includes resource_metadata", async () => {
+  it("loopback shared-bearer refusal is a Bearer invalid_token challenge without resource_metadata", async () => {
+    // Same wiring as src/index.js in shared_bearer mode: makeBearerCheck with
+    // the configured token, no authenticator, no served metadata document,
+    // and resourceMetadataUrl left undefined.
     const handle = handler({
-      checkAuth: () => false,
+      checkAuth: makeBearerCheck("configured-secret"),
+      authenticate: null,
+      protectedResource: null,
+      resourceMetadataUrl: undefined,
+    });
+    const res = mockRes();
+    await handle(req("POST", "/mcp", { authorization: "Bearer nope" }), res);
+    expect(res.statusCode).toBe(401);
+    const challenge = res.headers?.["WWW-Authenticate"];
+    expect(challenge).toMatch(/^Bearer\b/);
+    expect(challenge).toContain("error=\"invalid_token\"");
+    expect(challenge).toContain("error_description=\"Bearer token required\"");
+    expect(challenge).not.toContain("resource_metadata=");
+    expect(res.writeHead).toHaveBeenCalledTimes(1);
+  });
+
+  it("shared-bearer refusal carries resource_metadata only when a URL is wired", async () => {
+    const handle = handler({
+      checkAuth: makeBearerCheck("configured-secret"),
       authenticate: null,
     });
     const res = mockRes();
