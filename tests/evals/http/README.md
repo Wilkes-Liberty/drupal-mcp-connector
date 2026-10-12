@@ -32,9 +32,10 @@ needs a mutant that goes red; a known-red case must fail, and fails the pack if
 it passes (flip detection).
 
 Mutants in this increment are dependency swaps in `harness/build.js` (the
-and (DEV-848) refuses a verified token with no grant entry and no `sites`
-claim (T4b) while an explicit grant for site A still reaches A only (T4),
-records exactly one audit row per hosted request including 401 / 429 /
-bad-Origin refusals (T8, DEV-858 / R-A1), and (DEV-840) refuses an
-unsupported protocol version (T9), cross-principal session reuse (T10),
-and a disallowed Origin (T11) without dispatch.
+handler defaults for T1, a deny-everything authenticator for T7, all-sites
+grants for T4, the pre-DEV-848 fall-through for T4b, a disabled audit
+writer for T8, and protocol-version / session-principal / Origin no-ops
+for T9–T11). `src/` has no eval or mutant switch, and `run-pack.js` fails
+if it ever mentions one. The patch-based mutant runner, remaining T2+ cases,
+and `eval:http:mutants` are later increments. `EVAL_HTTP_SRC` points the
+harness at a scratch copy of `src/`.

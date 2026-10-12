@@ -425,7 +425,8 @@ export function createMcpRequestHandler({
         return;
       }
       const protocolVersion = req.headers["mcp-protocol-version"];
-      if (protocolVersion !== undefined && protocolVersion !== ""
+      // Only an absent header skips the check: a present, empty value is unsupported.
+      if (protocolVersion !== undefined
         && !protocolVersionSupportedFn(String(protocolVersion).trim())) {
         writeJsonRpcHttpError(res, 400, {
           code: UNSUPPORTED_PROTOCOL_VERSION_CODE,

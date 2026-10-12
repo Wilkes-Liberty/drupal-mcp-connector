@@ -139,33 +139,69 @@ export function sessionPrincipalKey(identity) {
 }
 
 /**
- * Whether the Accept header allows the given media type (or a wildcard).
+ * Parse an Accept header into media ranges with their quality values
+ * (RFC 9110 §12.5.1). Unparseable entries are dropped; a missing or
+ * malformed `q` counts as 1.
+ *
+ * @param {unknown} acceptHeader
+ * @returns {Array<{type: string, subtype: string, q: number, specificity: number}>}
+ */
+function parseAcceptRanges(acceptHeader) {
+  const ranges = [];
+  for (const entry of String(acceptHeader).split(",")) {
+    const [media, ...params] = entry.split(";");
+    const range = media.trim().toLowerCase();
+    const slash = range.indexOf("/");
+    if (slash <= 0 || slash === range.length - 1) continue;
+    const type = range.slice(0, slash);
+    const subtype = range.slice(slash + 1);
+    if (type === "*" && subtype !== "*") continue;
+    let q = 1;
+    for (const param of params) {
+      const [key, value] = param.split("=").map((part) => part.trim().toLowerCase());
+      if (key !== "q") continue;
+      const parsed = Number(value);
+      q = Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1;
+    }
+    const specificity = type === "*" ? 0 : (subtype === "*" ? 1 : 2);
+    ranges.push({ type, subtype, q, specificity });
+  }
+  return ranges;
+}
+
+/**
+ * Whether the Accept header allows the given media type. The most specific
+ * matching range decides (exact beats `type/*` beats `*\/*`), and a matching
+ * range with `q=0` forbids the type even when a broader range would allow it.
  *
  * @param {unknown} acceptHeader
  * @param {string} type
  * @returns {boolean}
  */
 export function acceptIncludes(acceptHeader, type) {
-  if (acceptHeader === undefined || acceptHeader === null || acceptHeader === "") {
-    return false;
+  if (acceptHeader === undefined || acceptHeader === null) return false;
+  const [wantType, wantSubtype] = String(type).toLowerCase().split("/");
+  let best = null;
+  for (const range of parseAcceptRanges(acceptHeader)) {
+    const typeMatches = range.type === "*" || range.type === wantType;
+    const subtypeMatches = range.subtype === "*" || range.subtype === wantSubtype;
+    if (!typeMatches || !subtypeMatches) continue;
+    if (!best || range.specificity > best.specificity) best = range;
   }
-  return String(acceptHeader).split(",").some((part) => {
-    const media = part.split(";")[0].trim().toLowerCase();
-    return media === type || media === "*/*";
-  });
+  return Boolean(best) && best.q > 0;
 }
 
 /**
  * Accept-header check for the MCP endpoint. A missing header is allowed
- * (non-browser clients sometimes omit it). A present header must list a
- * type the method can answer with.
+ * (non-browser clients sometimes omit it). A present header, including an
+ * empty one, must list a type the method can answer with.
  *
  * @param {string} method
  * @param {unknown} acceptHeader
  * @returns {boolean}
  */
 export function mcpAcceptOk(method, acceptHeader) {
-  if (acceptHeader === undefined || acceptHeader === null || acceptHeader === "") {
+  if (acceptHeader === undefined || acceptHeader === null) {
     return true;
   }
   if (method === "GET") {

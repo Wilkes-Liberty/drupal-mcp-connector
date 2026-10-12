@@ -277,6 +277,16 @@ describe("resolveInboundAuthConfig", () => {
       },
     }, { MCP_ALLOWED_ORIGINS: "https://cursor.example,https://grok.example" });
     expect(fromEnv.allowedOrigins).toEqual(["https://cursor.example", "https://grok.example"]);
+
+    // An explicitly empty env value replaces the configured list with nothing.
+    const cleared = resolveInboundAuthConfig({
+      auth: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+        allowedOrigins: ["https://app.example.com"],
+      },
+    }, { MCP_ALLOWED_ORIGINS: "" });
+    expect(cleared.allowedOrigins).toEqual([]);
   });
 
   it("defaults maxTokenLifetime and algorithms, and prefers env overrides", () => {

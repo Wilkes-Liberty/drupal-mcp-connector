@@ -72,6 +72,23 @@ describe("http-transport helpers", () => {
     expect(acceptIncludes("application/json; q=0.9, */*", "text/event-stream")).toBe(true);
   });
 
+  it("honors q=0, media ranges, and exact-over-wildcard precedence", () => {
+    // q=0 explicitly forbids a type even when listed.
+    expect(acceptIncludes("application/json;q=0", "application/json")).toBe(false);
+    expect(mcpAcceptOk("POST", "application/json;q=0")).toBe(false);
+    expect(mcpAcceptOk("POST", "application/json;q=0, text/event-stream")).toBe(true);
+    // A subtype wildcard is a valid range.
+    expect(acceptIncludes("application/*", "application/json")).toBe(true);
+    expect(mcpAcceptOk("GET", "text/*")).toBe(true);
+    // The most specific match decides: exact q=0 beats a wildcard that allows it.
+    expect(acceptIncludes("*/*, application/json;q=0", "application/json")).toBe(false);
+    expect(acceptIncludes("application/*;q=0, application/json", "application/json")).toBe(true);
+    // A present but empty header lists nothing the endpoint can answer with.
+    expect(mcpAcceptOk("POST", "")).toBe(false);
+    expect(mcpAcceptOk("GET", "   ")).toBe(false);
+    expect(mcpAcceptOk("POST", undefined)).toBe(true);
+  });
+
   it("detects JSON-RPC batches, notifications, and responses", () => {
     expect(isJsonRpcBatch([{ jsonrpc: "2.0", id: 1, method: "ping" }])).toBe(true);
     expect(isJsonRpcBatch({ jsonrpc: "2.0", id: 1, method: "ping" })).toBe(false);

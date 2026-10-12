@@ -674,6 +674,27 @@ describe("createMcpRequestHandler", () => {
       expect(legacyHandler).not.toHaveBeenCalled();
     });
 
+    it("returns 400 for a present but empty MCP-Protocol-Version", async () => {
+      const modernHandler = vi.fn();
+      const h = authed({ modernHandler });
+      const res = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, {
+        "mcp-protocol-version": "",
+      }), res);
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body)).toMatchObject({ error: { code: -32022 } });
+      expect(modernHandler).not.toHaveBeenCalled();
+    });
+
+    it("returns 406 for a present but empty Accept header", async () => {
+      const modernHandler = vi.fn();
+      const h = authed({ modernHandler });
+      const res = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { accept: "" }), res);
+      expect(res.statusCode).toBe(406);
+      expect(modernHandler).not.toHaveBeenCalled();
+    });
+
     it("returns 405 for authenticated GET and DELETE without a session", async () => {
       const legacyHandler = vi.fn();
       const h = authed({ legacyHandler });
