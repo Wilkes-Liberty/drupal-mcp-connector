@@ -620,7 +620,11 @@ function assertPublishedPreserved(entityType, before, after, relationships) {
     if (!submittedPinsLanded(submitted.pins, landed)) {
       problems.push("the forward revision does not pin the submitted paragraphs");
     }
-  } else if (pinKey(forwardPins) !== pinKey(baseline)) {
+  } else if (!submittedPinsLanded(baseline, forwardPins)) {
+    // Entity Reference Revisions saves a new paragraph revision when the host
+    // saves a new revision, so an unsubmitted pin may advance. The same
+    // paragraphs, in the same order per field, at the baseline revision or
+    // newer, are preserved; anything else is a change (#442).
     problems.push("the forward revision changed paragraph pins that were not submitted");
   }
   if (problems.length) {
