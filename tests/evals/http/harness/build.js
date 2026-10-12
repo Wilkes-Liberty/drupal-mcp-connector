@@ -21,7 +21,7 @@ import { createServer } from "node:http";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { installFakeClock } from "./clock.js";
-import { httpAuth, httpHandler, mcpServer, principal, rateLimit } from "./connector.js";
+import { httpAuth, httpAudit, httpHandler, mcpServer, principal, rateLimit } from "./connector.js";
 import { createCounters } from "./counters.js";
 import { createFakeDrupal } from "./fake-drupal.js";
 import { createStubIssuer } from "./stub-issuer.js";
@@ -119,6 +119,9 @@ const MUTANTS = {
       errorDescription: "Token validation failed",
     }),
   }),
+  // T8 (DEV-858): disable the hosted HTTP audit writer. The green run
+  // asserts one row per request; with the writer off those assertions fail.
+  T8: () => ({ auditWriter: null }),
 };
 
 /**
@@ -146,10 +149,21 @@ function assertNoAmbientCredentials() {
 }
 
 /**
- * @param {{mutant?: string|null, grants?: object|null}} [options] Case id of the dependency-swap mutant, or null for the real build. `grants: null` is T4b (no table).
+ * @param {object} [options]
+ * @param {string|null} [options.mutant] Case id of the dependency-swap mutant, or null for the real build.
+ * @param {object|null} [options.grants] Grant table; `null` is T4b (no table), undefined is the fixture default.
+ * @param {number} [options.rateLimit] Per-key /mcp limit (default: fixture high water).
+ * @param {(req: object) => boolean} [options.checkOrigin] Optional Origin predicate.
+ * @param {(req: object) => string} [options.clientKey] Optional rate-limit key.
  * @returns {Promise<object>} harness handle
  */
-export async function buildHarness({ mutant = null, grants: grantsOption } = {}) {
+export async function buildHarness({
+  mutant = null,
+  grants: grantsOption,
+  rateLimit: rateLimitOpt,
+  checkOrigin = null,
+  clientKey,
+} = {}) {
   assertNoAmbientCredentials();
   if (mutant !== null && !MUTANTS[mutant]) throw new Error(`Unknown mutant "${mutant}".`);
 
@@ -217,6 +231,10 @@ export async function buildHarness({ mutant = null, grants: grantsOption } = {})
   const handlerSwap = { ...swap };
   delete handlerSwap.resolveGrantedSites;
   delete handlerSwap.resolveInboundAuthMode;
+  const auditRows = [];
+  const evalWriter = httpAudit.createHttpAuditWriter({
+    sink: (row) => { auditRows.push(row); },
+  });
   const deps = {
     // Production wiring in resource-server mode (index.js): checkAuth is closed.
     checkAuth: () => false,
@@ -225,12 +243,19 @@ export async function buildHarness({ mutant = null, grants: grantsOption } = {})
   };
   const handler = httpHandler.createMcpRequestHandler({
     ...deps,
+    auditWriter: deps.auditWriter !== undefined ? deps.auditWriter : evalWriter,
+    checkOrigin,
     protectedResource: inbound.protectedResource,
     resourceMetadataUrl: inbound.resourceMetadataUrl,
     toolCount: TOOL_DEFINITIONS.length,
     modernHandler: counters.wrapHandler(toNodeHandler(modern)),
     legacyHandler: counters.wrapHandler(httpHandler.createLegacySessionHandler({ buildServer, mode: "serve" })),
-    rateLimiter: rateLimit.createRateLimiter({ limit: FIXTURE_RATE_LIMIT, windowMs: 60_000, now: clock.now }),
+    rateLimiter: rateLimit.createRateLimiter({
+      limit: rateLimitOpt ?? FIXTURE_RATE_LIMIT,
+      windowMs: 60_000,
+      now: clock.now,
+    }),
+    ...(clientKey ? { clientKey } : {}),
   });
 
   const server = createServer((req, res) => {
@@ -247,8 +272,9 @@ export async function buildHarness({ mutant = null, grants: grantsOption } = {})
     requiredScopes: REQUIRED_SCOPES,
     grants,
     tools: TOOL_DEFINITIONS.map((tool) => tool.name),
-    rateLimit: FIXTURE_RATE_LIMIT,
+    rateLimit: rateLimitOpt ?? FIXTURE_RATE_LIMIT,
     mutant,
+    audit: deps.auditWriter !== null,
   })).digest("hex").slice(0, 16);
 
   const harness = {
@@ -258,6 +284,7 @@ export async function buildHarness({ mutant = null, grants: grantsOption } = {})
     resourceMetadataUrl: inbound.resourceMetadataUrl,
     counters,
     tap,
+    auditRows,
     fake,
     issuer,
     tenants: TENANTS,
@@ -271,10 +298,16 @@ export async function buildHarness({ mutant = null, grants: grantsOption } = {})
     /**
      * Send one built request to /mcp and record the response in the tap.
      * @param {{method: string, headers: object, body?: string}} request
-     * @param {{token?: string}} [options] Authorization is added only when a token is given.
+     * @param {{token?: string, headers?: object, requestId?: string}} [options]
+     *   Authorization is added only when a token is given.
      */
-    async send(request, { token } = {}) {
-      const headers = { ...request.headers, ...(token ? { authorization: `Bearer ${token}` } : {}) };
+    async send(request, { token, headers: extra = {}, requestId } = {}) {
+      const headers = {
+        ...request.headers,
+        ...extra,
+        ...(requestId ? { "x-request-id": requestId } : {}),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      };
       const res = await fetch(url, { method: request.method, headers, body: request.body });
       const text = await res.text();
       const entry = { status: res.status, headers: Object.fromEntries(res.headers), text };

@@ -11,8 +11,7 @@
  * body "Unauthorized"; Ch = 0, Ct = 0, Cu = 0; no Mcp-Session-Id issued; the
  * request body is not read.
  *
- * Not asserted here: "one refusal record". No refusal record exists in the
- * connector today (requirement R-A1, increment 5).
+ * One-row refusal records are T8 (DEV-858 / R-A1).
  *
  * Mutant (dependency swap): the handler defaults `authenticate: null,
  * checkAuth: () => true`, so each request dispatches under null identity.

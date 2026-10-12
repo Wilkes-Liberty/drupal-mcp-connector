@@ -74,6 +74,12 @@ import {
   writeUnauthorized,
   SPOOFABLE_IDENTITY_HEADERS,
 } from "../http-auth.js";
+import {
+  attachHttpAudit,
+  markHttpAuditTenant,
+  createHttpAuditWriter,
+  defaultHttpAuditSink,
+} from "../http-audit.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../http-handler.js";
 import { isWriteLikeCall } from "../operations.js";
 import {
@@ -651,6 +657,11 @@ function byteLength(value) {
  * @param {Function} [options.inboundAuthenticate] Test seam that replaces
  *   the resource-server authenticator after inbound metadata is built.
  * @param {?{recordListen: Function, recordConnect: Function}} [options.ledger]
+ * @param {{write: Function}|null} [options.auditWriter] Hosted HTTP audit
+ *   writer (DEV-858). Default: stderr JSONL (silent under Vitest). `null`
+ *   disables. One finish-time row per northbound response, refusals included.
+ * @param {(req: object) => boolean} [options.checkOrigin] Optional Origin
+ *   predicate forwarded to the shared HTTP handler.
  * @returns {Promise<object>}
  */
 export async function startEdge({
@@ -681,6 +692,8 @@ export async function startEdge({
   fetchFn = fetch,
   inboundAuthenticate = null,
   ledger = null,
+  auditWriter,
+  checkOrigin = null,
 } = {}) {
   if (!auth?.issuer || !auth?.audience) {
     throw new EdgeStartupError(
@@ -882,6 +895,9 @@ export async function startEdge({
 
   const inbound = await createInboundHttpsAuth({ inboundCfg: auth, fetchFn });
   const authenticate = inboundAuthenticate ?? ((req) => inbound.authenticate(req));
+  const hostedAudit = auditWriter === undefined
+    ? createHttpAuditWriter({ sink: defaultHttpAuditSink })
+    : auditWriter;
   const targetRelay = createLocalRelay({ sites: catalog, grants: grantTable, defaultSite });
   const broker = createRequestBroker({ timeoutMs: fanDownTimeoutMs });
 
@@ -1107,7 +1123,10 @@ export async function startEdge({
       targetName,
       sessions: [...sessions.values()],
     });
-    if (selected.tenant) usageTenant = selected.tenant;
+    if (selected.tenant) {
+      usageTenant = selected.tenant;
+      markHttpAuditTenant(req, selected.tenant);
+    }
     if (!selected.session && selected.reason === "not_entitled") {
       refuse(403, "not_entitled");
       return;
@@ -1371,6 +1390,7 @@ export async function startEdge({
       res.writeHead(auth.status, auth.headers).end(auth.body);
       return;
     }
+    req.mcpIdentity = auth.identity;
     if (tombstones.has(auth.identity.clientId)) {
       jsonResponse(res, 403, { error: "offboarded" });
       return;
@@ -1388,6 +1408,7 @@ export async function startEdge({
         jsonResponse(res, 403, { error: "not_entitled" });
         return;
       }
+      markHttpAuditTenant(req, read.tenant);
       jsonResponse(res, 200, {
         tenant: read.tenant,
         records: read.records,
@@ -1441,6 +1462,7 @@ export async function startEdge({
       res.writeHead(authResult.status, authResult.headers).end(authResult.body);
       return;
     }
+    req.mcpIdentity = authResult.identity;
     if (tombstones.has(authResult.identity.clientId)) {
       jsonResponse(res, 403, { error: "offboarded" });
       return;
@@ -1470,6 +1492,7 @@ export async function startEdge({
         jsonResponse(res, 403, { error: "not_entitled" });
         return;
       }
+      markHttpAuditTenant(req, pack.tenant);
       jsonResponse(res, 200, pack);
     } catch {
       console.error("[drupal-mcp-edge] assessor export failed.");
@@ -1485,6 +1508,8 @@ export async function startEdge({
     authenticate,
     protectedResource: inbound.protectedResource,
     resourceMetadataUrl: inbound.resourceMetadataUrl,
+    auditWriter: hostedAudit,
+    checkOrigin,
     modernHandler: fanDown,
     // Northbound is stateless 2026-07-28 only: sessionful legacy traffic is
     // refused, so no Mcp-Session-Id ever exists in either direction.
@@ -1499,6 +1524,7 @@ export async function startEdge({
   });
 
   function northbound(req, res) {
+    if (hostedAudit) attachHttpAudit(req, res, hostedAudit);
     const path = String(req.url || "").split("?")[0];
     if (path === "/usage") {
       void serveUsage(req, res);

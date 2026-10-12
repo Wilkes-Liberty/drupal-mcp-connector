@@ -30,6 +30,7 @@ import { createLocalPolicyEnforcement } from "../../src/lib/policy-enforcement.j
 import { createRelayAgent } from "../../src/lib/relay/agent.js";
 import { createNotary, generateNotaryKeys, verifyInclusion } from "../../src/lib/anchor.js";
 import { ABSENT, createEvidenceLedger, EXECUTION_IDS, exportAssessor } from "../../src/lib/evidence.js";
+import { createHttpAuditWriter } from "../../src/lib/http-audit.js";
 import { createUsageLedger, reconcileUsage } from "../../src/lib/usage.js";
 import {
   AUDIENCE,
@@ -170,7 +171,7 @@ async function startRealAgent(harness, {
 
 async function startTwoTenantHarness({
   tenantGrants, grants, actors, policies, promotions, quotas, usage,
-  evidence, evidenceAnchor, fanDownTimeoutMs, now,
+  evidence, evidenceAnchor, fanDownTimeoutMs, now, auditWriter,
 } = {}) {
   const channel = createChannelFile();
   const tokenA = `channel-a-${randomBytes(24).toString("hex")}`;
@@ -194,6 +195,7 @@ async function startTwoTenantHarness({
     ...(evidenceAnchor ? { evidenceAnchor } : {}),
     ...(fanDownTimeoutMs !== undefined ? { fanDownTimeoutMs } : {}),
     ...(now ? { now } : {}),
+    ...(auditWriter ? { auditWriter } : {}),
   }));
   closers.push(() => edge.close());
   return { edge, channel, tokenA, tokenB, ledger };
@@ -553,6 +555,32 @@ describe("DEV-877: edge 401s carry resource_metadata", () => {
       edge.resourceMetadataUrl,
       "Bearer token required",
     );
+  });
+
+  it("records the authenticated principal on /usage and /assessor audit rows", async () => {
+    const writer = createHttpAuditWriter({ sink: () => {} });
+    const keys = generateNotaryKeys();
+    const edge = await startEdge(baseEdgeOptions({
+      tenantGrants: TENANT_GRANTS,
+      usage: createUsageLedger(),
+      evidence: createEvidenceLedger(),
+      evidenceAnchor: { publicKey: keys.publicPin, submit: () => ({ ok: false }) },
+      auditWriter: writer,
+    }));
+    closers.push(() => edge.close());
+
+    const jwt = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    expect((await usageGet(edge.northboundUrl, jwt)).status).toBe(200);
+    expect((await assessorGet(edge.northboundUrl, jwt)).status).toBe(200);
+    const unlisted = await issuer.signToken({ clientId: "client-x", sub: "sub-x" });
+    expect((await usageGet(edge.northboundUrl, unlisted)).status).toBe(403);
+
+    const usageRow = writer.rows.find((row) => row.route === "/usage" && row.status === 200);
+    const assessorRow = writer.rows.find((row) => row.route === "/assessor" && row.status === 200);
+    const denied = writer.rows.find((row) => row.route === "/usage" && row.status === 403);
+    expect(usageRow).toMatchObject({ code: "ok", principal: "sub-a" });
+    expect(assessorRow).toMatchObject({ code: "ok", principal: "sub-a" });
+    expect(denied).toMatchObject({ code: "forbidden", principal: "sub-x" });
   });
 });
 
@@ -2318,6 +2346,30 @@ describe("independently verifiable evidence (#261)", () => {
     }
     return ledger.records();
   }
+
+  it("audits /usage and /assessor reads with the authenticated principal and tenant (DEV-858)", async () => {
+    const rows = [];
+    const keys = generateNotaryKeys();
+    const notary = createNotary(keys);
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: POLICIES,
+      usage: createUsageLedger(),
+      evidence: createEvidenceLedger(),
+      evidenceAnchor: { publicKey: keys.publicPin, submit: (digest) => notary.include(digest) },
+      auditWriter: { write: (row) => { rows.push(row); } },
+    });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const usage = await usageGet(harness.edge.northboundUrl, jwtA);
+    expect(usage.status).toBe(200);
+    const assessor = await assessorGet(harness.edge.northboundUrl, jwtA);
+    expect(assessor.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const usageRow = rows.find((row) => row.route === "/usage");
+    const assessorRow = rows.find((row) => row.route === "/assessor");
+    expect(usageRow).toMatchObject({ status: 200, code: "ok", principal: "sub-a", tenant: "tenant-a" });
+    expect(assessorRow).toMatchObject({ status: 200, code: "ok", principal: "sub-a", tenant: "tenant-a" });
+  });
 
   it("reconciles one governed execution, anchors it, and cites it from /assessor", async () => {
     const keys = generateNotaryKeys();
