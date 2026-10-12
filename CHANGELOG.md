@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Doctor loads local credentials through the same secret map as server startup (#439). An explicit config uses the map beside that file; exported credentials take precedence, help does not access Keychain, and a missing secret is reported without attempting OAuth acquisition.
+
 ## [3.2.3] - 2026-10-11
 
 ### Added

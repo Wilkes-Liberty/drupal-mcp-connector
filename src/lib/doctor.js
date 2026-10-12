@@ -7,6 +7,7 @@
 
 import fetch from "node-fetch";
 import { readFileSync } from "node:fs";
+import { loadLocalSecrets } from "./load-secrets.js";
 import {
   resolveApiToken,
   resolveOauth,
@@ -231,7 +232,7 @@ function hasCredential(site) {
   return Boolean(
     site.apiToken
     || (site.username && site.password)
-    || (site.oauth?.clientId && (site.oauth.clientSecret || site.oauth.clientSecretEnv)),
+    || (site.oauth?.clientId && site.oauth.clientSecret),
   );
 }
 
@@ -631,9 +632,14 @@ export async function runDoctorCli(argv, io = {}) {
     stdout.write(DOCTOR_USAGE);
     return 0;
   }
+  const env = io.env || process.env;
+  loadLocalSecrets({
+    env,
+    ...(args.config ? { configPath: String(args.config) } : {}),
+  });
   const report = await runDoctor({
     args,
-    env: io.env || process.env,
+    env,
     fetch: io.fetch,
   });
   if (args.json) {
