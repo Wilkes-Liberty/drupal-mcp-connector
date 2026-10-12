@@ -171,7 +171,7 @@ async function startRealAgent(harness, {
 
 async function startTwoTenantHarness({
   tenantGrants, grants, actors, policies, promotions, quotas, usage,
-  evidence, evidenceAnchor, fanDownTimeoutMs, now,
+  evidence, evidenceAnchor, fanDownTimeoutMs, now, auditWriter,
 } = {}) {
   const channel = createChannelFile();
   const tokenA = `channel-a-${randomBytes(24).toString("hex")}`;
@@ -195,6 +195,7 @@ async function startTwoTenantHarness({
     ...(evidenceAnchor ? { evidenceAnchor } : {}),
     ...(fanDownTimeoutMs !== undefined ? { fanDownTimeoutMs } : {}),
     ...(now ? { now } : {}),
+    ...(auditWriter ? { auditWriter } : {}),
   }));
   closers.push(() => edge.close());
   return { edge, channel, tokenA, tokenB, ledger };
@@ -2345,6 +2346,30 @@ describe("independently verifiable evidence (#261)", () => {
     }
     return ledger.records();
   }
+
+  it("audits /usage and /assessor reads with the authenticated principal and tenant (DEV-858)", async () => {
+    const rows = [];
+    const keys = generateNotaryKeys();
+    const notary = createNotary(keys);
+    const harness = await startTwoTenantHarness({
+      tenantGrants: TENANT_GRANTS,
+      policies: POLICIES,
+      usage: createUsageLedger(),
+      evidence: createEvidenceLedger(),
+      evidenceAnchor: { publicKey: keys.publicPin, submit: (digest) => notary.include(digest) },
+      auditWriter: { write: (row) => { rows.push(row); } },
+    });
+    const jwtA = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    const usage = await usageGet(harness.edge.northboundUrl, jwtA);
+    expect(usage.status).toBe(200);
+    const assessor = await assessorGet(harness.edge.northboundUrl, jwtA);
+    expect(assessor.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const usageRow = rows.find((row) => row.route === "/usage");
+    const assessorRow = rows.find((row) => row.route === "/assessor");
+    expect(usageRow).toMatchObject({ status: 200, code: "ok", principal: "sub-a", tenant: "tenant-a" });
+    expect(assessorRow).toMatchObject({ status: 200, code: "ok", principal: "sub-a", tenant: "tenant-a" });
+  });
 
   it("reconciles one governed execution, anchors it, and cites it from /assessor", async () => {
     const keys = generateNotaryKeys();

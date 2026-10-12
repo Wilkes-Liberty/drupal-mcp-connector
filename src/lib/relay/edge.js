@@ -76,6 +76,7 @@ import {
 } from "../http-auth.js";
 import {
   attachHttpAudit,
+  markHttpAuditTenant,
   createHttpAuditWriter,
   defaultHttpAuditSink,
 } from "../http-audit.js";
@@ -1122,7 +1123,10 @@ export async function startEdge({
       targetName,
       sessions: [...sessions.values()],
     });
-    if (selected.tenant) usageTenant = selected.tenant;
+    if (selected.tenant) {
+      usageTenant = selected.tenant;
+      markHttpAuditTenant(req, selected.tenant);
+    }
     if (!selected.session && selected.reason === "not_entitled") {
       refuse(403, "not_entitled");
       return;
@@ -1404,6 +1408,7 @@ export async function startEdge({
         jsonResponse(res, 403, { error: "not_entitled" });
         return;
       }
+      markHttpAuditTenant(req, read.tenant);
       jsonResponse(res, 200, {
         tenant: read.tenant,
         records: read.records,
@@ -1487,6 +1492,7 @@ export async function startEdge({
         jsonResponse(res, 403, { error: "not_entitled" });
         return;
       }
+      markHttpAuditTenant(req, pack.tenant);
       jsonResponse(res, 200, pack);
     } catch {
       console.error("[drupal-mcp-edge] assessor export failed.");
@@ -1518,7 +1524,7 @@ export async function startEdge({
   });
 
   function northbound(req, res) {
-    if (hostedAudit) attachHttpAudit(req, res, hostedAudit, { checkOrigin });
+    if (hostedAudit) attachHttpAudit(req, res, hostedAudit);
     const path = String(req.url || "").split("?")[0];
     if (path === "/usage") {
       void serveUsage(req, res);

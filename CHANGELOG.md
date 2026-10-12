@@ -12,9 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Streamable-HTTP `/mcp` and the relay northbound edge emit a closed-field
   row (`timestamp`, `route`, `method`, `status`, denial `code`, `requestId`,
   and principal/tenant only when known) when the response finishes. Missing
-  token, invalid token, rate-limit, bad Origin, and allow each get a code
-  from `unauthenticated` / `invalid_token` / `rate_limited` / `bad_origin` /
-  `forbidden` / `ok`. Bearer tokens, `Authorization`, cookies, and raw
+  token, invalid token, rate-limit, bad Origin, client abort, and allow each
+  get a code from `unauthenticated` / `invalid_token` / `rate_limited` /
+  `bad_origin` / `forbidden` / `aborted` / `ok`. `bad_origin` is recorded from
+  the handler's own 403 decision, never by re-running the Origin predicate at
+  finish; `/usage` and `/assessor` rows carry the authenticated principal and
+  resolved tenant. Bearer tokens, `Authorization`, cookies, and raw
   bodies are never copied in. A writer/sink error is swallowed so a refused
   request cannot become an allowed one. Optional `checkOrigin` /
   `allowedOrigins` is the classify hook for Origin refusals; stricter
@@ -26,12 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no site. An explicit `auth.grants` row or a `sites` claim is unchanged.
   Stdio and loopback local-operator identities still see every configured
   site.
-
-### Fixed
-- Hosted HTTP audit rows classify Origin only when `/mcp` actually refused it
-  (a 200 `/health` or 429 `/usage` with a disallowed Origin is no longer
-  `bad_origin`), record the authenticated principal on `/usage` and
-  `/assessor`, and do not treat a client disconnect before headers as `ok`.
 
 ## [4.0.0] - 2026-10-12
 

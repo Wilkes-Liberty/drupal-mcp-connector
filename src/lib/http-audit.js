@@ -18,6 +18,7 @@ export const HTTP_AUDIT_CODES = Object.freeze([
   "rate_limited",
   "bad_origin",
   "forbidden",
+  "aborted",
   "ok",
 ]);
 
@@ -25,6 +26,10 @@ const CODE_SET = new Set(HTTP_AUDIT_CODES);
 
 const ATTACHED = new WeakSet();
 const WRITTEN = new WeakSet();
+/** Requests whose /mcp Origin check refused them (set by the handler that wrote the 403). */
+const ORIGIN_REFUSED = new WeakSet();
+/** Tenant resolved for a request, when the route resolved one. */
+const TENANTS = new WeakMap();
 
 const FORBIDDEN_ROW_KEYS = new Set([
   "authorization",
@@ -129,38 +134,52 @@ export function resolveRequestId(req) {
   return randomUUID();
 }
 
-const MCP_ORIGIN_METHODS = new Set(["GET", "POST", "DELETE"]);
+/**
+ * Record that the handler refused this request on its Origin check. The audit
+ * row classifies `bad_origin` from this mark only, never by re-running the
+ * predicate, so a route that does not enforce Origin (or a stateful predicate)
+ * cannot relabel a response after the fact.
+ *
+ * @param {import("http").IncomingMessage} req
+ */
+export function markHttpAuditOriginRefused(req) {
+  if (req && typeof req === "object") ORIGIN_REFUSED.add(req);
+}
 
 /**
- * Origin is enforced only on Streamable-HTTP `/mcp` (GET/POST/DELETE).
- * Auxiliary routes (`/health`, `/usage`, `/assessor`) ignore Origin.
+ * Record the tenant a route resolved for this request so the row carries it
+ * even when the identity object has no `tenant` field.
  *
- * @param {import("http").IncomingMessage|{url?: string, method?: string}} req
- * @returns {boolean}
+ * @param {import("http").IncomingMessage} req
+ * @param {string|null|undefined} tenant
  */
-function originEnforcedOn(req) {
-  const route = String(req?.url || "").split("?")[0] || "/";
-  const method = String(req?.method || "GET").toUpperCase();
-  return route === "/mcp" && MCP_ORIGIN_METHODS.has(method);
+export function markHttpAuditTenant(req, tenant) {
+  if (req && typeof req === "object" && typeof tenant === "string" && tenant) {
+    TENANTS.set(req, tenant);
+  }
 }
 
 /**
  * Classify a finished response into a closed denial code.
  *
  * Codes are mutually exclusive outcomes of the finished response. Origin
- * denial only wins on the 403 the handler actually emits for `/mcp`.
+ * denial only wins on the 403 the handler actually emitted for `/mcp`,
+ * and only when that handler marked the refusal on the request.
  *
  * @param {object} fields
  * @param {number} [fields.status]
  * @param {boolean} [fields.hasAuthorization]
  * @param {boolean} [fields.originDenied]
+ * @param {boolean} [fields.aborted] Client went away before any status was written.
  * @returns {typeof HTTP_AUDIT_CODES[number]}
  */
 export function classifyHttpAuditCode({
   status,
   hasAuthorization = false,
   originDenied = false,
+  aborted = false,
 } = {}) {
+  if (aborted) return "aborted";
   const code = Number(status);
   if (code === 429) return "rate_limited";
   if (code === 401) return hasAuthorization ? "invalid_token" : "unauthenticated";
@@ -226,31 +245,17 @@ export function sanitizeHttpAuditRow(row, secrets = []) {
  * @param {import("http").ServerResponse} res
  * @param {object} [context]
  * @param {string} [context.requestId]
- * @param {(req: import("http").IncomingMessage) => boolean} [context.checkOrigin]
+ * @param {boolean} [context.aborted] The client closed before a status was written.
  * @param {() => string} [context.now]
- * @param {boolean} [context.aborted] True when the socket closed before finish.
  * @returns {object}
  */
 export function buildHttpAuditRow(req, res, {
   requestId,
-  checkOrigin = null,
-  now = () => new Date().toISOString(),
   aborted = false,
+  now = () => new Date().toISOString(),
 } = {}) {
-  let status = Number(res?.statusCode);
-  // Node defaults statusCode to 200. A disconnect before writeHead is not an allow.
-  if (aborted && res?.headersSent !== true) {
-    status = 0;
-  }
-  let originDenied = false;
-  if (typeof checkOrigin === "function" && originEnforcedOn(req)) {
-    try {
-      // Match the handler: anything other than strict true is a 403.
-      originDenied = checkOrigin(req) !== true;
-    } catch {
-      originDenied = true;
-    }
-  }
+  const status = aborted ? 0 : Number(res?.statusCode);
+  const originDenied = Boolean(req && ORIGIN_REFUSED.has(req));
   const identity = req?.mcpIdentity && typeof req.mcpIdentity === "object"
     ? req.mcpIdentity
     : null;
@@ -263,12 +268,14 @@ export function buildHttpAuditRow(req, res, {
       status,
       hasAuthorization: requestHasAuthorization(req),
       originDenied,
+      aborted,
     }),
     requestId: requestId || resolveRequestId(req),
   };
   const principal = identity?.sub || identity?.clientId;
   if (principal) row.principal = String(principal);
-  if (identity?.tenant) row.tenant = String(identity.tenant);
+  const tenant = identity?.tenant || (req && TENANTS.get(req));
+  if (tenant) row.tenant = String(tenant);
   return sanitizeHttpAuditRow(row, secretsFrom(req));
 }
 
@@ -331,13 +338,14 @@ export function resolveOriginCheck(checkOrigin = null, allowedOrigins = null) {
 
 /**
  * Attach exactly one finish-time write to `res`. Idempotent. A write error
- * is swallowed so a refused request cannot become an allowed one.
+ * is swallowed so a refused request cannot become an allowed one. A `close`
+ * before any status was written (client abort) is recorded as `aborted`
+ * with status 0 rather than as the default 200.
  *
  * @param {import("http").IncomingMessage} req
  * @param {import("http").ServerResponse} res
  * @param {{write: Function}|null} writer
  * @param {object} [context]
- * @param {(req: object) => boolean} [context.checkOrigin]
  * @param {() => string} [context.now]
  */
 export function attachHttpAudit(req, res, writer, context = {}) {
@@ -345,26 +353,21 @@ export function attachHttpAudit(req, res, writer, context = {}) {
   if (!res || ATTACHED.has(res)) return;
   ATTACHED.add(res);
   const requestId = resolveRequestId(req);
-  let finished = false;
 
-  const writeOnce = (aborted = false) => {
+  const writeOnce = ({ aborted = false } = {}) => {
     if (WRITTEN.has(res)) return;
     WRITTEN.add(res);
     try {
-      writer.write(buildHttpAuditRow(req, res, { requestId, ...context, aborted }), req);
+      writer.write(buildHttpAuditRow(req, res, { requestId, aborted, ...context }), req);
     } catch {
       // Fail-safe: the response has already been decided.
     }
   };
+  const statusWritten = () => Boolean(res.headersSent || res.writableFinished);
 
   if (typeof res.on === "function") {
-    res.on("finish", () => {
-      finished = true;
-      writeOnce(false);
-    });
-    res.on("close", () => {
-      writeOnce(!finished);
-    });
+    res.on("finish", () => writeOnce());
+    res.on("close", () => writeOnce({ aborted: !statusWritten() }));
     return;
   }
 
@@ -383,10 +386,11 @@ export function attachHttpAudit(req, res, writer, context = {}) {
   const origDestroy = res.destroy;
   if (typeof origDestroy === "function") {
     res.destroy = function auditedDestroy(...args) {
+      const aborted = !statusWritten();
       try {
         return origDestroy.apply(this, args);
       } finally {
-        writeOnce(true);
+        writeOnce({ aborted });
       }
     };
   }

@@ -6,6 +6,8 @@ import {
   buildHttpAuditRow,
   classifyHttpAuditCode,
   createHttpAuditWriter,
+  markHttpAuditOriginRefused,
+  markHttpAuditTenant,
   requestHasAuthorization,
   resolveOriginCheck,
   resolveRequestId,
@@ -49,7 +51,7 @@ describe("classifyHttpAuditCode", () => {
     expect(classifyHttpAuditCode({ status: 403 })).toBe("forbidden");
     expect(classifyHttpAuditCode({ status: 200 })).toBe("ok");
     expect(HTTP_AUDIT_CODES).toEqual([
-      "unauthenticated", "invalid_token", "rate_limited", "bad_origin", "forbidden", "ok",
+      "unauthenticated", "invalid_token", "rate_limited", "bad_origin", "forbidden", "aborted", "ok",
     ]);
   });
 
@@ -180,7 +182,7 @@ describe("attachHttpAudit", () => {
     attachHttpAudit(request, res, writer);
     res.emit("close");
     expect(writer.rows).toHaveLength(1);
-    expect(writer.rows[0]).toMatchObject({ code: "forbidden", status: 0 });
+    expect(writer.rows[0]).toMatchObject({ code: "aborted", status: 0 });
     res.emit("finish");
     expect(writer.rows).toHaveLength(1);
   });
@@ -219,12 +221,11 @@ describe("buildHttpAuditRow", () => {
     ).code).toBe("forbidden");
   });
 
-  it("treats a non-true Origin predicate as a /mcp denial", () => {
-    expect(buildHttpAuditRow(
-      req("POST", "/mcp"),
-      { statusCode: 403 },
-      { checkOrigin: () => undefined },
-    ).code).toBe("bad_origin");
+  it("labels bad_origin only when the handler marked the refusal on a 403", () => {
+    const refused = req("POST", "/mcp");
+    markHttpAuditOriginRefused(refused);
+    expect(buildHttpAuditRow(refused, { statusCode: 403 }).code).toBe("bad_origin");
+    expect(buildHttpAuditRow(req("POST", "/mcp"), { statusCode: 403 }).code).toBe("forbidden");
   });
 });
 
@@ -292,6 +293,62 @@ describe("createMcpRequestHandler audit finish hook", () => {
     await sloppy.handle(req("POST", "/mcp"), sloppyRes);
     expect(sloppyRes.statusCode).toBe(403);
     expect(sloppy.writer.rows[0].code).toBe("bad_origin");
+  });
+
+  it("labels bad_origin only from the handler's own refusal, never by re-running the predicate", async () => {
+    // A disallowed Origin on a route that never enforces Origin is not a refusal.
+    const health = handler({ checkOrigin: () => false });
+    const healthRes = mockRes();
+    await health.handle(req("GET", "/health", { origin: "https://evil.example" }), healthRes);
+    expect(healthRes.statusCode).toBe(200);
+    expect(health.writer.rows[0].code).toBe("ok");
+
+    // A stateful predicate that admitted /mcp must not flip the row afterwards.
+    let calls = 0;
+    const flaky = handler({ checkOrigin: () => calls++ === 0 });
+    const flakyRes = mockRes();
+    await flaky.handle(req("POST", "/mcp", { origin: "https://app.example" }), flakyRes);
+    expect(flakyRes.statusCode).toBe(401);
+    expect(flaky.writer.rows[0].code).toBe("unauthenticated");
+    expect(flaky.writer.rows[0].status).toBe(401);
+  });
+
+  it("records a client abort before headers as aborted, not ok", () => {
+    const writer = createHttpAuditWriter({ sink: () => {} });
+    const res = Object.assign(new EventEmitter(), { statusCode: 200, headersSent: false, writableFinished: false });
+    attachHttpAudit(req("POST", "/mcp"), res, writer);
+    res.emit("close");
+    expect(writer.rows).toHaveLength(1);
+    expect(writer.rows[0].code).toBe("aborted");
+    expect(writer.rows[0].status).toBe(0);
+    // A late 401 cannot rewrite history, and no second row appears.
+    res.statusCode = 401;
+    res.headersSent = true;
+    res.emit("finish");
+    expect(writer.rows).toHaveLength(1);
+  });
+
+  it("keeps a normal finish after close as the real status", () => {
+    const writer = createHttpAuditWriter({ sink: () => {} });
+    const res = Object.assign(new EventEmitter(), { statusCode: 429, headersSent: true, writableFinished: true });
+    attachHttpAudit(req("POST", "/mcp"), res, writer);
+    res.emit("finish");
+    res.emit("close");
+    expect(writer.rows).toHaveLength(1);
+    expect(writer.rows[0].code).toBe("rate_limited");
+  });
+
+  it("carries a tenant and an origin refusal that the handler marked on the request", () => {
+    const request = req("GET", "/usage");
+    request.mcpIdentity = { sub: "sub-a", clientId: "client-a" };
+    markHttpAuditTenant(request, "tenant-alpha");
+    const row = buildHttpAuditRow(request, { statusCode: 200 });
+    expect(row.principal).toBe("sub-a");
+    expect(row.tenant).toBe("tenant-alpha");
+
+    const refused = req("POST", "/mcp", { origin: "https://evil.example" });
+    markHttpAuditOriginRefused(refused);
+    expect(buildHttpAuditRow(refused, { statusCode: 403 }).code).toBe("bad_origin");
   });
 
   it("keeps a 401 when the writer throws", async () => {

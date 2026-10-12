@@ -13,6 +13,7 @@ import { NodeStreamableHTTPServerTransport, toWebRequest } from "@modelcontextpr
 import { writeUnauthorized } from "./http-auth.js";
 import {
   attachHttpAudit,
+  markHttpAuditOriginRefused,
   createHttpAuditWriter,
   defaultHttpAuditSink,
   resolveOriginCheck,
@@ -305,7 +306,7 @@ export function createMcpRequestHandler({
   }
 
   return async function handle(req, res) {
-    if (writer) attachHttpAudit(req, res, writer, { checkOrigin: originCheck });
+    if (writer) attachHttpAudit(req, res, writer);
     const path = requestPath(req);
 
     if (isUnauthenticatedRoute(req.method, path)) {
@@ -332,6 +333,7 @@ export function createMcpRequestHandler({
         originAllowed = false;
       }
       if (!originAllowed) {
+        markHttpAuditOriginRefused(req);
         res.writeHead(403).end("Forbidden");
         return;
       }
