@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Streamable HTTP 2026-07-28 conformance on `/mcp` (DEV-840).** The connector
+  HTTP surface now matches the current MCP Streamable HTTP revision so
+  non-stdio clients can add the operator-run URL with an OAuth bearer.
+  Targeted revision: **2026-07-28** (dual-era 2025 sessionful arm retained).
+  After fail-closed auth: `Origin` allowlist (`auth.allowedOrigins` /
+  `MCP_ALLOWED_ORIGINS`; missing Origin allowed; present disallowed Origin is
+  `403`); `MCP-Protocol-Version` `400` with `-32022` before dispatch;
+  `Accept` `406` when the header lists neither `application/json` nor
+  `text/event-stream`; JSON-RPC batches `400` (`-32600`); sessionless
+  `GET`/`DELETE` `405` (`Allow: POST`); 2025 sessions bound to
+  `sub`+`clientId` (`403` on cross-principal reuse, `404` after `DELETE`);
+  Last-Event-ID / GET SSE resumability are not implemented (the 2026
+  revision does not support them). Hosted rollout, TLS termination, and
+  marketplace listings remain DEV-817 / Keystone — this change does not
+  claim a public URL is live.
+
+### Changed
+- **Sessionless `GET`/`DELETE` `/mcp` is `405` (DEV-840, breaking).** Those
+  methods without `Mcp-Session-Id` previously reached the 2025 arm and
+  returned `400`. Revision 2026-07-28 has no standalone GET stream; clients
+  that probed GET without a session should treat `405` as "POST only".
+  Authenticated requests with a present `Origin` not on
+  `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS` are now `403`. A JSON-RPC
+  batch array is `400`. An `Accept` header that lists neither
+  `application/json` nor `text/event-stream` is `406`.
+
 ### Security
 - **Hosted HTTP path writes one audit row per request, refusals included (DEV-858).**
   Streamable-HTTP `/mcp` and the relay northbound edge emit a closed-field
@@ -19,9 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finish; `/usage` and `/assessor` rows carry the authenticated principal and
   resolved tenant. Bearer tokens, `Authorization`, cookies, and raw
   bodies are never copied in. A writer/sink error is swallowed so a refused
-  request cannot become an allowed one. Optional `checkOrigin` /
-  `allowedOrigins` is the classify hook for Origin refusals; stricter
-  Host/Origin validation remains DEV-861.
+  request cannot become an allowed one. Origin refusals come from the DEV-840
+  `auth.allowedOrigins` guard; stricter Host validation remains DEV-861.
 - **Hosted JWT principals without a grant entry or `sites` claim get no sites (DEV-848).**
   When `auth.grants` is omitted, a bearer token that also lacks a `sites` /
   `mcp_sites` claim is entitled to no configured site. Tool calls are

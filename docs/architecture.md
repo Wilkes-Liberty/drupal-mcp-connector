@@ -155,9 +155,12 @@ MCP_PORT=3443 node src/index.js
 Endpoint: `https://host:3443/mcp` (health probe at `/health`). One bounded POST
 body is classified into exactly one transport arm: current 2026-07-28 requests
 use the strict request-scoped handler, while 2025-era clients use the existing
-sessionful handler. `GET`/`DELETE` are legacy session operations. Set
-`MCP_LEGACY_TRANSPORT=reject` to reject the legacy arm. Authentication and rate
-limiting run before body parsing and classification.
+sessionful handler. Sessionless `GET`/`DELETE` return 405 (revision 2026-07-28
+has no standalone GET stream). With `Mcp-Session-Id`, `GET`/`DELETE` remain
+legacy session operations and the id is bound to the authenticated principal.
+Set `MCP_LEGACY_TRANSPORT=reject` to reject the legacy arm. Authentication and
+rate limiting run before Origin, protocol-version, Accept, body parsing, and
+classification.
 
 HTTPS is mandatory; plain HTTP is refused on non-localhost unless
 `MCP_ALLOW_HTTP=1` is set explicitly (development only). Without TLS the server

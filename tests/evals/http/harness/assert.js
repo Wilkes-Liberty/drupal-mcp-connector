@@ -59,6 +59,24 @@ export function expectAllowed(h, label, res, { status = 200 } = {}) {
 }
 
 /**
+ * An authenticated transport-level denial (Origin, protocol version, session).
+ * Not a 401 — identity already resolved.
+ *
+ * @param {object} h
+ * @param {string} label
+ * @param {{status: number, headers: object, text: string}} res
+ * @param {{status: number, code?: number}} expected
+ */
+export function expectTransportDenied(h, label, res, { status, code } = {}) {
+  check(h, () => expect(res.status, `${label}: status`).toBe(status));
+  check(h, () => expect(res.headers["www-authenticate"], `${label}: no 401 challenge`).toBeUndefined());
+  check(h, () => expect(res.headers["mcp-session-id"], `${label}: no session issued`).toBeUndefined());
+  if (code !== undefined) {
+    check(h, () => expect(JSON.parse(res.text).error.code, `${label}: JSON-RPC code`).toBe(code));
+  }
+}
+
+/**
  * Generic counted equality for allow-twin facts (entitlement, counters, canaries).
  * @param {object} h
  * @param {string} label

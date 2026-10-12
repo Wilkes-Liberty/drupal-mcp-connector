@@ -949,6 +949,9 @@ export function resolveInboundAuthConfig(cfg = {}, env = process.env) {
       env.MCP_MAX_TOKEN_LIFETIME || auth.maxTokenLifetime || DEFAULT_MAX_TOKEN_LIFETIME,
     ),
     algorithms: normalizeTokenAlgorithms(env.MCP_TOKEN_ALGORITHMS || auth.algorithms),
+    allowedOrigins: env.MCP_ALLOWED_ORIGINS
+      ? String(env.MCP_ALLOWED_ORIGINS).split(/[\s,]+/).filter(Boolean)
+      : (Array.isArray(auth.allowedOrigins) ? auth.allowedOrigins.map(String) : []),
   };
 }
 

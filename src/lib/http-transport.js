@@ -1,0 +1,225 @@
+/**
+ * Streamable HTTP transport helpers (DEV-840).
+ *
+ * Conformance helpers for MCP revision 2026-07-28, plus the dual-era
+ * 2025 sessionful compatibility arm. Origin validation, protocol-version
+ * allowlisting, Accept checks, JSON-RPC batch rejection, and principal
+ * binding for leftover 2025 sessions live here so the request handler
+ * stays a thin wire-up. Session ids never replace per-request token
+ * validation.
+ */
+
+/** Current Streamable HTTP / core protocol revision this connector targets. */
+export const MCP_PROTOCOL_VERSION_CURRENT = "2026-07-28";
+
+/**
+ * Protocol versions this connector will serve. 2026-07-28 is current;
+ * 2025-* remain only for the time-boxed legacy HTTP arm.
+ */
+export const MCP_PROTOCOL_VERSIONS = Object.freeze([
+  MCP_PROTOCOL_VERSION_CURRENT,
+  "2025-11-25",
+  "2025-06-18",
+  "2025-03-26",
+]);
+
+/** JSON-RPC error code the SDK uses for an unsupported protocol version. */
+export const UNSUPPORTED_PROTOCOL_VERSION_CODE = -32022;
+
+/**
+ * Whether `version` is a protocol revision this connector serves.
+ *
+ * @param {unknown} version
+ * @returns {boolean}
+ */
+export function isSupportedProtocolVersion(version) {
+  return MCP_PROTOCOL_VERSIONS.includes(String(version || "").trim());
+}
+
+/**
+ * Normalize a configured or header Origin to `https://host[:port]`.
+ * Returns null when the value is missing or not an absolute URL.
+ *
+ * @param {unknown} value
+ * @returns {?string}
+ */
+export function normalizeOrigin(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Split a config array or comma/space-separated env string into raw origin
+ * tokens. Values are not normalized here.
+ *
+ * @param {unknown} value
+ * @returns {string[]}
+ */
+export function parseOriginList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value.split(/[\s,]+/).filter(Boolean);
+  }
+  return [];
+}
+
+/**
+ * Build the Origin allowlist. Env/config entries are normalized; the origin
+ * of `resource` (or `audience`) is always included when it is an absolute
+ * http(s) URL so a same-origin browser client works without extra config.
+ *
+ * @param {object} [options]
+ * @param {unknown} [options.allowedOrigins]
+ * @param {string} [options.resource]
+ * @param {string} [options.audience]
+ * @returns {readonly string[]}
+ */
+export function resolveAllowedOrigins({
+  allowedOrigins = [],
+  resource = "",
+  audience = "",
+} = {}) {
+  const listed = new Set();
+  for (const item of parseOriginList(allowedOrigins)) {
+    const origin = normalizeOrigin(item);
+    if (origin) listed.add(origin);
+  }
+  const auto = normalizeOrigin(resource) || normalizeOrigin(audience);
+  if (auto) listed.add(auto);
+  return Object.freeze([...listed]);
+}
+
+/**
+ * DNS-rebinding guard. A missing Origin is allowed (non-browser clients such
+ * as Cursor and Grok Bot typically omit it). A present Origin must be on the
+ * allowlist. The literal `null` origin is refused unless explicitly listed.
+ *
+ * @param {unknown} originHeader
+ * @param {readonly string[]} allowlist
+ * @returns {boolean}
+ */
+export function originAllowed(originHeader, allowlist) {
+  if (originHeader === undefined || originHeader === null || originHeader === "") {
+    return true;
+  }
+  const trimmed = String(originHeader).trim();
+  if (trimmed.toLowerCase() === "null") {
+    return allowlist.includes("null");
+  }
+  const origin = normalizeOrigin(trimmed);
+  if (!origin) return false;
+  return allowlist.includes(origin);
+}
+
+/**
+ * Stable principal key for binding a 2025-era session. Same `sub` +
+ * `clientId` is the same principal (token refresh). A local-operator
+ * identity shares one loopback key. Unidentifiable identities return
+ * null so a session cannot be minted or reused.
+ *
+ * @param {object|null|undefined} identity
+ * @returns {?string}
+ */
+export function sessionPrincipalKey(identity) {
+  if (!identity) return null;
+  if (identity.localOperator === true) return "local-operator";
+  const sub = identity.sub == null ? "" : String(identity.sub);
+  const clientId = identity.clientId == null ? "" : String(identity.clientId);
+  if (!sub && !clientId) return null;
+  return `${sub}\0${clientId}`;
+}
+
+/**
+ * Whether the Accept header allows the given media type (or a wildcard).
+ *
+ * @param {unknown} acceptHeader
+ * @param {string} type
+ * @returns {boolean}
+ */
+export function acceptIncludes(acceptHeader, type) {
+  if (acceptHeader === undefined || acceptHeader === null || acceptHeader === "") {
+    return false;
+  }
+  return String(acceptHeader).split(",").some((part) => {
+    const media = part.split(";")[0].trim().toLowerCase();
+    return media === type || media === "*/*";
+  });
+}
+
+/**
+ * Accept-header check for the MCP endpoint. A missing header is allowed
+ * (non-browser clients sometimes omit it). A present header must list a
+ * type the method can answer with.
+ *
+ * @param {string} method
+ * @param {unknown} acceptHeader
+ * @returns {boolean}
+ */
+export function mcpAcceptOk(method, acceptHeader) {
+  if (acceptHeader === undefined || acceptHeader === null || acceptHeader === "") {
+    return true;
+  }
+  if (method === "GET") {
+    return acceptIncludes(acceptHeader, "text/event-stream");
+  }
+  if (method === "POST") {
+    return acceptIncludes(acceptHeader, "application/json")
+      || acceptIncludes(acceptHeader, "text/event-stream");
+  }
+  return true;
+}
+
+/**
+ * True when the parsed POST body is a JSON-RPC 2.0 batch (an array).
+ * Revision 2026-07-28 requires a single request or notification per POST.
+ *
+ * @param {unknown} body
+ * @returns {boolean}
+ */
+export function isJsonRpcBatch(body) {
+  return Array.isArray(body);
+}
+
+/**
+ * True when the parsed body is a JSON-RPC notification (no `id`).
+ *
+ * @param {unknown} body
+ * @returns {boolean}
+ */
+export function isJsonRpcNotification(body) {
+  return Boolean(
+    body
+    && typeof body === "object"
+    && !Array.isArray(body)
+    && body.jsonrpc === "2.0"
+    && typeof body.method === "string"
+    && !Object.hasOwn(body, "id"),
+  );
+}
+
+/**
+ * True when the parsed body is a JSON-RPC response (no `method`).
+ *
+ * @param {unknown} body
+ * @returns {boolean}
+ */
+export function isJsonRpcResponse(body) {
+  return Boolean(
+    body
+    && typeof body === "object"
+    && !Array.isArray(body)
+    && body.jsonrpc === "2.0"
+    && Object.hasOwn(body, "id")
+    && !Object.hasOwn(body, "method")
+    && (Object.hasOwn(body, "result") || Object.hasOwn(body, "error")),
+  );
+}

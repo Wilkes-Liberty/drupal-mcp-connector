@@ -81,6 +81,7 @@ import {
   defaultHttpAuditSink,
 } from "../http-audit.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../http-handler.js";
+import { resolveAllowedOrigins } from "../http-transport.js";
 import { isWriteLikeCall } from "../operations.js";
 import {
   eligiblePromotions,
@@ -660,8 +661,6 @@ function byteLength(value) {
  * @param {{write: Function}|null} [options.auditWriter] Hosted HTTP audit
  *   writer (DEV-858). Default: stderr JSONL (silent under Vitest). `null`
  *   disables. One finish-time row per northbound response, refusals included.
- * @param {(req: object) => boolean} [options.checkOrigin] Optional Origin
- *   predicate forwarded to the shared HTTP handler.
  * @returns {Promise<object>}
  */
 export async function startEdge({
@@ -693,7 +692,6 @@ export async function startEdge({
   inboundAuthenticate = null,
   ledger = null,
   auditWriter,
-  checkOrigin = null,
 } = {}) {
   if (!auth?.issuer || !auth?.audience) {
     throw new EdgeStartupError(
@@ -1509,7 +1507,6 @@ export async function startEdge({
     protectedResource: inbound.protectedResource,
     resourceMetadataUrl: inbound.resourceMetadataUrl,
     auditWriter: hostedAudit,
-    checkOrigin,
     modernHandler: fanDown,
     // Northbound is stateless 2026-07-28 only: sessionful legacy traffic is
     // refused, so no Mcp-Session-Id ever exists in either direction.
@@ -1521,6 +1518,11 @@ export async function startEdge({
     }),
     toolCount: 0,
     rateLimiter,
+    allowedOrigins: resolveAllowedOrigins({
+      allowedOrigins: auth.allowedOrigins,
+      resource: auth.resource,
+      audience: auth.audience,
+    }),
   });
 
   function northbound(req, res) {

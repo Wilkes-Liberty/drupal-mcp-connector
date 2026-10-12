@@ -316,27 +316,6 @@ export function createHttpAuditWriter({
 }
 
 /**
- * Resolve an optional Origin predicate. `checkOrigin` wins; otherwise a
- * non-empty `allowedOrigins` list refuses a present Origin that is not listed.
- * Missing Origin is allowed so non-browser MCP clients keep working.
- * DEV-861 owns stricter Host/Origin validation; this is the classify hook.
- *
- * @param {(req: object) => boolean|null|undefined} [checkOrigin]
- * @param {string[]|null} [allowedOrigins]
- * @returns {((req: object) => boolean)|null}
- */
-export function resolveOriginCheck(checkOrigin = null, allowedOrigins = null) {
-  if (typeof checkOrigin === "function") return checkOrigin;
-  if (!Array.isArray(allowedOrigins) || allowedOrigins.length === 0) return null;
-  const allowed = new Set(allowedOrigins.map(String));
-  return (req) => {
-    const origin = headerValue(req, "origin");
-    if (origin === undefined) return true;
-    return allowed.has(origin);
-  };
-}
-
-/**
  * Attach exactly one finish-time write to `res`. Idempotent. A write error
  * is swallowed so a refused request cannot become an allowed one. A `close`
  * before any status was written (client abort) is recorded as `aborted`

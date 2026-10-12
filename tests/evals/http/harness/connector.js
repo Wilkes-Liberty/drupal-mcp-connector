@@ -18,6 +18,7 @@ const load = (relative) => import(pathToFileURL(join(SRC_DIR, relative)).href);
 export const httpAuth = await load("lib/http-auth.js");
 export const httpAudit = await load("lib/http-audit.js");
 export const httpHandler = await load("lib/http-handler.js");
+export const httpTransport = await load("lib/http-transport.js");
 export const mcpServer = await load("lib/mcp-server.js");
 export const principal = await load("lib/principal.js");
 export const rateLimit = await load("lib/rate-limit.js");
