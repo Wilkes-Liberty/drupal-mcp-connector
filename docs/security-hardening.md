@@ -34,6 +34,8 @@ standards-based issuer (RFC 8414 / OIDC discovery) and the resource audience.
   "audience": "https://mcp.example.com/mcp",
   "resource": "https://mcp.example.com/mcp",
   "requiredScopes": ["mcp_read"],
+  "maxTokenLifetime": 3600,
+  "algorithms": ["RS256", "ES256"],
   "revocationFile": "/etc/drupal-mcp/revoked.json"
 }
 ```
@@ -41,15 +43,43 @@ standards-based issuer (RFC 8414 / OIDC discovery) and the resource audience.
 ```sh
 export MCP_RESOURCE_ISSUER="https://idp.example.com"
 export MCP_RESOURCE_AUDIENCE="https://mcp.example.com/mcp"
+export MCP_MAX_TOKEN_LIFETIME="3600"
+export MCP_TOKEN_ALGORITHMS="RS256,ES256"
 ```
 
 Clients send `Authorization: Bearer <access-token>`. The connector validates
-issuer, audience, expiry and scopes against the issuer's JWKS. A JSON revocation
-file (`{ "jti": [], "sub": [] }`) is re-read when it changes, so a revoke does
-not require a restart. Optional RFC 7662 introspection (`introspectionUrl`) is
-an additional fail-closed check when configured. Issuer discovery, JWKS
-retrieval, and introspection abort after 30s (`AbortSignal.timeout`), matching
-outbound Drupal HTTP; a stuck IdP fails closed (startup throw, or 401 on `/mcp`).
+issuer, audience, expiry, lifetime, algorithm, and scopes against the issuer's
+JWKS. A JSON revocation file (`{ "jti": [], "sub": [] }`) is re-read when it
+changes, so a revoke does not require a restart. Optional RFC 7662
+introspection (`introspectionUrl`) is an additional fail-closed check when
+configured. Issuer discovery, JWKS retrieval, and introspection abort after
+30s (`AbortSignal.timeout`), matching outbound Drupal HTTP; a stuck IdP fails
+closed (startup throw, or 401 on `/mcp`).
+
+**Bearer lifetime and algorithms (DEV-876).** Access tokens must carry numeric
+`exp` and `iat`. `exp` must still be in the future (jose `clockTolerance`,
+default 5 seconds). `exp - iat` must not exceed `auth.maxTokenLifetime`
+(default **3600** seconds), and a token whose `iat` is older than that cap is
+also refused (`maxTokenAge` on the JWT path; the same local check on
+introspection). Pin `auth.algorithms` to the asymmetric algorithms your issuer
+actually uses. The documented default is `RS256`/`RS384`/`RS512`,
+`ES256`/`ES384`/`ES512`, `PS256`/`PS384`/`PS512`, `EdDSA`. `alg: none` is
+never accepted, even if named in config. HMAC (`HS*`) is not in the default
+so a JWKS public key cannot be treated as a shared secret. Env overrides:
+`MCP_MAX_TOKEN_LIFETIME` (seconds) and `MCP_TOKEN_ALGORITHMS` (comma- or
+space-separated). **Breaking:** an authorization server that mints tokens
+without `exp`/`iat`, or with a lifetime longer than the cap, gets
+`401 invalid_token`. Raise the cap only when the issuer cannot issue shorter
+access tokens.
+
+**Missing `iss` on introspection is refused.** When `auth.issuer` is
+configured, an RFC 7662 result without `iss` (or with a different issuer) is
+`401 invalid_token`. Audience was already fail-closed when missing; issuer is
+now the same. The introspection URL is configured independently of the
+issuer, so an `active: true` body that does not name the authorization server
+cannot be bound to this resource. Ask the authorization server to return
+`iss` (RFC 7662 recommends it). JWT validation already required `iss` via
+`jwtVerify({ issuer })`.
 
 Unauthenticated clients receive `401` with a `WWW-Authenticate` challenge that
 points at RFC 9728 metadata:

@@ -24,11 +24,13 @@
   },
 
   "auth": {
-    "_comment": "Inbound OAuth resource-server for MCP_TRANSPORT=https when the process binds beyond loopback. The issuer is any standards-based authorization server (RFC 8414 / OIDC) — not a vendor-specific product. Tokens are JWTs validated against the issuer's JWKS. Optional: revocationFile (JSON {jti,sub}, re-read without restart) and introspectionUrl (RFC 7662). Env overrides: MCP_RESOURCE_ISSUER, MCP_RESOURCE_AUDIENCE, MCP_RESOURCE, MCP_REVOCATION_FILE, MCP_INTROSPECTION_URL.",
+    "_comment": "Inbound OAuth resource-server for MCP_TRANSPORT=https when the process binds beyond loopback. The issuer is any standards-based authorization server (RFC 8414 / OIDC) — not a vendor-specific product. Tokens are JWTs validated against the issuer's JWKS. Bearers must include exp and iat; exp minus iat (and age since iat) must stay within maxTokenLifetime seconds (default 3600). algorithms is the JWS allowlist (default: RS256/RS384/RS512, ES256/ES384/ES512, PS256/PS384/PS512, EdDSA). none is never accepted. The same exp/iat/lifetime checks apply to RFC 7662 introspection results; a missing iss on introspection is refused. Optional: revocationFile (JSON {jti,sub}, re-read without restart) and introspectionUrl (RFC 7662). Env overrides: MCP_RESOURCE_ISSUER, MCP_RESOURCE_AUDIENCE, MCP_RESOURCE, MCP_REVOCATION_FILE, MCP_INTROSPECTION_URL, MCP_MAX_TOKEN_LIFETIME, MCP_TOKEN_ALGORITHMS.",
     "issuer":   "https://idp.example.com",
     "audience": "https://mcp.example.com/mcp",
     "resource": "https://mcp.example.com/mcp",
     "requiredScopes": ["mcp_read"],
+    "maxTokenLifetime": 3600,
+    "algorithms": ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512", "EdDSA"],
     "grants": {
       "_comment": "Optional. Map inbound OAuth client_id (azp) to site names, e.g. \"content-agent\": [\"production\", \"staging\"]. When the map names any client, unknown clients receive no sites. Omit this object (or leave only this comment) to let every resolvable site stay visible; inbound scopes still gate the tool surface."
     },

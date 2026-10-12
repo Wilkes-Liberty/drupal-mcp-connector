@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet } from "jose";
+import { generateKeyPair, exportJWK, exportSPKI, SignJWT, createLocalJWKSet } from "jose";
 import {
   makeBearerCheck,
   parseBearerToken,
@@ -200,16 +200,59 @@ describe("resolveInboundAuthConfig", () => {
     expect(resolved.audience).toBe("https://mcp.example.com/mcp");
     expect(resolved.resource).toBe("https://mcp.example.com/mcp");
   });
+
+  it("defaults maxTokenLifetime and algorithms, and prefers env overrides", () => {
+    const defaults = resolveInboundAuthConfig({
+      auth: { issuer: "https://idp.example.com", audience: "https://mcp.example.com/mcp" },
+    }, {});
+    expect(defaults.maxTokenLifetime).toBe(3600);
+    expect(defaults.algorithms).toEqual([
+      "RS256", "RS384", "RS512",
+      "ES256", "ES384", "ES512",
+      "PS256", "PS384", "PS512",
+      "EdDSA",
+    ]);
+
+    const overridden = resolveInboundAuthConfig(
+      {
+        auth: {
+          issuer: "https://idp.example.com",
+          audience: "https://mcp.example.com/mcp",
+          maxTokenLifetime: 900,
+          algorithms: ["ES256"],
+        },
+      },
+      { MCP_MAX_TOKEN_LIFETIME: "1800", MCP_TOKEN_ALGORITHMS: "RS256,PS256" },
+    );
+    expect(overridden.maxTokenLifetime).toBe(1800);
+    expect(overridden.algorithms).toEqual(["RS256", "PS256"]);
+  });
 });
 
-async function signedToken({ privateKey, kid = "test", claims = {}, issuer, audience, exp = "5m" }) {
-  return new SignJWT(claims)
-    .setProtectedHeader({ alg: "RS256", kid })
+async function signedToken({
+  privateKey,
+  kid = "test",
+  claims = {},
+  issuer,
+  audience,
+  exp = "5m",
+  iat,
+  alg = "RS256",
+  key = privateKey,
+} = {}) {
+  let jwt = new SignJWT(claims)
+    .setProtectedHeader({ alg, kid })
     .setIssuer(issuer)
     .setAudience(audience)
-    .setExpirationTime(exp)
-    .setSubject(claims.sub ?? "agent-1")
-    .sign(privateKey);
+    .setSubject(claims.sub ?? "agent-1");
+  if (iat !== false) jwt = jwt.setIssuedAt(iat);
+  if (exp !== false) jwt = jwt.setExpirationTime(exp);
+  return jwt.sign(key);
+}
+
+function compactJwt(header, payload, signature = "") {
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode(header)}.${encode(payload)}.${signature}`;
 }
 
 describe("createResourceAuthenticator", () => {
@@ -224,7 +267,7 @@ describe("createResourceAuthenticator", () => {
     jwk.alg = "RS256";
     jwk.use = "sig";
     const jwks = createLocalJWKSet({ keys: [jwk] });
-    return { privateKey, jwks };
+    return { publicKey, privateKey, jwks };
   }
 
   it("accepts a valid JWT and returns a frozen identity", async () => {
@@ -427,12 +470,21 @@ describe("createResourceAuthenticator", () => {
   });
 
   it("uses introspection for an opaque token and when the AS says inactive", async () => {
+    const now = Math.floor(Date.now() / 1000);
     const authenticateOpaque = createResourceAuthenticator({
       issuer,
       audience,
       verifyJwt: async () => { throw new Error("not a jwt"); },
       introspect: async (token) => token === "opaque-ok"
-        ? { active: true, sub: "agent-9", iss: issuer, aud: audience, scope: "mcp_read" }
+        ? {
+          active: true,
+          sub: "agent-9",
+          iss: issuer,
+          aud: audience,
+          scope: "mcp_read",
+          iat: now,
+          exp: now + 300,
+        }
         : null,
       resourceMetadataUrl: metadata,
     });
@@ -456,6 +508,174 @@ describe("createResourceAuthenticator", () => {
     const denied = await authenticate("Bearer opaque-ok");
     expect(denied.ok).toBe(false);
     expect(denied.status).toBe(401);
+  });
+
+  it("rejects a validly signed JWT that omits exp (DEV-876)", async () => {
+    const { privateKey, jwks } = await fixture();
+    const token = await signedToken({
+      privateKey, issuer, audience, claims: { sub: "agent-1", scope: "mcp_read" }, exp: false,
+    });
+    const authenticate = createResourceAuthenticator({
+      issuer, audience, jwks, resourceMetadataUrl: metadata,
+    });
+    const denied = await authenticate(`Bearer ${token}`);
+    expect(denied.ok).toBe(false);
+    expect(denied.status).toBe(401);
+    expect(denied.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
+  });
+
+  it("rejects a JWT whose exp minus iat exceeds the lifetime cap (DEV-876)", async () => {
+    const { privateKey, jwks } = await fixture();
+    const now = Math.floor(Date.now() / 1000);
+    const token = await signedToken({
+      privateKey,
+      issuer,
+      audience,
+      claims: { sub: "agent-1", scope: "mcp_read" },
+      iat: now,
+      exp: now + 3600 + 60,
+    });
+    const authenticate = createResourceAuthenticator({
+      issuer, audience, jwks, resourceMetadataUrl: metadata, clockTolerance: 0,
+    });
+    const denied = await authenticate(`Bearer ${token}`);
+    expect(denied.ok).toBe(false);
+    expect(denied.status).toBe(401);
+    expect(denied.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
+  });
+
+  it("accepts a JWT whose lifetime is at the documented cap (DEV-876)", async () => {
+    const { privateKey, jwks } = await fixture();
+    const now = Math.floor(Date.now() / 1000);
+    const token = await signedToken({
+      privateKey,
+      issuer,
+      audience,
+      claims: { sub: "agent-1", scope: "mcp_read" },
+      iat: now,
+      exp: now + 3600,
+    });
+    const authenticate = createResourceAuthenticator({
+      issuer, audience, jwks, resourceMetadataUrl: metadata, clockTolerance: 0,
+    });
+    expect((await authenticate(`Bearer ${token}`)).ok).toBe(true);
+  });
+
+  it("refuses alg none and HS256 signed with the RSA public key (DEV-876)", async () => {
+    const { publicKey, jwks } = await fixture();
+    const now = Math.floor(Date.now() / 1000);
+    const claims = {
+      sub: "agent-1",
+      iss: issuer,
+      aud: audience,
+      iat: now,
+      exp: now + 300,
+      scope: "mcp_read",
+    };
+    const authenticate = createResourceAuthenticator({
+      issuer, audience, jwks, resourceMetadataUrl: metadata,
+    });
+
+    const noneToken = compactJwt({ alg: "none", typ: "JWT" }, claims);
+    const noneDenied = await authenticate(`Bearer ${noneToken}`);
+    expect(noneDenied.ok).toBe(false);
+    expect(noneDenied.status).toBe(401);
+    expect(noneDenied.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
+
+    const hmacSecret = new TextEncoder().encode(await exportSPKI(publicKey));
+    const hs256 = await signedToken({
+      privateKey: hmacSecret,
+      key: hmacSecret,
+      alg: "HS256",
+      issuer,
+      audience,
+      claims: { sub: "agent-1", scope: "mcp_read" },
+    });
+    const hsDenied = await authenticate(`Bearer ${hs256}`);
+    expect(hsDenied.ok).toBe(false);
+    expect(hsDenied.status).toBe(401);
+    expect(hsDenied.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
+  });
+
+  it("refuses introspection active:true when exp is missing or already past (DEV-876)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const authenticate = createResourceAuthenticator({
+      issuer,
+      audience,
+      verifyJwt: async () => { throw new Error("not a jwt"); },
+      introspect: async (token) => {
+        if (token === "no-exp") {
+          return { active: true, sub: "agent-9", iss: issuer, aud: audience, iat: now, scope: "mcp_read" };
+        }
+        if (token === "expired") {
+          return {
+            active: true,
+            sub: "agent-9",
+            iss: issuer,
+            aud: audience,
+            iat: now - 120,
+            exp: now - 60,
+            scope: "mcp_read",
+          };
+        }
+        return null;
+      },
+      resourceMetadataUrl: metadata,
+      clockTolerance: 0,
+    });
+
+    for (const token of ["no-exp", "expired"]) {
+      const denied = await authenticate(`Bearer ${token}`);
+      expect(denied.ok).toBe(false);
+      expect(denied.status).toBe(401);
+      expect(denied.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
+    }
+  });
+
+  it("refuses introspection active:true when iss is missing (DEV-876)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const authenticate = createResourceAuthenticator({
+      issuer,
+      audience,
+      verifyJwt: async () => { throw new Error("not a jwt"); },
+      introspect: async () => ({
+        active: true,
+        sub: "agent-9",
+        aud: audience,
+        iat: now,
+        exp: now + 300,
+        scope: "mcp_read",
+      }),
+      resourceMetadataUrl: metadata,
+    });
+    const denied = await authenticate("Bearer opaque-ok");
+    expect(denied.ok).toBe(false);
+    expect(denied.status).toBe(401);
+    expect(denied.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
+  });
+
+  it("refuses introspection whose exp minus iat exceeds the lifetime cap (DEV-876)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const authenticate = createResourceAuthenticator({
+      issuer,
+      audience,
+      verifyJwt: async () => { throw new Error("not a jwt"); },
+      introspect: async () => ({
+        active: true,
+        sub: "agent-9",
+        iss: issuer,
+        aud: audience,
+        iat: now,
+        exp: now + 3600 + 60,
+        scope: "mcp_read",
+      }),
+      resourceMetadataUrl: metadata,
+      clockTolerance: 0,
+    });
+    const denied = await authenticate("Bearer opaque-ok");
+    expect(denied.ok).toBe(false);
+    expect(denied.status).toBe(401);
+    expect(denied.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
   });
 });
 
