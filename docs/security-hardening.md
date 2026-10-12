@@ -63,15 +63,17 @@ unknown clients see no targets. Caller-supplied `site` / `environment` /
 `tenant` / `target` arguments cannot widen the grant. Stdio and loopback
 without a resource-server identity are unchanged (local operator).
 
-`/health` stays open. Missing a required scope is `403` with
+`/health` stays open as a liveness probe (`{status: "ok"}`) and does
+not expose a tool catalog. Missing a required scope is `403` with
 `error="insufficient_scope"`.
 
 The inbound access token is never forwarded to Drupal. Outbound Drupal
 credentials stay the per-site OAuth client or `apiTokenEnv`.
 
 **Loopback only:** `MCP_AUTH_TOKEN` remains a shared bearer for local HTTPS.
-**Trusted proxy:** `MCP_ALLOW_UNAUTHENTICATED=1` still opts out of connector-side
-auth when a reverse proxy already authenticates clients.
+**`MCP_ALLOW_UNAUTHENTICATED=1`** is loopback-only. A non-loopback bind with
+that flag is fatal at startup (DEV-845). There is no trusted-proxy exception
+beyond loopback: network-facing HTTPS requires `auth.issuer` + `auth.audience`.
 
 For `/mcp`, rate limiting and bearer authentication run before any request body
 is parsed, converted, or classified. POST bodies are bounded to 1 MiB, read

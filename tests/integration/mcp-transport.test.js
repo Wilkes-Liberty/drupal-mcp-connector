@@ -48,6 +48,7 @@ async function startServer({ onToolCall = () => {}, onBuild = () => {}, legacyMo
   const modernMcpHandler = createMcpHandler(buildServer, { legacy: "reject" });
   const handler = createMcpRequestHandler({
     checkAuth: (header) => header === "Bearer transport-secret",
+    allowLocalOperator: true,
     modernHandler: toNodeHandler(modernMcpHandler),
     legacyHandler: createLegacySessionHandler({ buildServer, mode: legacyMode }),
     toolCount: 1,

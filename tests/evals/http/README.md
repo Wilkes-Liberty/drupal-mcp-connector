@@ -5,7 +5,9 @@ Run: `npm run eval:http`. It is not part of `npm test` or `npm run check` yet.
 What it proves: the connector's HTTP request handler, wired as in hosted
 (resource-server) mode, refuses a missing identity with 401 before any
 dispatch (T1), still serves a legitimate request (T7, the allow twin), and
-records the DEV-845 gap as an expected failure (T1n). Everything is synthetic:
+asserts that a non-loopback bind with `MCP_ALLOW_UNAUTHENTICATED=1` is
+fatal at startup (T1n, DEV-845; tests `resolveInboundAuthMode` directly).
+Everything is synthetic:
 keys are generated in memory, the token issuer is a stub that is **not
 Paladin**, and the upstream is a fake loopback server with per-tenant canaries.
 It proves connector logic, not Paladin, Keystone, or production Sentinel.

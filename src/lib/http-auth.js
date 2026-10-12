@@ -522,11 +522,30 @@ export function createResourceAuthenticator({
 }
 
 /**
+ * Loopback bind hosts. Non-loopback is a network-facing product path.
+ *
+ * @param {string} bindHost
+ * @returns {boolean}
+ */
+export function isLoopbackBind(bindHost) {
+  return bindHost === "127.0.0.1" || bindHost === "::1" || bindHost === "localhost";
+}
+
+/**
+ * Named fatal reason when MCP_ALLOW_UNAUTHENTICATED is set on a non-loopback
+ * bind (DEV-845). Startup must refuse; there is no trusted-proxy exception
+ * beyond loopback.
+ */
+export const NON_LOOPBACK_UNAUTHENTICATED_REASON =
+  "non-loopback bind with MCP_ALLOW_UNAUTHENTICATED is not permitted. " +
+  "Bind to 127.0.0.1 or configure an inbound OAuth resource server (auth.issuer and auth.audience).";
+
+/**
  * Decide how inbound HTTPS /mcp is authenticated.
  *
  * Network-facing product paths require a resource server. MCP_AUTH_TOKEN is
- * accepted only on loopback (or when the operator has opted into an unauthenticated
- * trusted-proxy front).
+ * accepted only on loopback. MCP_ALLOW_UNAUTHENTICATED is loopback-only;
+ * a non-loopback bind with that flag is fatal (DEV-845).
  *
  * @param {object} options
  * @returns {{mode: "resource_server"|"shared_bearer"|"unauthenticated"|"fatal", reason?: string}}
@@ -537,9 +556,12 @@ export function resolveInboundAuthMode({
   sharedToken = "",
   resourceServer = null,
 }) {
-  const isLoopback = bindHost === "127.0.0.1" || bindHost === "::1" || bindHost === "localhost";
+  const isLoopback = isLoopbackBind(bindHost);
   const hasRs = Boolean(resourceServer?.issuer && resourceServer?.audience);
   if (hasRs) return { mode: "resource_server" };
+  if (allowUnauth && !isLoopback) {
+    return { mode: "fatal", reason: NON_LOOPBACK_UNAUTHENTICATED_REASON };
+  }
   if (allowUnauth) return { mode: "unauthenticated" };
   if (isLoopback) {
     return sharedToken ? { mode: "shared_bearer" } : { mode: "unauthenticated" };
@@ -549,7 +571,7 @@ export function resolveInboundAuthMode({
     reason:
       "Network-facing HTTPS requires an inbound OAuth resource server (auth.issuer and auth.audience). " +
       "MCP_AUTH_TOKEN is not accepted on governed product paths. " +
-      "Bind to 127.0.0.1, set MCP_ALLOW_UNAUTHENTICATED=1 behind a trusted proxy, or configure the resource server.",
+      "MCP_ALLOW_UNAUTHENTICATED is loopback-only. Bind to 127.0.0.1 or configure the resource server.",
   };
 }
 
@@ -569,7 +591,7 @@ export function inboundAuthDeprecationWarning(mode) {
     "[drupal-mcp-connector] WARNING: inbound auth mode shared_bearer is deprecated " +
     "and will be removed in v4.0.0 (#231). Configure an OAuth resource server " +
     "(auth.issuer + auth.audience) or run unauthenticated loopback. " +
-    "MCP_ALLOW_UNAUTHENTICATED remains the explicit trusted-proxy opt-in."
+    "MCP_ALLOW_UNAUTHENTICATED is loopback-only."
   );
 }
 

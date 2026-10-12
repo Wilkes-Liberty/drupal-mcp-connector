@@ -61,6 +61,7 @@ describe("createMcpRequestHandler", () => {
     legacyHandler = vi.fn((request, response, body) => fakeTransport.handleRequest(request, response, body));
     handler = createMcpRequestHandler({
       checkAuth: () => true,
+      allowLocalOperator: true,
       modernHandler: vi.fn(),
       legacyHandler,
       toolCount: 66,
@@ -131,11 +132,11 @@ describe("createMcpRequestHandler", () => {
     expect(legacyHandler).not.toHaveBeenCalled();
   });
 
-  it("serves /health as JSON with the tool count", async () => {
+  it("serves /health as JSON without tool data", async () => {
     const res = mockRes();
     await handler(req("GET", "/health"), res);
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body)).toEqual({ status: "ok", tools: 66 });
+    expect(JSON.parse(res.body)).toEqual({ status: "ok" });
   });
 
   it("returns 404 for unknown paths", async () => {
@@ -246,6 +247,7 @@ describe("createMcpRequestHandler", () => {
     const rateLimiter = { check: vi.fn(() => ({ allowed: false, retryAfterSec: 7, remaining: 0 })) };
     const h = createMcpRequestHandler({
       checkAuth: () => true,
+      allowLocalOperator: true,
       modernHandler: vi.fn(),
       legacyHandler,
       toolCount: 66,
@@ -278,6 +280,7 @@ describe("createMcpRequestHandler", () => {
     const rateLimiter = { check: vi.fn(() => ({ allowed: false, retryAfterSec: 1 })) };
     const h = createMcpRequestHandler({
       checkAuth: () => true,
+      allowLocalOperator: true,
       modernHandler: vi.fn(),
       legacyHandler,
       toolCount: 66,
@@ -300,6 +303,7 @@ describe("createMcpRequestHandler", () => {
     const isLegacyRequestFn = vi.fn(async () => false);
     const h = createMcpRequestHandler({
       checkAuth: () => true,
+      allowLocalOperator: true,
       modernHandler,
       legacyHandler,
       toolCount: 66,
@@ -337,6 +341,7 @@ describe("createMcpRequestHandler", () => {
 
     const authenticated = createMcpRequestHandler({
       checkAuth: () => true,
+      allowLocalOperator: true,
       modernHandler,
       legacyHandler,
       toolCount: 66,
@@ -378,6 +383,7 @@ describe("createMcpRequestHandler", () => {
       const onError = vi.fn(() => { throw new Error("diagnostic sink failed"); });
       const h = createMcpRequestHandler({
         checkAuth: () => true,
+        allowLocalOperator: true,
         modernHandler,
         legacyHandler,
         toolCount: 66,
@@ -407,6 +413,7 @@ describe("createMcpRequestHandler", () => {
       const onError = vi.fn();
       const h = createMcpRequestHandler({
         checkAuth: () => true,
+        allowLocalOperator: true,
         modernHandler: vi.fn(),
         legacyHandler,
         toolCount: 66,
@@ -429,6 +436,7 @@ describe("createMcpRequestHandler", () => {
       const onError = vi.fn();
       const h = createMcpRequestHandler({
         checkAuth: () => true,
+        allowLocalOperator: true,
         modernHandler,
         legacyHandler,
         toolCount: 66,
@@ -456,6 +464,7 @@ describe("createMcpRequestHandler", () => {
       });
       const h = createMcpRequestHandler({
         checkAuth: () => true,
+        allowLocalOperator: true,
         modernHandler,
         legacyHandler,
         toolCount: 66,
@@ -482,6 +491,7 @@ describe("createMcpRequestHandler", () => {
       const legacyHandler = vi.fn();
       const h = createMcpRequestHandler({
         checkAuth: () => true,
+        allowLocalOperator: true,
         modernHandler,
         legacyHandler,
         toolCount: 66,
@@ -508,6 +518,7 @@ describe("createMcpRequestHandler", () => {
     ])("rejects a missing %s handler instead of inferring legacy-only routing", (_missing, handlers) => {
       expect(() => createMcpRequestHandler({
         checkAuth: () => true,
+        allowLocalOperator: true,
         toolCount: 66,
         ...handlers,
       })).toThrow(/modernHandler and legacyHandler must be configured together/);
@@ -522,6 +533,7 @@ describe("createMcpRequestHandler", () => {
       const iterator = vi.spyOn(request, Symbol.asyncIterator);
       const h = createMcpRequestHandler({
         checkAuth: () => true,
+        allowLocalOperator: true,
         modernHandler,
         legacyHandler,
         toolCount: 66,
@@ -542,6 +554,7 @@ describe("createMcpRequestHandler", () => {
       const legacyHandler = vi.fn();
       const h = createMcpRequestHandler({
         checkAuth: () => true,
+        allowLocalOperator: true,
         modernHandler,
         legacyHandler,
         toolCount: 66,
@@ -562,6 +575,7 @@ describe("createMcpRequestHandler", () => {
       const legacyHandler = vi.fn();
       const h = createMcpRequestHandler({
         checkAuth: () => true,
+        allowLocalOperator: true,
         modernHandler,
         legacyHandler,
         toolCount: 66,

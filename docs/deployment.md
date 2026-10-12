@@ -19,7 +19,7 @@ service, port, or token; see [mcp-clients.md](mcp-clients.md).
 | `TLS_CERT_PATH` / `TLS_KEY_PATH` | TLS cert + key (mandatory off-localhost) |
 | `MCP_RESOURCE_ISSUER` / `MCP_RESOURCE_AUDIENCE` | Inbound OAuth resource server — **required** for non-loopback binds (or set `auth` in config) |
 | `MCP_AUTH_TOKEN` | Shared bearer — **loopback only**; refused on a network-facing product path |
-| `MCP_ALLOW_UNAUTHENTICATED` | Set to `1` only when a trusted proxy already authenticates clients |
+| `MCP_ALLOW_UNAUTHENTICATED` | Set to `1` only on loopback. A non-loopback bind with this flag is fatal |
 | `MCP_RATE_LIMIT` | Max `/mcp` requests per window per IP (`0` = off; default 120 on non-loopback TLS) |
 | `MCP_UPLOAD_ROOT` | Colon-separated absolute dirs allowed for local file uploads (default: process cwd) |
 | `MCP_BIND_HOST` | Restrict the listen interface (with TLS) |

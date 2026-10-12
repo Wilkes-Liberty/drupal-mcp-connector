@@ -154,9 +154,18 @@ describe("resolveInboundAuthMode", () => {
     }).mode).toBe("shared_bearer");
   });
 
-  it("allows an explicit unauthenticated trusted-proxy front", () => {
-    expect(resolveInboundAuthMode({
+  it("is fatal for allow-unauthenticated on a non-loopback bind (DEV-845)", () => {
+    const decision = resolveInboundAuthMode({
       bindHost: "0.0.0.0",
+      allowUnauth: true,
+    });
+    expect(decision.mode).toBe("fatal");
+    expect(decision.reason).toMatch(/non-loopback bind with MCP_ALLOW_UNAUTHENTICATED is not permitted/);
+  });
+
+  it("still allows explicit unauthenticated loopback", () => {
+    expect(resolveInboundAuthMode({
+      bindHost: "127.0.0.1",
       allowUnauth: true,
     }).mode).toBe("unauthenticated");
   });
