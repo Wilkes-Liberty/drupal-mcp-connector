@@ -282,8 +282,8 @@ export function normalizeTokenAlgorithms(value) {
 /**
  * Shared `exp` / `iat` / lifetime checks for JWT claims and RFC 7662
  * introspection results. Missing `exp` or `iat`, an expired `exp`, a
- * not-yet-valid `nbf`, `exp - iat` above the cap, or an `iat` older than
- * the cap are refused.
+ * not-yet-valid `nbf`, a future `iat` (beyond `clockTolerance`),
+ * `exp - iat` above the cap, or an `iat` older than the cap are refused.
  * @param {object} claims
  * @param {object} [options]
  * @param {number} [options.maxTokenLifetime]
@@ -307,6 +307,9 @@ export function validateBearerTimeClaims(claims, {
   }
   if (typeof claims.nbf === "number" && claims.nbf > now + clockTolerance) {
     return { ok: false, reason: "Token is not yet valid" };
+  }
+  if (claims.iat > now + clockTolerance) {
+    return { ok: false, reason: "Token iat is in the future" };
   }
   if (claims.exp - claims.iat > maxTokenLifetime) {
     return { ok: false, reason: "Token lifetime exceeds maximum" };

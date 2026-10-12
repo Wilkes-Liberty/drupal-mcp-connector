@@ -58,7 +58,8 @@ closed (startup throw, or 401 on `/mcp`).
 
 **Bearer lifetime and algorithms (DEV-876).** Access tokens must carry numeric
 `exp` and `iat`. `exp` must still be in the future (jose `clockTolerance`,
-default 5 seconds). `exp - iat` must not exceed `auth.maxTokenLifetime`
+default 5 seconds). `iat` must not be in the future beyond that same
+tolerance. `exp - iat` must not exceed `auth.maxTokenLifetime`
 (default **3600** seconds), and a token whose `iat` is older than that cap is
 also refused (`maxTokenAge` on the JWT path; the same local check on
 introspection). Pin `auth.algorithms` to the asymmetric algorithms your issuer

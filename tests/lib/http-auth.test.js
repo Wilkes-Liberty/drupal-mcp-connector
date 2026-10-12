@@ -12,6 +12,7 @@ import {
   createRevocationStore,
   createResourceAuthenticator,
   createInboundHttpsAuth,
+  validateBearerTimeClaims,
   authorizationServerDiscoveryUrls,
   discoverAuthorizationServer,
   introspectToken,
@@ -676,6 +677,48 @@ describe("createResourceAuthenticator", () => {
     expect(denied.ok).toBe(false);
     expect(denied.status).toBe(401);
     expect(denied.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
+  });
+
+  it("refuses introspection whose iat is in the future even when exp minus iat is within the cap (DEV-876)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const authenticate = createResourceAuthenticator({
+      issuer,
+      audience,
+      verifyJwt: async () => { throw new Error("not a jwt"); },
+      introspect: async () => ({
+        active: true,
+        sub: "agent-9",
+        iss: issuer,
+        aud: audience,
+        iat: now + 3600,
+        exp: now + 7200,
+        scope: "mcp_read",
+      }),
+      resourceMetadataUrl: metadata,
+      clockTolerance: 0,
+    });
+    const denied = await authenticate("Bearer opaque-ok");
+    expect(denied.ok).toBe(false);
+    expect(denied.status).toBe(401);
+    expect(denied.headers["WWW-Authenticate"]).toContain("error=\"invalid_token\"");
+  });
+});
+
+describe("validateBearerTimeClaims", () => {
+  const now = 1_800_000_000;
+
+  it("refuses a future iat even when exp minus iat is within the cap", () => {
+    expect(validateBearerTimeClaims(
+      { iat: now + 3600, exp: now + 7200 },
+      { now, maxTokenLifetime: 3600, clockTolerance: 0 },
+    )).toEqual({ ok: false, reason: "Token iat is in the future" });
+  });
+
+  it("accepts a slightly future iat within clockTolerance", () => {
+    expect(validateBearerTimeClaims(
+      { iat: now + 3, exp: now + 303 },
+      { now, clockTolerance: 5 },
+    )).toEqual({ ok: true });
   });
 });
 
