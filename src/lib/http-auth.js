@@ -1,8 +1,8 @@
 /**
  * Inbound authentication for the HTTPS MCP transport.
  *
- * Two modes, never mixed on a governed product path:
- *   - Shared bearer (`makeBearerCheck`) — loopback / stdio-adjacent only.
+ * One authenticated mode. The loopback shared bearer (`MCP_AUTH_TOKEN`) was
+ * removed in 4.0.0 (#231); setting it is fatal at startup.
  *   - OAuth resource server (`createResourceAuthenticator`) — network-facing
  *     HTTPS. Every authenticated network call is validated by RFC 7662
  *     introspection at the single configured issuer (DEV-844). There is no
@@ -19,7 +19,6 @@
  *     `DEFAULT_INTROSPECTION_TIMEOUT_MS` (2s, configurable).
  */
 
-import { timingSafeEqual } from "crypto";
 import { readFileSync, statSync, writeFileSync } from "fs";
 import { createRemoteJWKSet, customFetch, decodeProtectedHeader, jwtVerify } from "jose";
 
@@ -113,26 +112,6 @@ export const SPOOFABLE_IDENTITY_HEADERS = Object.freeze([
   "x-forwarded-user",
   "x-forwarded-sub",
 ]);
-
-/**
- * Build a predicate that validates an HTTP Authorization header against an
- * expected bearer token.
- * @param {?string} token Expected token; falsy disables auth (predicate is always true).
- * @returns {(authorizationHeader: any) => boolean} True when the header carries the token.
- */
-export function makeBearerCheck(token) {
-  if (!token) return () => true; // auth disabled
-  const expected = Buffer.from(String(token));
-  return (authorizationHeader) => {
-    if (typeof authorizationHeader !== "string") return false;
-    const prefix = "Bearer ";
-    if (!authorizationHeader.startsWith(prefix)) return false;
-    const provided = Buffer.from(authorizationHeader.slice(prefix.length));
-    // Length check first: timingSafeEqual throws on unequal-length buffers, and
-    // the comparison itself stays constant-time to avoid leaking the token.
-    return provided.length === expected.length && timingSafeEqual(provided, expected);
-  };
-}
 
 /**
  * Extract the raw bearer token from an Authorization header.
@@ -867,7 +846,7 @@ export const NON_LOOPBACK_UNAUTHENTICATED_REASON =
 export const NETWORK_INTROSPECTION_REQUIRED_REASON =
   "Network-facing HTTPS requires an inbound OAuth resource server with exactly one issuer, " +
   "one audience, and RFC 7662 introspection (auth.issuer, auth.audience, auth.introspectionUrl, " +
-  "and introspection client credentials). MCP_AUTH_TOKEN is not accepted on governed product paths. " +
+  "and introspection client credentials). MCP_AUTH_TOKEN was removed in 4.0.0 (#231). " +
   "MCP_ALLOW_UNAUTHENTICATED is loopback-only. Bind to 127.0.0.1 or configure the resource server.";
 
 /**
@@ -887,15 +866,30 @@ export function hasCompleteNetworkResourceServer(resourceServer) {
 }
 
 /**
+ * Startup refusal when `MCP_AUTH_TOKEN` is set (#231). The shared bearer was
+ * removed in 4.0.0; a stale deployment must not keep running while believing
+ * the token still gates `/mcp`. Named so callers and tests can match it.
+ */
+export const SHARED_BEARER_REMOVED_REASON =
+  "MCP_AUTH_TOKEN is set, but the loopback shared bearer was removed in 4.0.0 (#231) and is no longer read. " +
+  "Unset MCP_AUTH_TOKEN. Configure an inbound OAuth resource server (auth.issuer and auth.audience), " +
+  "or run unauthenticated on loopback.";
+
+/**
  * Decide how inbound HTTPS /mcp is authenticated.
  *
  * Network-facing product paths require a resource server with live
- * introspection (DEV-844). MCP_AUTH_TOKEN is accepted only on loopback.
- * MCP_ALLOW_UNAUTHENTICATED is loopback-only; a non-loopback bind with that
- * flag is fatal (DEV-845).
+ * introspection (DEV-844). Loopback is either the resource server or
+ * unauthenticated (local operator). A set `MCP_AUTH_TOKEN` is fatal at any
+ * bind host (#231). `MCP_ALLOW_UNAUTHENTICATED` is loopback-only; a
+ * non-loopback bind with that flag is fatal (DEV-845).
  *
  * @param {object} options
- * @returns {{mode: "resource_server"|"shared_bearer"|"unauthenticated"|"fatal", reason?: string}}
+ * @param {string} options.bindHost
+ * @param {boolean} [options.allowUnauth]
+ * @param {string} [options.sharedToken] The `MCP_AUTH_TOKEN` value, if any; non-empty is fatal.
+ * @param {?object} [options.resourceServer]
+ * @returns {{mode: "resource_server"|"unauthenticated"|"fatal", reason?: string}}
  */
 export function resolveInboundAuthMode({
   bindHost,
@@ -903,6 +897,7 @@ export function resolveInboundAuthMode({
   sharedToken = "",
   resourceServer = null,
 }) {
+  if (sharedToken) return { mode: "fatal", reason: SHARED_BEARER_REMOVED_REASON };
   const isLoopback = isLoopbackBind(bindHost);
   const hasRs = Boolean(resourceServer?.issuer && resourceServer?.audience);
   const ready = networkIntrospectionRequired()
@@ -912,34 +907,11 @@ export function resolveInboundAuthMode({
   if (allowUnauth && !isLoopback) {
     return { mode: "fatal", reason: NON_LOOPBACK_UNAUTHENTICATED_REASON };
   }
-  if (allowUnauth) return { mode: "unauthenticated" };
-  if (isLoopback) {
-    return sharedToken ? { mode: "shared_bearer" } : { mode: "unauthenticated" };
-  }
+  if (allowUnauth || isLoopback) return { mode: "unauthenticated" };
   return {
     mode: "fatal",
     reason: NETWORK_INTROSPECTION_REQUIRED_REASON,
   };
-}
-
-/**
- * Startup deprecation warning for inbound auth mode `shared_bearer` (#231).
- *
- * Removal is the next major (v4.0.0). Resource-server and unauthenticated
- * modes are silent. The warning names the issue and the removal version so
- * a loopback install cannot miss the kill criterion.
- *
- * @param {string} mode
- * @returns {?string} Warning text, or null when this mode is not deprecated.
- */
-export function inboundAuthDeprecationWarning(mode) {
-  if (mode !== "shared_bearer") return null;
-  return (
-    "[drupal-mcp-connector] WARNING: inbound auth mode shared_bearer is deprecated " +
-    "and will be removed in v4.0.0 (#231). Configure an OAuth resource server " +
-    "(auth.issuer + auth.audience) or run unauthenticated loopback. " +
-    "MCP_ALLOW_UNAUTHENTICATED is loopback-only."
-  );
 }
 
 /**

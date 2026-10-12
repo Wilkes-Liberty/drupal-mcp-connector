@@ -39,7 +39,7 @@ ${formatTransportPresetHelp()}
   --transport stdio|https   MCP transport (default: stdio)
   --host <url>              Drupal base URL (stdio) or MCP URL (https)
   --drupal-url <url>        Drupal site for whoami/contract_ready (https)
-  --auth token|oauth        Auth mode (default: token; public-https forces oauth)
+  --auth token|oauth        Auth mode (default: token for stdio; https requires oauth)
   --client-id <id>          Agent client id (default: content-agent)
   --clients cursor,claude   Which snippets to emit (default: both)
   --server-name <id>        mcpServers key (default: drupal)
@@ -240,10 +240,14 @@ export async function resolveWizardAnswers(args, options = {}) {
   }
   const transport = normalizeChoice(transportChoice, ["stdio", "https"], "transport");
   let auth = normalizeChoice(asked.auth, ["token", "oauth"], "auth");
-  if (preset?.id === "public-https") {
-    if (auth === "token" && args.auth && String(args.auth) === "token") {
+  if (transport === "https") {
+    // The loopback shared bearer (MCP_AUTH_TOKEN) was removed in 4.0.0 (#231):
+    // the HTTPS transport authenticates only as an OAuth resource server.
+    const explicitAuth = (args.auth !== undefined && args.auth !== true) || Boolean(process.env.MCP_WIZARD_AUTH);
+    if (auth === "token" && explicitAuth) {
+      const flag = preset?.id === "public-https" ? "--preset public-https" : "--transport https";
       throw new Error(
-        "--preset public-https requires --auth oauth (MCP_AUTH_TOKEN is loopback-only; inbound OAuth is required for network HTTPS).",
+        `${flag} requires --auth oauth (the MCP_AUTH_TOKEN shared bearer was removed in 4.0.0; inbound OAuth is the only HTTPS auth).`,
       );
     }
     auth = "oauth";
@@ -419,9 +423,6 @@ export function formatWizardReport(result, selected) {
   if (answers.auth === "oauth") {
     lines.push("  OAuth client secret stays in clientSecretEnv / a secrets manager — never in mcp.json.");
   }
-  if (answers.transport === "https" && answers.auth === "token") {
-    lines.push("  MCP_AUTH_TOKEN is loopback-only. Network-facing HTTPS needs inbound OAuth (auth.issuer + audience + RFC 7662 introspection).");
-  }
   lines.push("");
 
   for (const id of selected) {
@@ -478,13 +479,8 @@ function buildServerEntry(answers, flavor) {
   if (answers.transport === "https") {
     const entry = { url: answers.mcpUrl };
     if (flavor === "claude") entry.type = "http";
-    if (answers.auth === "token") {
-      // Build placeholder without a `${` token in source (code-quality / non-template string).
-      const tokenRef = flavor === "cursor"
-        ? ("$" + "{env:MCP_AUTH_TOKEN}")
-        : ("$" + "{MCP_AUTH_TOKEN}");
-      entry.headers = { Authorization: `Bearer ${tokenRef}` };
-    }
+    // No static Authorization header: HTTPS authenticates as an OAuth
+    // resource server, so the client obtains its own access token (#231).
     return entry;
   }
 

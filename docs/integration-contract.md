@@ -60,8 +60,8 @@ X-MCP-Declared-Destination: content-agent:production
 **Inbound (MCP clients → connector HTTPS).** A network-facing `/mcp` is an
 OAuth protected resource. The connector validates the caller's access token
 against a configured issuer (RFC 8414 / OIDC + JWKS). That inbound token is
-never forwarded to Drupal. `MCP_AUTH_TOKEN` remains a loopback-only shared
-secret and is not a governed product path.
+never forwarded to Drupal. The loopback shared secret (`MCP_AUTH_TOKEN`) was
+removed in 4.0.0 (#231).
 
 **Outbound (connector → Drupal).** The connector authenticates to Drupal with
 **OAuth2** (via Drupal `simple_oauth`):

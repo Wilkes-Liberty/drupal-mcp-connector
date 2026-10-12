@@ -4,8 +4,9 @@
 # Pattern: Caddy terminates public TLS and proxies to the connector on loopback.
 # Run the connector bound to localhost — either with its own TLS, or in
 # loopback-HTTP mode (MCP_TRANSPORT=https MCP_ALLOW_HTTP=1, which binds 127.0.0.1
-# only). Defense in depth: keep MCP_AUTH_TOKEN set on the connector even behind
-# Caddy, and restrict to the client's egress range where possible.
+# only). Defense in depth: keep the inbound OAuth resource server (auth.issuer +
+# auth.audience) configured on the connector even behind Caddy, and restrict to
+# the client's egress range where possible. MCP_AUTH_TOKEN was removed in 4.0.0.
 
 mcp.example.com {
 	# Only allow the AI vendor's documented egress IPs to reach /mcp.

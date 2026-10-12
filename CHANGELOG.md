@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **Loopback `shared_bearer` inbound auth, `MCP_AUTH_TOKEN` (#231, breaking).**
+  The HTTPS transport authenticates only as an OAuth resource server
+  (`auth.issuer` + `auth.audience`). Loopback without one is the explicit
+  local operator, as it already was when no token was set. A set
+  `MCP_AUTH_TOKEN` is now fatal at startup at any bind host, with a reason
+  that names the removal, so a stale deployment cannot keep running while
+  believing the token gates `/mcp`. The startup deprecation warning and the
+  `loopback_shared_bearer` verify residual are gone; `npm run verify` fails
+  `inbound_auth` when the variable is set. The wizard's `--transport https`
+  requires `--auth oauth` and no longer emits a static `Authorization`
+  header. `drupal-mcp-edge` never read the variable and is unchanged.
+
 ### Security
 - **Every authenticated network call is introspected at the issuer (DEV-844).**
   Hosted HTTPS and the relay edge validate the bearer with RFC 7662 at the
@@ -34,10 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointing at the served `/.well-known/oauth-protected-resource` URL, plus
   RFC 6750 `error` / `error_description` where applicable. One shared
   writer (`writeUnauthorized` / `unauthorizedChallenge`) is the only 401
-  path so a future site cannot omit the pointer. Loopback shared-bearer
-  (`MCP_AUTH_TOKEN`) has no RFC 9728 document, so its refusal is now a
-  `Bearer` challenge with `error="invalid_token"` (previously a bare
-  `Bearer`) and no `resource_metadata`.
+  path so a future site cannot omit the pointer. Unauthenticated loopback
+  has no RFC 9728 document, so a refusal there is now a `Bearer` challenge
+  with `error="invalid_token"` (previously a bare `Bearer`) and no
+  `resource_metadata`.
 - **Network listeners refuse a null principal before dispatch (DEV-845).**
   HTTP `/mcp` (modern and legacy), relay edge routes, and any non-stdio
   listener return 401 when no identity was resolved. No tool handler,

@@ -17,7 +17,7 @@ see [SECURITY.md](../SECURITY.md).
 | **Operator config** (`config/config.json`, env, TLS certs, SSH key, `baseUrl`, `drupalRoot`) | **Trusted.** Set by the operator, not the AI. Not attacker-controlled. |
 | **MCP tool inputs** (ids, bundles, titles, field values, filters, drush args, SQL) | **Untrusted.** An AI client (or a compromised/confused one) can send arbitrary values. Validate at this boundary. |
 | **Drupal** | **Authoritative.** Drupal core permissions + the governance module (e.g. MCP Sentinel) are the real access-control gate. The connector is defense-in-depth, not the primary control. |
-| **HTTPS transport network** | Untrusted when exposed; protected by TLS + OAuth resource-server (JWT/JWKS) + bind-host + rate limiting. Shared `MCP_AUTH_TOKEN` is loopback-only. |
+| **HTTPS transport network** | Untrusted when exposed; protected by TLS + OAuth resource-server (JWT/JWKS) + bind-host + rate limiting. The shared `MCP_AUTH_TOKEN` was removed in 4.0.0 (#231). |
 
 ## Assets
 
@@ -77,7 +77,8 @@ field-name validator — it would break legitimate relationship filters.
   pre-exposure checklist in [deployment.md](deployment.md). Non-loopback binds
   **require** an inbound OAuth resource server (`auth.issuer` + `auth.audience`
   + RFC 7662 introspection) and `MCP_ALLOW_UNAUTHENTICATED=1` is loopback-only
-  (a non-loopback bind with that flag is fatal). `MCP_AUTH_TOKEN` is loopback-only.
+  (a non-loopback bind with that flag is fatal). `MCP_AUTH_TOKEN` was removed
+  in 4.0.0 (#231); setting it is fatal.
   Prefer TLS + tight `MCP_BIND_HOST` + rate limiting (default 120/min on
   non-loopback HTTPS) and/or a reverse-proxy allow-list.
 

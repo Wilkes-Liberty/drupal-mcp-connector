@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { generateKeyPair, exportJWK, exportSPKI, SignJWT, createLocalJWKSet } from "jose";
 import {
-  makeBearerCheck,
   parseBearerToken,
   scopesFromClaim,
   buildIdentity,
@@ -20,32 +19,13 @@ import {
   discoverAuthorizationServer,
   introspectToken,
   resolveInboundAuthMode,
-  inboundAuthDeprecationWarning,
+  SHARED_BEARER_REMOVED_REASON,
   resolveInboundAuthConfig,
   INBOUND_IDP_TIMEOUT_MS,
   DEFAULT_INTROSPECTION_TIMEOUT_MS,
   denyUnavailable,
 } from "../../src/lib/http-auth.js";
 import { authHeaders, authHeadersAsync } from "../../src/lib/config.js";
-
-describe("makeBearerCheck", () => {
-  it("disabled (no token) accepts anything", () => {
-    const ok = makeBearerCheck("");
-    expect(ok(undefined)).toBe(true);
-    expect(ok("Bearer whatever")).toBe(true);
-  });
-  it("accepts the matching bearer token", () => {
-    const ok = makeBearerCheck("s3cret");
-    expect(ok("Bearer s3cret")).toBe(true);
-  });
-  it("rejects a wrong / missing / malformed token", () => {
-    const ok = makeBearerCheck("s3cret");
-    expect(ok("Bearer nope")).toBe(false);
-    expect(ok("s3cret")).toBe(false);
-    expect(ok(undefined)).toBe(false);
-    expect(ok("Bearer s3cre")).toBe(false);
-  });
-});
 
 describe("parseBearerToken / scopes / identity", () => {
   it("parses a Bearer token and rejects other schemes", () => {
@@ -177,25 +157,60 @@ describe("resolveInboundAuthMode", () => {
   };
 
   it("requires a resource server on a network-facing bind", () => {
-    expect(resolveInboundAuthMode({
-      bindHost: "0.0.0.0",
-      sharedToken: "legacy-secret",
-    }).mode).toBe("fatal");
+    const decision = resolveInboundAuthMode({ bindHost: "0.0.0.0" });
+    expect(decision.mode).toBe("fatal");
+    expect(decision.reason).toMatch(/inbound OAuth resource server/);
   });
 
-  it("accepts the resource server on a network-facing bind and ignores a shared token", () => {
+  it("accepts the resource server on a network-facing bind", () => {
     expect(resolveInboundAuthMode({
       bindHost: "0.0.0.0",
-      sharedToken: "legacy-secret",
       resourceServer: rs,
     }).mode).toBe("resource_server");
   });
 
-  it("keeps MCP_AUTH_TOKEN on loopback", () => {
-    expect(resolveInboundAuthMode({
+  it("is fatal when MCP_AUTH_TOKEN is set on loopback (#231 removal)", () => {
+    const decision = resolveInboundAuthMode({
       bindHost: "127.0.0.1",
       sharedToken: "legacy-secret",
-    }).mode).toBe("shared_bearer");
+    });
+    expect(decision.mode).toBe("fatal");
+    expect(decision.reason).toBe(SHARED_BEARER_REMOVED_REASON);
+    expect(decision.reason).toMatch(/MCP_AUTH_TOKEN/);
+    expect(decision.reason).toMatch(/#231/);
+    expect(decision.reason).not.toMatch(/legacy-secret/);
+  });
+
+  it("is fatal when MCP_AUTH_TOKEN is set beside a configured resource server", () => {
+    // A stale deployment must not keep running while believing the shared
+    // bearer still gates anything.
+    expect(resolveInboundAuthMode({
+      bindHost: "0.0.0.0",
+      sharedToken: "legacy-secret",
+      resourceServer: rs,
+    })).toEqual({ mode: "fatal", reason: SHARED_BEARER_REMOVED_REASON });
+  });
+
+  it("is fatal when MCP_AUTH_TOKEN is set beside MCP_ALLOW_UNAUTHENTICATED on loopback", () => {
+    expect(resolveInboundAuthMode({
+      bindHost: "127.0.0.1",
+      allowUnauth: true,
+      sharedToken: "legacy-secret",
+    }).mode).toBe("fatal");
+  });
+
+  it("never resolves to a shared_bearer mode", () => {
+    const hosts = ["127.0.0.1", "::1", "localhost", "0.0.0.0"];
+    for (const bindHost of hosts) {
+      for (const sharedToken of ["", "legacy-secret"]) {
+        for (const allowUnauth of [false, true]) {
+          for (const resourceServer of [null, rs]) {
+            const { mode } = resolveInboundAuthMode({ bindHost, sharedToken, allowUnauth, resourceServer });
+            expect(["resource_server", "unauthenticated", "fatal"]).toContain(mode);
+          }
+        }
+      }
+    }
   });
 
   it("is fatal on a network bind when issuer and audience are set but introspection is not", () => {
@@ -224,22 +239,11 @@ describe("resolveInboundAuthMode", () => {
   });
 });
 
-describe("inboundAuthDeprecationWarning", () => {
-  it("warns for shared_bearer and names the removal major", () => {
-    const warning = inboundAuthDeprecationWarning("shared_bearer");
-    expect(warning).toEqual(expect.stringContaining("WARNING"));
-    expect(warning).toEqual(expect.stringContaining("shared_bearer"));
-    expect(warning).toEqual(expect.stringContaining("v4.0.0"));
-    expect(warning).toEqual(expect.stringContaining("#231"));
-  });
-
-  it("is silent in resource-server mode", () => {
-    expect(inboundAuthDeprecationWarning("resource_server")).toBeNull();
-  });
-
-  it("is silent for unauthenticated and fatal modes", () => {
-    expect(inboundAuthDeprecationWarning("unauthenticated")).toBeNull();
-    expect(inboundAuthDeprecationWarning("fatal")).toBeNull();
+describe("shared bearer removal (#231)", () => {
+  it("exports neither the bearer predicate nor the deprecation warning", async () => {
+    const auth = await import("../../src/lib/http-auth.js");
+    expect(auth.makeBearerCheck).toBeUndefined();
+    expect(auth.inboundAuthDeprecationWarning).toBeUndefined();
   });
 });
 

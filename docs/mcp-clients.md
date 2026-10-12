@@ -203,7 +203,7 @@ and reference its URL:
       "type": "mcp",
       "server_label": "drupal",
       "server_url": "https://mcp.example.com/mcp",
-      "authorization": "Bearer YOUR_MCP_AUTH_TOKEN"
+      "authorization": "Bearer <access token issued by auth.issuer>"
     }
   ]
 }
@@ -265,7 +265,7 @@ and add it:
       "type": "mcp",
       "server_label": "drupal",
       "server_url": "https://mcp.example.com/mcp",
-      "headers": { "Authorization": "Bearer YOUR_MCP_AUTH_TOKEN" }
+      "headers": { "Authorization": "Bearer <access token issued by auth.issuer>" }
     }
   ]
 }
@@ -302,7 +302,7 @@ Hardening (see [security-hardening.md](security-hardening.md)):
 
 - **Inbound OAuth resource server** — required on `/mcp` beyond loopback.
   Clients send `Authorization: Bearer <access-token>` issued by `auth.issuer`.
-- **`MCP_AUTH_TOKEN`** — loopback-only shared bearer. Not accepted network-facing.
+- **`MCP_AUTH_TOKEN`** — removed in 4.0.0 (#231). Setting it is fatal at startup.
 - **TLS is mandatory** off localhost (plain HTTP is refused unless `MCP_ALLOW_HTTP=1`, dev only).
 - **`MCP_BIND_HOST`** — restrict the listen interface.
 - Source the OAuth client secret from env / a secrets manager (not a desktop keychain) on servers.

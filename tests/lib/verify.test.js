@@ -85,14 +85,11 @@ describe("verifyStatic — a secure, tenant-neutral configuration", () => {
     expect(residual.detail.toLowerCase()).toContain("not");
   });
 
-  it("names loopback shared_bearer as a managed residual with a dated kill", () => {
+  it("no longer lists the loopback shared bearer as a residual (#231 removed it)", () => {
     const result = run(secureConfig());
-    expect(RESIDUALS.map((r) => r.id)).toContain("loopback_shared_bearer");
-    const residual = result.residuals.find((r) => r.id === "loopback_shared_bearer");
-    expect(residual.status).toBe("managed");
-    expect(residual.detail).toEqual(expect.stringContaining("shared_bearer"));
-    expect(residual.detail).toEqual(expect.stringContaining("v4.0.0"));
-    expect(residual.detail).toEqual(expect.stringContaining("#231"));
+    expect(RESIDUALS.map((r) => r.id)).not.toContain("loopback_shared_bearer");
+    expect(result.residuals.map((r) => r.id)).not.toContain("loopback_shared_bearer");
+    expect(JSON.stringify(result.residuals)).not.toMatch(/shared_bearer|MCP_AUTH_TOKEN/);
   });
 
   it("never lets a secret value reach the evidence", () => {
@@ -127,7 +124,27 @@ describe("verifyStatic — inbound_auth", () => {
       env: { MCP_TRANSPORT: "https", MCP_BIND_HOST: "0.0.0.0", MCP_AUTH_TOKEN: "shared-secret" },
     });
     expect(statusOf(result, "inbound_auth")).toBe("fail");
-    expect(detailOf(result, "inbound_auth").join(" ")).toContain("resource server");
+    const detail = detailOf(result, "inbound_auth").join(" ");
+    expect(detail).toMatch(/MCP_AUTH_TOKEN/);
+    expect(detail).toMatch(/#231/);
+    expect(detail).not.toContain("shared-secret");
+  });
+
+  it("fails loopback HTTPS that still sets MCP_AUTH_TOKEN (#231 removal)", () => {
+    const result = run(secureConfig(), {
+      env: { MCP_TRANSPORT: "https", MCP_BIND_HOST: "127.0.0.1", MCP_AUTH_TOKEN: "shared-secret" },
+    });
+    expect(statusOf(result, "inbound_auth")).toBe("fail");
+    const detail = detailOf(result, "inbound_auth").join(" ");
+    expect(detail).toMatch(/MCP_AUTH_TOKEN/);
+    expect(detail).not.toContain("shared-secret");
+  });
+
+  it("passes loopback HTTPS with no inbound resource server once the token is gone", () => {
+    const result = run(secureConfig(), {
+      env: { MCP_TRANSPORT: "https", MCP_BIND_HOST: "127.0.0.1" },
+    });
+    expect(statusOf(result, "inbound_auth")).toBe("pass");
   });
 
   it("passes network-facing HTTPS when issuer, audience, and introspection are set", () => {

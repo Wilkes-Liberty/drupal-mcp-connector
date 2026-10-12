@@ -2,8 +2,9 @@
 # Install to /etc/systemd/system/, adjust paths/user, then:
 #   sudo systemctl daemon-reload && sudo systemctl enable --now drupal-mcp-connector
 #
-# Secrets (MCP_AUTH_TOKEN, the OAuth client secret / DRUPAL_API_TOKEN) go in the
-# EnvironmentFile below — NOT in this unit, and never in git. chmod 600 it.
+# Secrets (the OAuth client secret / DRUPAL_API_TOKEN) go in the EnvironmentFile
+# below — NOT in this unit, and never in git. chmod 600 it. Do not set
+# MCP_AUTH_TOKEN: it was removed in 4.0.0 and is fatal at startup.
 
 [Unit]
 Description=drupal-mcp-connector (MCP HTTPS transport)
@@ -26,7 +27,7 @@ Environment=TLS_KEY_PATH=/etc/ssl/private/drupal-mcp.key
 Environment=MCP_BIND_HOST=0.0.0.0
 Environment=MCP_RATE_LIMIT=120
 Environment=MCP_RATE_WINDOW_SEC=60
-# MCP_AUTH_TOKEN=... and the OAuth client secret live here (mode 600, not in git):
+# The OAuth client secret lives here (mode 600, not in git); no MCP_AUTH_TOKEN:
 EnvironmentFile=-/etc/drupal-mcp-connector/secrets.env
 
 # Hardening

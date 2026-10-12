@@ -18,7 +18,7 @@ service, port, or token; see [mcp-clients.md](mcp-clients.md).
 | `MCP_TRANSPORT=https` | Run the HTTP server transport |
 | `TLS_CERT_PATH` / `TLS_KEY_PATH` | TLS cert + key (mandatory off-localhost) |
 | `MCP_RESOURCE_ISSUER` / `MCP_RESOURCE_AUDIENCE` | Inbound OAuth resource server — **required** for non-loopback binds (or set `auth` in config) |
-| `MCP_AUTH_TOKEN` | Shared bearer — **loopback only**; refused on a network-facing product path |
+| `MCP_AUTH_TOKEN` | **Removed in 4.0.0** (#231). Setting it is fatal at startup; unset it |
 | `MCP_ALLOW_UNAUTHENTICATED` | Set to `1` only on loopback. A non-loopback bind with this flag is fatal |
 | `MCP_RATE_LIMIT` | Max `/mcp` requests per window per IP (`0` = off; default 120 on non-loopback TLS) |
 | `MCP_UPLOAD_ROOT` | Colon-separated absolute dirs allowed for local file uploads (default: process cwd) |
@@ -81,14 +81,14 @@ launchctl load -w ~/Library/LaunchAgents/com.example.drupal-mcp-connector.plist
 
 To terminate public TLS and add IP allow-listing, put Caddy/nginx in front and
 bind the connector to loopback. See [`deploy/Caddyfile.example`](../deploy/Caddyfile.example).
-Bind the connector to loopback and keep a loopback `MCP_AUTH_TOKEN`, or configure
-the inbound resource server even behind the proxy (defense in depth). Restrict
+Bind the connector to loopback and configure the inbound resource server even
+behind the proxy (defense in depth). Restrict
 to the client vendor's documented egress range where you can.
 
 ## Pre-exposure checklist
 
 - [ ] TLS configured (`TLS_CERT_PATH`/`TLS_KEY_PATH`) — never plain HTTP off localhost.
-- [ ] Inbound resource server configured (`auth.issuer` + `auth.audience` + RFC 7662 introspection), or loopback + `MCP_AUTH_TOKEN`.
+- [ ] Inbound resource server configured (`auth.issuer` + `auth.audience` + RFC 7662 introspection); `MCP_AUTH_TOKEN` is unset (removed in 4.0.0).
 - [ ] Authorization server mints access tokens with `exp` and `iat` inside `auth.maxTokenLifetime` (default 3600s) using an algorithm on `auth.algorithms`.
 - [ ] `MCP_BIND_HOST` and/or proxy IP allow-list restrict who can reach `/mcp`.
 - [ ] `MCP_RATE_LIMIT` enabled (or rate limiting at the proxy).

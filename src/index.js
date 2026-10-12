@@ -15,7 +15,7 @@
  *   DRUPAL_BASE_URL   Single-site fallback baseUrl
  *   DRUPAL_API_TOKEN  Single-site fallback Bearer token
  *   MCP_ALLOW_HTTP    Set to "1" to allow plain HTTP on localhost only (dev)
- *   MCP_AUTH_TOKEN    Loopback-only shared bearer for /mcp (not accepted network-facing)
+ *   MCP_AUTH_TOKEN    Removed in 4.0.0 (#231); setting it is fatal at startup
  *   MCP_RESOURCE_ISSUER / MCP_RESOURCE_AUDIENCE / MCP_RESOURCE
  *                     Inbound OAuth resource-server (required beyond loopback)
  *   MCP_BIND_HOST     Bind address for https mode when TLS is present
@@ -40,10 +40,8 @@ import { toNodeHandler } from "@modelcontextprotocol/node";
 import { listSiteNames, getTlsConfig, loadConfig, CLIENT_VERSION, SERVER_INFO } from "./lib/config.js";
 import { loadLocalSecrets, secretLoadFatalMessage, secretTableMismatchMessage } from "./lib/load-secrets.js";
 import {
-  makeBearerCheck,
   resolveInboundAuthConfig,
   resolveInboundAuthMode,
-  inboundAuthDeprecationWarning,
   createInboundHttpsAuth,
   isLoopbackBind,
 } from "./lib/http-auth.js";
@@ -334,10 +332,10 @@ if (transport === "stdio") {
     console.error(`[drupal-mcp-connector] FATAL: ${inboundMode.reason}`);
     process.exit(1);
   }
-  const deprecation = inboundAuthDeprecationWarning(inboundMode.mode);
-  if (deprecation) console.error(deprecation);
-
-  let checkAuth = makeBearerCheck(inboundMode.mode === "shared_bearer" ? authToken : "");
+  // No pre-dispatch header predicate outside resource-server mode: loopback
+  // without a resource server is the explicit local operator (#231 removed
+  // the shared bearer), and DEV-845 still refuses a null principal elsewhere.
+  let checkAuth = () => true;
   let authenticate = null;
   let protectedResource = null;
   let resourceMetadataUrl;
@@ -401,9 +399,7 @@ if (transport === "stdio") {
     authenticate,
     protectedResource,
     resourceMetadataUrl,
-    allowLocalOperator: loopbackBind && (
-      inboundMode.mode === "unauthenticated" || inboundMode.mode === "shared_bearer"
-    ),
+    allowLocalOperator: loopbackBind && inboundMode.mode === "unauthenticated",
     modernHandler,
     legacyHandler,
     toolCount: allDefinitions.length,
