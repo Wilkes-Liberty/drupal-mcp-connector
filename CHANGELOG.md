@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-12
+
 ### Security
 - **Resource-server and relay 401s carry RFC 9728 `resource_metadata` (DEV-877).**
   On a configured OAuth resource server (`auth.issuer` + `auth.audience`),
