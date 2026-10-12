@@ -26,7 +26,8 @@ defineCase({
       { token: tokenB },
     );
     expectTransportDenied(h, "B riding A's session", hijack, { status: 403 });
-    expectEqual(h, "only initialize dispatched", h.counters.ch, 1);
+    expectEqual(h, "initialize plus refused session lookup", h.counters.ch, 2);
     expectEqual(h, "no tool body on hijack", h.counters.ct, 0);
+    expectEqual(h, "no upstream on hijack", h.fake.count(), 0);
   },
 });

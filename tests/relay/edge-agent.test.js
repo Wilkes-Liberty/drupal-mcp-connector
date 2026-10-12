@@ -744,7 +744,7 @@ describe("stateless MCP 2026-07-28 end to end", () => {
     const get = await fetch(new URL("/mcp", harness.edge.northboundUrl), {
       headers: { authorization: `Bearer ${jwt}` },
     });
-    expect(get.status).toBe(400);
+    expect(get.status).toBe(405);
 
     const sessionful = await modernCall(harness.edge.northboundUrl, jwt, {
       args: { site: "tenant-alpha" },

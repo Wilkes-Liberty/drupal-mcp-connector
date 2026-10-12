@@ -132,8 +132,8 @@ export function originAllowed(originHeader, allowlist) {
 export function sessionPrincipalKey(identity) {
   if (!identity) return null;
   if (identity.localOperator === true) return "local-operator";
-  const sub = identity.sub == null ? "" : String(identity.sub);
-  const clientId = identity.clientId == null ? "" : String(identity.clientId);
+  const sub = identity.sub === undefined || identity.sub === null ? "" : String(identity.sub);
+  const clientId = identity.clientId === undefined || identity.clientId === null ? "" : String(identity.clientId);
   if (!sub && !clientId) return null;
   return `${sub}\0${clientId}`;
 }
