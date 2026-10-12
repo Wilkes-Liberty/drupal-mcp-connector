@@ -251,8 +251,9 @@ export function getDefaultSiteName() {
 
 /**
  * Server-resolved inbound site grants keyed by OAuth client id.
- * A missing or empty map means "no grant table" (every resolvable site).
- * A present map is fail-closed: unknown clients receive no sites.
+ * A missing or empty map means "no grant table": JWT principals then use a
+ * `sites` claim if present, otherwise no sites (DEV-848). A present map is
+ * fail-closed: unknown clients receive no sites. Local operators are unchanged.
  * @returns {object|null}
  */
 export function getInboundGrants() {

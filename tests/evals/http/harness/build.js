@@ -68,6 +68,39 @@ function failOpenInboundAuthMode({
   return { mode: "fatal", reason: "Network-facing HTTPS requires an inbound OAuth resource server." };
 }
 
+/**
+ * Pre-DEV-848 grant resolution: no table and no sites claim falls through
+ * to every configured site. Used only as the T4b mutant (dependency swap).
+ *
+ * @param {object|null} identity
+ * @param {Array<{_name: string}>} siteList
+ * @param {object|null} grantTable
+ * @returns {Array<object>}
+ */
+function fallThroughGrantedSites(identity, siteList, grantTable) {
+  if (identity == null || identity.localOperator === true) return [...siteList];
+  const names = siteList.map((site) => site._name);
+  const known = new Set(names);
+  let allowed;
+  if (grantTable) {
+    const listed = identity.clientId
+      ? new Map(Object.entries(grantTable)).get(identity.clientId)
+      : undefined;
+    allowed = Array.isArray(listed) ? listed.map(String).filter((name) => known.has(name)) : [];
+  } else if (Array.isArray(identity.sites)) {
+    allowed = identity.sites.map(String).filter((name) => known.has(name));
+  } else {
+    allowed = [...names];
+  }
+  const entitled = new Set(allowed);
+  return siteList.filter((site) => entitled.has(site._name));
+}
+
+/** T4 mutant: ignore grants and entitle every configured site. */
+function allSitesGranted(_identity, siteList) {
+  return [...siteList];
+}
+
 const MUTANTS = {
   // T1: drop the resource-server authenticator and allow a null principal
   // (the DEV-845 guard). Every request now dispatches under local operator.
@@ -75,6 +108,10 @@ const MUTANTS = {
   // T1n: restore the pre-DEV-845 startup decision (allow-unauthenticated
   // on a non-loopback bind is not fatal).
   T1n: () => ({ resolveInboundAuthMode: failOpenInboundAuthMode }),
+  // T4: ignore the grant table so a site-A grant also reaches B.
+  T4: () => ({ resolveGrantedSites: allSitesGranted }),
+  // T4b: restore the pre-DEV-848 fall-through (no grant, no sites claim → all sites).
+  T4b: () => ({ resolveGrantedSites: fallThroughGrantedSites }),
   // T7: an authenticator that rejects everything (the over-blocking check).
   T7: () => ({
     authenticate: async () => httpAuth.denyAuth(401, {
@@ -109,10 +146,10 @@ function assertNoAmbientCredentials() {
 }
 
 /**
- * @param {{mutant?: string|null}} [options] Case id of the dependency-swap mutant, or null for the real build.
+ * @param {{mutant?: string|null, grants?: object|null}} [options] Case id of the dependency-swap mutant, or null for the real build. `grants: null` is T4b (no table).
  * @returns {Promise<object>} harness handle
  */
-export async function buildHarness({ mutant = null } = {}) {
+export async function buildHarness({ mutant = null, grants: grantsOption } = {}) {
   assertNoAmbientCredentials();
   if (mutant !== null && !MUTANTS[mutant]) throw new Error(`Unknown mutant "${mutant}".`);
 
@@ -127,7 +164,10 @@ export async function buildHarness({ mutant = null } = {}) {
     baseUrl: fake.baseUrl(site),
     security: { preset: "development" },
   }));
-  const grants = Object.fromEntries(TENANTS.map(({ clientId, site }) => [clientId, [site]]));
+  const defaultGrants = Object.fromEntries(TENANTS.map(({ clientId, site }) => [clientId, [site]]));
+  const grants = grantsOption === undefined ? defaultGrants : grantsOption;
+  const swap = mutant && MUTANTS[mutant] ? MUTANTS[mutant]() : {};
+  const resolveGrantedSites = swap.resolveGrantedSites ?? principal.resolveGrantedSites;
 
   const inboundCfg = {
     issuer: issuer.issuer,
@@ -148,10 +188,16 @@ export async function buildHarness({ mutant = null } = {}) {
       list: async () => principal.filterToolsByPrincipal(
         TOOL_DEFINITIONS, sites, principal.getRequestIdentity(), grants),
       call: async (name) => {
-        counters.countTool();
         if (name !== "drupal_list_nodes") return { content: [{ type: "text", text: "Unknown tool" }], isError: true };
         const identity = principal.getRequestIdentity();
-        const entitled = principal.resolveGrantedSites(identity, sites, grants);
+        const entitled = resolveGrantedSites(identity, sites, grants);
+        if (!entitled.length) {
+          return {
+            content: [{ type: "text", text: "Access denied: Principal is not entitled to any configured target." }],
+            isError: true,
+          };
+        }
+        counters.countTool();
         const parts = [];
         for (const site of entitled) {
           const res = await fetch(`${site.baseUrl}/jsonapi/node/article`, {
@@ -168,11 +214,14 @@ export async function buildHarness({ mutant = null } = {}) {
   const buildServer = mcpServer.createConnectorServerFactory(surface);
   const modern = createMcpHandler(buildServer, { legacy: "reject" });
 
+  const handlerSwap = { ...swap };
+  delete handlerSwap.resolveGrantedSites;
+  delete handlerSwap.resolveInboundAuthMode;
   const deps = {
     // Production wiring in resource-server mode (index.js): checkAuth is closed.
     checkAuth: () => false,
     authenticate: inbound.authenticate,
-    ...(mutant ? MUTANTS[mutant]() : {}),
+    ...handlerSwap,
   };
   const handler = httpHandler.createMcpRequestHandler({
     ...deps,

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Hosted JWT principals without a grant entry or `sites` claim get no sites (DEV-848).**
+  When `auth.grants` is omitted, a bearer token that also lacks a `sites` /
+  `mcp_sites` claim is entitled to no configured site. Tool calls are
+  refused with a closed denial (`Not entitled` / `Access denied`) that names
+  no site. An explicit `auth.grants` row or a `sites` claim is unchanged.
+  Stdio and loopback local-operator identities still see every configured
+  site.
+
 ## [4.0.0] - 2026-10-12
 
 ### Removed

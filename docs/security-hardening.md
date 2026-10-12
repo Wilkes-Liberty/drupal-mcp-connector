@@ -115,9 +115,11 @@ refusal there is a `Bearer` challenge with `error="invalid_token"` and no
 After the token is accepted, tool / resource / prompt / site discovery is
 filtered by that principal (#178). `auth.grants` (optional) maps inbound
 `client_id` / `azp` to configured site names; when the map is present,
-unknown clients see no targets. Caller-supplied `site` / `environment` /
-`tenant` / `target` arguments cannot widen the grant. Stdio and loopback
-without a resource-server identity are unchanged (local operator).
+unknown clients see no targets. When the map is omitted, a token with no
+`sites` / `mcp_sites` claim is entitled to no sites (DEV-848). Caller-supplied
+`site` / `environment` / `tenant` / `target` arguments cannot widen the grant.
+Stdio and loopback without a resource-server identity are unchanged (local
+operator).
 
 `/health` stays open as a liveness probe (`{status: "ok"}`) and does
 not expose a tool catalog. Missing a required scope is `403` with

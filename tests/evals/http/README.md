@@ -4,9 +4,11 @@ Run: `npm run eval:http`. It is not part of `npm test` or `npm run check` yet.
 
 What it proves: the connector's HTTP request handler, wired as in hosted
 (resource-server) mode, refuses a missing identity with 401 before any
-dispatch (T1), still serves a legitimate request (T7, the allow twin), and
+dispatch (T1), still serves a legitimate request (T7, the allow twin),
 asserts that a non-loopback bind with `MCP_ALLOW_UNAUTHENTICATED=1` is
-fatal at startup (T1n, DEV-845; tests `resolveInboundAuthMode` directly).
+fatal at startup (T1n, DEV-845; tests `resolveInboundAuthMode` directly),
+and (DEV-848) refuses a verified token with no grant entry and no `sites`
+claim (T4b) while an explicit grant for site A still reaches A only (T4).
 Everything is synthetic:
 keys are generated in memory, the token issuer is a stub that is **not
 Paladin**, and the upstream is a fake loopback server with per-tenant canaries.
@@ -26,7 +28,8 @@ needs a mutant that goes red; a known-red case must fail, and fails the pack if
 it passes (flip detection).
 
 Mutants in this increment are dependency swaps in `harness/build.js` (the
-handler defaults for T1, a deny-everything authenticator for T7). `src/` has no
+handler defaults for T1, a deny-everything authenticator for T7, all-sites
+grants for T4, and the pre-DEV-848 fall-through for T4b). `src/` has no
 eval or mutant switch, and `run-pack.js` fails if it ever mentions one. The
-patch-based mutant runner, T2 onward, and `eval:http:mutants` are later
-increments. `EVAL_HTTP_SRC` points the harness at a scratch copy of `src/`.
+patch-based mutant runner, remaining T2+ cases, and `eval:http:mutants` are
+later increments. `EVAL_HTTP_SRC` points the harness at a scratch copy of `src/`.

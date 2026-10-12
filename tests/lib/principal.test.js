@@ -112,6 +112,31 @@ describe("resolveGrantedSiteNames", () => {
     expect(resolveGrantedSiteNames(identity({ sites: ["staging", "ghost"] }), names, null))
       .toEqual(["staging"]);
   });
+
+  it("denies every site when no grant table and no sites claim (DEV-848 / T4b)", () => {
+    expect(resolveGrantedSiteNames(identity({ sites: null }), names, null)).toEqual([]);
+    expect(resolveGrantedSiteNames(identity({ sites: undefined }), names, null)).toEqual([]);
+    expect(resolveGrantedSiteNames(identity(), names, null)).toEqual([]);
+  });
+
+  it("keeps an explicit grant for site A and not site B (DEV-848 allow twin)", () => {
+    const grants = { "content-agent": ["production"] };
+    expect(resolveGrantedSiteNames(identity(), names, grants)).toEqual(["production"]);
+    expect(resolveGrantedSiteNames(identity(), names, grants)).not.toContain("staging");
+  });
+
+  it("refuses a tool call when the principal has no sites (DEV-848)", () => {
+    const call = {
+      toolName: "drupal_get_node",
+      args: {},
+      identity: identity({ sites: null }),
+      sites,
+      grants: null,
+      defaultSite: "production",
+    };
+    expect(() => assertPrincipalEntitlement(call)).toThrow(SecurityError);
+    expect(() => assertPrincipalEntitlement(call)).toThrow(/Not entitled to invoke drupal_get_node/);
+  });
 });
 
 describe("filterToolsByPrincipal", () => {

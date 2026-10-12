@@ -313,6 +313,8 @@ export function resolvePolicy({ identity = null, policies = null } = {}) {
 
 /**
  * Site names this principal may address. Unknown names in a grant are dropped.
+ * A JWT principal with no grant-table entry and no `sites` claim is entitled
+ * to nothing (DEV-848). Local operators still see every configured name.
  *
  * @param {object|null} identity
  * @param {string[]} configuredNames
@@ -336,7 +338,7 @@ export function resolveGrantedSiteNames(identity, configuredNames, grants) {
     return identity.sites.map(String).filter((name) => known.has(name));
   }
 
-  return [...configuredNames];
+  return [];
 }
 
 /**
