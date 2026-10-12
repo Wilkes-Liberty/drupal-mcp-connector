@@ -135,6 +135,13 @@ describe("reports-content", () => {
       expect(backend.rawQuery).not.toHaveBeenCalled();
     });
 
+    it("refuses a zero sample size instead of reporting an empty population (#436)", async () => {
+      backend.listEntities.mockResolvedValue(page([node({ id: "1" })]));
+      await expect(handlers.drupal_report_translation_coverage({ type: "page", sampleSize: 0 }))
+        .rejects.toThrow(/sampleSize must be a positive integer/);
+      expect(backend.listEntities).not.toHaveBeenCalled();
+    });
+
     it("stays unavailable when a nonempty population has no inventory endpoint (#436)", async () => {
       backend.listEntities.mockResolvedValue(page([node({ id: "1" }), node({ id: "2" })]));
       backend.rawQuery.mockRejectedValue(new Error("Drupal 404 on GET /jsonapi/node/page/1/mcp-translations"));

@@ -208,6 +208,11 @@ async function workflowBottlenecks({ site: siteName, type, days = 30, states, sa
  */
 async function translationCoverage({ site: siteName, type, sampleSize = 100 }) {
   const contentType = requireContentType(type, "drupal_report_translation_coverage");
+  // A zero or negative sample reads nothing, so it could not tell an empty
+  // bundle from an unread one. Refuse it instead of reporting populationEmpty.
+  if (!Number.isInteger(sampleSize) || sampleSize < 1) {
+    throw new Error("drupal_report_translation_coverage: sampleSize must be a positive integer.");
+  }
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
   assertReadAllowed(sec, "node", contentType);
@@ -738,7 +743,7 @@ export const definitions = [
       properties: {
         site:       { type: "string" },
         type:       { type: "string", description: "Content type machine name (required; see drupal_list_content_types)" },
-        sampleSize: { type: "number", default: 100, description: "Max nodes to inventory" },
+        sampleSize: { type: "number", default: 100, minimum: 1, description: "Max nodes to inventory (at least 1)" },
       },
     },
   },
