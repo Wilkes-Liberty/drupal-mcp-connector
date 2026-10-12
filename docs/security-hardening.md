@@ -137,13 +137,24 @@ beyond loopback: network-facing HTTPS requires `auth.issuer` + `auth.audience`
 + RFC 7662 introspection.
 
 For `/mcp`, rate limiting and bearer authentication run before any request body
-is parsed, converted, or classified. POST bodies are bounded to 1 MiB, read
-once, and dispatched to exactly one era. Current 2026-07-28 requests are
-stateless; 2025-era sessions are accepted by default or can be disabled with:
+is parsed, converted, or classified. After a resolved identity, the handler
+validates `Origin` (DNS-rebinding), `MCP-Protocol-Version`, and `Accept`, then
+refuses JSON-RPC batches. POST bodies are bounded to 1 MiB, read once, and
+dispatched to exactly one era. Current 2026-07-28 requests are stateless;
+2025-era sessions are accepted by default, bound to the authenticated
+principal (`sub` + `clientId`), and can be disabled with:
 
 ```sh
 export MCP_LEGACY_TRANSPORT=reject
+export MCP_ALLOWED_ORIGINS="https://app.example.com"
 ```
+
+`auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS` is the Streamable HTTP Origin
+allowlist. A missing `Origin` is allowed (Cursor, Grok Bot, and other
+non-browser clients typically omit it). A present `Origin` that is not on the
+list is `403`. The origin of `auth.resource` / `auth.audience` is always
+included. Session ids never replace per-request token validation: a stolen
+`Mcp-Session-Id` presented with another principal's bearer is `403`.
 
 Unexpected conversion/classification/dispatch failures return only a generic
 500 before headers. If a handler already began a response, the connection is

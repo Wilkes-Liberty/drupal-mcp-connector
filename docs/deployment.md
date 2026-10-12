@@ -26,6 +26,7 @@ service, port, or token; see [mcp-clients.md](mcp-clients.md).
 | `MCP_RATE_LIMIT` / `MCP_RATE_WINDOW_SEC` | Optional per-IP rate limiting (see [security-hardening.md](security-hardening.md)) |
 | `MCP_PORT` | Listen port (default 3443) |
 | `MCP_LEGACY_TRANSPORT` | `serve` (default) or `reject` for 2025-era HTTP clients |
+| `MCP_ALLOWED_ORIGINS` | Comma/space-separated Origin allowlist for Streamable HTTP DNS-rebinding protection |
 
 Provide the Drupal connection via a mounted `config/config.json` or the
 single-site `DRUPAL_*` env vars. Keep all secrets out of config files and images

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../../src/lib/http-handler.js";
-import { getRequestIdentity } from "../../src/lib/principal.js";
+import { getRequestIdentity, LOCAL_OPERATOR } from "../../src/lib/principal.js";
 
 /** Minimal Node-like ServerResponse mock that records status/headers/body. */
 function mockRes() {
@@ -188,7 +188,8 @@ describe("createMcpRequestHandler", () => {
     await h(incoming, res);
     expect(authenticate).toHaveBeenCalled();
     expect(incoming.mcpIdentity.sub).toBe("agent-1");
-    expect(legacyHandler).toHaveBeenCalled();
+    expect(res.statusCode).toBe(405);
+    expect(legacyHandler).not.toHaveBeenCalled();
   });
 
   it("exposes the inbound identity to the request store for discovery", async () => {
@@ -196,15 +197,17 @@ describe("createMcpRequestHandler", () => {
     const identityHandler = vi.fn(async () => {
       seen = getRequestIdentity()?.sub ?? null;
     });
-    const incoming = req("GET", "/mcp", { authorization: "Bearer good" });
+    const incoming = bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" });
     const h = createMcpRequestHandler({
       authenticate: async () => ({
         ok: true,
         identity: Object.freeze({ sub: "agent-1", scopes: ["mcp_read"] }),
       }),
-      modernHandler: vi.fn(),
-      legacyHandler: identityHandler,
+      modernHandler: identityHandler,
+      legacyHandler: vi.fn(),
       toolCount: 66,
+      toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
+      isLegacyRequestFn: async () => false,
     });
     await h(incoming, mockRes());
     expect(seen).toBe("agent-1");
@@ -355,7 +358,7 @@ describe("createMcpRequestHandler", () => {
       isLegacyRequestFn,
     });
     const allowed = mockRes();
-    await authenticated(req("DELETE", "/mcp"), allowed);
+    await authenticated(req("DELETE", "/mcp", { "mcp-session-id": "legacy-1" }), allowed);
     expect(allowed.statusCode).toBe(204);
     expect(legacyHandler).toHaveBeenCalledOnce();
     expect(toWebRequestFn).not.toHaveBeenCalled();
@@ -427,7 +430,7 @@ describe("createMcpRequestHandler", () => {
       });
       const res = mockRes();
 
-      await h(req(method, "/mcp"), res);
+      await h(req(method, "/mcp", { "mcp-session-id": "legacy-1" }), res);
 
       expect(res.statusCode).toBe(500);
       expect(res.body).toBe("Internal Server Error");
@@ -596,9 +599,160 @@ describe("createMcpRequestHandler", () => {
       expect(legacyHandler).not.toHaveBeenCalled();
     });
   });
+
+  describe("Streamable HTTP conformance (DEV-840)", () => {
+    function authed(overrides = {}) {
+      return createMcpRequestHandler({
+        checkAuth: () => true,
+        allowLocalOperator: true,
+        modernHandler: vi.fn(async (_req, res) => res.writeHead(200).end("modern")),
+        legacyHandler: vi.fn(async (_req, res) => res.writeHead(200).end("legacy")),
+        toolCount: 66,
+        toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
+        isLegacyRequestFn: async () => false,
+        allowedOrigins: ["https://app.example.com"],
+        ...overrides,
+      });
+    }
+
+    it("returns 401 for unauthenticated GET and DELETE before Origin or dispatch", async () => {
+      const modernHandler = vi.fn();
+      const legacyHandler = vi.fn();
+      const h = createMcpRequestHandler({
+        checkAuth: () => false,
+        modernHandler,
+        legacyHandler,
+        toolCount: 66,
+        allowedOrigins: ["https://app.example.com"],
+      });
+      for (const method of ["GET", "DELETE"]) {
+        const res = mockRes();
+        await h(req(method, "/mcp", { origin: "https://evil.example" }), res);
+        expect(res.statusCode, method).toBe(401);
+        expect(res.headers["WWW-Authenticate"]).toMatch(/^Bearer\b/);
+      }
+      expect(modernHandler).not.toHaveBeenCalled();
+      expect(legacyHandler).not.toHaveBeenCalled();
+    });
+
+    it("returns 403 for a present Origin that is not on the allowlist", async () => {
+      const modernHandler = vi.fn();
+      const legacyHandler = vi.fn();
+      const h = authed({ modernHandler, legacyHandler });
+      const res = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { origin: "https://evil.example" }), res);
+      expect(res.statusCode).toBe(403);
+      expect(JSON.parse(res.body).error.message).toMatch(/origin/i);
+      expect(modernHandler).not.toHaveBeenCalled();
+      expect(legacyHandler).not.toHaveBeenCalled();
+    });
+
+    it("allows a missing Origin and an allowlisted Origin", async () => {
+      const h = authed();
+      const missing = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }), missing);
+      expect(missing.statusCode).toBe(200);
+
+      const allowed = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 2, method: "tools/list" }, { origin: "https://app.example.com" }), allowed);
+      expect(allowed.statusCode).toBe(200);
+    });
+
+    it("returns 400 for an unsupported MCP-Protocol-Version before dispatch", async () => {
+      const modernHandler = vi.fn();
+      const legacyHandler = vi.fn();
+      const h = authed({ modernHandler, legacyHandler });
+      const res = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, {
+        "mcp-protocol-version": "2099-01-01",
+      }), res);
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body)).toMatchObject({
+        error: { code: -32022, data: { supported: expect.arrayContaining(["2026-07-28"]) } },
+      });
+      expect(modernHandler).not.toHaveBeenCalled();
+      expect(legacyHandler).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for a present but empty MCP-Protocol-Version", async () => {
+      const modernHandler = vi.fn();
+      const h = authed({ modernHandler });
+      const res = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, {
+        "mcp-protocol-version": "",
+      }), res);
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body)).toMatchObject({ error: { code: -32022 } });
+      expect(modernHandler).not.toHaveBeenCalled();
+    });
+
+    it("returns 406 for a present but empty Accept header", async () => {
+      const modernHandler = vi.fn();
+      const h = authed({ modernHandler });
+      const res = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { accept: "" }), res);
+      expect(res.statusCode).toBe(406);
+      expect(modernHandler).not.toHaveBeenCalled();
+    });
+
+    it("returns 405 for authenticated GET and DELETE without a session", async () => {
+      const legacyHandler = vi.fn();
+      const h = authed({ legacyHandler });
+      for (const method of ["GET", "DELETE"]) {
+        const res = mockRes();
+        await h(req(method, "/mcp"), res);
+        expect(res.statusCode, method).toBe(405);
+        expect(res.headers.Allow).toBe("POST");
+      }
+      expect(legacyHandler).not.toHaveBeenCalled();
+    });
+
+    it("returns 406 when Accept lists neither JSON nor SSE", async () => {
+      const modernHandler = vi.fn();
+      const h = authed({ modernHandler });
+      const res = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, {
+        accept: "text/html",
+      }), res);
+      expect(res.statusCode).toBe(406);
+      expect(modernHandler).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for a JSON-RPC batch before classification", async () => {
+      const modernHandler = vi.fn();
+      const legacyHandler = vi.fn();
+      const h = authed({ modernHandler, legacyHandler });
+      const res = mockRes();
+      await h(bodyReq([
+        { jsonrpc: "2.0", id: 1, method: "tools/list" },
+        { jsonrpc: "2.0", id: 2, method: "ping" },
+      ]), res);
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).error.code).toBe(-32600);
+      expect(modernHandler).not.toHaveBeenCalled();
+      expect(legacyHandler).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("createLegacySessionHandler", () => {
+  const principalA = Object.freeze({ sub: "agent-a", clientId: "client-a" });
+  const principalB = Object.freeze({ sub: "agent-b", clientId: "client-b" });
+  const initialize = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-11-25",
+      capabilities: {},
+      clientInfo: { name: "legacy-test", version: "1.0.0" },
+    },
+  };
+
+  function identReq(method, headers = {}, identity = LOCAL_OPERATOR) {
+    return { method, url: "/mcp", headers, mcpIdentity: identity };
+  }
+
   function setup(mode = "serve") {
     const sessions = new Map();
     const server = { connect: vi.fn(async () => {}) };
@@ -607,6 +761,9 @@ describe("createLegacySessionHandler", () => {
     const transportFactory = vi.fn((options) => {
       transport = {
         sessionId: undefined,
+        close: vi.fn(async () => {
+          transport.onclose?.();
+        }),
         handleRequest: vi.fn(async (_req, res, body) => {
           if (body?.method === "initialize") {
             transport.sessionId = "legacy-1";
@@ -629,32 +786,25 @@ describe("createLegacySessionHandler", () => {
   it("creates a session only for initialize and reuses it for later requests", async () => {
     const state = setup();
     const initialized = mockRes();
-    const initialize = {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-11-25",
-        capabilities: {},
-        clientInfo: { name: "legacy-test", version: "1.0.0" },
-      },
-    };
-    await state.handler(req("POST", "/mcp"), initialized, initialize);
+    await state.handler(identReq("POST"), initialized, initialize);
     expect(initialized.statusCode).toBe(200);
     expect(state.buildServer).toHaveBeenCalledWith({ era: "legacy" });
     expect(state.server.connect).toHaveBeenCalledWith(state.transport);
-    expect(state.sessions.get("legacy-1")).toBe(state.transport);
+    expect(state.sessions.get("legacy-1")).toEqual({
+      transport: state.transport,
+      principalKey: "local-operator",
+    });
 
     const reused = mockRes();
-    await state.handler(req("POST", "/mcp", { "mcp-session-id": "legacy-1" }), reused, {
+    await state.handler(identReq("POST", { "mcp-session-id": "legacy-1" }), reused, {
       jsonrpc: "2.0", id: 2, method: "tools/list",
     });
     const notified = mockRes();
-    await state.handler(req("POST", "/mcp", { "mcp-session-id": "legacy-1" }), notified, {
+    await state.handler(identReq("POST", { "mcp-session-id": "legacy-1" }), notified, {
       jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 2, reason: "test" },
     });
     const streamed = mockRes();
-    await state.handler(req("GET", "/mcp", { "mcp-session-id": "legacy-1" }), streamed);
+    await state.handler(identReq("GET", { "mcp-session-id": "legacy-1" }), streamed);
     expect(state.transportFactory).toHaveBeenCalledOnce();
     expect(state.transport.handleRequest).toHaveBeenCalledTimes(4);
     expect(state.transport.handleRequest).toHaveBeenNthCalledWith(
@@ -668,6 +818,32 @@ describe("createLegacySessionHandler", () => {
       streamed,
       undefined
     );
+  });
+
+  it("refuses cross-principal session reuse and terminates on DELETE", async () => {
+    const state = setup();
+    const initialized = mockRes();
+    await state.handler(identReq("POST", {}, principalA), initialized, initialize);
+    expect(initialized.statusCode).toBe(200);
+    expect(state.sessions.has("legacy-1")).toBe(true);
+
+    const hijack = mockRes();
+    await state.handler(identReq("POST", { "mcp-session-id": "legacy-1" }, principalB), hijack, {
+      jsonrpc: "2.0", id: 2, method: "tools/list",
+    });
+    expect(hijack.statusCode).toBe(403);
+    expect(state.transport.handleRequest).toHaveBeenCalledOnce();
+
+    const closed = mockRes();
+    await state.handler(identReq("DELETE", { "mcp-session-id": "legacy-1" }, principalA), closed);
+    expect(closed.statusCode).toBe(200);
+    expect(state.sessions.has("legacy-1")).toBe(false);
+
+    const expired = mockRes();
+    await state.handler(identReq("POST", { "mcp-session-id": "legacy-1" }, principalA), expired, {
+      jsonrpc: "2.0", id: 3, method: "tools/list",
+    });
+    expect(expired.statusCode).toBe(404);
   });
 
   it("rejects sessionless non-initialize and unknown sessions without opening one", async () => {
@@ -687,17 +863,11 @@ describe("createLegacySessionHandler", () => {
   it("reject mode denies all legacy requests", async () => {
     const state = setup("reject");
     const res = mockRes();
-    await state.handler(req("POST", "/mcp"), res, {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-11-25",
-        capabilities: {},
-        clientInfo: { name: "legacy-test", version: "1.0.0" },
-      },
-    });
+    await state.handler(identReq("POST"), res, initialize);
     expect(res.statusCode).toBe(400);
+    const get = mockRes();
+    await state.handler(identReq("GET", { "mcp-session-id": "legacy-1" }), get);
+    expect(get.statusCode).toBe(405);
     expect(state.transportFactory).not.toHaveBeenCalled();
   });
 });

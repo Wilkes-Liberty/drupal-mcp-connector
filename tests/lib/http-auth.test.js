@@ -256,6 +256,37 @@ describe("resolveInboundAuthConfig", () => {
     expect(resolved.issuer).toBe("https://other.example.com");
     expect(resolved.audience).toBe("https://mcp.example.com/mcp");
     expect(resolved.resource).toBe("https://mcp.example.com/mcp");
+    expect(resolved.allowedOrigins).toEqual([]);
+  });
+
+  it("reads allowedOrigins from config and prefers MCP_ALLOWED_ORIGINS", () => {
+    const fromConfig = resolveInboundAuthConfig({
+      auth: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+        allowedOrigins: ["https://app.example.com"],
+      },
+    }, {});
+    expect(fromConfig.allowedOrigins).toEqual(["https://app.example.com"]);
+
+    const fromEnv = resolveInboundAuthConfig({
+      auth: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+        allowedOrigins: ["https://app.example.com"],
+      },
+    }, { MCP_ALLOWED_ORIGINS: "https://cursor.example,https://grok.example" });
+    expect(fromEnv.allowedOrigins).toEqual(["https://cursor.example", "https://grok.example"]);
+
+    // An explicitly empty env value replaces the configured list with nothing.
+    const cleared = resolveInboundAuthConfig({
+      auth: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+        allowedOrigins: ["https://app.example.com"],
+      },
+    }, { MCP_ALLOWED_ORIGINS: "" });
+    expect(cleared.allowedOrigins).toEqual([]);
   });
 
   it("defaults maxTokenLifetime and algorithms, and prefers env overrides", () => {

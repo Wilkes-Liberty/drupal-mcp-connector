@@ -51,8 +51,11 @@ Regardless of client, a Drupal-side governance module (e.g.
 
 Both transports accept current MCP 2026-07-28 clients and a time-boxed 2025-era
 compatibility path. HTTP clients share one URL but not one state model: current
-requests are stateless; legacy clients keep a session. Operators can set
-`MCP_LEGACY_TRANSPORT=reject` once all registered clients are current.
+requests are stateless; legacy clients keep a session bound to the authenticated
+principal. Operators can set `MCP_LEGACY_TRANSPORT=reject` once all registered
+clients are current. Browser clients that send `Origin` must be listed on
+`auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS`; desktop clients that omit
+`Origin` are unchanged.
 
 ---
 

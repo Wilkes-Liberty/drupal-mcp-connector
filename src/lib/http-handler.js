@@ -16,8 +16,16 @@ import {
   markHttpAuditOriginRefused,
   createHttpAuditWriter,
   defaultHttpAuditSink,
-  resolveOriginCheck,
 } from "./http-audit.js";
+import {
+  MCP_PROTOCOL_VERSIONS,
+  UNSUPPORTED_PROTOCOL_VERSION_CODE,
+  isJsonRpcBatch,
+  isSupportedProtocolVersion,
+  mcpAcceptOk,
+  originAllowed,
+  sessionPrincipalKey,
+} from "./http-transport.js";
 import { LOCAL_OPERATOR, runWithIdentity } from "./principal.js";
 
 /**
@@ -52,6 +60,26 @@ function refuseUnresolvedIdentity(res, resourceMetadataUrl) {
     errorDescription: "Bearer token required",
     resourceMetadata: resourceMetadataUrl,
   });
+}
+
+/**
+ * JSON-RPC error body with no `id` (Streamable HTTP MAY attach one to an
+ * HTTP-level refusal). Used for Origin and protocol-version denials.
+ *
+ * @param {import("http").ServerResponse} res
+ * @param {number} status
+ * @param {{code?: number, message: string, data?: unknown}} error
+ */
+function writeJsonRpcHttpError(res, status, error) {
+  const body = {
+    jsonrpc: "2.0",
+    error: {
+      code: error.code ?? -32000,
+      message: error.message,
+      ...(error.data === undefined ? {} : { data: error.data }),
+    },
+  };
+  res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
 }
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
@@ -123,6 +151,8 @@ async function readJsonBody(req, maxBodyBytes) {
  * @param {Map<string, object>} [deps.sessions]
  * @param {"serve"|"reject"} [deps.mode]
  * @param {(options: object) => object} [deps.transportFactory]
+ * @param {(identity: object|null|undefined) => ?string} [deps.sessionPrincipalKeyFn]
+ *   Injectable principal binder (eval mutants swap this).
  * @returns {(req: import("http").IncomingMessage, res: import("http").ServerResponse, body?: unknown) => Promise<void>}
  */
 export function createLegacySessionHandler({
@@ -130,15 +160,35 @@ export function createLegacySessionHandler({
   sessions = new Map(),
   mode = "serve",
   transportFactory = (options) => new NodeStreamableHTTPServerTransport(options),
+  sessionPrincipalKeyFn = sessionPrincipalKey,
 }) {
   if (mode !== "serve" && mode !== "reject") {
     throw new Error(`Invalid legacy MCP transport mode: "${mode}". Use "serve" or "reject".`);
   }
 
-  async function openSession() {
+  function methodNotAllowed(res) {
+    res.writeHead(405, { Allow: "POST" }).end("Method Not Allowed");
+  }
+
+  async function closeSession(session, sessionId) {
+    sessions.delete(sessionId);
+    const transport = session?.transport;
+    if (!transport) return;
+    try {
+      if (typeof transport.close === "function") await transport.close();
+    } catch {
+      // Termination must still drop the id even if the SDK close throws.
+    }
+  }
+
+  async function openSession(identity) {
+    const principalKey = sessionPrincipalKeyFn(identity);
+    if (!principalKey) {
+      throw new McpHttpClientError(403, "Session cannot be bound to this principal");
+    }
     const transport = transportFactory({
       sessionIdGenerator: randomUUID,
-      onsessioninitialized: (id) => sessions.set(id, transport),
+      onsessioninitialized: (id) => sessions.set(id, { transport, principalKey }),
     });
     transport.onclose = () => {
       if (transport.sessionId) sessions.delete(transport.sessionId);
@@ -150,18 +200,38 @@ export function createLegacySessionHandler({
 
   return async function handleLegacy(req, res, body) {
     if (mode === "reject") {
+      if (req.method === "GET" || req.method === "DELETE") {
+        methodNotAllowed(res);
+        return;
+      }
       res.writeHead(400).end("Legacy MCP transport is disabled");
       return;
     }
 
     const sessionId = req.headers["mcp-session-id"];
+    const principalKey = sessionPrincipalKeyFn(req.mcpIdentity);
+
     if (sessionId) {
-      const transport = sessions.get(sessionId);
-      if (!transport) {
+      const session = sessions.get(sessionId);
+      if (!session) {
         res.writeHead(404).end("Unknown MCP-Session-Id");
         return;
       }
-      await transport.handleRequest(req, res, body);
+      if (!principalKey || session.principalKey !== principalKey) {
+        res.writeHead(403).end("MCP-Session-Id does not belong to this principal");
+        return;
+      }
+      if (req.method === "DELETE") {
+        await closeSession(session, sessionId);
+        if (!res.headersSent) res.writeHead(200).end();
+        return;
+      }
+      await session.transport.handleRequest(req, res, body);
+      return;
+    }
+
+    if (req.method === "GET" || req.method === "DELETE") {
+      methodNotAllowed(res);
       return;
     }
 
@@ -170,7 +240,12 @@ export function createLegacySessionHandler({
       return;
     }
 
-    const transport = await openSession();
+    if (!principalKey) {
+      res.writeHead(403).end("Session cannot be bound to this principal");
+      return;
+    }
+
+    const transport = await openSession(req.mcpIdentity);
     await transport.handleRequest(req, res, body);
   };
 }
@@ -179,9 +254,13 @@ export function createLegacySessionHandler({
  * Build the `(req, res)` handler for the MCP HTTP endpoint.
  *
  * Routes:
- *   - `POST /mcp` — rate- and bearer-gated, bounded/body-parsed once, then
- *     classified into exactly one modern-stateless or legacy-sessionful arm.
- *   - `GET|DELETE /mcp` — rate- and bearer-gated legacy session operations.
+ *   - `POST /mcp` — rate- and bearer-gated, then Origin / protocol-version /
+ *     Accept checked, body bounded and parsed once, JSON-RPC batches refused,
+ *     then classified into exactly one modern-stateless or legacy-sessionful arm.
+ *   - `GET|DELETE /mcp` — rate- and bearer-gated. Sessionless GET/DELETE are
+ *     405 (2026-07-28 has no standalone GET stream). With `Mcp-Session-Id`,
+ *     GET/DELETE are 2025-era session operations bound to the authenticated
+ *     principal.
  *   - `GET /health` — unauthenticated liveness probe (`{status: "ok"}`).
  *     No tool catalog or count (DEV-845).
  *   - `GET /.well-known/oauth-protected-resource[/…]` — RFC 9728 metadata.
@@ -219,11 +298,13 @@ export function createLegacySessionHandler({
  * @param {{write: Function}|null} [deps.auditWriter] Hosted HTTP audit writer
  *   (DEV-858). Default: stderr JSONL (silent under Vitest). `null` disables
  *   the writer (eval mutant). One finish-time row per response.
- * @param {(req: import("http").IncomingMessage) => boolean} [deps.checkOrigin]
- *   Optional Origin predicate. `false` refuses `/mcp` with 403 (`bad_origin`).
- *   DEV-861 owns stricter Host/Origin validation; this is the classify hook.
- * @param {string[]} [deps.allowedOrigins] Convenience allowlist used when
- *   `checkOrigin` is omitted. A present Origin not in the list is refused.
+ * @param {readonly string[]} [deps.allowedOrigins] Normalized Origin allowlist.
+ * @param {(origin: unknown, allowlist: readonly string[]) => boolean} [deps.originAllowedFn]
+ *   Injectable Origin guard (eval mutants swap this).
+ * @param {(version: unknown) => boolean} [deps.protocolVersionSupportedFn]
+ *   Injectable protocol-version guard (eval mutants swap this).
+ * @param {(method: string, accept: unknown) => boolean} [deps.acceptOkFn]
+ *   Injectable Accept-header guard.
  * @returns {(req: import("http").IncomingMessage, res: import("http").ServerResponse) => Promise<void>}
  */
 export function createMcpRequestHandler({
@@ -242,8 +323,10 @@ export function createMcpRequestHandler({
   isLegacyRequestFn = isLegacyRequest,
   onError = defaultOnError,
   auditWriter,
-  checkOrigin = null,
-  allowedOrigins = null,
+  allowedOrigins = [],
+  originAllowedFn = originAllowed,
+  protocolVersionSupportedFn = isSupportedProtocolVersion,
+  acceptOkFn = mcpAcceptOk,
 }) {
   if (!modernHandler || !legacyHandler) {
     throw new Error("modernHandler and legacyHandler must be configured together for dual-era routing");
@@ -252,7 +335,6 @@ export function createMcpRequestHandler({
   const writer = auditWriter === undefined
     ? createHttpAuditWriter({ sink: defaultHttpAuditSink })
     : auditWriter;
-  const originCheck = resolveOriginCheck(checkOrigin, allowedOrigins);
 
   function requestPath(req) {
     return String(req.url || "").split("?")[0];
@@ -325,19 +407,6 @@ export function createMcpRequestHandler({
     }
 
     const isMcp = path === "/mcp" && ["POST", "GET", "DELETE"].includes(req.method);
-    if (isMcp && originCheck) {
-      let originAllowed = false;
-      try {
-        originAllowed = originCheck(req) === true;
-      } catch {
-        originAllowed = false;
-      }
-      if (!originAllowed) {
-        markHttpAuditOriginRefused(req);
-        res.writeHead(403).end("Forbidden");
-        return;
-      }
-    }
     if (isMcp && rateLimiter) {
       // Rate limit BEFORE auth so repeated bad-token attempts are throttled too.
       const verdict = rateLimiter.check(clientKey(req));
@@ -349,7 +418,34 @@ export function createMcpRequestHandler({
 
     if (!await gateAuth(req, res)) return;
 
+    if (path === "/mcp") {
+      if (!originAllowedFn(req.headers.origin, allowedOrigins)) {
+        markHttpAuditOriginRefused(req);
+        writeJsonRpcHttpError(res, 403, { message: "Forbidden origin" });
+        return;
+      }
+      const protocolVersion = req.headers["mcp-protocol-version"];
+      // Only an absent header skips the check: a present, empty value is unsupported.
+      if (protocolVersion !== undefined
+        && !protocolVersionSupportedFn(String(protocolVersion).trim())) {
+        writeJsonRpcHttpError(res, 400, {
+          code: UNSUPPORTED_PROTOCOL_VERSION_CODE,
+          message: "Unsupported protocol version",
+          data: { supported: [...MCP_PROTOCOL_VERSIONS] },
+        });
+        return;
+      }
+      if (!acceptOkFn(req.method, req.headers.accept)) {
+        res.writeHead(406).end("Not Acceptable");
+        return;
+      }
+    }
+
     if (path === "/mcp" && (req.method === "GET" || req.method === "DELETE")) {
+      if (!req.headers["mcp-session-id"]) {
+        res.writeHead(405, { Allow: "POST" }).end("Method Not Allowed");
+        return;
+      }
       try {
         await dispatchWithIdentity(req, () => legacyHandler(req, res));
       } catch (error) {
@@ -366,6 +462,10 @@ export function createMcpRequestHandler({
       let stage = "body-read";
       try {
         const body = await readJsonBody(req, maxBodyBytes);
+        if (isJsonRpcBatch(body)) {
+          writeJsonRpcHttpError(res, 400, { code: -32600, message: "JSON-RPC batch is not supported" });
+          return;
+        }
         stage = "request-conversion";
         const request = await toWebRequestFn(req, body);
         stage = "classification";

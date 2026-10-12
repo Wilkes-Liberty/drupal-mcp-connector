@@ -23,6 +23,8 @@
  *   MCP_RATE_LIMIT    Max /mcp requests per window per client IP (0/unset = off)
  *   MCP_RATE_WINDOW_SEC  Rate-limit window in seconds (default: 60)
  *   MCP_LEGACY_TRANSPORT "serve" (default) | "reject" for 2025-era clients
+ *   MCP_ALLOWED_ORIGINS Comma/space-separated Origin allowlist (DNS-rebinding);
+ *                     a present empty value clears the configured list
  *
  * CLI subcommands (anything else starts the MCP server):
  *   wizard | init     Operator install wizard — see src/lib/wizard.js
@@ -46,6 +48,7 @@ import {
   isLoopbackBind,
 } from "./lib/http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "./lib/http-handler.js";
+import { resolveAllowedOrigins } from "./lib/http-transport.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
 import { createRateLimiter } from "./lib/rate-limit.js";
 import { callTool, invokeReadTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
@@ -404,6 +407,11 @@ if (transport === "stdio") {
     legacyHandler,
     toolCount: allDefinitions.length,
     rateLimiter,
+    allowedOrigins: resolveAllowedOrigins({
+      allowedOrigins: inboundCfg.allowedOrigins,
+      resource: inboundCfg.resource,
+      audience: inboundCfg.audience,
+    }),
   });
 
   const nodeServer = createNodeServer(requestHandler);

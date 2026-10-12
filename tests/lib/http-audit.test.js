@@ -9,7 +9,6 @@ import {
   markHttpAuditOriginRefused,
   markHttpAuditTenant,
   requestHasAuthorization,
-  resolveOriginCheck,
   resolveRequestId,
   sanitizeHttpAuditRow,
 } from "../../src/lib/http-audit.js";
@@ -122,18 +121,6 @@ describe("resolveRequestId / requestHasAuthorization", () => {
   });
 });
 
-describe("resolveOriginCheck", () => {
-  it("uses checkOrigin when provided and an allowlist otherwise", () => {
-    const custom = () => false;
-    expect(resolveOriginCheck(custom, ["https://ok.example"])).toBe(custom);
-    const fromList = resolveOriginCheck(null, ["https://ok.example"]);
-    expect(fromList(req("POST", "/mcp"))).toBe(true);
-    expect(fromList(req("POST", "/mcp", { origin: "https://ok.example" }))).toBe(true);
-    expect(fromList(req("POST", "/mcp", { origin: "https://evil.example" }))).toBe(false);
-    expect(resolveOriginCheck(null, null)).toBeNull();
-  });
-});
-
 describe("createHttpAuditWriter", () => {
   it("never throws when the sink throws", () => {
     const writer = createHttpAuditWriter({
@@ -202,22 +189,18 @@ describe("buildHttpAuditRow", () => {
     });
   });
 
-  it("does not label auxiliary routes bad_origin from a failing Origin predicate", () => {
-    const deny = () => false;
+  it("does not label auxiliary routes bad_origin without a handler mark", () => {
     expect(buildHttpAuditRow(
       req("GET", "/health", { origin: "https://evil.example" }),
       { statusCode: 200 },
-      { checkOrigin: deny },
     ).code).toBe("ok");
     expect(buildHttpAuditRow(
       req("GET", "/usage", { origin: "https://evil.example" }),
       { statusCode: 429 },
-      { checkOrigin: deny },
     ).code).toBe("rate_limited");
     expect(buildHttpAuditRow(
       req("GET", "/assessor", { origin: "https://evil.example" }),
       { statusCode: 403 },
-      { checkOrigin: deny },
     ).code).toBe("forbidden");
   });
 
@@ -264,7 +247,9 @@ describe("createMcpRequestHandler audit finish hook", () => {
     expect(limited.writer.rows[0].code).toBe("rate_limited");
 
     const origin = handler({
-      checkOrigin: () => false,
+      checkAuth: () => true,
+      allowLocalOperator: true,
+      allowedOrigins: ["https://app.example"],
     });
     const originRes = mockRes();
     await origin.handle(req("POST", "/mcp", { origin: "https://evil.example" }), originRes);
@@ -274,7 +259,7 @@ describe("createMcpRequestHandler audit finish hook", () => {
     const allowed = handler({
       checkAuth: () => true,
       allowLocalOperator: true,
-      checkOrigin: () => false,
+      allowedOrigins: ["https://app.example"],
       modernHandler: vi.fn(),
       legacyHandler: createLegacySessionHandler({
         buildServer: async () => ({ connect: async () => {} }),
@@ -285,32 +270,24 @@ describe("createMcpRequestHandler audit finish hook", () => {
     await allowed.handle(req("GET", "/health", { origin: "https://evil.example" }), okRes);
     expect(okRes.statusCode).toBe(200);
     expect(allowed.writer.rows[0].code).toBe("ok");
-
-    const sloppy = handler({
-      checkOrigin: () => undefined,
-    });
-    const sloppyRes = mockRes();
-    await sloppy.handle(req("POST", "/mcp"), sloppyRes);
-    expect(sloppyRes.statusCode).toBe(403);
-    expect(sloppy.writer.rows[0].code).toBe("bad_origin");
   });
 
-  it("labels bad_origin only from the handler's own refusal, never by re-running the predicate", async () => {
+  it("labels bad_origin only from the handler's own refusal", async () => {
     // A disallowed Origin on a route that never enforces Origin is not a refusal.
-    const health = handler({ checkOrigin: () => false });
+    const health = handler({ allowedOrigins: ["https://app.example"] });
     const healthRes = mockRes();
     await health.handle(req("GET", "/health", { origin: "https://evil.example" }), healthRes);
     expect(healthRes.statusCode).toBe(200);
     expect(health.writer.rows[0].code).toBe("ok");
 
-    // A stateful predicate that admitted /mcp must not flip the row afterwards.
-    let calls = 0;
-    const flaky = handler({ checkOrigin: () => calls++ === 0 });
-    const flakyRes = mockRes();
-    await flaky.handle(req("POST", "/mcp", { origin: "https://app.example" }), flakyRes);
-    expect(flakyRes.statusCode).toBe(401);
-    expect(flaky.writer.rows[0].code).toBe("unauthenticated");
-    expect(flaky.writer.rows[0].status).toBe(401);
+    // Auth runs before the Origin guard (DEV-840): an unauthenticated request
+    // with a disallowed Origin is recorded as the 401 it received.
+    const unauth = handler({ allowedOrigins: ["https://app.example"] });
+    const unauthRes = mockRes();
+    await unauth.handle(req("POST", "/mcp", { origin: "https://evil.example" }), unauthRes);
+    expect(unauthRes.statusCode).toBe(401);
+    expect(unauth.writer.rows[0].code).toBe("unauthenticated");
+    expect(unauth.writer.rows[0].status).toBe(401);
   });
 
   it("records a client abort before headers as aborted, not ok", () => {

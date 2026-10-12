@@ -2,7 +2,8 @@
  * T8 (DEV-858 / R-A1): every hosted HTTP request leaves exactly one audit row,
  * refused ones included.
  *
- * Covers a missing-token 401, a 429, a bad-Origin 403, and a legitimate
+ * Covers a missing-token 401, a 429, a bad-Origin 403 (disallowed by the
+ * DEV-840 allowlist), and a legitimate
  * allow, each with the closed denial code. A sentinel bearer token is fed
  * and must appear in no row.
  *
@@ -29,17 +30,12 @@ function t8ClientKey(req) {
   return `t8-${Math.random()}`;
 }
 
-function t8CheckOrigin(req) {
-  return req.headers.origin !== EVIL_ORIGIN;
-}
-
 defineCase({
   id: "T8",
   title: "hosted HTTP requests each leave one audit row, refusals included",
   harness: {
     rateLimit: 1,
     clientKey: t8ClientKey,
-    checkOrigin: t8CheckOrigin,
   },
   async run(h) {
     const missing = await h.send(modernPost("tools/list"), { requestId: "t8-missing-token" });
@@ -55,13 +51,15 @@ defineCase({
     });
     expectEqual(h, "rate-limited status", limited.status, 429);
 
+    const token = await h.tokenFor("A");
+    // DEV-840 checks Origin after auth, so the probe carries a valid token.
     const origin = await h.send(modernPost("tools/list"), {
+      token,
       requestId: "t8-bad-origin",
       headers: { origin: EVIL_ORIGIN },
     });
     expectEqual(h, "bad-Origin status", origin.status, 403);
 
-    const token = await h.tokenFor("A");
     const allowed = await h.send(modernPost("server/discover"), {
       token,
       requestId: "t8-ok",

@@ -21,7 +21,7 @@ import { createServer } from "node:http";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { installFakeClock } from "./clock.js";
-import { httpAuth, httpAudit, httpHandler, mcpServer, principal, rateLimit } from "./connector.js";
+import { httpAuth, httpAudit, httpHandler, httpTransport, mcpServer, principal, rateLimit } from "./connector.js";
 import { createCounters } from "./counters.js";
 import { createFakeDrupal } from "./fake-drupal.js";
 import { createStubIssuer } from "./stub-issuer.js";
@@ -122,6 +122,12 @@ const MUTANTS = {
   // T8 (DEV-858): disable the hosted HTTP audit writer. The green run
   // asserts one row per request; with the writer off those assertions fail.
   T8: () => ({ auditWriter: null }),
+  // T9: treat every MCP-Protocol-Version as supported at the HTTP layer.
+  T9: () => ({ protocolVersionSupportedFn: () => true }),
+  // T10: bind every session to the same key so another principal can ride it.
+  T10: () => ({ sessionPrincipalKeyFn: () => "eval-shared" }),
+  // T11: skip Origin validation so a disallowed browser origin is served.
+  T11: () => ({ originAllowedFn: () => true }),
 };
 
 /**
@@ -153,7 +159,6 @@ function assertNoAmbientCredentials() {
  * @param {string|null} [options.mutant] Case id of the dependency-swap mutant, or null for the real build.
  * @param {object|null} [options.grants] Grant table; `null` is T4b (no table), undefined is the fixture default.
  * @param {number} [options.rateLimit] Per-key /mcp limit (default: fixture high water).
- * @param {(req: object) => boolean} [options.checkOrigin] Optional Origin predicate.
  * @param {(req: object) => string} [options.clientKey] Optional rate-limit key.
  * @returns {Promise<object>} harness handle
  */
@@ -161,7 +166,6 @@ export async function buildHarness({
   mutant = null,
   grants: grantsOption,
   rateLimit: rateLimitOpt,
-  checkOrigin = null,
   clientKey,
 } = {}) {
   assertNoAmbientCredentials();
@@ -244,18 +248,28 @@ export async function buildHarness({
   const handler = httpHandler.createMcpRequestHandler({
     ...deps,
     auditWriter: deps.auditWriter !== undefined ? deps.auditWriter : evalWriter,
-    checkOrigin,
     protectedResource: inbound.protectedResource,
     resourceMetadataUrl: inbound.resourceMetadataUrl,
     toolCount: TOOL_DEFINITIONS.length,
     modernHandler: counters.wrapHandler(toNodeHandler(modern)),
-    legacyHandler: counters.wrapHandler(httpHandler.createLegacySessionHandler({ buildServer, mode: "serve" })),
+    legacyHandler: counters.wrapHandler(httpHandler.createLegacySessionHandler({
+      buildServer,
+      mode: "serve",
+      sessionPrincipalKeyFn: deps.sessionPrincipalKeyFn ?? httpTransport.sessionPrincipalKey,
+    })),
     rateLimiter: rateLimit.createRateLimiter({
       limit: rateLimitOpt ?? FIXTURE_RATE_LIMIT,
       windowMs: 60_000,
       now: clock.now,
     }),
     ...(clientKey ? { clientKey } : {}),
+    allowedOrigins: httpTransport.resolveAllowedOrigins({
+      allowedOrigins: inboundCfg.allowedOrigins,
+      resource: inboundCfg.resource,
+      audience: inboundCfg.audience,
+    }),
+    originAllowedFn: deps.originAllowedFn ?? httpTransport.originAllowed,
+    protocolVersionSupportedFn: deps.protocolVersionSupportedFn ?? httpTransport.isSupportedProtocolVersion,
   });
 
   const server = createServer((req, res) => {
