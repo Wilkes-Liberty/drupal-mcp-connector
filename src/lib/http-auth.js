@@ -892,7 +892,9 @@ export function hasCompleteNetworkResourceServer(resourceServer) {
  * Network-facing product paths require a resource server with live
  * introspection (DEV-844). MCP_AUTH_TOKEN is accepted only on loopback.
  * MCP_ALLOW_UNAUTHENTICATED is loopback-only; a non-loopback bind with that
- * flag is fatal (DEV-845).
+ * flag is fatal (DEV-845). A configured issuer and audience without
+ * introspection is fatal on every bind, including loopback — incomplete
+ * OAuth must not fall through to unauthenticated or shared-bearer.
  *
  * @param {object} options
  * @returns {{mode: "resource_server"|"shared_bearer"|"unauthenticated"|"fatal", reason?: string}}
@@ -909,6 +911,12 @@ export function resolveInboundAuthMode({
     ? hasCompleteNetworkResourceServer(resourceServer)
     : hasRs;
   if (ready) return { mode: "resource_server" };
+  if (hasRs) {
+    return {
+      mode: "fatal",
+      reason: NETWORK_INTROSPECTION_REQUIRED_REASON,
+    };
+  }
   if (allowUnauth && !isLoopback) {
     return { mode: "fatal", reason: NON_LOOPBACK_UNAUTHENTICATED_REASON };
   }

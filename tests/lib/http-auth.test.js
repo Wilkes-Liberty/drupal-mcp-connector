@@ -207,6 +207,23 @@ describe("resolveInboundAuthMode", () => {
     expect(decision.reason).toMatch(/introspection/i);
   });
 
+  it("is fatal on a loopback bind when issuer and audience are set but introspection is not", () => {
+    const incomplete = {
+      issuer: "https://idp.example.com",
+      audience: "https://mcp.example.com/mcp",
+    };
+    for (const bindHost of ["127.0.0.1", "localhost", "::1"]) {
+      const decision = resolveInboundAuthMode({
+        bindHost,
+        sharedToken: "legacy-secret",
+        allowUnauth: true,
+        resourceServer: incomplete,
+      });
+      expect(decision.mode).toBe("fatal");
+      expect(decision.reason).toMatch(/introspection/i);
+    }
+  });
+
   it("is fatal for allow-unauthenticated on a non-loopback bind (DEV-845)", () => {
     const decision = resolveInboundAuthMode({
       bindHost: "0.0.0.0",
