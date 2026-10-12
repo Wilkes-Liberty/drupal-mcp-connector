@@ -547,6 +547,36 @@ describe("reusable library revision identity (#420)", () => {
     expect(out.fields.drupal_internal__revision_id).toBe(21);
   });
 
+  it("accepts a later revision of an unsubmitted pin on an attribute-only library draft (#442)", async () => {
+    versionedLibrary({
+      afterWorking: library(21, false, [{ id: publishedPins[0].id, revisionId: 11 }]),
+    });
+    const out = await handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { revision_log: "audit" },
+    });
+    expect(out._revisions).toEqual({ live: 20, working: 21 });
+    expect(out.fields.drupal_internal__revision_id).toBe(21);
+  });
+
+  it("rejects an older revision of an unsubmitted pin on an attribute-only library draft (#442)", async () => {
+    versionedLibrary({
+      afterWorking: library(21, false, [{ id: publishedPins[0].id, revisionId: 9 }]),
+    });
+    await expect(handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { revision_log: "audit" },
+    })).rejects.toThrow(/pins that were not submitted/);
+  });
+
+  it("rejects a different paragraph on an attribute-only library draft (#442)", async () => {
+    versionedLibrary({ afterWorking: library(21, false, draftPins) });
+    await expect(handlers.drupal_entity_update({
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id,
+      attributes: { revision_log: "audit" },
+    })).rejects.toThrow(/pins that were not submitted/);
+  });
+
   it("rejects a draft that pins an older revision of the submitted paragraph", async () => {
     const paragraphId = draftPins[0].id;
     let written = false;

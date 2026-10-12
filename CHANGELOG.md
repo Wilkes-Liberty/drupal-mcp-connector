@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Attribute-only library drafts (#442).** A governed draft of a published
+  `paragraphs_library_item` or `block_content` with no `relationships`
+  reported `WRITE_RESULT_UNCERTAIN` when Entity Reference Revisions saved a
+  newer revision of a paragraph the item already pinned. The forward revision
+  now counts as preserved when it pins the same paragraphs, in the same order
+  per field, at the pre-write revision or newer. An older revision, a
+  different paragraph, a different order, or a missing pin still fails, and
+  the published revision and its pins are still compared exactly.
 - Doctor loads local credentials through the same secret map as server startup (#439). An explicit config uses the map beside that file; exported credentials take precedence, help does not access Keychain, and a missing secret is reported without attempting OAuth acquisition.
 - **Empty translation coverage reports (#436).**
   `drupal_report_translation_coverage` on a bundle with no readable nodes
