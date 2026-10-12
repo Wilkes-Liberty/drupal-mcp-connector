@@ -33,8 +33,8 @@ const isVerdict = (error) => error?.name === "AssertionError";
 
 async function attempt(id, mutant, needsHarness, run, harness = {}) {
   const h = needsHarness
-    ? await buildHarness({ mutant, ...harness })
-    : { mutant, assertions: 0, configDigest: "none", close: async () => {} };
+    ? await buildHarness({ ...harness, mutant })
+    : { mutant, assertions: 0, configDigest: "none", auditRows: [], close: async () => {} };
   try {
     await run(h);
     return { passed: true, h };

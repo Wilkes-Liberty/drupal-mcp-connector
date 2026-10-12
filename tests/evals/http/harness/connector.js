@@ -16,6 +16,7 @@ export const SRC_DIR = process.env.EVAL_HTTP_SRC ? resolve(process.env.EVAL_HTTP
 const load = (relative) => import(pathToFileURL(join(SRC_DIR, relative)).href);
 
 export const httpAuth = await load("lib/http-auth.js");
+export const httpAudit = await load("lib/http-audit.js");
 export const httpHandler = await load("lib/http-handler.js");
 export const mcpServer = await load("lib/mcp-server.js");
 export const principal = await load("lib/principal.js");

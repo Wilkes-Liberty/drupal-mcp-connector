@@ -11,6 +11,12 @@ import { randomUUID } from "node:crypto";
 import { isInitializeRequest, isJsonContentType, isLegacyRequest } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport, toWebRequest } from "@modelcontextprotocol/node";
 import { writeUnauthorized } from "./http-auth.js";
+import {
+  attachHttpAudit,
+  createHttpAuditWriter,
+  defaultHttpAuditSink,
+  resolveOriginCheck,
+} from "./http-audit.js";
 import { LOCAL_OPERATOR, runWithIdentity } from "./principal.js";
 
 /**
@@ -209,6 +215,14 @@ export function createLegacySessionHandler({
  * @param {typeof toWebRequest} [deps.toWebRequestFn] Injectable Node-to-Web adapter.
  * @param {typeof isLegacyRequest} [deps.isLegacyRequestFn] Injectable SDK era classifier.
  * @param {(event: {stage: string}) => void} [deps.onError] Sanitized diagnostics sink.
+ * @param {{write: Function}|null} [deps.auditWriter] Hosted HTTP audit writer
+ *   (DEV-858). Default: stderr JSONL (silent under Vitest). `null` disables
+ *   the writer (eval mutant). One finish-time row per response.
+ * @param {(req: import("http").IncomingMessage) => boolean} [deps.checkOrigin]
+ *   Optional Origin predicate. `false` refuses `/mcp` with 403 (`bad_origin`).
+ *   DEV-861 owns stricter Host/Origin validation; this is the classify hook.
+ * @param {string[]} [deps.allowedOrigins] Convenience allowlist used when
+ *   `checkOrigin` is omitted. A present Origin not in the list is refused.
  * @returns {(req: import("http").IncomingMessage, res: import("http").ServerResponse) => Promise<void>}
  */
 export function createMcpRequestHandler({
@@ -226,10 +240,18 @@ export function createMcpRequestHandler({
   toWebRequestFn = toWebRequest,
   isLegacyRequestFn = isLegacyRequest,
   onError = defaultOnError,
+  auditWriter,
+  checkOrigin = null,
+  allowedOrigins = null,
 }) {
   if (!modernHandler || !legacyHandler) {
     throw new Error("modernHandler and legacyHandler must be configured together for dual-era routing");
   }
+
+  const writer = auditWriter === undefined
+    ? createHttpAuditWriter({ sink: defaultHttpAuditSink })
+    : auditWriter;
+  const originCheck = resolveOriginCheck(checkOrigin, allowedOrigins);
 
   function requestPath(req) {
     return String(req.url || "").split("?")[0];
@@ -283,6 +305,7 @@ export function createMcpRequestHandler({
   }
 
   return async function handle(req, res) {
+    if (writer) attachHttpAudit(req, res, writer, { checkOrigin: originCheck });
     const path = requestPath(req);
 
     if (isUnauthenticatedRoute(req.method, path)) {
@@ -301,6 +324,18 @@ export function createMcpRequestHandler({
     }
 
     const isMcp = path === "/mcp" && ["POST", "GET", "DELETE"].includes(req.method);
+    if (isMcp && originCheck) {
+      let originAllowed = false;
+      try {
+        originAllowed = originCheck(req) === true;
+      } catch {
+        originAllowed = false;
+      }
+      if (!originAllowed) {
+        res.writeHead(403).end("Forbidden");
+        return;
+      }
+    }
     if (isMcp && rateLimiter) {
       // Rate limit BEFORE auth so repeated bad-token attempts are throttled too.
       const verdict = rateLimiter.check(clientKey(req));

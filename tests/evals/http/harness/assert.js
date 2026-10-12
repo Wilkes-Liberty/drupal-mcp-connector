@@ -98,3 +98,33 @@ export function expectStartupFatal(h, label, decision) {
   check(h, () => expect(decision.mode, `${label}: mode`).toBe("fatal"));
   check(h, () => expect(decision.reason, `${label}: named reason`).toEqual(expect.any(String)));
 }
+
+/**
+ * Exactly one audit row for `requestId`, with the closed denial code and status.
+ * @param {object} h
+ * @param {string} label
+ * @param {string} requestId
+ * @param {{code: string, status: number}} expected
+ */
+export function expectAuditRow(h, label, requestId, { code, status }) {
+  const matches = (h.auditRows ?? []).filter((row) => row.requestId === requestId);
+  check(h, () => expect(matches, `${label}: exactly one row`).toHaveLength(1));
+  const row = matches[0] ?? {};
+  check(h, () => expect(row.code, `${label}: code`).toBe(code));
+  check(h, () => expect(row.status, `${label}: status`).toBe(status));
+  check(h, () => expect(row.route, `${label}: route`).toBe("/mcp"));
+  check(h, () => expect(typeof row.timestamp, `${label}: timestamp`).toBe("string"));
+  check(h, () => expect(typeof row.method, `${label}: method`).toBe("string"));
+  check(h, () => expect(row.requestId, `${label}: request id`).toBe(requestId));
+}
+
+/**
+ * No audit row contains the sentinel secret (token, cookie, or body).
+ * @param {object} h
+ * @param {string} label
+ * @param {string} sentinel
+ */
+export function expectNoSecretInAudit(h, label, sentinel) {
+  const haystack = JSON.stringify(h.auditRows ?? []);
+  check(h, () => expect(haystack.includes(sentinel), `${label}: sentinel absent from every row`).toBe(false));
+}

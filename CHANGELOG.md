@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **Hosted HTTP path writes one audit row per request, refusals included (DEV-858).**
+  Streamable-HTTP `/mcp` and the relay northbound edge emit a closed-field
+  row (`timestamp`, `route`, `method`, `status`, denial `code`, `requestId`,
+  and principal/tenant only when known) when the response finishes. Missing
+  token, invalid token, rate-limit, bad Origin, and allow each get a code
+  from `unauthenticated` / `invalid_token` / `rate_limited` / `bad_origin` /
+  `forbidden` / `ok`. Bearer tokens, `Authorization`, cookies, and raw
+  bodies are never copied in. A writer/sink error is swallowed so a refused
+  request cannot become an allowed one. Optional `checkOrigin` /
+  `allowedOrigins` is the classify hook for Origin refusals; stricter
+  Host/Origin validation remains DEV-861.
 - **Hosted JWT principals without a grant entry or `sites` claim get no sites (DEV-848).**
   When `auth.grants` is omitted, a bearer token that also lacks a `sites` /
   `mcp_sites` claim is entitled to no configured site. Tool calls are
