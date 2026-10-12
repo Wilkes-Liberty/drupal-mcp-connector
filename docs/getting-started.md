@@ -183,6 +183,14 @@ only — see **[mcp-clients.md](mcp-clients.md)**. After a green doctor, follow
 the README **Two-minute happy path** (`drupal_mcp_whoami` → `drupal_list_sites`
 → unpublished `drupal_list_nodes` / `dryRun` `drupal_create_node`).
 
+Doctor loads credentials through the same local secret loader as server startup.
+By default it reads `config/secrets.map`; with `--config /path/to/site.json`
+it reads `/path/to/secrets.map`. Already-exported values take precedence.
+Run it in the same OS user/login context as the MCP client: a Keychain item
+available in a desktop session may be inaccessible over SSH. `--help` does
+not access Keychain. Restart the MCP connection after changing its configuration
+or stored credentials, since an existing process can retain earlier values.
+
 Most desktop and CLI MCP clients launch the connector as a stdio subprocess. For **copy-paste config per client** — Claude Code/Desktop, Grok Build, OpenAI Codex, Cursor — see **[mcp-clients.md](mcp-clients.md)**. The generic shape most stdio clients accept:
 
 ```json

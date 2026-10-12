@@ -7,6 +7,7 @@
 
 import fetch from "node-fetch";
 import { readFileSync } from "node:fs";
+import { loadLocalSecrets } from "./load-secrets.js";
 import {
   resolveApiToken,
   resolveOauth,
@@ -184,11 +185,11 @@ export function resolveDoctorSite(args, env = process.env) {
     const name = args.site ? String(args.site) : cfg.defaultSite;
     const raw = new Map(Object.entries(cfg.sites || {})).get(name);
     if (!raw) return { _name: name || "default", baseUrl: "" };
-    return resolveOauth(resolveApiToken({ ...raw, _name: name }));
+    return resolveOauth(resolveApiToken({ ...raw, _name: name }, env), env);
   }
   if (env.DRUPAL_BASE_URL) return siteFromFlags({ ...args, host: env.DRUPAL_BASE_URL }, env);
   try {
-    return getSiteConfig(args.site ? String(args.site) : undefined);
+    return getSiteConfig(args.site ? String(args.site) : undefined, env);
   } catch {
     return { _name: args.site ? String(args.site) : "default", baseUrl: env.DRUPAL_BASE_URL || "" };
   }
@@ -220,7 +221,7 @@ function siteFromFlags(args, env) {
     site.apiTokenEnv = tokenEnv;
     site.apiToken = env[tokenEnv] || env.DRUPAL_API_TOKEN || "";
   }
-  return resolveOauth(resolveApiToken(site));
+  return resolveOauth(resolveApiToken(site, env), env);
 }
 
 /**
@@ -231,7 +232,7 @@ function hasCredential(site) {
   return Boolean(
     site.apiToken
     || (site.username && site.password)
-    || (site.oauth?.clientId && (site.oauth.clientSecret || site.oauth.clientSecretEnv)),
+    || (site.oauth?.clientId && site.oauth.clientSecret),
   );
 }
 
@@ -631,9 +632,14 @@ export async function runDoctorCli(argv, io = {}) {
     stdout.write(DOCTOR_USAGE);
     return 0;
   }
+  const env = io.env || process.env;
+  loadLocalSecrets({
+    env,
+    ...(args.config ? { configPath: String(args.config) } : {}),
+  });
   const report = await runDoctor({
     args,
-    env: io.env || process.env,
+    env,
     fetch: io.fetch,
   });
   if (args.json) {

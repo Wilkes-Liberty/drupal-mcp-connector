@@ -52,11 +52,12 @@ export function clientHeaders() {
  * If a site declares apiTokenEnv and has no explicit apiToken, source the token
  * from that environment variable (keeps secrets out of the config file).
  * @param {object} site Raw site config.
+ * @param {NodeJS.ProcessEnv} [env] Credential environment.
  * @returns {object} The site, possibly with apiToken populated from the env var.
  */
-export function resolveApiToken(site) {
+export function resolveApiToken(site, env = process.env) {
   if (site.apiToken || !site.apiTokenEnv) return site;
-  const fromEnv = new Map(Object.entries(process.env)).get(site.apiTokenEnv) || "";
+  const fromEnv = new Map(Object.entries(env)).get(site.apiTokenEnv) || "";
   return { ...site, apiToken: fromEnv };
 }
 
@@ -65,13 +66,14 @@ export function resolveApiToken(site) {
  * env var when no explicit clientSecret is set, and apply defaults for tokenUrl
  * and grant. Keeps the secret out of the config file.
  * @param {object} site Raw site config.
+ * @param {NodeJS.ProcessEnv} [env] Credential environment.
  * @returns {object} The site with a normalized oauth block (unchanged if no oauth).
  */
-export function resolveOauth(site) {
+export function resolveOauth(site, env = process.env) {
   if (!site.oauth) return site;
   const oauth = { ...site.oauth };
   if (!oauth.clientSecret && oauth.clientSecretEnv) {
-    oauth.clientSecret = new Map(Object.entries(process.env)).get(oauth.clientSecretEnv) || "";
+    oauth.clientSecret = new Map(Object.entries(env)).get(oauth.clientSecretEnv) || "";
   }
   oauth.tokenUrl = oauth.tokenUrl || "/oauth/token";
   oauth.grant = oauth.grant || "client_credentials";
@@ -212,10 +214,11 @@ function validateConfig(cfg) {
 /**
  * Resolve a named site config, falling back to the default.
  * @param {string|undefined} siteName
+ * @param {NodeJS.ProcessEnv} [env] Credential environment.
  * @returns {object} Site config with _name injected.
  * @throws if the site name is unknown.
  */
-export function getSiteConfig(siteName) {
+export function getSiteConfig(siteName, env = process.env) {
   const cfg  = loadConfig();
   const name = siteName || cfg.defaultSite;
   const site = new Map(Object.entries(cfg.sites)).get(name);
@@ -225,7 +228,7 @@ export function getSiteConfig(siteName) {
     throw new Error(`Unknown site: "${name}". Configured sites: ${available}`);
   }
 
-  const resolved = resolveOauth(resolveApiToken({ ...site, _name: name }));
+  const resolved = resolveOauth(resolveApiToken({ ...site, _name: name }, env), env);
   assertSecureAuth(resolved);
   return resolved;
 }

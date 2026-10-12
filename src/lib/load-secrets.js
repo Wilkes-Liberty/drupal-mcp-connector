@@ -17,7 +17,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 /** Shipped env-var → Keychain-item pairs. Matches config/config.example.json. */
 export const DEFAULT_SECRET_PAIRS = Object.freeze([
@@ -100,6 +100,7 @@ export function lookupKeychainItem(item) {
  *
  * @param {object} [options]
  * @param {string} [options.cwd]
+ * @param {string} [options.configPath] Config file; its directory supplies secrets.map.
  * @param {NodeJS.ProcessEnv} [options.env] Mutated when a lookup succeeds.
  * @param {typeof readFileSync} [options.readFile]
  * @param {(item: string) => string} [options.lookup]
@@ -107,14 +108,16 @@ export function lookupKeychainItem(item) {
  */
 export function loadLocalSecrets({
   cwd = process.cwd(),
+  configPath = "config/config.json",
   env = process.env,
   readFile = readFileSync,
   lookup = lookupKeychainItem,
 } = {}) {
+  const resolvedConfigPath = resolve(cwd, configPath);
   let source = "map";
   let pairs;
   try {
-    pairs = parseSecretMap(readFile(join(cwd, "config", "secrets.map"), "utf8"));
+    pairs = parseSecretMap(readFile(join(dirname(resolvedConfigPath), "secrets.map"), "utf8"));
   } catch {
     pairs = DEFAULT_SECRET_PAIRS;
     source = "default";
@@ -137,7 +140,7 @@ export function loadLocalSecrets({
 
   let named = [];
   try {
-    named = namedSecretEnvVars(JSON.parse(readFile(join(cwd, "config", "config.json"), "utf8")));
+    named = namedSecretEnvVars(JSON.parse(readFile(resolvedConfigPath, "utf8")));
   } catch {
     named = [];
   }
