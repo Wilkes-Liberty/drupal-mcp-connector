@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-12
+
 ### Removed
 - **Loopback `shared_bearer` inbound auth, `MCP_AUTH_TOKEN` (#231, breaking).**
   The HTTPS transport authenticates only as an OAuth resource server
@@ -36,8 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   URL, and introspection client credentials (`MCP_INTROSPECTION_URL`,
   `MCP_INTROSPECTION_CLIENT_ID`, `MCP_INTROSPECTION_CLIENT_SECRET`, or
   `auth.introspectionClientIdEnv` / `auth.introspectionClientSecretEnv`).
-  Stdio local-operator and loopback shared-bearer / unauthenticated modes
-  are unchanged. DEV-845 (null identity is 401 before dispatch on network
+  Stdio local-operator and loopback unauthenticated modes are
+  unchanged. DEV-845 (null identity is 401 before dispatch on network
   surfaces) is unchanged.
 - **Resource-server and relay 401s carry RFC 9728 `resource_metadata` (DEV-877).**
   On a configured OAuth resource server (`auth.issuer` + `auth.audience`),
