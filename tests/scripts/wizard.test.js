@@ -198,6 +198,35 @@ describe("drupal-mcp-wizard CLI", () => {
     expect(result.stderr).toMatch(/MCP_AUTH_TOKEN/);
   });
 
+  it("--transport https rejects every accepted spelling of --auth token", () => {
+    for (const spelling of ["TOKEN", "Token"]) {
+      const result = runWizard([
+        "--yes",
+        "--json",
+        "--transport", "https",
+        "--auth", spelling,
+        "--host", "https://mcp.example.ts.net:3443/mcp",
+        "--drupal-url", "https://drupal.example.com",
+        "--output", dir,
+      ]);
+      expect(result.status, spelling).toBe(1);
+      expect(result.stderr, spelling).toMatch(/requires --auth oauth/i);
+    }
+  });
+
+  it("--transport https rejects MCP_WIZARD_AUTH=token from the environment", () => {
+    const result = runWizard([
+      "--yes",
+      "--json",
+      "--transport", "https",
+      "--host", "https://mcp.example.ts.net:3443/mcp",
+      "--drupal-url", "https://drupal.example.com",
+      "--output", dir,
+    ], { env: { MCP_WIZARD_AUTH: "token" } });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/requires --auth oauth/i);
+  });
+
   it("--transport https defaults to oauth and emits no Authorization header placeholder", () => {
     const result = runWizard([
       "--yes",

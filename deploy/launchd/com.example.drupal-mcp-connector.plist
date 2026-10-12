@@ -5,9 +5,9 @@
   Install to ~/Library/LaunchAgents/ (or /Library/LaunchDaemons/ for system-wide),
   then: launchctl load -w <this file>
 
-  ProgramArguments points at a launcher script so secrets (MCP_AUTH_TOKEN, OAuth
-  client secret) can be sourced from the Keychain at start — keep them OUT of this
-  plist. See examples/launch-with-secret.sh for the pattern; the launcher should
+  ProgramArguments points at a launcher script so secrets (the OAuth client
+  secret) can be sourced from the Keychain at start — keep them OUT of this
+  plist. Do not set MCP_AUTH_TOKEN; it was removed in 4.0.0 and is fatal. See examples/launch-with-secret.sh for the pattern; the launcher should
   `export MCP_TRANSPORT=https` etc. and `exec node src/index.js`.
 -->
 <plist version="1.0">

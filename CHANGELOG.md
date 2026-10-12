@@ -47,10 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointing at the served `/.well-known/oauth-protected-resource` URL, plus
   RFC 6750 `error` / `error_description` where applicable. One shared
   writer (`writeUnauthorized` / `unauthorizedChallenge`) is the only 401
-  path so a future site cannot omit the pointer. Loopback shared-bearer
-  (`MCP_AUTH_TOKEN`) has no RFC 9728 document, so its refusal is now a
-  `Bearer` challenge with `error="invalid_token"` (previously a bare
-  `Bearer`) and no `resource_metadata`.
+  path so a future site cannot omit the pointer. Unauthenticated loopback
+  has no RFC 9728 document, so a refusal there is now a `Bearer` challenge
+  with `error="invalid_token"` (previously a bare `Bearer`) and no
+  `resource_metadata`.
 - **Network listeners refuse a null principal before dispatch (DEV-845).**
   HTTP `/mcp` (modern and legacy), relay edge routes, and any non-stdio
   listener return 401 when no identity was resolved. No tool handler,

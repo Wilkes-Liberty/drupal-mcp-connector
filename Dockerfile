@@ -1,7 +1,7 @@
 # Drupal MCP Connector — container image for the HTTPS (Streamable-HTTP) transport.
 #
 # Build:  docker build -t drupal-mcp-connector .
-# Run:    see docs/deployment.md (mount config + TLS certs, set MCP_AUTH_TOKEN).
+# Run:    see docs/deployment.md (mount config + TLS certs; configure auth.issuer + auth.audience).
 #
 # The image ships only production deps + src/ + the example config. Provide the
 # real config by mounting /app/config/config.json (or via env vars), and TLS via

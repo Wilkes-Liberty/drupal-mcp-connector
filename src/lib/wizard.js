@@ -243,7 +243,8 @@ export async function resolveWizardAnswers(args, options = {}) {
   if (transport === "https") {
     // The loopback shared bearer (MCP_AUTH_TOKEN) was removed in 4.0.0 (#231):
     // the HTTPS transport authenticates only as an OAuth resource server.
-    if (auth === "token" && args.auth && String(args.auth) === "token") {
+    const explicitAuth = (args.auth !== undefined && args.auth !== true) || Boolean(process.env.MCP_WIZARD_AUTH);
+    if (auth === "token" && explicitAuth) {
       const flag = preset?.id === "public-https" ? "--preset public-https" : "--transport https";
       throw new Error(
         `${flag} requires --auth oauth (the MCP_AUTH_TOKEN shared bearer was removed in 4.0.0; inbound OAuth is the only HTTPS auth).`,

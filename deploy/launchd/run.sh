@@ -6,12 +6,12 @@ set -eu
 
 cd "$(dirname "$0")/../.."   # connector root (config/config.json resolves here)
 
-# Bearer token required on /mcp, and the OAuth client secret for Drupal.
-# macOS Keychain examples: the item names and the env var names below are
+# The OAuth client secret for Drupal. Inbound /mcp authentication is the
+# OAuth resource server in config (auth.issuer + auth.audience); do not export
+# MCP_AUTH_TOKEN, which was removed in 4.0.0 and is fatal at startup.
+# macOS Keychain example: the item name and the env var name below are
 # placeholders matching config/config.example.json — replace both with your
 # own. Assign then export separately so `set -e` aborts if a lookup fails.
-MCP_AUTH_TOKEN="$(security find-generic-password -s drupal-mcp-auth-token -w)"
-export MCP_AUTH_TOKEN
 MCP_CONTENT_PRODUCTION_SECRET="$(security find-generic-password -s drupal-mcp-content-production -w)"
 export MCP_CONTENT_PRODUCTION_SECRET
 
