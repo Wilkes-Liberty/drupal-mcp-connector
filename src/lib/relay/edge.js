@@ -11,9 +11,10 @@
  *   - `createInboundHttpsAuth` is the ONLY authentication arm. There is no
  *     shared-bearer and no unauthenticated mode in this module; a missing
  *     issuer/audience is fatal at every bind host, loopback included.
- *   - A non-empty `auth.grants` table is mandatory. The library's all-sites
- *     fallback (principal.js) is untouched for existing installs; this entry
- *     point refuses to exist without explicit grants.
+ *   - A non-empty `auth.grants` table is mandatory. The library resolves a
+ *     JWT principal with no grant entry and no `sites` claim to no sites
+ *     (principal.js, DEV-848); this entry point goes further and refuses to
+ *     start without explicit grants.
  *   - Caller credential headers (authorization, cookie, proxy-authorization —
  *     the #229 strip set) and caller identity-assertion headers are stripped
  *     before framing. The frame carries the validated identity object only.
@@ -700,7 +701,8 @@ export async function startEdge({
   if (!grantTable) {
     throw new EdgeStartupError(
       "Relay edge refuses to start without a non-empty auth.grants table. "
-      + "The library's all-sites fallback does not apply to this entry point.",
+      + "A JWT principal without a grant entry is entitled to no sites, and this entry point "
+      + "does not start without the table.",
     );
   }
   const tenantGrantTable = normalizeGrants(tenantGrants);

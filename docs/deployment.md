@@ -126,8 +126,9 @@ and `MCP_ALLOW_UNAUTHENTICATED` are not read. Startup refuses without all of:
 - `auth.issuer` + `auth.audience` (an HTTPS resource identifier) and RFC 7662
   introspection (`auth.introspectionUrl` plus client credentials), at any bind
   host including loopback;
-- a non-empty `auth.grants` table (client id → site names) — the library's
-  all-sites fallback does not apply here;
+- a non-empty `auth.grants` table (client id → site names). A JWT principal
+  with no grant entry and no `sites` claim is entitled to no sites on every
+  surface (DEV-848); the edge additionally refuses to start without the table;
 - optional `auth.tenantGrants` (client id → tenant agent ids). When present,
   tenant routing is token-resolved: the JWT `azp` selects the tenant, caller
   `tenant` / `site` arguments are hints inside that grant, and a hint for
