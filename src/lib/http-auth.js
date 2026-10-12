@@ -154,6 +154,59 @@ export function formatWwwAuthenticate({
 }
 
 /**
+ * Headers for a Bearer challenge. Every connector 401/403 challenge
+ * is built here so `resource_metadata` cannot drift off the RFC 9728 URL.
+ *
+ * @param {object} [fields]
+ * @param {string} [fields.error]
+ * @param {string} [fields.errorDescription]
+ * @param {string} [fields.scope]
+ * @param {string} [fields.resourceMetadata]
+ * @returns {{ "WWW-Authenticate": string }}
+ */
+export function unauthorizedChallenge({
+  error,
+  errorDescription,
+  scope,
+  resourceMetadata,
+} = {}) {
+  return {
+    "WWW-Authenticate": formatWwwAuthenticate({
+      error,
+      errorDescription,
+      scope,
+      resourceMetadata,
+    }),
+  };
+}
+
+/**
+ * Write a 401 with a Bearer challenge. The only 401 writer in src/.
+ *
+ * @param {import("http").ServerResponse} res
+ * @param {object} [fields]
+ * @param {string} [fields.error]
+ * @param {string} [fields.errorDescription]
+ * @param {string} [fields.scope]
+ * @param {string} [fields.resourceMetadata]
+ * @param {string} [fields.body]
+ */
+export function writeUnauthorized(res, {
+  error = "invalid_token",
+  errorDescription,
+  scope,
+  resourceMetadata,
+  body = "Unauthorized",
+} = {}) {
+  res.writeHead(401, unauthorizedChallenge({
+    error,
+    errorDescription,
+    scope,
+    resourceMetadata,
+  })).end(body);
+}
+
+/**
  * RFC 9728 Protected Resource Metadata document.
  * @param {object} fields
  * @returns {object}
@@ -203,14 +256,12 @@ export function denyAuth(status, {
   return {
     ok: false,
     status,
-    headers: {
-      "WWW-Authenticate": formatWwwAuthenticate({
-        error,
-        errorDescription,
-        scope,
-        resourceMetadata,
-      }),
-    },
+    headers: unauthorizedChallenge({
+      error,
+      errorDescription,
+      scope,
+      resourceMetadata,
+    }),
     body: body ?? (status === 403 ? "Forbidden" : "Unauthorized"),
   };
 }

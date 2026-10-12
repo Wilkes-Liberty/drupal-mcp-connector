@@ -175,6 +175,7 @@ export async function buildHarness({ mutant = null } = {}) {
   const handler = httpHandler.createMcpRequestHandler({
     ...deps,
     protectedResource: inbound.protectedResource,
+    resourceMetadataUrl: inbound.resourceMetadataUrl,
     toolCount: TOOL_DEFINITIONS.length,
     modernHandler: counters.wrapHandler(toNodeHandler(modern)),
     legacyHandler: counters.wrapHandler(httpHandler.createLegacySessionHandler({ buildServer, mode: "serve" })),
@@ -203,6 +204,7 @@ export async function buildHarness({ mutant = null } = {}) {
     mutant,
     configDigest,
     url,
+    resourceMetadataUrl: inbound.resourceMetadataUrl,
     counters,
     tap,
     fake,

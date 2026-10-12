@@ -52,7 +52,12 @@ retrieval, and introspection abort after 30s (`AbortSignal.timeout`), matching
 outbound Drupal HTTP; a stuck IdP fails closed (startup throw, or 401 on `/mcp`).
 
 Unauthenticated clients receive `401` with a `WWW-Authenticate` challenge that
-points at RFC 9728 metadata:
+points at RFC 9728 metadata. On a configured resource server and on the relay
+edge, the same pointer is on every 401 (missing, invalid, expired, or
+wrong-audience token; authenticator throw; unresolved identity; edge `/usage`
+and `/assessor`). Loopback shared-bearer (`MCP_AUTH_TOKEN`) serves no metadata
+document, so its refusal is a `Bearer` challenge with `error="invalid_token"`
+and no `resource_metadata`:
 
 `GET /.well-known/oauth-protected-resource` (and `/mcp` on that path).
 

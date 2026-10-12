@@ -7,6 +7,8 @@ import {
   buildIdentity,
   identityHasScopes,
   formatWwwAuthenticate,
+  unauthorizedChallenge,
+  writeUnauthorized,
   protectedResourceMetadata,
   resourceMetadataUrlFor,
   createRevocationStore,
@@ -98,6 +100,38 @@ describe("WWW-Authenticate and protected-resource metadata", () => {
       "Bearer realm=\"mcp\", error=\"invalid_token\", error_description=\"expired\", " +
       "resource_metadata=\"https://mcp.example.com/.well-known/oauth-protected-resource/mcp\"",
     );
+  });
+
+  it("builds challenge headers and writes 401 through the shared helpers", () => {
+    const resourceMetadata = "https://mcp.example.com/.well-known/oauth-protected-resource/mcp";
+    expect(unauthorizedChallenge({
+      error: "invalid_token",
+      errorDescription: "Bearer token required",
+      resourceMetadata,
+    })).toEqual({
+      "WWW-Authenticate": formatWwwAuthenticate({
+        error: "invalid_token",
+        errorDescription: "Bearer token required",
+        resourceMetadata,
+      }),
+    });
+    const res = {
+      writeHead: vi.fn(function writeHead() { return this; }),
+      end: vi.fn(),
+    };
+    writeUnauthorized(res, {
+      error: "invalid_token",
+      errorDescription: "Bearer token required",
+      resourceMetadata,
+    });
+    expect(res.writeHead).toHaveBeenCalledWith(401, {
+      "WWW-Authenticate": formatWwwAuthenticate({
+        error: "invalid_token",
+        errorDescription: "Bearer token required",
+        resourceMetadata,
+      }),
+    });
+    expect(res.end).toHaveBeenCalledWith("Unauthorized");
   });
 
   it("formats an insufficient_scope challenge", () => {

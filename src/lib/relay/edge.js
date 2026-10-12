@@ -69,7 +69,7 @@ import {
 } from "../evidence.js";
 import {
   createInboundHttpsAuth,
-  formatWwwAuthenticate,
+  writeUnauthorized,
   SPOOFABLE_IDENTITY_HEADERS,
 } from "../http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../http-handler.js";
@@ -646,6 +646,8 @@ function byteLength(value) {
  * @param {?object} [options.rateLimiter] Optional rate limiter (rate-limit.js).
  * @param {number} [options.fanDownTimeoutMs]
  * @param {typeof fetch} [options.fetchFn] Issuer discovery/JWKS fetch.
+ * @param {Function} [options.inboundAuthenticate] Test seam that replaces
+ *   the resource-server authenticator after inbound metadata is built.
  * @param {?{recordListen: Function, recordConnect: Function}} [options.ledger]
  * @returns {Promise<object>}
  */
@@ -675,6 +677,7 @@ export async function startEdge({
   rateLimiter = null,
   fanDownTimeoutMs = DEFAULT_FAN_DOWN_TIMEOUT_MS,
   fetchFn = fetch,
+  inboundAuthenticate = null,
   ledger = null,
 } = {}) {
   if (!auth?.issuer || !auth?.audience) {
@@ -867,6 +870,7 @@ export async function startEdge({
   assertBindAllowed("agent-channel", agentBindHost, hasTls);
 
   const inbound = await createInboundHttpsAuth({ inboundCfg: auth, fetchFn });
+  const authenticate = inboundAuthenticate ?? ((req) => inbound.authenticate(req));
   const targetRelay = createLocalRelay({ sites: catalog, grants: grantTable, defaultSite });
   const broker = createRequestBroker({ timeoutMs: fanDownTimeoutMs });
 
@@ -1343,14 +1347,13 @@ export async function startEdge({
     }
     let auth;
     try {
-      auth = await inbound.authenticate(req);
+      auth = await authenticate(req);
     } catch {
-      res.writeHead(401, {
-        "WWW-Authenticate": formatWwwAuthenticate({
-          error: "invalid_token",
-          errorDescription: "Token validation failed",
-        }),
-      }).end("Unauthorized");
+      writeUnauthorized(res, {
+        error: "invalid_token",
+        errorDescription: "Token validation failed",
+        resourceMetadata: inbound.resourceMetadataUrl,
+      });
       return;
     }
     if (!auth.ok) {
@@ -1414,14 +1417,13 @@ export async function startEdge({
     }
     let authResult;
     try {
-      authResult = await inbound.authenticate(req);
+      authResult = await authenticate(req);
     } catch {
-      res.writeHead(401, {
-        "WWW-Authenticate": formatWwwAuthenticate({
-          error: "invalid_token",
-          errorDescription: "Token validation failed",
-        }),
-      }).end("Unauthorized");
+      writeUnauthorized(res, {
+        error: "invalid_token",
+        errorDescription: "Token validation failed",
+        resourceMetadata: inbound.resourceMetadataUrl,
+      });
       return;
     }
     if (!authResult.ok) {
@@ -1469,8 +1471,9 @@ export async function startEdge({
   }
 
   const requestHandler = createMcpRequestHandler({
-    authenticate: (req) => inbound.authenticate(req),
+    authenticate,
     protectedResource: inbound.protectedResource,
+    resourceMetadataUrl: inbound.resourceMetadataUrl,
     modernHandler: fanDown,
     // Northbound is stateless 2026-07-28 only: sessionful legacy traffic is
     // refused, so no Mcp-Session-Id ever exists in either direction.
