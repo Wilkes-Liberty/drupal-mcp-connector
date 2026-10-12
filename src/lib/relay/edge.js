@@ -1386,6 +1386,7 @@ export async function startEdge({
       res.writeHead(auth.status, auth.headers).end(auth.body);
       return;
     }
+    req.mcpIdentity = auth.identity;
     if (tombstones.has(auth.identity.clientId)) {
       jsonResponse(res, 403, { error: "offboarded" });
       return;
@@ -1456,6 +1457,7 @@ export async function startEdge({
       res.writeHead(authResult.status, authResult.headers).end(authResult.body);
       return;
     }
+    req.mcpIdentity = authResult.identity;
     if (tombstones.has(authResult.identity.clientId)) {
       jsonResponse(res, 403, { error: "offboarded" });
       return;

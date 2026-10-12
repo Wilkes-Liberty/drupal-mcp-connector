@@ -30,6 +30,7 @@ import { createLocalPolicyEnforcement } from "../../src/lib/policy-enforcement.j
 import { createRelayAgent } from "../../src/lib/relay/agent.js";
 import { createNotary, generateNotaryKeys, verifyInclusion } from "../../src/lib/anchor.js";
 import { ABSENT, createEvidenceLedger, EXECUTION_IDS, exportAssessor } from "../../src/lib/evidence.js";
+import { createHttpAuditWriter } from "../../src/lib/http-audit.js";
 import { createUsageLedger, reconcileUsage } from "../../src/lib/usage.js";
 import {
   AUDIENCE,
@@ -553,6 +554,32 @@ describe("DEV-877: edge 401s carry resource_metadata", () => {
       edge.resourceMetadataUrl,
       "Bearer token required",
     );
+  });
+
+  it("records the authenticated principal on /usage and /assessor audit rows", async () => {
+    const writer = createHttpAuditWriter({ sink: () => {} });
+    const keys = generateNotaryKeys();
+    const edge = await startEdge(baseEdgeOptions({
+      tenantGrants: TENANT_GRANTS,
+      usage: createUsageLedger(),
+      evidence: createEvidenceLedger(),
+      evidenceAnchor: { publicKey: keys.publicPin, submit: () => ({ ok: false }) },
+      auditWriter: writer,
+    }));
+    closers.push(() => edge.close());
+
+    const jwt = await issuer.signToken({ clientId: "client-a", sub: "sub-a" });
+    expect((await usageGet(edge.northboundUrl, jwt)).status).toBe(200);
+    expect((await assessorGet(edge.northboundUrl, jwt)).status).toBe(200);
+    const unlisted = await issuer.signToken({ clientId: "client-x", sub: "sub-x" });
+    expect((await usageGet(edge.northboundUrl, unlisted)).status).toBe(403);
+
+    const usageRow = writer.rows.find((row) => row.route === "/usage" && row.status === 200);
+    const assessorRow = writer.rows.find((row) => row.route === "/assessor" && row.status === 200);
+    const denied = writer.rows.find((row) => row.route === "/usage" && row.status === 403);
+    expect(usageRow).toMatchObject({ code: "ok", principal: "sub-a" });
+    expect(assessorRow).toMatchObject({ code: "ok", principal: "sub-a" });
+    expect(denied).toMatchObject({ code: "forbidden", principal: "sub-x" });
   });
 });
 

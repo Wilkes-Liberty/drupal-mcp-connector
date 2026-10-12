@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Stdio and loopback local-operator identities still see every configured
   site.
 
+### Fixed
+- Hosted HTTP audit rows classify Origin only when `/mcp` actually refused it
+  (a 200 `/health` or 429 `/usage` with a disallowed Origin is no longer
+  `bad_origin`), record the authenticated principal on `/usage` and
+  `/assessor`, and do not treat a client disconnect before headers as `ok`.
+
 ## [4.0.0] - 2026-10-12
 
 ### Removed
