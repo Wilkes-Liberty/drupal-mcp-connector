@@ -135,7 +135,9 @@ export async function buildHarness({ mutant = null } = {}) {
     resource: issuer.audience,
     requiredScopes: REQUIRED_SCOPES,
     revocationFile: "",
-    introspectionUrl: "",
+    introspectionUrl: issuer.introspectionUrl,
+    introspectionClientId: "eval-rs",
+    introspectionClientSecret: "eval-rs-secret",
   };
   const inbound = await httpAuth.createInboundHttpsAuth({ inboundCfg, fetchFn: issuer.fetchFn });
 

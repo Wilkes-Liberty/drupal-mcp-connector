@@ -12,11 +12,12 @@
  * injected `fetchFn` is the only thing that answers for it.
  */
 
-import { SignJWT } from "jose";
+import { decodeJwt, SignJWT } from "jose";
 import { generateSigningKey } from "./keys.js";
 
 export const STUB_ISSUER_URL = "https://stub-issuer.invalid";
 export const STUB_AUDIENCE = "https://mcp.stub.invalid/mcp";
+export const STUB_INTROSPECTION_URL = `${STUB_ISSUER_URL}/introspect`;
 
 /** Fixture token lifetime in seconds. Not a recommendation. */
 const FIXTURE_TOKEN_TTL_SEC = 300;
@@ -37,7 +38,12 @@ export async function createStubIssuer({
     headers: { "content-type": "application/json" },
   });
 
-  const metadata = { issuer, jwks_uri: `${issuer}/jwks.json` };
+  const introspectionUrl = `${issuer.replace(/\/+$/, "")}/introspect`;
+  const metadata = {
+    issuer,
+    jwks_uri: `${issuer}/jwks.json`,
+    introspection_endpoint: introspectionUrl,
+  };
   const documents = new Map([
     [`${issuer}/.well-known/oauth-authorization-server`, metadata],
     [`${issuer}/.well-known/openid-configuration`, metadata],
@@ -45,9 +51,22 @@ export async function createStubIssuer({
   ]);
 
   /** Answers only for the stub issuer's own URLs; everything else is a 404. */
-  async function fetchFn(input) {
-    const url = String(input instanceof Request ? input.url : input);
+  async function fetchFn(input, init = {}) {
+    const url = String(input instanceof Request ? input.url : input).split("?")[0];
     requested.push(url);
+    const method = String(init.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+    if (url === introspectionUrl && method === "POST") {
+      const raw = init.body != null
+        ? String(init.body)
+        : (input instanceof Request ? await input.text() : "");
+      const token = new URLSearchParams(raw).get("token") || "";
+      try {
+        const claims = decodeJwt(token);
+        return json({ active: true, ...claims });
+      } catch {
+        return json({ active: false });
+      }
+    }
     const document = documents.get(url);
     return document ? json(document) : new Response("not found", { status: 404 });
   }
@@ -71,5 +90,5 @@ export async function createStubIssuer({
     return jwt.sign(key.privateKey);
   }
 
-  return { issuer, audience, fetchFn, requested, mint };
+  return { issuer, audience, introspectionUrl, fetchFn, requested, mint };
 }

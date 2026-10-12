@@ -23,6 +23,8 @@ import {
   inboundAuthDeprecationWarning,
   resolveInboundAuthConfig,
   INBOUND_IDP_TIMEOUT_MS,
+  DEFAULT_INTROSPECTION_TIMEOUT_MS,
+  denyUnavailable,
 } from "../../src/lib/http-auth.js";
 import { authHeaders, authHeadersAsync } from "../../src/lib/config.js";
 
@@ -166,7 +168,13 @@ describe("WWW-Authenticate and protected-resource metadata", () => {
 });
 
 describe("resolveInboundAuthMode", () => {
-  const rs = { issuer: "https://idp.example.com", audience: "https://mcp.example.com/mcp" };
+  const rs = {
+    issuer: "https://idp.example.com",
+    audience: "https://mcp.example.com/mcp",
+    introspectionUrl: "https://idp.example.com/introspect",
+    introspectionClientId: "rs-client",
+    introspectionClientSecret: "rs-secret",
+  };
 
   it("requires a resource server on a network-facing bind", () => {
     expect(resolveInboundAuthMode({
@@ -188,6 +196,15 @@ describe("resolveInboundAuthMode", () => {
       bindHost: "127.0.0.1",
       sharedToken: "legacy-secret",
     }).mode).toBe("shared_bearer");
+  });
+
+  it("is fatal on a network bind when issuer and audience are set but introspection is not", () => {
+    const decision = resolveInboundAuthMode({
+      bindHost: "0.0.0.0",
+      resourceServer: { issuer: "https://idp.example.com", audience: "https://mcp.example.com/mcp" },
+    });
+    expect(decision.mode).toBe("fatal");
+    expect(decision.reason).toMatch(/introspection/i);
   });
 
   it("is fatal for allow-unauthenticated on a non-loopback bind (DEV-845)", () => {
@@ -531,6 +548,20 @@ describe("createResourceAuthenticator", () => {
     const dead = await authenticateOpaque("Bearer opaque-dead");
     expect(dead.ok).toBe(false);
     expect(dead.status).toBe(401);
+  });
+
+  it("returns 503 when required introspection throws (DEV-844)", async () => {
+    const authenticate = createResourceAuthenticator({
+      issuer,
+      audience,
+      requireIntrospection: true,
+      introspect: async () => { throw new Error("idp down"); },
+      resourceMetadataUrl: metadata,
+    });
+    const denied = await authenticate("Bearer opaque-ok");
+    expect(denied.ok).toBe(false);
+    expect(denied.status).toBe(503);
+    expect(denied.body).toMatch(/unavailable/i);
   });
 
   it("returns 401 when introspection throws", async () => {
@@ -904,6 +935,9 @@ describe("discoverAuthorizationServer / introspectToken", () => {
         issuer: "https://idp.example.com",
         audience: "https://mcp.example.com",
         resource: "https://mcp.example.com",
+        introspectionUrl: "https://idp.example.com/introspect",
+        introspectionClientId: "rs",
+        introspectionClientSecret: "rs-secret",
       },
       fetchFn,
     });
@@ -917,6 +951,8 @@ describe("discoverAuthorizationServer / introspectToken", () => {
         audience: "https://mcp.example.com",
         resource: "https://mcp.example.com",
         introspectionUrl: "http://idp.example.com/introspect",
+        introspectionClientId: "rs",
+        introspectionClientSecret: "rs-secret",
       },
       fetchFn: async () => ({ ok: false, json: async () => ({}) }),
     })).rejects.toThrow(/introspectionUrl must be an https URL/);
@@ -956,6 +992,7 @@ describe("discoverAuthorizationServer / introspectToken", () => {
         fetchFn,
       });
       expect(spy).toHaveBeenCalledWith(INBOUND_IDP_TIMEOUT_MS);
+      expect(spy).toHaveBeenCalledWith(DEFAULT_INTROSPECTION_TIMEOUT_MS);
       expect(seen).toEqual([fake, fake]);
     } finally {
       spy.mockRestore();
@@ -988,8 +1025,9 @@ describe("discoverAuthorizationServer / introspectToken", () => {
     }
   });
 
-  it("fails closed with 401 when JWKS retrieval times out", async () => {
+  it("admits a bearer when JWKS times out but introspection is active (DEV-844)", async () => {
     const { privateKey } = await generateKeyPair("RS256");
+    const now = Math.floor(Date.now() / 1000);
     const token = await signedToken({
       privateKey,
       issuer: "https://idp.example.com",
@@ -998,6 +1036,20 @@ describe("discoverAuthorizationServer / introspectToken", () => {
     });
     const fetchFn = async (url, options) => {
       if (String(url).includes("/jwks")) return hangingFetch(url, options);
+      if (String(url).includes("/introspect")) {
+        return {
+          ok: true,
+          json: async () => ({
+            active: true,
+            sub: "agent-1",
+            iss: "https://idp.example.com",
+            aud: "https://mcp.example.com",
+            iat: now,
+            exp: now + 300,
+            scope: "mcp_read",
+          }),
+        };
+      }
       return {
         ok: true,
         json: async () => ({
@@ -1011,20 +1063,53 @@ describe("discoverAuthorizationServer / introspectToken", () => {
         issuer: "https://idp.example.com",
         audience: "https://mcp.example.com",
         resource: "https://mcp.example.com",
+        introspectionUrl: "https://idp.example.com/introspect",
+        introspectionClientId: "rs",
+        introspectionClientSecret: "rs-secret",
       },
       fetchFn,
     });
-    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
-    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => originalTimeout(20));
-    try {
-      const denied = await inbound.authenticate({
-        headers: { authorization: `Bearer ${token}` },
-      });
-      expect(denied.ok).toBe(false);
-      expect(denied.status).toBe(401);
-    } finally {
-      spy.mockRestore();
-    }
+    const allowed = await inbound.authenticate({
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(allowed.ok).toBe(true);
+    expect(allowed.identity.sub).toBe("agent-1");
+  });
+
+  it("returns 503 when required introspection times out (DEV-844)", async () => {
+    const { privateKey } = await generateKeyPair("RS256");
+    const token = await signedToken({
+      privateKey,
+      issuer: "https://idp.example.com",
+      audience: "https://mcp.example.com",
+      claims: { sub: "agent-1", scope: "mcp_read" },
+    });
+    const fetchFn = async (url, options) => {
+      if (String(url).includes("/introspect")) return hangingFetch(url, options);
+      return {
+        ok: true,
+        json: async () => ({
+          issuer: "https://idp.example.com",
+          jwks_uri: "https://idp.example.com/jwks",
+        }),
+      };
+    };
+    const inbound = await createInboundHttpsAuth({
+      inboundCfg: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com",
+        resource: "https://mcp.example.com",
+        introspectionUrl: "https://idp.example.com/introspect",
+        introspectionClientId: "rs",
+        introspectionClientSecret: "rs-secret",
+        introspectionTimeoutMs: 20,
+      },
+      fetchFn,
+    });
+    const denied = await inbound.authenticate({
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(denied).toEqual(denyUnavailable());
   });
 });
 

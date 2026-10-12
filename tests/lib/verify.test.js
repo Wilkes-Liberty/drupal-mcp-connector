@@ -130,7 +130,28 @@ describe("verifyStatic — inbound_auth", () => {
     expect(detailOf(result, "inbound_auth").join(" ")).toContain("resource server");
   });
 
-  it("passes network-facing HTTPS when issuer and audience are set", () => {
+  it("passes network-facing HTTPS when issuer, audience, and introspection are set", () => {
+    const result = run(secureConfig({
+      auth: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+        resource: "https://mcp.example.com/mcp",
+        introspectionUrl: "https://idp.example.com/introspect",
+        introspectionClientIdEnv: "MCP_INTROSPECTION_CLIENT_ID",
+        introspectionClientSecretEnv: "MCP_INTROSPECTION_CLIENT_SECRET",
+      },
+    }), {
+      env: {
+        MCP_TRANSPORT: "https",
+        MCP_BIND_HOST: "0.0.0.0",
+        MCP_INTROSPECTION_CLIENT_ID: "rs-client",
+        MCP_INTROSPECTION_CLIENT_SECRET: "rs-secret",
+      },
+    });
+    expect(statusOf(result, "inbound_auth")).toBe("pass");
+  });
+
+  it("fails network-facing HTTPS when introspection is missing (DEV-844)", () => {
     const result = run(secureConfig({
       auth: {
         issuer: "https://idp.example.com",
@@ -140,7 +161,8 @@ describe("verifyStatic — inbound_auth", () => {
     }), {
       env: { MCP_TRANSPORT: "https", MCP_BIND_HOST: "0.0.0.0" },
     });
-    expect(statusOf(result, "inbound_auth")).toBe("pass");
+    expect(statusOf(result, "inbound_auth")).toBe("fail");
+    expect(detailOf(result, "inbound_auth").join(" ")).toMatch(/introspection/i);
   });
 
   it("fails an inbound issuer that is not HTTPS", () => {

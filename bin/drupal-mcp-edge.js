@@ -6,13 +6,18 @@
  * requests down the outbound tenant-agent channel (see src/lib/relay/edge.js).
  * There is no shared-bearer and no unauthenticated mode on this entry point:
  * MCP_AUTH_TOKEN and MCP_ALLOW_UNAUTHENTICATED are ignored, and a missing
- * issuer/audience is fatal at every bind host including loopback. The edge
- * holds no site credentials; its site catalog is names and base URLs only.
+ * issuer/audience/introspection is fatal at every bind host including loopback.
+ * The edge holds no site credentials; its site catalog is names and base URLs
+ * only.
  *
  * Environment variables:
  *   MCP_RESOURCE_ISSUER / MCP_RESOURCE_AUDIENCE / MCP_RESOURCE
  *                     Inbound OAuth resource server (or config auth.issuer /
  *                     auth.audience / auth.resource). Required.
+ *   MCP_INTROSPECTION_URL / MCP_INTROSPECTION_CLIENT_ID /
+ *   MCP_INTROSPECTION_CLIENT_SECRET
+ *                     RFC 7662 introspection (or config auth.introspectionUrl
+ *                     plus named env pointers). Required. Secrets stay in env.
  *   MCP_CHANNEL_CREDENTIALS_FILE
  *                     Agent channel credential store (or config
  *                     relay.channelCredentialsFile). Required. JSON:
@@ -101,6 +106,14 @@ if (!inboundCfg.issuer || !inboundCfg.audience) {
     + "auth.audience (or MCP_RESOURCE_ISSUER / MCP_RESOURCE_AUDIENCE). There is no "
     + "shared-bearer or unauthenticated mode on this entry point, at any bind host "
     + "including loopback.",
+  );
+}
+if (!inboundCfg.introspectionUrl || !inboundCfg.introspectionClientId || !inboundCfg.introspectionClientSecret) {
+  fatal(
+    "The relay edge requires RFC 7662 introspection: set auth.introspectionUrl and "
+    + "introspection client credentials (MCP_INTROSPECTION_URL, "
+    + "MCP_INTROSPECTION_CLIENT_ID, MCP_INTROSPECTION_CLIENT_SECRET). The "
+    + "revocation file is not an authority on this network surface.",
   );
 }
 

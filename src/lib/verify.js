@@ -413,7 +413,7 @@ export function verifyStatic(config, { source = "config", now = () => new Date()
 
   const inboundAuth = check(
     "inbound_auth",
-    "Network-facing HTTPS authenticates as an OAuth protected resource",
+    "Network-facing HTTPS authenticates as an OAuth protected resource with live introspection",
     inboundFindings,
   );
 

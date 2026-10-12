@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **Every authenticated network call is introspected at the issuer (DEV-844).**
+  Hosted HTTPS and the relay edge validate the bearer with RFC 7662 at the
+  single configured issuer on every call. There is no positive cache: a
+  revoked token fails on the next call. Introspection unreachable, timed
+  out (default **2s**, `auth.introspectionTimeoutMs` /
+  `MCP_INTROSPECTION_TIMEOUT_MS`), or errored is **503** and does not
+  dispatch; `active: false` is **401**. `iss` must be present and equal
+  the configured issuer; audience is an exact match against the one
+  configured plane. JWT algorithms stay pinned (`none` never; `HS*` only
+  when explicitly configured). The revocation file is **not** an authority
+  on network surfaces (keep it as an additional deny for stdio-dev only).
+  Startup refuses a network bind without issuer, audience, introspection
+  URL, and introspection client credentials (`MCP_INTROSPECTION_URL`,
+  `MCP_INTROSPECTION_CLIENT_ID`, `MCP_INTROSPECTION_CLIENT_SECRET`, or
+  `auth.introspectionClientIdEnv` / `auth.introspectionClientSecretEnv`).
+  Stdio local-operator and loopback shared-bearer / unauthenticated modes
+  are unchanged. DEV-845 (null identity is 401 before dispatch on network
+  surfaces) is unchanged.
 - **Resource-server and relay 401s carry RFC 9728 `resource_metadata` (DEV-877).**
   On a configured OAuth resource server (`auth.issuer` + `auth.audience`),
   standalone HTTP `/mcp` (modern and legacy), authenticator throws, the

@@ -238,7 +238,7 @@ MCP_PORT=3443 node src/index.js
 
 The server listens at `https://host:3443/mcp` with a health probe at `/health`. Register that URL with any HTTP-capable MCP client.
 
-> **Security:** HTTPS is mandatory; plain HTTP is refused on non-localhost unless `MCP_ALLOW_HTTP=1` (dev only). Non-loopback binds require an inbound OAuth resource server (`auth.issuer` + `auth.audience`). `MCP_AUTH_TOKEN` is loopback-only. `MCP_ALLOW_UNAUTHENTICATED=1` is loopback-only; a non-loopback bind with that flag refuses to start. See [security-hardening.md](security-hardening.md).
+> **Security:** HTTPS is mandatory; plain HTTP is refused on non-localhost unless `MCP_ALLOW_HTTP=1` (dev only). Non-loopback binds require an inbound OAuth resource server (`auth.issuer` + `auth.audience` + RFC 7662 introspection). Every authenticated network call is introspected at the issuer. `MCP_AUTH_TOKEN` is loopback-only. `MCP_ALLOW_UNAUTHENTICATED=1` is loopback-only; a non-loopback bind with that flag refuses to start. See [security-hardening.md](security-hardening.md).
 
 ---
 
@@ -407,7 +407,7 @@ Before going to production, verify:
 - [ ] `security.preset` is `auditor` or `production-strict` for live sites
 - [ ] `security.allowDestructive` is `false` unless deletes are required
 - [ ] A dedicated, least-privilege Drupal API user (not `admin`)
-- [ ] TLS configured for the HTTPS transport; inbound `auth.issuer`/`auth.audience` and `MCP_BIND_HOST` set if exposed beyond loopback
+- [ ] TLS configured for the HTTPS transport; inbound `auth.issuer`/`auth.audience`/introspection and `MCP_BIND_HOST` set if exposed beyond loopback
 - [ ] Call `drupal_security_info` to confirm the active policy
 
 ---

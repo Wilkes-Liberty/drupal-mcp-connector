@@ -24,9 +24,10 @@ The `https` transport serves `/mcp` to MCP clients.
 
 **Network-facing product path (required):** if the process binds beyond loopback
 (`MCP_BIND_HOST` other than `127.0.0.1` / `::1` / `localhost`, or the TLS default
-`0.0.0.0`), the connector is an OAuth **protected resource**. Configure a
-standards-based issuer (RFC 8414 / OIDC discovery) and the resource audience.
-`MCP_AUTH_TOKEN` is **not** accepted on this path.
+`0.0.0.0`), the connector is an OAuth **protected resource**. Configure exactly
+one issuer (RFC 8414 / OIDC discovery), the resource audience, and RFC 7662
+introspection. Startup refuses to listen when any of those are missing
+(DEV-844). `MCP_AUTH_TOKEN` is **not** accepted on this path.
 
 ```json
 "auth": {
@@ -36,25 +37,37 @@ standards-based issuer (RFC 8414 / OIDC discovery) and the resource audience.
   "requiredScopes": ["mcp_read"],
   "maxTokenLifetime": 3600,
   "algorithms": ["RS256", "ES256"],
-  "revocationFile": "/etc/drupal-mcp/revoked.json"
+  "introspectionUrl": "https://idp.example.com/introspect",
+  "introspectionTimeoutMs": 2000,
+  "introspectionClientIdEnv": "MCP_INTROSPECTION_CLIENT_ID",
+  "introspectionClientSecretEnv": "MCP_INTROSPECTION_CLIENT_SECRET"
 }
 ```
 
 ```sh
 export MCP_RESOURCE_ISSUER="https://idp.example.com"
 export MCP_RESOURCE_AUDIENCE="https://mcp.example.com/mcp"
+export MCP_INTROSPECTION_URL="https://idp.example.com/introspect"
+export MCP_INTROSPECTION_CLIENT_ID="mcp-connector"
+export MCP_INTROSPECTION_CLIENT_SECRET="…from the issuer, never committed…"
+export MCP_INTROSPECTION_TIMEOUT_MS="2000"
 export MCP_MAX_TOKEN_LIFETIME="3600"
 export MCP_TOKEN_ALGORITHMS="RS256,ES256"
 ```
 
-Clients send `Authorization: Bearer <access-token>`. The connector validates
-issuer, audience, expiry, lifetime, algorithm, and scopes against the issuer's
-JWKS. A JSON revocation file (`{ "jti": [], "sub": [] }`) is re-read when it
-changes, so a revoke does not require a restart. Optional RFC 7662
-introspection (`introspectionUrl`) is an additional fail-closed check when
-configured. Issuer discovery, JWKS retrieval, and introspection abort after
-30s (`AbortSignal.timeout`), matching outbound Drupal HTTP; a stuck IdP fails
-closed (startup throw, or 401 on `/mcp`).
+Clients send `Authorization: Bearer <access-token>`. Every authenticated
+network call is introspected at the issuer (RFC 7662). There is **no positive
+cache**: a revoke takes effect on the next call. Introspection unreachable,
+timed out (default **2s**), or errored is **503** and the tool never runs.
+`active: false` is **401**. `iss` must be present and equal the configured
+issuer; audience is an exact match against the one configured plane. JWT
+algorithms are pinned (`none` never; `HS*` only when explicitly configured).
+Issuer discovery and JWKS retrieval abort after 30s; introspection uses the
+shorter timeout above. A stuck issuer fails closed.
+
+The JSON revocation file (`{ "jti": [], "sub": [] }`) is **not** an authority
+on network surfaces. Keep it only as an additional deny for stdio-dev. Do
+not treat a file revoke as sufficient for a hosted bind.
 
 **Bearer lifetime and algorithms (DEV-876).** Access tokens must carry numeric
 `exp` and `iat`. `exp` must still be in the future (jose `clockTolerance`,
@@ -115,7 +128,8 @@ credentials stay the per-site OAuth client or `apiTokenEnv`.
 **Loopback only:** `MCP_AUTH_TOKEN` remains a shared bearer for local HTTPS.
 **`MCP_ALLOW_UNAUTHENTICATED=1`** is loopback-only. A non-loopback bind with
 that flag is fatal at startup (DEV-845). There is no trusted-proxy exception
-beyond loopback: network-facing HTTPS requires `auth.issuer` + `auth.audience`.
+beyond loopback: network-facing HTTPS requires `auth.issuer` + `auth.audience`
++ RFC 7662 introspection.
 
 For `/mcp`, rate limiting and bearer authentication run before any request body
 is parsed, converted, or classified. POST bodies are bounded to 1 MiB, read
