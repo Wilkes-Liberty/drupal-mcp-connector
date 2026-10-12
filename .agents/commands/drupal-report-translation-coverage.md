@@ -1,11 +1,11 @@
 ---
-description: "Per-node translation coverage from Sentinel's inventory (missing non-default language, outdated core flag, language counts). Without Sentinel the report is unavailable — JSON:API only shows the default language, so a histogram would be misleading."
+description: "Per-node translation coverage from Sentinel's inventory (missing non-default language, outdated core flag, language counts). Without Sentinel the report is unavailable — JSON:API only shows the default language, so a histogram would be misleading. A bundle with no readable nodes reports scanned 0 with populationEmpty true, not unavailable."
 argument-hint: "<type> [site] [sampleSize]"
 ---
 
 Call the MCP tool `drupal_report_translation_coverage`.
 
-Per-node translation coverage from Sentinel's inventory (missing non-default language, outdated core flag, language counts). Without Sentinel the report is unavailable — JSON:API only shows the default language, so a histogram would be misleading.
+Per-node translation coverage from Sentinel's inventory (missing non-default language, outdated core flag, language counts). Without Sentinel the report is unavailable — JSON:API only shows the default language, so a histogram would be misleading. A bundle with no readable nodes reports scanned 0 with populationEmpty true, not unavailable.
 
 Parse the arguments supplied with this command into this tool's parameters:
 

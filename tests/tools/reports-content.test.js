@@ -119,6 +119,31 @@ describe("reports-content", () => {
       await expect(handlers.drupal_report_translation_coverage({ type: "page" }))
         .rejects.toThrow(/403/);
     });
+
+    it("reports an empty population as empty, not as a missing inventory (#436)", async () => {
+      backend.listEntities.mockResolvedValue(page([]));
+      const res = await handlers.drupal_report_translation_coverage({ type: "page" });
+      expect(res.unavailable).toBeUndefined();
+      expect(res.populationEmpty).toBe(true);
+      expect(res.scanned).toBe(0);
+      expect(res.inventoried).toBe(0);
+      expect(res.approximate).toBe(false);
+      expect(res.languages).toEqual([]);
+      expect(res.missing).toEqual([]);
+      expect(res.outdated).toEqual([]);
+      expect(res.findings).toEqual([]);
+      expect(backend.rawQuery).not.toHaveBeenCalled();
+    });
+
+    it("stays unavailable when a nonempty population has no inventory endpoint (#436)", async () => {
+      backend.listEntities.mockResolvedValue(page([node({ id: "1" }), node({ id: "2" })]));
+      backend.rawQuery.mockRejectedValue(new Error("Drupal 404 on GET /jsonapi/node/page/1/mcp-translations"));
+      const res = await handlers.drupal_report_translation_coverage({ type: "page" });
+      expect(res.unavailable).toBe(true);
+      expect(res.populationEmpty).toBeUndefined();
+      expect(res.scanned).toBe(2);
+      expect(res.reason).toMatch(/inventory/i);
+    });
   });
 
   describe("drupal_report_scheduled_content", () => {
