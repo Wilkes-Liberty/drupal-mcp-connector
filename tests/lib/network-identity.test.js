@@ -132,12 +132,12 @@ describe("HTTP handler — unauthenticated network bind (DEV-845)", () => {
     expect(isLegacyRequestFn).not.toHaveBeenCalled();
   });
 
-  it("does not let shared-bearer without a resolved identity reach tool dispatch", async () => {
+  it("does not let a passing header predicate without a resolved identity reach tool dispatch", async () => {
     const modernHandler = vi.fn();
     const legacyHandler = vi.fn();
     const toWebRequestFn = vi.fn();
     const handle = networkHandler({
-      checkAuth: (header) => header === "Bearer shared-secret",
+      checkAuth: (header) => header === "Bearer any-value",
       modernHandler,
       legacyHandler,
       toWebRequestFn,
@@ -146,7 +146,7 @@ describe("HTTP handler — unauthenticated network bind (DEV-845)", () => {
 
     await handle(bodyReq(
       { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "drupal_list_nodes" } },
-      { authorization: "Bearer shared-secret" },
+      { authorization: "Bearer any-value" },
     ), res);
 
     expect(res.statusCode).toBe(401);

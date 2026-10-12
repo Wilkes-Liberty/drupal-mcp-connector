@@ -166,8 +166,8 @@ resource server (`auth.issuer` + `auth.audience` + RFC 7662 introspection).
 Every authenticated network call is introspected at the issuer (no positive
 cache; issuer down is 503). Bearer tokens must
 include `exp` and `iat` within `auth.maxTokenLifetime` and use an
-algorithm on `auth.algorithms`. `MCP_AUTH_TOKEN` is
-loopback-only. `MCP_ALLOW_UNAUTHENTICATED=1` is loopback-only; a non-loopback
+algorithm on `auth.algorithms`. `MCP_AUTH_TOKEN` was
+removed in 4.0.0 (#231). `MCP_ALLOW_UNAUTHENTICATED=1` is loopback-only; a non-loopback
 bind with that flag is fatal. They
 default to a 120
 req/min rate limit when `MCP_RATE_LIMIT` is unset. Bind-address restriction

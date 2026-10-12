@@ -183,6 +183,36 @@ describe("drupal-mcp-wizard CLI", () => {
     expect(result.stderr).toMatch(/requires --auth oauth/i);
   });
 
+  it("--transport https rejects explicit --auth token (shared bearer removed, #231)", () => {
+    const result = runWizard([
+      "--yes",
+      "--json",
+      "--transport", "https",
+      "--auth", "token",
+      "--host", "https://mcp.example.ts.net:3443/mcp",
+      "--drupal-url", "https://drupal.example.com",
+      "--output", dir,
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/requires --auth oauth/i);
+    expect(result.stderr).toMatch(/MCP_AUTH_TOKEN/);
+  });
+
+  it("--transport https defaults to oauth and emits no Authorization header placeholder", () => {
+    const result = runWizard([
+      "--yes",
+      "--json",
+      "--transport", "https",
+      "--host", "https://mcp.example.ts.net:3443/mcp",
+      "--drupal-url", "https://drupal.example.com",
+      "--output", dir,
+    ]);
+    expect(result.status).toBe(0);
+    const body = JSON.parse(result.stdout);
+    expect(body.answers.auth).toBe("oauth");
+    expect(JSON.stringify(body)).not.toMatch(/MCP_AUTH_TOKEN/);
+  });
+
   it("stdio + --auth oauth is rejected with an actionable error", () => {
     const result = runWizard([
       "--yes",

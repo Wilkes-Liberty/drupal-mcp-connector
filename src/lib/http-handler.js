@@ -181,17 +181,19 @@ export function createLegacySessionHandler({
  *   - everything else — 401 without a resolved identity, 404 after auth.
  *
  * A request with no resolved identity is refused before any handler, Drupal
- * call, or budget charge. `allowLocalOperator` is the loopback exception
- * (shared-bearer / unauthenticated); it attaches {@link LOCAL_OPERATOR}
- * rather than dispatching as `null`.
+ * call, or budget charge. `allowLocalOperator` is the unauthenticated-loopback
+ * exception; it attaches {@link LOCAL_OPERATOR} rather than dispatching as
+ * `null`. The loopback shared bearer was removed in 4.0.0 (#231).
  *
  * @param {object} deps
- * @param {(authHeader: any) => boolean} [deps.checkAuth] Shared-bearer predicate (loopback).
+ * @param {(authHeader: any) => boolean} [deps.checkAuth] Pre-dispatch header
+ *   predicate used when no authenticator is wired (closed in resource-server
+ *   mode, open on unauthenticated loopback). Default: open.
  * @param {(req: import("http").IncomingMessage) => Promise<object>} [deps.authenticate]
  *   Resource-server authenticator. When set, it replaces `checkAuth`.
- * @param {boolean} [deps.allowLocalOperator=false] Loopback shared-bearer /
- *   unauthenticated only. After a successful check, attach the local-operator
- *   identity. Default false: missing identity is 401.
+ * @param {boolean} [deps.allowLocalOperator=false] Unauthenticated loopback
+ *   only. After a successful check, attach the local-operator identity.
+ *   Default false: missing identity is 401.
  * @param {object|null} [deps.protectedResource] RFC 9728 metadata served unauthenticated.
  * @param {string} [deps.resourceMetadataUrl] RFC 9728 metadata URL included
  *   on every 401 challenge (DEV-877).

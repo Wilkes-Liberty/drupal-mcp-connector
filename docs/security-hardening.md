@@ -27,7 +27,8 @@ The `https` transport serves `/mcp` to MCP clients.
 `0.0.0.0`), the connector is an OAuth **protected resource**. Configure exactly
 one issuer (RFC 8414 / OIDC discovery), the resource audience, and RFC 7662
 introspection. Startup refuses to listen when any of those are missing
-(DEV-844). `MCP_AUTH_TOKEN` is **not** accepted on this path.
+(DEV-844). `MCP_AUTH_TOKEN` was removed in 4.0.0 (#231); setting it is
+fatal at startup.
 
 ```json
 "auth": {
@@ -105,9 +106,9 @@ Unauthenticated clients receive `401` with a `WWW-Authenticate` challenge that
 points at RFC 9728 metadata. On a configured resource server and on the relay
 edge, the same pointer is on every 401 (missing, invalid, expired, or
 wrong-audience token; authenticator throw; unresolved identity; edge `/usage`
-and `/assessor`). Loopback shared-bearer (`MCP_AUTH_TOKEN`) serves no metadata
-document, so its refusal is a `Bearer` challenge with `error="invalid_token"`
-and no `resource_metadata`:
+and `/assessor`). Unauthenticated loopback serves no metadata document, so a
+refusal there is a `Bearer` challenge with `error="invalid_token"` and no
+`resource_metadata`:
 
 `GET /.well-known/oauth-protected-resource` (and `/mcp` on that path).
 
@@ -125,7 +126,9 @@ not expose a tool catalog. Missing a required scope is `403` with
 The inbound access token is never forwarded to Drupal. Outbound Drupal
 credentials stay the per-site OAuth client or `apiTokenEnv`.
 
-**Loopback only:** `MCP_AUTH_TOKEN` remains a shared bearer for local HTTPS.
+**Loopback:** the shared bearer (`MCP_AUTH_TOKEN`) was removed in 4.0.0 (#231).
+Loopback HTTPS is either the resource server or unauthenticated (local
+operator); a set `MCP_AUTH_TOKEN` is fatal at startup.
 **`MCP_ALLOW_UNAUTHENTICATED=1`** is loopback-only. A non-loopback bind with
 that flag is fatal at startup (DEV-845). There is no trusted-proxy exception
 beyond loopback: network-facing HTTPS requires `auth.issuer` + `auth.audience`

@@ -7,12 +7,12 @@
  * writeHead(401) that skips the shared builder). Authenticator denials that
  * already go through denyAuth should stay green.
  *
- * Loopback shared-bearer (`MCP_AUTH_TOKEN`) has no RFC 9728 document and
- * `src/index.js` leaves `resourceMetadataUrl` undefined in that mode, so its
- * refusal is a Bearer challenge with `error="invalid_token"` and no
- * `resource_metadata`. That case is asserted as such below, with the same
- * wiring `src/index.js` uses, rather than inheriting a URL the live path
- * never supplies.
+ * Unauthenticated loopback has no RFC 9728 document and `src/index.js`
+ * leaves `resourceMetadataUrl` undefined in that mode, so a refusal there is
+ * a Bearer challenge with `error="invalid_token"` and no `resource_metadata`.
+ * That case is asserted below with the same wiring `src/index.js` uses,
+ * rather than inheriting a URL the live path never supplies. The loopback
+ * shared bearer (`MCP_AUTH_TOKEN`) was removed in 4.0.0 (#231).
  */
 
 import { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet } from "jose";
@@ -23,7 +23,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createResourceAuthenticator,
   formatWwwAuthenticate,
-  makeBearerCheck,
   protectedResourceMetadata,
   resourceMetadataUrlFor,
 } from "../../src/lib/http-auth.js";
@@ -222,12 +221,12 @@ describe("DEV-877: 401 challenge matches served RFC 9728 metadata", () => {
     expectRfc9728Challenge(res, { errorDescription: "Token validation failed" });
   });
 
-  it("loopback shared-bearer refusal is a Bearer invalid_token challenge without resource_metadata", async () => {
-    // Same wiring as src/index.js in shared_bearer mode: makeBearerCheck with
-    // the configured token, no authenticator, no served metadata document,
-    // and resourceMetadataUrl left undefined.
+  it("loopback refusal without a metadata document is a Bearer invalid_token challenge without resource_metadata", async () => {
+    // Same wiring as src/index.js on unauthenticated loopback: no
+    // authenticator, no served metadata document, resourceMetadataUrl left
+    // undefined, and a closed predicate standing in for a refused request.
     const handle = handler({
-      checkAuth: makeBearerCheck("configured-secret"),
+      checkAuth: () => false,
       authenticate: null,
       protectedResource: null,
       resourceMetadataUrl: undefined,
@@ -243,9 +242,9 @@ describe("DEV-877: 401 challenge matches served RFC 9728 metadata", () => {
     expect(res.writeHead).toHaveBeenCalledTimes(1);
   });
 
-  it("shared-bearer refusal carries resource_metadata only when a URL is wired", async () => {
+  it("a closed predicate carries resource_metadata only when a URL is wired", async () => {
     const handle = handler({
-      checkAuth: makeBearerCheck("configured-secret"),
+      checkAuth: () => false,
       authenticate: null,
     });
     const res = mockRes();
