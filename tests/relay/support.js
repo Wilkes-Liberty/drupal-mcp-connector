@@ -55,6 +55,7 @@ export async function createIssuerFixture() {
       .setProtectedHeader({ alg: "RS256", kid: "relay-test" })
       .setIssuer(issuer)
       .setAudience(audience)
+      .setIssuedAt()
       .setExpirationTime(exp)
       .setSubject(sub)
       .sign(privateKey);

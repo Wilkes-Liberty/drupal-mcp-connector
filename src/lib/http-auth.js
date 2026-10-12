@@ -5,17 +5,42 @@
  *   - Shared bearer (`makeBearerCheck`) — loopback / stdio-adjacent only.
  *   - OAuth resource server (`createResourceAuthenticator`) — network-facing
  *     HTTPS. JWT via issuer discovery + JWKS, optional RFC 7662 introspection,
- *     and a hot-reloaded revocation file. Caller-supplied identity headers
- *     never become the principal. IdP HTTP (discovery, JWKS, introspection)
- *     aborts after `INBOUND_IDP_TIMEOUT_MS` (30s).
+ *     and a hot-reloaded revocation file. Bearer tokens must carry `exp` and
+ *     `iat`, stay within `auth.maxTokenLifetime`, and use an algorithm on
+ *     `auth.algorithms`. The same time checks apply to introspection results;
+ *     a missing `iss` is refused when an issuer is configured. Caller-supplied
+ *     identity headers never become the principal. IdP HTTP (discovery, JWKS,
+ *     introspection) aborts after `INBOUND_IDP_TIMEOUT_MS` (30s).
  */
 
 import { timingSafeEqual } from "crypto";
 import { readFileSync, statSync, writeFileSync } from "fs";
-import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
+import { createRemoteJWKSet, customFetch, decodeProtectedHeader, jwtVerify } from "jose";
 
 /** Inbound IdP HTTP timeout. Matches Drupal/Drush outbound HTTP. */
 export const INBOUND_IDP_TIMEOUT_MS = 30_000;
+
+/**
+ * Default maximum bearer lifetime in seconds (`exp - iat`). One hour is
+ * conservative for access tokens; operators with longer-lived issuers raise
+ * `auth.maxTokenLifetime`.
+ */
+export const DEFAULT_MAX_TOKEN_LIFETIME = 3600;
+
+/**
+ * Default JWS algorithms accepted on the hosted resource-server path.
+ * Asymmetric only — `none` and HMAC (`HS*`) are excluded so a public JWKS
+ * key cannot be reused as a shared secret. Operators pin a narrower list
+ * with `auth.algorithms` when the issuer uses a subset.
+ */
+export const DEFAULT_TOKEN_ALGORITHMS = Object.freeze([
+  "RS256", "RS384", "RS512",
+  "ES256", "ES384", "ES512",
+  "PS256", "PS384", "PS512",
+  "EdDSA",
+]);
+
+const FORBIDDEN_TOKEN_ALGS = new Set(["none"]);
 
 /**
  * Attach the inbound IdP abort timeout. A caller `signal` wins.
@@ -274,6 +299,104 @@ export function allowAuth(identity) {
   return { ok: true, identity };
 }
 
+/**
+ * Normalize a configured maximum token lifetime to a positive integer.
+ * Invalid or missing values fall back to {@link DEFAULT_MAX_TOKEN_LIFETIME}.
+ * @param {unknown} value
+ * @returns {number}
+ */
+export function normalizeMaxTokenLifetime(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_MAX_TOKEN_LIFETIME;
+  return Math.floor(n);
+}
+
+/**
+ * Normalize a configured JWS algorithm allowlist. `none` is stripped even
+ * when an operator names it. An empty list after filtering uses the default.
+ * @param {unknown} value
+ * @returns {string[]}
+ */
+export function normalizeTokenAlgorithms(value) {
+  let list;
+  if (Array.isArray(value)) {
+    list = value.map(String);
+  } else if (typeof value === "string" && value.trim()) {
+    list = value.split(/[\s,]+/).filter(Boolean);
+  } else {
+    list = [...DEFAULT_TOKEN_ALGORITHMS];
+  }
+  const allowed = list.filter((alg) => alg && !FORBIDDEN_TOKEN_ALGS.has(alg.toLowerCase()));
+  return allowed.length ? allowed : [...DEFAULT_TOKEN_ALGORITHMS];
+}
+
+/**
+ * Shared `exp` / `iat` / lifetime checks for JWT claims and RFC 7662
+ * introspection results. Missing `exp` or `iat`, an expired `exp`, a
+ * not-yet-valid `nbf`, a future `iat` (beyond `clockTolerance`),
+ * `exp - iat` above the cap, or an `iat` older than the cap are refused.
+ * @param {object} claims
+ * @param {object} [options]
+ * @param {number} [options.maxTokenLifetime]
+ * @param {number} [options.clockTolerance]
+ * @param {number} [options.now]
+ * @returns {{ok: true}|{ok: false, reason: string}}
+ */
+export function validateBearerTimeClaims(claims, {
+  maxTokenLifetime = DEFAULT_MAX_TOKEN_LIFETIME,
+  clockTolerance = 5,
+  now = Math.floor(Date.now() / 1000),
+} = {}) {
+  if (typeof claims?.exp !== "number" || !Number.isFinite(claims.exp)) {
+    return { ok: false, reason: "Token is missing exp" };
+  }
+  if (typeof claims?.iat !== "number" || !Number.isFinite(claims.iat)) {
+    return { ok: false, reason: "Token is missing iat" };
+  }
+  // `exp` is an exclusive boundary (RFC 7519 §4.1.4), matching jose.
+  if (claims.exp <= now - clockTolerance) {
+    return { ok: false, reason: "Token has expired" };
+  }
+  if (typeof claims.nbf === "number" && claims.nbf > now + clockTolerance) {
+    return { ok: false, reason: "Token is not yet valid" };
+  }
+  if (claims.iat > now + clockTolerance) {
+    return { ok: false, reason: "Token iat is in the future" };
+  }
+  if (claims.exp - claims.iat > maxTokenLifetime) {
+    return { ok: false, reason: "Token lifetime exceeds maximum" };
+  }
+  if (now - claims.iat > maxTokenLifetime + clockTolerance) {
+    return { ok: false, reason: "Token is too old" };
+  }
+  return { ok: true };
+}
+
+/**
+ * Refuse a compact JWS whose protected header names an algorithm outside
+ * the allowlist before any introspection fallback, so a token the local
+ * verifier rejected for its algorithm cannot be re-admitted as "opaque".
+ * A token that is not a decodable three-segment JWS is left to
+ * introspection.
+ * @param {string} token
+ * @param {string[]} allowedAlgs
+ * @returns {?string} Refusal reason, or null when the token may proceed.
+ */
+export function compactJwtAlgorithmRefusal(token, allowedAlgs) {
+  if (typeof token !== "string" || token.split(".").length !== 3) return null;
+  let header;
+  try {
+    header = decodeProtectedHeader(token);
+  } catch {
+    return null;
+  }
+  if (!header || typeof header !== "object") return null;
+  if (typeof header.alg !== "string" || !allowedAlgs.includes(header.alg)) {
+    return "Token algorithm is not allowed";
+  }
+  return null;
+}
+
 function audienceMatches(aud, expected) {
   if (aud === undefined || aud === null) return false;
   if (Array.isArray(aud)) return aud.includes(expected);
@@ -482,6 +605,17 @@ export async function introspectToken(token, {
  * headers are deliberately unused. Identity comes only from the validated token.
  *
  * @param {object} options
+ * @param {string} [options.issuer]
+ * @param {string} [options.audience]
+ * @param {string[]} [options.requiredScopes]
+ * @param {string} [options.resourceMetadataUrl]
+ * @param {import("jose").JWTVerifyGetKey} [options.jwks]
+ * @param {(token: string) => Promise<object>} [options.verifyJwt]
+ * @param {(token: string) => Promise<object|null>} [options.introspect]
+ * @param {{isRevoked: Function}} [options.revocationStore]
+ * @param {number} [options.clockTolerance]
+ * @param {number} [options.maxTokenLifetime] Seconds; default {@link DEFAULT_MAX_TOKEN_LIFETIME}.
+ * @param {string[]} [options.algorithms] JWS allowlist; default {@link DEFAULT_TOKEN_ALGORITHMS}.
  * @returns {(authorizationHeader: unknown, requestHeaders?: object) => Promise<object>}
  */
 export function createResourceAuthenticator({
@@ -494,9 +628,13 @@ export function createResourceAuthenticator({
   introspect,
   revocationStore,
   clockTolerance = 5,
+  maxTokenLifetime = DEFAULT_MAX_TOKEN_LIFETIME,
+  algorithms = DEFAULT_TOKEN_ALGORITHMS,
 }) {
   const fail = (status, extra) => denyAuth(status, { resourceMetadata: resourceMetadataUrl, ...extra });
   const expectedIssuer = issuer ? normalizeIssuer(issuer) : "";
+  const lifetimeCap = normalizeMaxTokenLifetime(maxTokenLifetime);
+  const allowedAlgs = normalizeTokenAlgorithms(algorithms);
 
   async function claimsFromJwt(token) {
     if (verifyJwt) return verifyJwt(token);
@@ -505,6 +643,9 @@ export function createResourceAuthenticator({
       issuer: expectedIssuer ? [expectedIssuer, `${expectedIssuer}/`] : undefined,
       audience,
       clockTolerance,
+      requiredClaims: ["exp", "iat"],
+      maxTokenAge: lifetimeCap,
+      algorithms: allowedAlgs,
     });
     return payload;
   }
@@ -529,6 +670,10 @@ export function createResourceAuthenticator({
       if (!introspect) {
         return fail(401, { error: "invalid_token", errorDescription: "Token validation failed" });
       }
+      const algorithmRefusal = compactJwtAlgorithmRefusal(token, allowedAlgs);
+      if (algorithmRefusal) {
+        return fail(401, { error: "invalid_token", errorDescription: algorithmRefusal });
+      }
       try {
         claims = await introspect(token);
       } catch {
@@ -549,7 +694,18 @@ export function createResourceAuthenticator({
       }
     }
 
-    if (expectedIssuer && claims.iss && normalizeIssuer(claims.iss) !== expectedIssuer) {
+    const timeCheck = validateBearerTimeClaims(claims, {
+      maxTokenLifetime: lifetimeCap,
+      clockTolerance,
+    });
+    if (!timeCheck.ok) {
+      return fail(401, { error: "invalid_token", errorDescription: timeCheck.reason });
+    }
+
+    // Missing iss is refused when an issuer is configured. Audience was
+    // already fail-closed; issuer must be too so an introspection result
+    // cannot bind a token to this resource without naming the AS.
+    if (expectedIssuer && (!claims.iss || normalizeIssuer(claims.iss) !== expectedIssuer)) {
       return fail(401, { error: "invalid_token", errorDescription: "Issuer mismatch" });
     }
     if (audience && !audienceMatches(claims.aud, audience)) {
@@ -666,6 +822,10 @@ export function resolveInboundAuthConfig(cfg = {}, env = process.env) {
     introspectionUrl: env.MCP_INTROSPECTION_URL || auth.introspectionUrl || "",
     introspectionClientIdEnv: auth.introspectionClientIdEnv || "",
     introspectionClientSecretEnv: auth.introspectionClientSecretEnv || "",
+    maxTokenLifetime: normalizeMaxTokenLifetime(
+      env.MCP_MAX_TOKEN_LIFETIME || auth.maxTokenLifetime || DEFAULT_MAX_TOKEN_LIFETIME,
+    ),
+    algorithms: normalizeTokenAlgorithms(env.MCP_TOKEN_ALGORITHMS || auth.algorithms),
   };
 }
 
@@ -728,6 +888,8 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
     jwks,
     introspect,
     revocationStore,
+    maxTokenLifetime: inboundCfg.maxTokenLifetime,
+    algorithms: inboundCfg.algorithms,
   });
 
   return {
