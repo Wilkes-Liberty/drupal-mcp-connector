@@ -23,8 +23,8 @@ export const HTTP_AUDIT_CODES = Object.freeze([
 
 const CODE_SET = new Set(HTTP_AUDIT_CODES);
 
-const ATTACHED = Symbol.for("drupal-mcp.http-audit.attached");
-const WRITTEN = Symbol.for("drupal-mcp.http-audit.written");
+const ATTACHED = new WeakSet();
+const WRITTEN = new WeakSet();
 
 const FORBIDDEN_ROW_KEYS = new Set([
   "authorization",
@@ -317,13 +317,13 @@ export function resolveOriginCheck(checkOrigin = null, allowedOrigins = null) {
  */
 export function attachHttpAudit(req, res, writer, context = {}) {
   if (!writer || typeof writer.write !== "function") return;
-  if (!res || res[ATTACHED]) return;
-  res[ATTACHED] = true;
+  if (!res || ATTACHED.has(res)) return;
+  ATTACHED.add(res);
   const requestId = resolveRequestId(req);
 
   const writeOnce = () => {
-    if (res[WRITTEN]) return;
-    res[WRITTEN] = true;
+    if (WRITTEN.has(res)) return;
+    WRITTEN.add(res);
     try {
       writer.write(buildHttpAuditRow(req, res, { requestId, ...context }), req);
     } catch {
@@ -334,8 +334,11 @@ export function attachHttpAudit(req, res, writer, context = {}) {
   if (typeof res.on === "function") {
     res.on("finish", writeOnce);
     res.on("close", writeOnce);
+    return;
   }
 
+  // Test doubles without EventEmitter: wrap the terminal methods so a row
+  // still lands. Production ServerResponse always exposes `on`.
   const origEnd = res.end;
   if (typeof origEnd === "function") {
     res.end = function auditedEnd(...args) {

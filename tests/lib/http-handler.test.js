@@ -11,6 +11,10 @@ function mockRes() {
     headersSent: false,
     destroyed: false,
     destroyError: null,
+    // Presence of `on` keeps the audit finish hook from wrapping the spies
+    // below (DEV-858). Real ServerResponse emits finish/close; these tests
+    // assert writeHead/end/destroy identity.
+    on: vi.fn(),
   };
   response.writeHead = vi.fn(function writeHead(status, headers) {
     this.statusCode = status;
