@@ -47,9 +47,34 @@ const TOOL_DEFINITIONS = [
  * Dependency-swap mutants: each removes exactly one guard from the handler's
  * dependencies. Keyed by the case id whose mutant it is.
  */
+/**
+ * Pre-DEV-845 inbound-mode decision: allowUnauth wins on any bind host.
+ * Used only as the T1n mutant (dependency swap in this file).
+ *
+ * @param {object} options
+ * @returns {{mode: string, reason?: string}}
+ */
+function failOpenInboundAuthMode({
+  bindHost,
+  allowUnauth = false,
+  sharedToken = "",
+  resourceServer = null,
+}) {
+  const isLoopback = bindHost === "127.0.0.1" || bindHost === "::1" || bindHost === "localhost";
+  const hasRs = Boolean(resourceServer?.issuer && resourceServer?.audience);
+  if (hasRs) return { mode: "resource_server" };
+  if (allowUnauth) return { mode: "unauthenticated" };
+  if (isLoopback) return sharedToken ? { mode: "shared_bearer" } : { mode: "unauthenticated" };
+  return { mode: "fatal", reason: "Network-facing HTTPS requires an inbound OAuth resource server." };
+}
+
 const MUTANTS = {
-  // T1: the handler defaults. Every request now dispatches under null identity.
-  T1: () => ({ authenticate: null, checkAuth: () => true }),
+  // T1: drop the resource-server authenticator and allow a null principal
+  // (the DEV-845 guard). Every request now dispatches under local operator.
+  T1: () => ({ authenticate: null, checkAuth: () => true, allowLocalOperator: true }),
+  // T1n: restore the pre-DEV-845 startup decision (allow-unauthenticated
+  // on a non-loopback bind is not fatal).
+  T1n: () => ({ resolveInboundAuthMode: failOpenInboundAuthMode }),
   // T7: an authenticator that rejects everything (the over-blocking check).
   T7: () => ({
     authenticate: async () => httpAuth.denyAuth(401, {
@@ -58,6 +83,20 @@ const MUTANTS = {
     }),
   }),
 };
+
+/**
+ * Inbound-mode resolver for T1n. The green run uses the real function; the
+ * mutant run uses the fail-open swap from {@link MUTANTS}.
+ *
+ * @param {object} options
+ * @param {string|null} [mutant]
+ * @returns {{mode: string, reason?: string}}
+ */
+export function inboundAuthModeForEval(options, mutant = null) {
+  const swap = mutant && MUTANTS[mutant] ? MUTANTS[mutant]() : {};
+  const resolve = swap.resolveInboundAuthMode ?? httpAuth.resolveInboundAuthMode;
+  return resolve(options);
+}
 
 /** @returns {string[]} case ids that have a dependency-swap mutant */
 export const mutantIds = () => Object.keys(MUTANTS);

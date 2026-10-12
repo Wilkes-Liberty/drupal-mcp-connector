@@ -45,6 +45,7 @@ import {
   resolveInboundAuthMode,
   inboundAuthDeprecationWarning,
   createInboundHttpsAuth,
+  isLoopbackBind,
 } from "./lib/http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "./lib/http-handler.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
@@ -320,7 +321,7 @@ if (transport === "stdio") {
   // Unauthenticated plain HTTP must never bind beyond loopback. A non-loopback
   // bind is allowed only alongside TLS, via an explicit MCP_BIND_HOST opt-in.
   const bindHost = hasTls ? (process.env.MCP_BIND_HOST || "0.0.0.0") : "127.0.0.1";
-  const isLoopbackBind = bindHost === "127.0.0.1" || bindHost === "::1" || bindHost === "localhost";
+  const loopbackBind = isLoopbackBind(bindHost);
 
   const inboundCfg = resolveInboundAuthConfig(loadConfig());
   const inboundMode = resolveInboundAuthMode({
@@ -368,7 +369,7 @@ if (transport === "stdio") {
   // also rate-limit at the reverse proxy.
   const rateWindowSec = Number(process.env.MCP_RATE_WINDOW_SEC || 60);
   const rateLimitEnv  = process.env.MCP_RATE_LIMIT;
-  const rateLimitDefault = (hasTls && !isLoopbackBind) ? 120 : 0;
+  const rateLimitDefault = (hasTls && !loopbackBind) ? 120 : 0;
   const rateLimit = rateLimitEnv === undefined || rateLimitEnv === ""
     ? rateLimitDefault
     : Number(rateLimitEnv);
@@ -397,6 +398,9 @@ if (transport === "stdio") {
     checkAuth,
     authenticate,
     protectedResource,
+    allowLocalOperator: loopbackBind && (
+      inboundMode.mode === "unauthenticated" || inboundMode.mode === "shared_bearer"
+    ),
     modernHandler,
     legacyHandler,
     toolCount: allDefinitions.length,

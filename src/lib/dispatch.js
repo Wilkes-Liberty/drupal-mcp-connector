@@ -19,7 +19,7 @@ import { ensureTextFormatContext, toolNeedsTextFormatContext } from "./text-form
 import { assertSourceGovernance, GovernanceError } from "./governance.js";
 import {
   assertPrincipalEntitlement, callerTargetHints, DIAGNOSTIC_TOOLS,
-  getRequestIdentity, principalHasScope, resolveAuthoritativeTarget,
+  getRequestIdentity, getRequestSurface, principalHasScope, resolveAuthoritativeTarget,
 } from "./principal.js";
 import { assertExplicitSiteForWrite, withResolvedTarget } from "./site-target.js";
 import { buildDataFlowContext, consumeBudgetIfEnforced, runWithDataFlow } from "./data-flow.js";
@@ -222,6 +222,9 @@ export async function callTool(name, args, context = {}) {
   }
 
   try {
+    if (getRequestSurface() === "network" && getRequestIdentity() === null) {
+      throw new SecurityError("Unauthenticated network request.");
+    }
     const ctx = { ...context };
     const result = await securityMiddleware(name, args ?? {}, handler, ctx);
     return toolResult(withResolvedTarget(result, ctx.resolvedTarget));

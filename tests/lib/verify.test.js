@@ -108,6 +108,20 @@ describe("verifyStatic — inbound_auth", () => {
     expect(statusOf(run(secureConfig()), "inbound_auth")).toBe("pass");
   });
 
+  it("fails network-facing HTTPS that sets MCP_ALLOW_UNAUTHENTICATED (DEV-845)", () => {
+    const result = run(secureConfig(), {
+      env: {
+        MCP_TRANSPORT: "https",
+        MCP_BIND_HOST: "0.0.0.0",
+        MCP_ALLOW_UNAUTHENTICATED: "1",
+      },
+    });
+    expect(statusOf(result, "inbound_auth")).toBe("fail");
+    expect(detailOf(result, "inbound_auth").join(" ")).toMatch(
+      /non-loopback bind with MCP_ALLOW_UNAUTHENTICATED is not permitted/,
+    );
+  });
+
   it("fails network-facing HTTPS that still relies on MCP_AUTH_TOKEN", () => {
     const result = run(secureConfig(), {
       env: { MCP_TRANSPORT: "https", MCP_BIND_HOST: "0.0.0.0", MCP_AUTH_TOKEN: "shared-secret" },

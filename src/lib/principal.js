@@ -3,9 +3,10 @@
  *
  * HTTPS resource-server requests carry a validated JWT identity. Discovery
  * and invocation are filtered by that identity's server-resolved grants.
- * Stdio, loopback shared-bearer, and unauthenticated loopback have no
- * inbound principal and keep the existing site + source-governance filter
- * so a local operator is not hollowed out.
+ * Stdio has no inbound principal (null) and keeps the existing site +
+ * source-governance filter so a local operator is not hollowed out.
+ * Network listeners must attach a resolved identity before dispatch
+ * (DEV-845); a leftover null on a network surface discovers nothing.
  *
  * Caller-supplied site, environment, tenant, target, actor, delegator,
  * policy, digest, or scope fields are hints. They never become authority.
@@ -20,6 +21,24 @@ import { resolveSecurityConfig, SecurityError } from "./security.js";
 import { lookupWorkflow } from "./workflow-prompts.js";
 
 const identityStore = new AsyncLocalStorage();
+
+/**
+ * Explicit local-operator principal for loopback HTTP (shared-bearer or
+ * unauthenticated). Distinct from `null`, which is stdio — and, on a
+ * network surface, an unresolved principal that must not dispatch.
+ */
+export const LOCAL_OPERATOR = Object.freeze({ localOperator: true });
+
+/**
+ * True for stdio (`null`) and for the explicit loopback local-operator
+ * identity. A JWT principal is never a local operator.
+ *
+ * @param {object|null|undefined} identity
+ * @returns {boolean}
+ */
+export function isLocalOperator(identity) {
+  return identity === null || identity === undefined || identity.localOperator === true;
+}
 
 /** Caller fields that look like a target but are never authority. */
 export const TARGET_HINT_KEYS = Object.freeze(["site", "environment", "tenant", "target"]);
@@ -76,21 +95,49 @@ const READ_WORKFLOW_PROMPTS = new Set([
 ]);
 
 /**
- * Run `fn` with `identity` as the request principal (null = local operator).
+ * Run `fn` with `identity` as the request principal (null = local operator
+ * on stdio). Pass `{ surface: "network" }` on every non-stdio listener so
+ * an unresolved principal cannot discover or invoke tools (DEV-845).
+ *
  * @param {object|null} identity
  * @param {Function} fn
+ * @param {{surface?: "network"|null}} [options]
  * @returns {*}
  */
-export function runWithIdentity(identity, fn) {
-  return identityStore.run({ identity: identity ?? null }, fn);
+export function runWithIdentity(identity, fn, options = {}) {
+  return identityStore.run({
+    identity: identity ?? null,
+    surface: options.surface ?? null,
+  }, fn);
 }
 
 /**
- * The inbound identity for the current request, or null on stdio / loopback.
+ * The inbound identity for the current request, or null on stdio.
  * @returns {object|null}
  */
 export function getRequestIdentity() {
   return identityStore.getStore()?.identity ?? null;
+}
+
+/**
+ * Listener class for the current request. `network` is HTTP / relay / any
+ * non-stdio surface. Unset means stdio (or a unit test outside a listener).
+ *
+ * @returns {"network"|null}
+ */
+export function getRequestSurface() {
+  return identityStore.getStore()?.surface ?? null;
+}
+
+/**
+ * An unresolved principal on a network surface discovers nothing. Stdio
+ * (`null` identity, no surface) stays the local operator.
+ *
+ * @param {object|null} identity
+ * @returns {boolean}
+ */
+function isUnresolvedNetworkPrincipal(identity) {
+  return identity === null && getRequestSurface() === "network";
 }
 
 /**
@@ -273,7 +320,7 @@ export function resolvePolicy({ identity = null, policies = null } = {}) {
  * @returns {string[]}
  */
 export function resolveGrantedSiteNames(identity, configuredNames, grants) {
-  if (!identity) return [...configuredNames];
+  if (isLocalOperator(identity)) return [...configuredNames];
   const known = new Set(configuredNames);
   const grantMap = grants === undefined ? getInboundGrants() : grants;
 
@@ -341,7 +388,8 @@ function siteAllowsTool(site, toolName) {
  * @returns {boolean}
  */
 export function principalMayUseTool(toolName, identity, sites, grants) {
-  if (!identity) return true;
+  if (isUnresolvedNetworkPrincipal(identity)) return false;
+  if (isLocalOperator(identity)) return true;
   if (DIAGNOSTIC_TOOLS.has(toolName)) return true;
   if (!principalHasScope(identity, requiredScopeForTool(toolName))) return false;
   const entitled = resolveGrantedSites(identity, sites, grants);
@@ -360,7 +408,8 @@ export function principalMayUseTool(toolName, identity, sites, grants) {
  * @returns {Array<object>}
  */
 export function filterToolsByPrincipal(definitions, sites, identity, grants) {
-  if (!identity) return definitions;
+  if (isUnresolvedNetworkPrincipal(identity)) return [];
+  if (isLocalOperator(identity)) return definitions;
   return definitions.filter((definition) =>
     principalMayUseTool(definition.name, identity, sites, grants));
 }
@@ -403,13 +452,18 @@ export function describeTarget(site, source) {
  * @returns {{sites: string[], targets: Array<{name: string, baseUrl?: string, source: string}>, tenants: Array<{id: string, source: string}>}}
  */
 export function visibleSiteTargets(identity, resolvable, configuredNames, grants) {
-  const granted = identity ? resolveGrantedSites(identity, resolvable, grants) : resolvable;
-  const names = identity
-    ? granted.map((site) => site._name)
-    : [...configuredNames];
+  if (isUnresolvedNetworkPrincipal(identity)) {
+    return { sites: [], targets: [], tenants: [] };
+  }
+  const granted = isLocalOperator(identity)
+    ? resolvable
+    : resolveGrantedSites(identity, resolvable, grants);
+  const names = isLocalOperator(identity)
+    ? [...configuredNames]
+    : granted.map((site) => site._name);
   const byName = new Map(granted.map((site) => [site._name, site]));
-  const source = identity ? "grant" : "config";
-  const tenantId = identity && typeof identity.tenant === "string" && identity.tenant
+  const source = isLocalOperator(identity) ? "config" : "grant";
+  const tenantId = !isLocalOperator(identity) && typeof identity.tenant === "string" && identity.tenant
     ? identity.tenant
     : null;
   return {
@@ -484,7 +538,10 @@ export function assertPrincipalEntitlement({
   grants,
   defaultSite,
 }) {
-  if (!identity) return null;
+  if (isUnresolvedNetworkPrincipal(identity)) {
+    throw new SecurityError("Not entitled to invoke this tool.");
+  }
+  if (isLocalOperator(identity)) return null;
   if (!principalMayUseTool(toolName, identity, sites, grants)) {
     throw new SecurityError(`Not entitled to invoke ${toolName}.`);
   }
@@ -505,7 +562,8 @@ export function assertPrincipalEntitlement({
  * @returns {Array<object>}
  */
 export function filterResourcesByPrincipal(resources, identity, sites, grants) {
-  if (!identity) return resources;
+  if (isUnresolvedNetworkPrincipal(identity)) return [];
+  if (isLocalOperator(identity)) return resources;
   const entitled = resolveGrantedSites(identity, sites, grants);
   const canRead = principalHasScope(identity, "mcp_read") && entitled.length > 0;
   return resources.filter((resource) => {
@@ -521,7 +579,8 @@ export function filterResourcesByPrincipal(resources, identity, sites, grants) {
  * @returns {Array<object>}
  */
 export function filterPromptsByPrincipal(prompts, identity, visibleTools) {
-  if (!identity) return prompts;
+  if (isUnresolvedNetworkPrincipal(identity)) return [];
+  if (isLocalOperator(identity)) return prompts;
   const visible = new Set((visibleTools ?? []).map((tool) => tool.name));
   return prompts.filter((prompt) => {
     const wf = lookupWorkflow(prompt.name);

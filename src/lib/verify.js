@@ -84,8 +84,8 @@ export const RESIDUALS = [
       "Loopback MCP_AUTH_TOKEN (inbound mode shared_bearer) still ships. It is " +
       "deprecated as of this release and will be removed in v4.0.0 (#231). " +
       "Network-facing product paths already refuse it. MCP_ALLOW_UNAUTHENTICATED " +
-      "is a separate named residual: an explicit trusted-proxy opt-in, not a " +
-      "shared credential, and is not retired by #231.",
+      "is a separate named residual: loopback-only, not a shared credential, " +
+      "and is not retired by #231. A non-loopback bind with that flag is fatal (DEV-845).",
   },
 ];
 

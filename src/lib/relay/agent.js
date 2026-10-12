@@ -129,7 +129,9 @@ export function createRelayAgent({
         headers,
         ...(body !== undefined ? { body } : {}),
       });
-      response = await runWithIdentity(frame.identity, () => handler.fetch(request));
+      response = await runWithIdentity(frame.identity, () => handler.fetch(request), {
+        surface: "network",
+      });
     } catch {
       writeFrame(activeSocket, {
         type: "mcp-response",

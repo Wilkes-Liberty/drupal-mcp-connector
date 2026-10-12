@@ -11,7 +11,43 @@ import { randomUUID } from "node:crypto";
 import { isInitializeRequest, isJsonContentType, isLegacyRequest } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport, toWebRequest } from "@modelcontextprotocol/node";
 import { formatWwwAuthenticate } from "./http-auth.js";
-import { runWithIdentity } from "./principal.js";
+import { LOCAL_OPERATOR, runWithIdentity } from "./principal.js";
+
+/**
+ * Routes that may be reached without a resolved identity. Health is a mesh
+ * liveness probe and must not expose tool data. RFC 9728 protected-resource
+ * metadata must stay reachable so a client can discover how to authenticate.
+ * Everything else fails closed with 401 (DEV-845).
+ */
+export const UNAUTHENTICATED_ROUTES = Object.freeze([
+  Object.freeze({ method: "GET", path: "/health" }),
+  Object.freeze({ method: "GET", path: "/.well-known/oauth-protected-resource" }),
+]);
+
+/**
+ * Whether this request may proceed without a resolved identity.
+ *
+ * @param {string} method
+ * @param {string} url Path or full URL (query string is ignored).
+ * @returns {boolean}
+ */
+export function isUnauthenticatedRoute(method, url) {
+  const path = String(url || "").split("?")[0];
+  if (method !== "GET") return false;
+  if (path === "/health") return true;
+  return path === "/.well-known/oauth-protected-resource"
+    || path.startsWith("/.well-known/oauth-protected-resource/");
+}
+
+function refuseUnresolvedIdentity(res, resourceMetadataUrl) {
+  res.writeHead(401, {
+    "WWW-Authenticate": formatWwwAuthenticate({
+      error: "invalid_token",
+      errorDescription: "Bearer token required",
+      resourceMetadata: resourceMetadataUrl,
+    }),
+  }).end("Unauthorized");
+}
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
@@ -141,15 +177,26 @@ export function createLegacySessionHandler({
  *   - `POST /mcp` — rate- and bearer-gated, bounded/body-parsed once, then
  *     classified into exactly one modern-stateless or legacy-sessionful arm.
  *   - `GET|DELETE /mcp` — rate- and bearer-gated legacy session operations.
- *   - `GET /health` — unauthenticated liveness probe (`{status, tools}`).
- *   - everything else — 404.
+ *   - `GET /health` — unauthenticated liveness probe (`{status: "ok"}`).
+ *     No tool catalog or count (DEV-845).
+ *   - `GET /.well-known/oauth-protected-resource[/…]` — RFC 9728 metadata.
+ *   - everything else — 401 without a resolved identity, 404 after auth.
+ *
+ * A request with no resolved identity is refused before any handler, Drupal
+ * call, or budget charge. `allowLocalOperator` is the loopback exception
+ * (shared-bearer / unauthenticated); it attaches {@link LOCAL_OPERATOR}
+ * rather than dispatching as `null`.
  *
  * @param {object} deps
  * @param {(authHeader: any) => boolean} [deps.checkAuth] Shared-bearer predicate (loopback).
  * @param {(req: import("http").IncomingMessage) => Promise<object>} [deps.authenticate]
  *   Resource-server authenticator. When set, it replaces `checkAuth`.
+ * @param {boolean} [deps.allowLocalOperator=false] Loopback shared-bearer /
+ *   unauthenticated only. After a successful check, attach the local-operator
+ *   identity. Default false: missing identity is 401.
  * @param {object|null} [deps.protectedResource] RFC 9728 metadata served unauthenticated.
- * @param {number} deps.toolCount Tool count reported by /health.
+ * @param {number} [deps.toolCount] Ignored; retained so existing call sites
+ *   keep compiling. `/health` no longer exposes a tool count.
  * @param {(req: object, res: object, body?: unknown) => Promise<void>} deps.modernHandler
  * @param {(req: object, res: object, body?: unknown) => Promise<void>} deps.legacyHandler
  * @param {?{check: (key: string) => {allowed: boolean, retryAfterSec: number}}} [deps.rateLimiter]
@@ -165,8 +212,9 @@ export function createLegacySessionHandler({
 export function createMcpRequestHandler({
   checkAuth = () => true,
   authenticate = null,
+  allowLocalOperator = false,
   protectedResource = null,
-  toolCount,
+  toolCount: _toolCount,
   modernHandler = null,
   legacyHandler = null,
   rateLimiter = null,
@@ -202,6 +250,10 @@ export function createMcpRequestHandler({
         res.writeHead(result.status, result.headers).end(result.body);
         return false;
       }
+      if (!result.identity) {
+        refuseUnresolvedIdentity(res);
+        return false;
+      }
       req.mcpIdentity = result.identity;
       return true;
     }
@@ -209,16 +261,30 @@ export function createMcpRequestHandler({
       res.writeHead(401, { "WWW-Authenticate": "Bearer" }).end("Unauthorized");
       return false;
     }
+    if (allowLocalOperator) {
+      req.mcpIdentity = LOCAL_OPERATOR;
+      return true;
+    }
+    if (!req.mcpIdentity) {
+      refuseUnresolvedIdentity(res);
+      return false;
+    }
     return true;
+  }
+
+  function dispatchWithIdentity(req, fn) {
+    return runWithIdentity(req.mcpIdentity, fn, { surface: "network" });
   }
 
   return async function handle(req, res) {
     const path = requestPath(req);
-    if (
-      req.method === "GET"
-      && (path === "/.well-known/oauth-protected-resource"
-        || path.startsWith("/.well-known/oauth-protected-resource/"))
-    ) {
+
+    if (isUnauthenticatedRoute(req.method, path)) {
+      if (path === "/health") {
+        res.writeHead(200, { "Content-Type": "application/json" })
+          .end(JSON.stringify({ status: "ok" }));
+        return;
+      }
       if (!protectedResource) {
         res.writeHead(404).end("Not found");
         return;
@@ -228,30 +294,28 @@ export function createMcpRequestHandler({
       return;
     }
 
-    if (req.url === "/mcp" && ["POST", "GET", "DELETE"].includes(req.method)) {
+    const isMcp = path === "/mcp" && ["POST", "GET", "DELETE"].includes(req.method);
+    if (isMcp && rateLimiter) {
       // Rate limit BEFORE auth so repeated bad-token attempts are throttled too.
-      if (rateLimiter) {
-        const verdict = rateLimiter.check(clientKey(req));
-        if (!verdict.allowed) {
-          res.writeHead(429, { "Retry-After": String(verdict.retryAfterSec) }).end("Too Many Requests");
-          return;
-        }
+      const verdict = rateLimiter.check(clientKey(req));
+      if (!verdict.allowed) {
+        res.writeHead(429, { "Retry-After": String(verdict.retryAfterSec) }).end("Too Many Requests");
+        return;
       }
-      // Auth gate: only the /mcp endpoint requires a token; /health and
-      // protected-resource metadata stay open.
-      if (!await gateAuth(req, res)) return;
     }
 
-    if (req.url === "/mcp" && (req.method === "GET" || req.method === "DELETE")) {
+    if (!await gateAuth(req, res)) return;
+
+    if (path === "/mcp" && (req.method === "GET" || req.method === "DELETE")) {
       try {
-        await runWithIdentity(req.mcpIdentity ?? null, () => legacyHandler(req, res));
+        await dispatchWithIdentity(req, () => legacyHandler(req, res));
       } catch (error) {
         respondAfterFailure(res, error, onError, "legacy-dispatch");
       }
       return;
     }
 
-    if (req.method === "POST" && req.url === "/mcp") {
+    if (req.method === "POST" && path === "/mcp") {
       if (!isJsonContentType(req.headers["content-type"])) {
         res.writeHead(415).end("Content-Type must be application/json");
         return;
@@ -265,16 +329,10 @@ export function createMcpRequestHandler({
         const legacy = await isLegacyRequestFn(request, body);
         const selectedHandler = legacy ? legacyHandler : modernHandler;
         stage = legacy ? "legacy-dispatch" : "modern-dispatch";
-        await runWithIdentity(req.mcpIdentity ?? null, () => selectedHandler(req, res, body));
+        await dispatchWithIdentity(req, () => selectedHandler(req, res, body));
       } catch (error) {
         respondAfterFailure(res, error, onError, stage);
       }
-      return;
-    }
-
-    if (req.url === "/health") {
-      res.writeHead(200, { "Content-Type": "application/json" })
-        .end(JSON.stringify({ status: "ok", tools: toolCount }));
       return;
     }
 

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Network listeners refuse a null principal before dispatch (DEV-845).**
+  HTTP `/mcp` (modern and legacy), relay edge routes, and any non-stdio
+  listener return 401 when no identity was resolved. No tool handler,
+  Drupal call, or budget charge runs. `tools/list` for an unresolved
+  principal on a network surface is empty. Stdio is unchanged (null
+  still means local operator).
+- **`MCP_ALLOW_UNAUTHENTICATED` is loopback-only (breaking).** A
+  non-loopback bind with that flag is fatal at startup with the named
+  reason `non-loopback bind with MCP_ALLOW_UNAUTHENTICATED is not
+  permitted`. Operators who used it behind a trusted proxy on
+  `0.0.0.0` must bind loopback or configure `auth.issuer` +
+  `auth.audience`.
+- **Unauthenticated HTTP allowlist is health and RFC 9728 metadata
+  only.** `GET /health` stays open for mesh probes but no longer
+  includes a tool count. `GET /.well-known/oauth-protected-resource`
+  (and `/…` suffixes) stay open so clients can discover how to
+  authenticate. Every other route without a resolved identity is 401.
+
 ### Fixed
 - **Attribute-only library drafts (#442).** A governed draft of a published
   `paragraphs_library_item` or `block_content` with no `relationships`

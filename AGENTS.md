@@ -75,7 +75,8 @@ targeted tests while iterating (`npx vitest run tests/tools/nodes.test.js`).
   moderated node defaults the write to `moderation_state: "draft"`.
 - Uploads: only under `MCP_UPLOAD_ROOT` (or cwd). Non-loopback HTTPS requires
   an inbound OAuth resource server (`auth.issuer` + `auth.audience`).
-  `MCP_AUTH_TOKEN` is loopback-only (or trusted proxy + `MCP_ALLOW_UNAUTHENTICATED=1`).
+  `MCP_AUTH_TOKEN` is loopback-only. `MCP_ALLOW_UNAUTHENTICATED=1` is
+  loopback-only; a non-loopback bind with that flag is fatal.
 - Default security preset is `production-strict` when `security` is omitted.
 - GraphQL tools require `allowGraphql` (development preset only by default).
   When enabled, results still skip entity allowlist/redaction — prefer JSON:API
