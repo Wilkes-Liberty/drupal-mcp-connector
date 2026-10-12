@@ -80,8 +80,9 @@ describe("Cursor plugin scaffold (DEV-751 Brief A)", () => {
     expect(readme).toMatch(/public-https.*gated/s);
   });
 
-  it("lists 3.x as the supported security line, not 0.x", () => {
-    expect(security).toMatch(/\|\s*3\.x\s*\|/);
+  it("lists the current major as the supported security line, not 0.x", () => {
+    const major = pkg.version.split(".")[0];
+    expect(security).toMatch(new RegExp(`\\|\\s*${major}\\.x\\s*\\|`));
     expect(security).not.toMatch(/\|\s*0\.x\s*\|/);
   });
 
