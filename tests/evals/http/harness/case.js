@@ -31,9 +31,9 @@ function record(entry) {
 /** A failed assertion is a verdict; any other error is a broken harness. */
 const isVerdict = (error) => error?.name === "AssertionError";
 
-async function attempt(id, mutant, needsHarness, run) {
+async function attempt(id, mutant, needsHarness, run, harness = {}) {
   const h = needsHarness
-    ? await buildHarness({ mutant })
+    ? await buildHarness({ mutant, ...harness })
     : { mutant, assertions: 0, configDigest: "none", close: async () => {} };
   try {
     await run(h);
@@ -47,15 +47,15 @@ async function attempt(id, mutant, needsHarness, run) {
 }
 
 /**
- * @param {{id: string, title: string, run: (h: object) => Promise<void>, needsHarness?: boolean}} definition
+ * @param {{id: string, title: string, run: (h: object) => Promise<void>, needsHarness?: boolean, harness?: object}} definition
  */
-export function defineCase({ id, title, run, needsHarness = true }) {
+export function defineCase({ id, title, run, needsHarness = true, harness = {} } = {}) {
   const ticket = KNOWN_RED[id];
   const hasMutant = mutantIds().includes(id);
 
   describe(`${id} ${title}`, () => {
     it(`${id} green run`, async () => {
-      const result = await attempt(id, null, needsHarness, run);
+      const result = await attempt(id, null, needsHarness, run, harness);
       const base = { caseId: id, mutant: "none", configDigest: result.h.configDigest, assertions: result.h.assertions };
       if (result.h.assertions === 0) {
         record({ ...base, result: "no-assertions" });
@@ -75,7 +75,7 @@ export function defineCase({ id, title, run, needsHarness = true }) {
 
     if (hasMutant && !ticket) {
       it(`${id} mutant run`, async () => {
-        const result = await attempt(id, id, needsHarness, run);
+        const result = await attempt(id, id, needsHarness, run, harness);
         const base = { caseId: id, mutant: id, configDigest: result.h.configDigest, assertions: result.h.assertions };
         if (result.passed) {
           record({ ...base, result: "survived" });

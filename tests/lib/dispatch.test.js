@@ -213,7 +213,7 @@ describe("securityMiddleware inbound entitlement (#178)", () => {
       "drupal_create_node",
       { site: "gov", title: "T" },
       handler,
-      { identity: reader, sites: granted, grants: null, defaultSite: "gov" },
+      { identity: reader, sites: granted, grants: { "content-agent": ["gov"] }, defaultSite: "gov" },
     )).rejects.toBeInstanceOf(SecurityError);
     expect(handler).not.toHaveBeenCalled();
   });
@@ -222,7 +222,7 @@ describe("securityMiddleware inbound entitlement (#178)", () => {
     const result = await callTool(
       "drupal_create_node",
       { site: "gov", title: "T" },
-      { identity: reader, sites: granted, grants: null, defaultSite: "gov" },
+      { identity: reader, sites: granted, grants: { "content-agent": ["gov"] }, defaultSite: "gov" },
     );
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/Access denied: Not entitled to invoke/);
@@ -253,7 +253,7 @@ describe("securityMiddleware inbound entitlement (#178)", () => {
       "drupal_get_node",
       { site: "gov", id: "1" },
       handler,
-      { identity: reader, sites: granted, grants: null, defaultSite: "gov" },
+      { identity: reader, sites: granted, grants: { "content-agent": ["gov"] }, defaultSite: "gov" },
     );
     expect(out.site).toBe("gov");
     expect(handler).toHaveBeenCalledOnce();
@@ -298,7 +298,7 @@ describe("resolved target echo (#167)", () => {
     const result = await callTool(
       "drupal_mcp_whoami",
       {},
-      { identity: writer, sites: entitled, grants: null, defaultSite: "gov" },
+      { identity: writer, sites: entitled, grants: { "content-agent": ["gov", "open"] }, defaultSite: "gov" },
     );
     const payload = JSON.parse(result.content[0].text);
     expect(payload.target.source).toBe("default");
@@ -423,7 +423,7 @@ describe("securityMiddleware northbound data-flow (#179)", () => {
       "drupal_get_node",
       { site: "gov", id: "1" },
       handler,
-      { identity: reader, sites: [tightGov], grants: null, defaultSite: "gov" },
+      { identity: reader, sites: [tightGov], grants: { "content-agent": ["gov"] }, defaultSite: "gov" },
     );
     expect(handler).toHaveBeenCalledOnce();
   });
@@ -432,7 +432,7 @@ describe("securityMiddleware northbound data-flow (#179)", () => {
     vi.mocked(fetch).mockResolvedValue(ready());
     vi.mocked(getSiteConfig).mockReturnValue(tightGov);
     const handler = vi.fn(async () => ({ secret: "restricted-body" }));
-    const ctx = { identity: reader, sites: [tightGov], grants: null, defaultSite: "gov" };
+    const ctx = { identity: reader, sites: [tightGov], grants: { "content-agent": ["gov"] }, defaultSite: "gov" };
     await expect(
       securityMiddleware("drupal_get_node", { site: "gov", id: "1" }, handler, ctx),
     ).resolves.toEqual({ secret: "restricted-body" });
@@ -452,7 +452,7 @@ describe("securityMiddleware northbound data-flow (#179)", () => {
     vi.mocked(fetch).mockResolvedValue(notReady());
     vi.mocked(getSiteConfig).mockReturnValue(tightGov);
     const handler = vi.fn(async () => ({ ok: true }));
-    const ctx = { identity: reader, sites: [tightGov], grants: null, defaultSite: "gov" };
+    const ctx = { identity: reader, sites: [tightGov], grants: { "content-agent": ["gov"] }, defaultSite: "gov" };
     await expect(
       securityMiddleware("drupal_get_node", { site: "gov", id: "1" }, handler, ctx),
     ).rejects.toBeInstanceOf(GovernanceError);

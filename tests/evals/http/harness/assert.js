@@ -70,6 +70,25 @@ export function expectEqual(h, label, actual, expected) {
 }
 
 /**
+ * Authenticated tools/call that was refused after token verification
+ * (closed entitlement denial). HTTP 200 with an MCP isError envelope;
+ * the text names no site.
+ * @param {object} h
+ * @param {string} label
+ * @param {{status: number, headers: object, text: string}} res
+ * @param {{message?: RegExp}} [expected]
+ */
+export function expectToolDenied(h, label, res, { message = /Access denied:.*[Nn]ot entitled/ } = {}) {
+  check(h, () => expect(res.status, `${label}: status`).toBe(200));
+  check(h, () => expect(res.headers["www-authenticate"], `${label}: no challenge`).toBeUndefined());
+  const body = JSON.parse(res.text);
+  const text = body.result?.content?.[0]?.text ?? "";
+  check(h, () => expect(body.result?.isError, `${label}: isError`).toBe(true));
+  check(h, () => expect(text, `${label}: closed denial`).toMatch(message));
+  check(h, () => expect(text, `${label}: no site name in denial`).not.toMatch(/site-a|site-b/i));
+}
+
+/**
  * Startup refusal: the inbound-mode decision must be fatal with a named reason.
  * @param {object} h
  * @param {string} label
