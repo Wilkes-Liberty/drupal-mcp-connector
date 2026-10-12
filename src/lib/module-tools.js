@@ -4,7 +4,10 @@ import Ajv from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { listServerTools, callServerTool, toolResultData } from "./server-tools.js";
 import { listResolvableSiteConfigs, securityMiddleware } from "./dispatch.js";
-import { getRequestIdentity, principalHasScope, resolveGrantedSites } from "./principal.js";
+import {
+  getRequestIdentity, getRequestSurface, isLocalOperator, principalHasScope,
+  resolveGrantedSites,
+} from "./principal.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
 import { assertSourceGovernance, GovernanceError } from "./governance.js";
 import { DataFlowBudgetError } from "./data-flow.js";
@@ -70,7 +73,8 @@ function principalHasPolicyScope(identity, policy) {
 
 function allowed(entry, identity, sites, grants) {
   const { site, policy } = entry;
-  if (identity && (!principalHasPolicyScope(identity, policy) ||
+  if (identity === null && getRequestSurface() === "network") return false;
+  if (!isLocalOperator(identity) && (!principalHasPolicyScope(identity, policy) ||
       !resolveGrantedSites(identity, sites, grants).some((s) => s._name === site._name))) return false;
   const sec = resolveSecurityConfig(site);
   if (policy.operation !== "read" && sec.readOnly) return false;

@@ -40,6 +40,7 @@ import {
 import { GovernanceError, clearGovernanceCache } from "../../src/lib/governance.js";
 import { SecurityError } from "../../src/lib/security.js";
 import { withResolvedTarget } from "../../src/lib/site-target.js";
+import { LOCAL_OPERATOR } from "../../src/lib/principal.js";
 import {
   HEADER_DECLARED_DESTINATION,
   REASON_CHAINED_ACTION,
@@ -358,6 +359,42 @@ describe("resolved target echo (#167)", () => {
     expect(result.content[0].text).toMatch(/Access denied:.*explicit site/s);
     expect(result.content[0].text).toContain("open");
     expect(result.content[0].text).toContain("https://open.example.com");
+  });
+
+  it("refuses a LOCAL_OPERATOR write that omitted site on a multi-site config", async () => {
+    const handler = vi.fn();
+    await expect(securityMiddleware(
+      "drupal_create_node",
+      { type: "article", title: "T" },
+      handler,
+      { identity: LOCAL_OPERATOR },
+    )).rejects.toThrow(/explicit site/);
+    expect(handler).not.toHaveBeenCalled();
+
+    const result = await callTool(
+      "drupal_create_node",
+      { type: "article", title: "T" },
+      { identity: LOCAL_OPERATOR },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Access denied:.*explicit site/s);
+  });
+
+  it("echoes _target for a LOCAL_OPERATOR read that omitted site", async () => {
+    const handler = vi.fn(async () => ({ total: 0, nodes: [] }));
+    const ctx = { identity: LOCAL_OPERATOR };
+    const raw = await securityMiddleware(
+      "drupal_list_nodes",
+      { type: "article" },
+      handler,
+      ctx,
+    );
+    const payload = withResolvedTarget(raw, ctx.resolvedTarget);
+    expect(payload._target).toEqual({
+      name: "open",
+      baseUrl: "https://open.example.com",
+      source: "default",
+    });
   });
 
   it("refuses a GraphQL mutation that omitted site on a multi-site config", async () => {

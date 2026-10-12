@@ -19,7 +19,8 @@ import { ensureTextFormatContext, toolNeedsTextFormatContext } from "./text-form
 import { assertSourceGovernance, GovernanceError } from "./governance.js";
 import {
   assertPrincipalEntitlement, callerTargetHints, DIAGNOSTIC_TOOLS,
-  getRequestIdentity, getRequestSurface, principalHasScope, resolveAuthoritativeTarget,
+  getRequestIdentity, getRequestSurface, isLocalOperator, principalHasScope,
+  resolveAuthoritativeTarget,
 } from "./principal.js";
 import { assertExplicitSiteForWrite, withResolvedTarget } from "./site-target.js";
 import { buildDataFlowContext, consumeBudgetIfEnforced, runWithDataFlow } from "./data-flow.js";
@@ -63,7 +64,9 @@ function resolveCallTarget(toolName, rawArgs, context = {}) {
   }
 
   const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
-  if (identity) {
+  // LOCAL_OPERATOR is truthy; keep the same hint/default resolution as stdio
+  // `null` so multi-site write guards, `_target`, and data-flow still run.
+  if (!isLocalOperator(identity)) {
     if (context.moduleTool) {
       if (!principalHasScope(identity, context.moduleTool.scope)) {
         throw new SecurityError("Not entitled to invoke this module tool.");

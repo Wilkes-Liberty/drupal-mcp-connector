@@ -15,6 +15,7 @@ vi.mock("../../src/lib/governance.js", async (original) => ({
 import { assertSourceGovernance } from "../../src/lib/governance.js";
 import { createModuleToolRegistry, configuredModuleTools } from "../../src/lib/module-tools.js";
 import { resetDataFlowBudgets } from "../../src/lib/data-flow.js";
+import { LOCAL_OPERATOR, runWithIdentity } from "../../src/lib/principal.js";
 
 const schema = {
   type: "object", required: ["id"], additionalProperties: false,
@@ -151,6 +152,36 @@ describe("module-owned tool registry", () => {
     ]) {
       expect((await registry.call(definition.name, parameters(definition, args), context())).isError).toBe(true);
     }
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("keeps module tools visible for LOCAL_OPERATOR and stdio null", async () => {
+    for (const identity of [LOCAL_OPERATOR, null]) {
+      const definitions = await registry.list({ sites: state.sites, identity });
+      expect(definitions.map((item) => item.name)).toEqual([
+        "drupal_module_read_stage__relationship",
+        "drupal_module_write_stage__asset",
+      ]);
+      const result = await registry.call(
+        definitions[0].name,
+        parameters(definitions[0]),
+        { sites: state.sites, identity },
+      );
+      expect(result.isError).toBe(false);
+      expect(result.structuredContent._target.name).toBe("stage");
+    }
+  });
+
+  it("hides module tools for an unresolved network principal", async () => {
+    const visible = await runWithIdentity(null, () => (
+      registry.list({ sites: state.sites, identity: null })
+    ), { surface: "network" });
+    expect(visible).toEqual([]);
+    const denied = await runWithIdentity(null, () => (
+      registry.call("drupal_module_read_stage__relationship", {}, { sites: state.sites, identity: null })
+    ), { surface: "network" });
+    expect(denied.isError).toBe(true);
+    expect(list).not.toHaveBeenCalled();
     expect(call).not.toHaveBeenCalled();
   });
 
