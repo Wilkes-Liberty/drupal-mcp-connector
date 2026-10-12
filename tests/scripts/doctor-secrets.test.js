@@ -147,3 +147,22 @@ describe.each([["standalone", bin], ["server subcommand", index]])("doctor secre
     expect(receivedSecrets).toEqual([]);
   });
 });
+
+
+describe.each([["default config", false], ["explicit config", true]])("injected doctor environment: %s", (_label, explicit) => {
+  it("uses the injected environment for loaded OAuth secrets", async () => {
+    const config = join(dir, "config", "config.json");
+    fixture(config);
+    const runner = join(dir, "injected.mjs");
+    const doctorUrl = new URL("../../src/lib/doctor.js", import.meta.url).href;
+    writeFileSync(runner, `
+      import { runDoctorCli } from ${JSON.stringify(doctorUrl)};
+      process.exitCode = await runDoctorCli(process.argv.slice(2), { env: {} });
+    `);
+    const result = await run(runner, [...(explicit ? ["--config", config] : []), "--json"]);
+    expectSafe(result);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).ok).toBe(true);
+    expect(receivedSecrets).toEqual([credential]);
+  });
+});
