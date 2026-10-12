@@ -379,7 +379,7 @@ export function attachHttpAudit(req, res, writer, context = {}) {
       try {
         return origEnd.apply(this, args);
       } finally {
-        writeOnce(false);
+        writeOnce();
       }
     };
   }
