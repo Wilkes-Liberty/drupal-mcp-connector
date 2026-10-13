@@ -399,14 +399,17 @@ export function createMcpRequestHandler({
   }
 
   /**
-   * After a 401, count the attempt against the address bucket so a spray of
-   * bad bearers is eventually refused before the next auth call.
+   * After a 401 or 403 from the bearer path, count the attempt against the
+   * address bucket so a spray of bad or under-scoped bearers is eventually
+   * refused before the next introspection. A valid token that lacks a
+   * required scope never reaches the principal gate, so without this it
+   * could trigger unlimited issuer calls.
    *
    * @param {import("http").IncomingMessage} req
    * @param {import("http").ServerResponse} res
    */
   function noteFailedAuthAddress(req, res) {
-    if (!rateLimiter || res.statusCode !== 401) return;
+    if (!rateLimiter || (res.statusCode !== 401 && res.statusCode !== 403)) return;
     if (!parseBearerToken(req.headers.authorization)) return;
     rateLimiter.check(addressKey(req));
   }

@@ -214,6 +214,38 @@ describe("createMcpRequestHandler", () => {
     expect(getRequestIdentity()).toBeNull();
   });
 
+  it("charges the address bucket for an insufficient-scope 403 so under-scoped bearers cannot introspect for free", async () => {
+    const authenticate = vi.fn(async () => ({
+      ok: false,
+      status: 403,
+      headers: { "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"mcp_read\"" },
+      body: "Forbidden",
+    }));
+    const rateLimiter = {
+      peek: vi.fn(() => ({ allowed: true, remaining: 1, retryAfterSec: 0 })),
+      check: vi.fn(() => ({ allowed: true, remaining: 0, retryAfterSec: 0 })),
+    };
+    const modernHandler = vi.fn();
+    const h = createMcpRequestHandler({
+      authenticate,
+      rateLimiter,
+      modernHandler,
+      legacyHandler: vi.fn(),
+      toolCount: 66,
+      toWebRequestFn: vi.fn(),
+    });
+    const res = mockRes();
+    await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { authorization: "Bearer scoped-wrong" }), res);
+    expect(res.statusCode).toBe(403);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    // The bearer-present request was only peeked before auth; the 403 then
+    // consumes a slot, exactly like a 401 does.
+    expect(rateLimiter.peek).toHaveBeenCalledWith("addr:127.0.0.1");
+    expect(rateLimiter.check).toHaveBeenCalledTimes(1);
+    expect(rateLimiter.check).toHaveBeenCalledWith("addr:127.0.0.1");
+    expect(modernHandler).not.toHaveBeenCalled();
+  });
+
   it("returns the authenticator challenge without reading the body", async () => {
     const modernHandler = vi.fn();
     const toWebRequestFn = vi.fn();

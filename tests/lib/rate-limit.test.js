@@ -67,6 +67,21 @@ describe("createRateLimiter", () => {
     expect(rl.size()).toBeLessThanOrEqual(8);
   });
 
+  it("never evicts a live bucket under key spray; a denied key stays denied", () => {
+    const rl = createRateLimiter({ limit: 1, windowMs: 60_000, now: () => 0, maxKeys: 4 });
+    expect(rl.check("victim").allowed).toBe(true);
+    expect(rl.check("victim").allowed).toBe(false);
+    for (let i = 0; i < 50; i += 1) rl.check(`spray-${i}`);
+    expect(rl.size()).toBeLessThanOrEqual(4);
+    // The exhausted bucket survived the spray.
+    expect(rl.check("victim").allowed).toBe(false);
+    expect(rl.peek("victim").allowed).toBe(false);
+    // Keys admitted while the map is full share one fail-closed bucket, so
+    // the spray itself is throttled instead of being granted fresh quota.
+    expect(rl.check("spray-new").allowed).toBe(false);
+    expect(rl.peek("spray-unseen").allowed).toBe(false);
+  });
+
   it("peek reports exhaustion without consuming a slot", () => {
     let t = 0;
     const rl = createRateLimiter({ limit: 1, windowMs: 1000, now: () => t });
@@ -133,7 +148,7 @@ describe("resolveHttpRateLimitOptions", () => {
     expect(off.principalLimit).toBe(0);
   });
 
-  it("shares one limiter instance when both limits are equal and positive", () => {
+  it("keeps address and principal limiters isolated even when the limits are equal", () => {
     const { rateLimiter, principalLimiter } = createHttpRateLimiters({
       addressLimit: 5,
       principalLimit: 5,
@@ -141,8 +156,13 @@ describe("resolveHttpRateLimitOptions", () => {
       maxKeys: 10,
       now: () => 0,
     });
-    expect(rateLimiter).toBe(principalLimiter);
     expect(rateLimiter).not.toBeNull();
+    expect(principalLimiter).not.toBeNull();
+    expect(rateLimiter).not.toBe(principalLimiter);
+    // An address spray fills the address map but cannot touch principal quota.
+    for (let i = 0; i < 100; i += 1) rateLimiter.check(`addr:198.51.100.${i}`);
+    expect(principalLimiter.size()).toBe(0);
+    expect(principalLimiter.check("principal:[\"alice\",\"c\"]").allowed).toBe(true);
   });
 });
 

@@ -34,8 +34,10 @@ export const DEFAULT_RATE_MAX_KEYS = 10_000;
  * @param {number}  [opts.windowMs]  Window length in ms (default 60_000).
  * @param {() => number} [opts.now]  Clock (injectable for tests; default Date.now).
  * @param {number}  [opts.maxKeys]   Hard cap on tracked keys (default 10_000). Expired
- *   buckets are pruned first; if the map is still full, the oldest insertion
- *   is evicted so spray cannot exhaust memory.
+ *   buckets are pruned first; if the map is still full, live quota state is
+ *   never evicted. Keys that arrive while the map is full share one
+ *   fail-closed overflow bucket, so a key spray can neither exhaust memory
+ *   nor reset an already-denied key.
  * @returns {{ check: (key: string) => RateVerdict, peek: (key: string) => RateVerdict, size: () => number }}
  */
 export function createRateLimiter({
@@ -48,6 +50,8 @@ export function createRateLimiter({
   const cap = Number.isInteger(maxKeys) && maxKeys > 0 ? maxKeys : DEFAULT_RATE_MAX_KEYS;
   /** @type {Map<string, {count: number, resetAt: number}>} */
   const buckets = new Map();
+  /** Shared bucket for keys admitted while the map is at capacity. */
+  let overflow = null;
 
   function prune(t) {
     for (const [k, b] of buckets) {
@@ -55,9 +59,17 @@ export function createRateLimiter({
     }
   }
 
-  function evictOldest() {
-    const first = buckets.keys().next().value;
-    if (first !== undefined) buckets.delete(first);
+  function overflowBucket(t) {
+    if (!overflow || t >= overflow.resetAt) overflow = { count: 0, resetAt: t + windowMs };
+    return overflow;
+  }
+
+  function consume(b, t) {
+    b.count += 1;
+    if (b.count > limit) {
+      return { allowed: false, remaining: 0, retryAfterSec: Math.ceil((b.resetAt - t) / 1000) };
+    }
+    return { allowed: true, remaining: limit - b.count, retryAfterSec: 0 };
   }
 
   function verdictFor(b, t) {
@@ -81,7 +93,13 @@ export function createRateLimiter({
      */
     peek(key) {
       if (!enabled) return { allowed: true, remaining: Infinity, retryAfterSec: 0 };
-      return verdictFor(buckets.get(key), now());
+      const t = now();
+      const b = buckets.get(key);
+      if (!b && buckets.size >= cap) {
+        prune(t);
+        if (buckets.size >= cap) return verdictFor(overflow, t);
+      }
+      return verdictFor(b, t);
     },
     check(key) {
       if (!enabled) return { allowed: true, remaining: Infinity, retryAfterSec: 0 };
@@ -90,16 +108,14 @@ export function createRateLimiter({
       if (!b || t >= b.resetAt) {
         if (!b && buckets.size >= cap) {
           prune(t);
-          if (buckets.size >= cap) evictOldest();
+          // Fail closed: a full map never evicts a live bucket (that would let
+          // a denied key spray its way back in). New keys share one bucket.
+          if (buckets.size >= cap) return consume(overflowBucket(t), t);
         }
         b = { count: 0, resetAt: t + windowMs };
         buckets.set(key, b);
       }
-      b.count += 1;
-      if (b.count > limit) {
-        return { allowed: false, remaining: 0, retryAfterSec: Math.ceil((b.resetAt - t) / 1000) };
-      }
-      return { allowed: true, remaining: limit - b.count, retryAfterSec: 0 };
+      return consume(b, t);
     },
     size() { return buckets.size; },
   };
@@ -211,8 +227,9 @@ export function resolveHttpRateLimitOptions({
 
 /**
  * Build the address and principal limiters used by the HTTPS `/mcp` handler.
- * When both limits are positive and equal they share one instance (one
- * `maxKeys` bound). A zero limit is `null` (that gate is off).
+ * The two are always separate instances, each with its own `maxKeys` bound,
+ * so unauthenticated address traffic can never crowd out or reset verified
+ * principal quota. A zero limit is `null` (that gate is off).
  *
  * @param {object} [options] `resolveHttpRateLimitOptions` result, or the
  *   `{ hasTls, loopbackBind, env }` input to that function. `now` is forwarded.
@@ -227,11 +244,8 @@ export function createHttpRateLimiters(options = {}) {
   const address = addressLimit > 0
     ? createRateLimiter({ limit: addressLimit, windowMs, maxKeys, now })
     : null;
-  let principal = null;
-  if (principalLimit > 0) {
-    principal = (address && principalLimit === addressLimit)
-      ? address
-      : createRateLimiter({ limit: principalLimit, windowMs, maxKeys, now });
-  }
+  const principal = principalLimit > 0
+    ? createRateLimiter({ limit: principalLimit, windowMs, maxKeys, now })
+    : null;
   return { rateLimiter: address, principalLimiter: principal };
 }
