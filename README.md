@@ -294,7 +294,7 @@ unbounded range.
 
 1. Pin an exact version in the lockfile (`package-lock.json` or
    `npm-shrinkwrap.json`), or in `package.json` as
-   `"drupal-mcp-connector": "4.0.0"` (use the version you intend to run).
+   `"drupal-mcp-connector": "5.0.0"` (use the version you intend to run).
 2. Confirm the registry checksum before you install.
    `npm view drupal-mcp-connector@5.0.0 dist.integrity` prints the integrity
    npm checks. A lockfile install fails when the tarball does not match.
