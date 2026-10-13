@@ -113,11 +113,13 @@ refusal there is a `Bearer` challenge with `error="invalid_token"` and no
 `GET /.well-known/oauth-protected-resource` (and `/mcp` on that path).
 
 After the token is accepted, tool / resource / prompt / site discovery is
-filtered by that principal (#178). A tool without an explicit
+filtered by that principal (#178). A **built-in** tool without an explicit
 `requiredScopes` row in the deny-by-default scope table is omitted from
 `tools/list` and refused on `tools/call` (DEV-862). Hosted/network startup
-is fatal when any registered tool is missing from the table or has empty
-`requiredScopes`. `auth.grants` (optional) maps inbound `client_id` / `azp`
+is fatal when any registered built-in tool is missing from the table or has
+empty `requiredScopes`. Module-owned tools (`drupal_module_*`) are the one
+exception: they are appended by the module-tool registry and gated by the
+`scope` their binding policy declares, not by a table row. `auth.grants` (optional) maps inbound `client_id` / `azp`
 to configured site names; when the map is present, unknown clients see no
 targets. When the map is omitted, a token with no `sites` / `mcp_sites`
 claim is entitled to no sites (DEV-848). Caller-supplied `site` /
