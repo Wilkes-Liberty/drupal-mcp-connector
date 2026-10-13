@@ -132,6 +132,32 @@ describe("http-transport helpers", () => {
     expect(hostAllowed("[2001:db8::1:8443]", ["[2001:db8::1]:8443"])).toBe(false);
   });
 
+  it("rejects Host values that carry URL syntax instead of host[:port] (DEV-861)", () => {
+    // `URL` would absorb userinfo, query, fragment, and backslashes and hand
+    // back the allowlisted hostname; the raw grammar check refuses them first.
+    for (const bad of [
+      "evil.example@mcp.example.com",
+      "user:pw@mcp.example.com:443",
+      "mcp.example.com?x=1",
+      "mcp.example.com#frag",
+      "mcp.example.com\\x",
+      "mcp.example.com:",
+      "mcp.example.com:443:1",
+      "mcp.example.com:8o80",
+      "[::1",
+      "::1]:3443",
+    ]) {
+      expect(parseHostHeader(bad), bad).toBeNull();
+      expect(hostAllowed(bad, ["mcp.example.com", "::1"]), bad).toBe(false);
+    }
+    // Explicit default ports are kept, not dropped by URL normalization.
+    expect(parseHostHeader("mcp.example.com:80")).toEqual({ hostname: "mcp.example.com", port: "80" });
+    expect(parseHostHeader("mcp.example.com:443")).toEqual({ hostname: "mcp.example.com", port: "443" });
+    expect(parseHostHeader("MCP.Example.COM.")).toEqual({ hostname: "mcp.example.com", port: "" });
+    // IPv6 zone ids are not valid in a Host header and are refused.
+    expect(parseHostHeader("[fe80::1%25eth0]:3443")).toBeNull();
+  });
+
   it("detects JSON-RPC batches, notifications, and responses", () => {
     expect(isJsonRpcBatch([{ jsonrpc: "2.0", id: 1, method: "ping" }])).toBe(true);
     expect(isJsonRpcBatch({ jsonrpc: "2.0", id: 1, method: "ping" })).toBe(false);

@@ -148,15 +148,21 @@ function explicitHostPort(token) {
 }
 
 /**
- * Parse `Host` into hostname + optional port. Rejects absolute URLs and
- * values that are not a host[:port] token.
+ * Parse `Host` into hostname + optional port. The raw grammar is checked
+ * first (reg-name, IPv4, or bracketed IPv6, with an optional decimal port);
+ * `URL` is used only to canonicalize the hostname.
  *
  * @param {unknown} value
  * @returns {?{hostname: string, port: string}}
  */
 export function parseHostHeader(value) {
   const raw = String(value ?? "").trim().toLowerCase();
-  if (!raw || raw.includes("://") || /[\s/]/.test(raw)) return null;
+  // Host is `host [":" port]` only: reg-name, IPv4, or bracketed IPv6
+  // characters plus a port separator. Userinfo, path, query, fragment,
+  // backslash, and zone-id delimiters are URL syntax that `URL` would
+  // silently absorb (`evil.example@mcp.example.com` parses to hostname
+  // `mcp.example.com`), so they are refused before `URL` sees the value.
+  if (!raw || !/^[[\]a-z0-9:._-]+$/.test(raw)) return null;
   const urlHost = raw.startsWith("[") || /^[^:]+:\d+$/.test(raw)
     ? raw
     : (raw.includes(":") ? `[${raw}]` : raw);
