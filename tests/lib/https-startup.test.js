@@ -256,6 +256,15 @@ describe("startHttpsTransport", () => {
     expect(result.server).toBeUndefined();
   });
 
+  it("refuses a non-loopback listenHost so the test override cannot widen exposure", async () => {
+    for (const listenHost of ["0.0.0.0", "::", "192.0.2.10"]) {
+      await expect(baseStartup({ listenHost })).rejects.toThrow(/listenHost must be a loopback address/);
+    }
+    const ok = await baseStartup({ listenHost: "127.0.0.1" });
+    expect(ok.started).toBe(true);
+    await ok.close();
+  });
+
   it("throws at construction when sessionPrincipalKeyFn is supplied but not a function", async () => {
     await expect(baseStartup({ handlerOverrides: { sessionPrincipalKeyFn: null } }))
       .rejects.toThrow(/sessionPrincipalKeyFn must be a function/);

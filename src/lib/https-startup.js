@@ -230,7 +230,7 @@ function createNodeServer({ onRequest, tls, allowHttp, exit, log }) {
  * @param {(code: number, reason?: string) => void} [options.exit]
  * @param {(msg: string) => void} [options.log]
  * @param {string} [options.listenLabel] Extra listen-line detail (tool/resource/prompt counts).
- * @param {string} [options.listenHost] Override the bind address used for `listen` only.
+ * @param {string} [options.listenHost] Loopback-only override of the address used for `listen` (tests); any non-loopback value throws at construction.
  * @returns {Promise<{
  *   started: boolean,
  *   inboundMode: {mode: string, reason?: string},
@@ -269,6 +269,12 @@ export async function startHttpsTransport({
   listenHost,
 } = {}) {
   const pickedOverrides = pickHandlerOverrides(handlerOverrides);
+  // `listenHost` only narrows where the socket binds for tests; every
+  // auth/TLS decision is made against `bindHost`, so it must never widen
+  // exposure beyond loopback.
+  if (listenHost !== undefined && !isLoopbackBind(listenHost)) {
+    throw new Error(`listenHost must be a loopback address (got ${listenHost})`);
+  }
   const inboundMode = resolveInboundAuthModeFn({
     bindHost,
     allowUnauth,
