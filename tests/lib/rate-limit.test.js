@@ -105,6 +105,44 @@ describe("createRateLimiter", () => {
     expect(rl.check("b").allowed).toBe(true);
   });
 
+  it("commits a reserved overflow slot even after prune frees dedicated capacity", () => {
+    let t = 0;
+    const rl = createRateLimiter({ limit: 2, windowMs: 1000, now: () => t, maxKeys: 2 });
+    expect(rl.check("old").allowed).toBe(true);
+    t = 100;
+    expect(rl.check("kept").allowed).toBe(true);
+    const hold = rl.reserve("spray-1");
+    expect(hold.allowed).toBe(true);
+    // `old` expires; `kept` and the overflow window are still live.
+    t = 1000;
+    hold.commit();
+    // Freed dedicated capacity is used by a real charge, not by the commit.
+    expect(rl.check("fresh").allowed).toBe(true);
+    expect(rl.size()).toBeLessThanOrEqual(2);
+    // Overflow already consumed the reserved slot: one more unique key is
+    // admitted, then the shared bucket is exhausted for the window.
+    expect(rl.check("overflow-a").allowed).toBe(true);
+    expect(rl.check("overflow-b").allowed).toBe(false);
+    expect(rl.reserve("overflow-c").allowed).toBe(false);
+    expect(rl.peek("overflow-d").allowed).toBe(false);
+  });
+
+  it("does not pin an unused address bucket after a released reserve", () => {
+    const rl = createRateLimiter({ limit: 1, windowMs: 60_000, now: () => 0, maxKeys: 2 });
+    for (let i = 0; i < 8; i += 1) {
+      const hold = rl.reserve(`good-${i}`);
+      expect(hold.allowed).toBe(true);
+      hold.release();
+    }
+    expect(rl.size()).toBe(0);
+    // Dedicated capacity is still available for real unauthenticated charges.
+    expect(rl.check("bad-1").allowed).toBe(true);
+    expect(rl.check("bad-2").allowed).toBe(true);
+    expect(rl.size()).toBe(2);
+    expect(rl.check("bad-3").allowed).toBe(true);
+    expect(rl.check("bad-4").allowed).toBe(false);
+  });
+
   it("peek reports exhaustion without consuming a slot", () => {
     let t = 0;
     const rl = createRateLimiter({ limit: 1, windowMs: 1000, now: () => t });
