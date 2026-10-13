@@ -161,6 +161,19 @@ export function resolveClientAddress(req, trustedProxies = []) {
 }
 
 /**
+ * Decimal-only CIDR prefix length, or null. `Number("")` is 0 and
+ * `Number("0x10")` / `Number("1e1")` are integers, so a typo such as
+ * `10.0.0.0/` or `10.0.0.0/0x0` must never reach `BlockList` as `/0`.
+ *
+ * @param {string} suffix
+ * @returns {?number}
+ */
+function parsePrefixBits(suffix) {
+  if (!/^\d{1,3}$/.test(suffix)) return null;
+  return Number(suffix);
+}
+
+/**
  * @param {string} spec
  * @returns {boolean}
  */
@@ -168,11 +181,9 @@ function isProxySpec(spec) {
   const slash = spec.lastIndexOf("/");
   if (slash === -1) return isIP(normalizeIp(spec)) !== 0;
   const ip = normalizeIp(spec.slice(0, slash));
-  const suffix = spec.slice(slash + 1);
-  const bits = Number(suffix);
+  const bits = parsePrefixBits(spec.slice(slash + 1));
   const version = isIP(ip);
-  // Number("") is 0; an empty suffix must not become a default route.
-  if (version === 0 || suffix === "" || !Number.isInteger(bits) || bits < 0) return false;
+  if (version === 0 || bits === null) return false;
   return version === 4 ? bits <= 32 : bits <= 128;
 }
 
@@ -191,7 +202,8 @@ function addProxySpec(list, spec) {
       return;
     }
     const ip = normalizeIp(spec.slice(0, slash));
-    const bits = Number(spec.slice(slash + 1));
+    const bits = parsePrefixBits(spec.slice(slash + 1));
+    if (bits === null) return;
     const version = isIP(ip);
     if (version === 4) list.addSubnet(ip, bits, "ipv4");
     else if (version === 6) list.addSubnet(ip, bits, "ipv6");

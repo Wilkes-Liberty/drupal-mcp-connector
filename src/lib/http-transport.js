@@ -135,7 +135,8 @@ export function sessionPrincipalKey(identity) {
   const sub = identity.sub === undefined || identity.sub === null ? "" : String(identity.sub);
   const clientId = identity.clientId === undefined || identity.clientId === null ? "" : String(identity.clientId);
   if (!sub && !clientId) return null;
-  return `${sub}\0${clientId}`;
+  // Structural encoding so a NUL inside a claim cannot collide two principals.
+  return JSON.stringify([sub, clientId]);
 }
 
 /**

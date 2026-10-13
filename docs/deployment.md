@@ -22,12 +22,11 @@ service, port, or token; see [mcp-clients.md](mcp-clients.md).
 | `MCP_ALLOW_UNAUTHENTICATED` | Set to `1` only on loopback. A non-loopback bind with this flag is fatal |
 | `MCP_RATE_LIMIT` | Max `/mcp` requests per window per client address (unauthenticated) and, unless overridden, per verified principal (`0` = off; default 120 on non-loopback TLS) |
 | `MCP_PRINCIPAL_RATE_LIMIT` | Optional post-auth principal limit override |
+| `MCP_RATE_WINDOW_SEC` | Rate-limit window in seconds (default 60); see [security-hardening.md](security-hardening.md) |
 | `MCP_RATE_MAX_KEYS` | Hard cap on tracked limiter keys (default 10000) |
 | `MCP_TRUSTED_PROXIES` | CIDR/IP list allowed to set `X-Forwarded-For` (default: empty — trust none) |
 | `MCP_UPLOAD_ROOT` | Colon-separated absolute dirs allowed for local file uploads (default: process cwd) |
 | `MCP_BIND_HOST` | Restrict the listen interface (with TLS) |
-| `MCP_RATE_LIMIT` / `MCP_PRINCIPAL_RATE_LIMIT` / `MCP_RATE_WINDOW_SEC` / `MCP_RATE_MAX_KEYS` | Optional per-address and per-principal rate limiting (see [security-hardening.md](security-hardening.md)) |
-| `MCP_TRUSTED_PROXIES` | Reverse proxies allowed to set `X-Forwarded-For` (default: trust none) |
 | `MCP_PORT` | Listen port (default 3443) |
 | `MCP_LEGACY_TRANSPORT` | `serve` (default) or `reject` for 2025-era HTTP clients |
 | `MCP_ALLOWED_ORIGINS` | Comma/space-separated Origin allowlist for Streamable HTTP DNS-rebinding protection |

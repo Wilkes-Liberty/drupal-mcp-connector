@@ -120,7 +120,9 @@ export function rateLimitPrincipalKey(identity) {
     ? ""
     : String(identity.clientId);
   if (!sub && !clientId) return null;
-  return `principal:${sub}\0${clientId}`;
+  // Structural encoding: a NUL inside a claim cannot make two principals
+  // share a bucket (`a\0b`/`c` vs `a`/`b\0c`). Same shape as the session key.
+  return `principal:${JSON.stringify([sub, clientId])}`;
 }
 
 /**

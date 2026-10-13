@@ -45,6 +45,19 @@ describe("parseTrustedProxies / resolveTrustedProxies", () => {
     expect(parseTrustedProxies(["10.0.0.1", "not-a-proxy", "10.0.0.0/99", "10.0.0.0/", "2001:db8::/"])).toEqual(["10.0.0.1"]);
   });
 
+  it("accepts only a decimal prefix length, never empty, hex, exponent, or signed forms", () => {
+    // Number("") is 0 and Number("0x0") / Number("0e0") are integers: each
+    // would reach BlockList as /0 and trust every peer.
+    for (const bad of ["10.0.0.0/", "10.0.0.0/0x0", "10.0.0.0/0e0", "10.0.0.0/1e1", "10.0.0.0/+8", "10.0.0.0/-0", "10.0.0.0/ 8", "10.0.0.0/8.0", "2001:db8::/0x40"]) {
+      expect(parseTrustedProxies([bad]), bad).toEqual([]);
+      expect(isTrustedProxy("8.8.8.8", [bad]), bad).toBe(false);
+      expect(isTrustedProxy("2001:db8::1", [bad]), bad).toBe(false);
+    }
+    expect(parseTrustedProxies(["10.0.0.0/0", "10.0.0.0/08", "2001:db8::/64"])).toEqual(["10.0.0.0/0", "10.0.0.0/08", "2001:db8::/64"]);
+    expect(isTrustedProxy("8.8.8.8", ["10.0.0.0/0"])).toBe(true);
+    expect(isTrustedProxy("10.3.0.1", ["10.0.0.0/08"])).toBe(true);
+  });
+
   it("lets MCP_TRUSTED_PROXIES replace the configured list, including empty", () => {
     expect(resolveTrustedProxies({
       trustedProxies: ["10.0.0.1"],
