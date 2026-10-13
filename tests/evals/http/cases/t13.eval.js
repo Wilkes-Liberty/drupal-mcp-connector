@@ -1,39 +1,25 @@
 /**
- * T13 (DEV-861): a Host that is not on the allowlist is 403 after auth,
- * with no dispatch. An unauthenticated request with a bad Host is still
- * the shared 401 + resource_metadata (DEV-845 / DEV-877). A good Host
- * (loopback, derived for this listener) is served.
+ * T13 (DEV-840): a present Accept that lists neither JSON nor SSE is 406.
+ * Allow twin: T7's tools/list (valid Accept).
  *
- * Mutant: hostAllowedFn always returns true, so the bad Host is served.
+ * Mutant: acceptOkFn always true, so the request is served.
  */
 
 import { defineCase } from "../harness/case.js";
-import {
-  expectAllowed,
-  expectNoDispatch,
-  expectRefused,
-  expectTransportDenied,
-} from "../harness/assert.js";
-import { modernPost } from "../harness/requests.js";
+import { expectHandlerUnreached, expectNoDispatch, expectTransportDenied } from "../harness/assert.js";
+import { badAcceptPost } from "../harness/requests.js";
 
 defineCase({
   id: "T13",
-  title: "disallowed Host is 403 before dispatch; unauthenticated stays 401",
+  title: "Accept listing neither JSON nor SSE is 406 before dispatch",
+  mutants: [
+    { id: "T13", expectedLabel: "bad Accept: status" },
+  ],
   async run(h) {
     const token = await h.tokenFor("A");
-    const bad = await h.send(modernPost("tools/list"), {
-      token,
-      headers: { host: "evil.example" },
-    });
-    expectTransportDenied(h, "disallowed Host", bad, { status: 403 });
-    expectNoDispatch(h, "disallowed Host");
-
-    const unauth = await h.send(modernPost("tools/list"), {
-      headers: { host: "evil.example" },
-    });
-    expectRefused(h, "unauthenticated bad Host", unauth);
-
-    const good = await h.send(modernPost("tools/list"), { token });
-    expectAllowed(h, "allowlisted Host", good);
+    const res = await h.send(badAcceptPost(), { token });
+    expectTransportDenied(h, "bad Accept", res, { status: 406 });
+    expectHandlerUnreached(h, "bad Accept");
+    expectNoDispatch(h, "bad Accept");
   },
 });

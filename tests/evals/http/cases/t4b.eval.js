@@ -19,6 +19,9 @@ defineCase({
   id: "T4b",
   title: "token with no grant entry and no sites claim reaches no site",
   harness: { grants: null },
+  mutants: [
+    { id: "T4b", expectedLabel: "tools/call without grant or sites claim: isError" },
+  ],
   async run(h) {
     const token = await h.issuer.mint({
       sub: "ungranted-subject",

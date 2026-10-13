@@ -538,6 +538,39 @@ describe("createMcpRequestHandler", () => {
     });
   });
 
+  describe("injected predicate construction (DEV-866 L2)", () => {
+    const predicates = [
+      "originAllowedFn",
+      "protocolVersionSupportedFn",
+      "acceptOkFn",
+      "isUnauthenticatedRouteFn",
+      "sessionlessMethodRefusedFn",
+      "isJsonRpcBatchFn",
+    ];
+
+    it.each(predicates)("throws at construction when %s is null", (name) => {
+      expect(() => createMcpRequestHandler({
+        checkAuth: () => true,
+        allowLocalOperator: true,
+        modernHandler: vi.fn(),
+        legacyHandler: vi.fn(),
+        toolCount: 66,
+        [name]: null,
+      })).toThrow(new RegExp(`${name} must be a function`));
+    });
+
+    it.each(predicates)("throws at construction when %s is not a function", (name) => {
+      expect(() => createMcpRequestHandler({
+        checkAuth: () => true,
+        allowLocalOperator: true,
+        modernHandler: vi.fn(),
+        legacyHandler: vi.fn(),
+        toolCount: 66,
+        [name]: true,
+      })).toThrow(new RegExp(`${name} must be a function`));
+    });
+  });
+
   describe("controlled body errors", () => {
     it("rejects a declared oversized body before reading or dispatching", async () => {
       const modernHandler = vi.fn();
@@ -786,6 +819,13 @@ describe("createMcpRequestHandler", () => {
 });
 
 describe("createLegacySessionHandler", () => {
+  it("throws at construction when sessionPrincipalKeyFn is not a function", () => {
+    expect(() => createLegacySessionHandler({
+      buildServer: vi.fn(),
+      sessionPrincipalKeyFn: null,
+    })).toThrow(/sessionPrincipalKeyFn must be a function/);
+  });
+
   const principalA = Object.freeze({ sub: "agent-a", clientId: "client-a" });
   const principalB = Object.freeze({ sub: "agent-b", clientId: "client-b" });
   const initialize = {

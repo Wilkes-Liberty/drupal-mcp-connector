@@ -1,33 +1,29 @@
 /**
- * T12 (DEV-862): a tool with no scope-table entry is not listed and not
- * callable on the hosted HTTP path. Zero upstream calls.
+ * T12 (DEV-840): authenticated sessionless GET/DELETE `/mcp` are 405.
+ * Allow twin: T7's GET/DELETE without session (same 405) and T7's session
+ * DELETE after initialize.
  *
- * Mutant: restore the v3.2.x default so an unknown name is treated as
- * mcp_read (listed and callable). The list/call assertions then fail.
+ * Mutant: sessionlessMethodRefusedFn always false, so the 405 is skipped.
  */
 
 import { defineCase } from "../harness/case.js";
-import { expectAllowed, expectEqual, expectToolDenied } from "../harness/assert.js";
-import { modernPost } from "../harness/requests.js";
+import { expectHandlerUnreached, expectNoDispatch, expectTransportDenied } from "../harness/assert.js";
+import { sessionRequest } from "../harness/requests.js";
 
 defineCase({
   id: "T12",
-  title: "unscoped tool is absent from tools/list and refused on tools/call",
+  title: "authenticated sessionless GET/DELETE are 405 before dispatch",
+  mutants: [
+    { id: "T12", expectedLabel: "GET without session: handler was not reached" },
+  ],
   async run(h) {
     const token = await h.tokenFor("A");
-    const listed = await h.send(modernPost("tools/list"), { token });
-    expectAllowed(h, "tools/list", listed);
-    const names = JSON.parse(listed.text).result.tools.map((tool) => tool.name);
-    expectEqual(h, "unscoped tool absent from tools/list", names.includes("drupal_eval_unscoped"), false);
-    expectEqual(h, "known read tool still listed", names.includes("drupal_list_nodes"), true);
-
-    const call = await h.send(modernPost(
-      "tools/call",
-      { name: "drupal_eval_unscoped", arguments: {} },
-      { name: "drupal_eval_unscoped" },
-    ), { token });
-    expectToolDenied(h, "unscoped tools/call", call, { message: /scope table|requiredScopes/i });
-    expectEqual(h, "Ct: tool body not executed", h.counters.ct, 0);
-    expectEqual(h, "Cu: no upstream", h.fake.count(), 0);
+    for (const method of ["GET", "DELETE"]) {
+      const label = `${method} without session`;
+      const res = await h.send(sessionRequest(method), { token });
+      expectTransportDenied(h, label, res, { status: 405 });
+      expectHandlerUnreached(h, label);
+      expectNoDispatch(h, label);
+    }
   },
 });

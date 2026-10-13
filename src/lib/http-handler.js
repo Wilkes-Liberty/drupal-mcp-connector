@@ -42,6 +42,25 @@ export const UNAUTHENTICATED_ROUTES = Object.freeze([
   Object.freeze({ method: "GET", path: "/.well-known/oauth-protected-resource" }),
 ]);
 
+/** Single MCP endpoint path. Sessionless GET/DELETE are 405 after auth. */
+export const MCP_HTTP_PATH = "/mcp";
+
+/** Methods the MCP endpoint accepts after auth (DEV-840). */
+export const MCP_HTTP_METHODS = Object.freeze(["POST", "GET", "DELETE"]);
+
+/**
+ * Whether an authenticated GET/DELETE without `Mcp-Session-Id` is refused
+ * (2026-07-28 has no standalone GET stream). Injectable so eval mutants can
+ * skip the 405 without changing the default.
+ *
+ * @param {string} method
+ * @param {unknown} sessionId
+ * @returns {boolean}
+ */
+export function sessionlessMethodRefused(method, sessionId) {
+  return (method === "GET" || method === "DELETE") && !sessionId;
+}
+
 /**
  * Whether this request may proceed without a resolved identity.
  *
@@ -167,6 +186,9 @@ export function createLegacySessionHandler({
 }) {
   if (mode !== "serve" && mode !== "reject") {
     throw new Error(`Invalid legacy MCP transport mode: "${mode}". Use "serve" or "reject".`);
+  }
+  if (typeof sessionPrincipalKeyFn !== "function") {
+    throw new Error("sessionPrincipalKeyFn must be a function");
   }
 
   function methodNotAllowed(res) {
@@ -314,6 +336,12 @@ export function createLegacySessionHandler({
  *   Injectable protocol-version guard (eval mutants swap this).
  * @param {(method: string, accept: unknown) => boolean} [deps.acceptOkFn]
  *   Injectable Accept-header guard.
+ * @param {(method: string, url: string) => boolean} [deps.isUnauthenticatedRouteFn]
+ *   Injectable unauthenticated-route predicate (eval mutants swap this).
+ * @param {(method: string, sessionId: unknown) => boolean} [deps.sessionlessMethodRefusedFn]
+ *   Injectable sessionless GET/DELETE 405 guard (eval mutants swap this).
+ * @param {(body: unknown) => boolean} [deps.isJsonRpcBatchFn]
+ *   Injectable JSON-RPC batch predicate (eval mutants swap this).
  * @returns {(req: import("http").IncomingMessage, res: import("http").ServerResponse) => Promise<void>}
  */
 export function createMcpRequestHandler({
@@ -338,9 +366,25 @@ export function createMcpRequestHandler({
   hostAllowedFn = hostAllowed,
   protocolVersionSupportedFn = isSupportedProtocolVersion,
   acceptOkFn = mcpAcceptOk,
+  isUnauthenticatedRouteFn = isUnauthenticatedRoute,
+  sessionlessMethodRefusedFn = sessionlessMethodRefused,
+  isJsonRpcBatchFn = isJsonRpcBatch,
 }) {
   if (!modernHandler || !legacyHandler) {
     throw new Error("modernHandler and legacyHandler must be configured together for dual-era routing");
+  }
+  const injectedPredicates = {
+    originAllowedFn,
+    protocolVersionSupportedFn,
+    acceptOkFn,
+    isUnauthenticatedRouteFn,
+    sessionlessMethodRefusedFn,
+    isJsonRpcBatchFn,
+  };
+  for (const [name, fn] of Object.entries(injectedPredicates)) {
+    if (typeof fn !== "function") {
+      throw new Error(`${name} must be a function`);
+    }
   }
 
   const writer = auditWriter === undefined
@@ -402,7 +446,7 @@ export function createMcpRequestHandler({
     if (writer) attachHttpAudit(req, res, writer);
     const path = requestPath(req);
 
-    if (isUnauthenticatedRoute(req.method, path)) {
+    if (isUnauthenticatedRouteFn(req.method, path)) {
       if (path === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" })
           .end(JSON.stringify({ status: "ok" }));
@@ -417,7 +461,7 @@ export function createMcpRequestHandler({
       return;
     }
 
-    const isMcp = path === "/mcp" && ["POST", "GET", "DELETE"].includes(req.method);
+    const isMcp = path === MCP_HTTP_PATH && MCP_HTTP_METHODS.includes(req.method);
     if (isMcp && rateLimiter) {
       // Rate limit BEFORE auth so repeated bad-token attempts are throttled too.
       const verdict = rateLimiter.check(clientKey(req));
@@ -429,7 +473,7 @@ export function createMcpRequestHandler({
 
     if (!await gateAuth(req, res)) return;
 
-    if (path === "/mcp") {
+    if (path === MCP_HTTP_PATH) {
       if (!hostAllowedFn(req.headers.host, allowedHosts)) {
         markHttpAuditHostRefused(req);
         writeJsonRpcHttpError(res, 403, { message: "Forbidden host" });
@@ -457,8 +501,8 @@ export function createMcpRequestHandler({
       }
     }
 
-    if (path === "/mcp" && (req.method === "GET" || req.method === "DELETE")) {
-      if (!req.headers["mcp-session-id"]) {
+    if (path === MCP_HTTP_PATH && (req.method === "GET" || req.method === "DELETE")) {
+      if (sessionlessMethodRefusedFn(req.method, req.headers["mcp-session-id"])) {
         res.writeHead(405, { Allow: "POST" }).end("Method Not Allowed");
         return;
       }
@@ -470,7 +514,7 @@ export function createMcpRequestHandler({
       return;
     }
 
-    if (req.method === "POST" && path === "/mcp") {
+    if (req.method === "POST" && path === MCP_HTTP_PATH) {
       if (!isJsonContentType(req.headers["content-type"])) {
         res.writeHead(415).end("Content-Type must be application/json");
         return;
@@ -478,7 +522,7 @@ export function createMcpRequestHandler({
       let stage = "body-read";
       try {
         const body = await readJsonBody(req, maxBodyBytes);
-        if (isJsonRpcBatch(body)) {
+        if (isJsonRpcBatchFn(body)) {
           writeJsonRpcHttpError(res, 400, { code: -32600, message: "JSON-RPC batch is not supported" });
           return;
         }

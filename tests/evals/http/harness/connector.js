@@ -19,7 +19,16 @@ export const httpAuth = await load("lib/http-auth.js");
 export const httpAudit = await load("lib/http-audit.js");
 export const httpHandler = await load("lib/http-handler.js");
 export const httpTransport = await load("lib/http-transport.js");
+export const httpsStartup = await load("lib/https-startup.js");
 export const mcpServer = await load("lib/mcp-server.js");
 export const principal = await load("lib/principal.js");
 export const rateLimit = await load("lib/rate-limit.js");
 export const toolScopes = await load("lib/tool-scopes.js");
+export const relayEdge = await load("lib/relay/edge.js");
+export const usage = await load("lib/usage.js");
+export const evidence = await load("lib/evidence.js");
+export const anchor = await load("lib/anchor.js");
+export const tools = await load("tools/index.js");
+
+/** Edge auxiliary routes (DEV-858 / #451). Re-exported for the label pin. */
+export const EDGE_NORTHBOUND_AUX_ROUTES = relayEdge.EDGE_NORTHBOUND_AUX_ROUTES;

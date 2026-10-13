@@ -14,6 +14,9 @@ import { modernPost } from "../harness/requests.js";
 defineCase({
   id: "T11",
   title: "disallowed Origin is 403 before dispatch",
+  mutants: [
+    { id: "T11", expectedLabel: "disallowed Origin: status" },
+  ],
   async run(h) {
     const token = await h.tokenFor("A");
     const request = modernPost("tools/list");

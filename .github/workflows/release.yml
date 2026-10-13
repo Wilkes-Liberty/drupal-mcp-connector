@@ -1,12 +1,18 @@
 name: Release
 
 # Publishes to npm when a v* tag is pushed (e.g. `git push origin v0.6.2`).
+# The same tag also builds, signs, and pushes a container image to GHCR
+# (DEV-923) so hosted deploys can pin `name@sha256:…`.
 #
 # Auth: npm **trusted publishing** via GitHub Actions OIDC — no token, no stored
 # secret. npm trusts this exact repo+workflow identity (configured one-time on
-# npmjs.com → package → Settings → Trusted Publisher). The `id-token: write`
-# permission below lets the runner mint the OIDC token npm exchanges for a
-# short-lived publish credential. Provenance is attached automatically.
+# npmjs.com → package → Settings → Trusted Publisher). The publish job's
+# `id-token: write` permission lets the runner mint the OIDC token npm exchanges
+# for a short-lived publish credential. Provenance is attached automatically.
+#
+# Image signing is keyless Sigstore/cosign over the same GitHub OIDC identity
+# (no long-lived key). SLSA provenance and an SBOM travel with the image;
+# GitHub Artifact Attestations are recorded as well.
 #
 # One-time setup (maintainer, on npmjs.com):
 #   Package `drupal-mcp-connector` → Settings → Trusted Publishing → GitHub Actions
@@ -14,20 +20,49 @@ name: Release
 #     Repository         : drupal-mcp-connector
 #     Workflow filename  : release.yml
 #   (Leave "Environment" blank unless this job is pinned to one.)
+#
+# One-time setup (GHCR, after the first image lands):
+#   https://github.com/orgs/Wilkes-Liberty/packages/container/drupal-mcp-connector/settings
+#     Visibility: Public (if Keystone or anyone without a GH token must pull)
+#     Linked repository: Wilkes-Liberty/drupal-mcp-connector (usually automatic)
+#
+# workflow_dispatch is an image-only path (build, optional push). It never
+# publishes npm. Use it to dry-run, or to backfill a tag such as v4.0.0
+# without moving the git tag.
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: >-
+          Git ref to build the image from (tag, branch, or SHA). Does not
+          create or move git tags. Example: v4.0.0
+        required: true
+        type: string
+      publish_image:
+        description: >-
+          Push, sign, and record the image. Leave unchecked to build only
+          (never pushes).
+        required: false
+        type: boolean
+        default: false
 
+# Default token is read-only. Jobs that mint OIDC or write packages/releases
+# raise only the scopes they need.
 permissions:
   contents: read
-  id-token: write  # required for npm trusted publishing (OIDC) + provenance
 
 jobs:
   publish:
     name: Publish to npm
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # npm trusted publishing (OIDC) + provenance
     steps:
       - uses: actions/checkout@v7
 
@@ -82,3 +117,325 @@ jobs:
       - name: Publish (trusted publishing — no token)
         if: steps.published.outputs.already == 'false'
         run: npm publish --access public
+
+  publish-image:
+    name: Publish container image to GHCR
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+      || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create/update the GitHub Release + digest assets
+      packages: write        # push to GHCR
+      id-token: write        # keyless cosign + GitHub attestations (OIDC)
+      attestations: write    # persist GitHub Artifact Attestations
+      artifact-metadata: write
+    env:
+      REGISTRY: ghcr.io
+    steps:
+      - name: Resolve image coordinates
+        id: coords
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_GIT_REF: ${{ inputs.git_ref }}
+          INPUT_PUBLISH: ${{ inputs.publish_image }}
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          IMAGE="$(printf '%s/%s' "${REGISTRY}" "${REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            GIT_REF="${INPUT_GIT_REF}"
+            PUBLISH="${INPUT_PUBLISH}"
+            # Backfill must not move floating tags (latest / 4 / 4.0) onto an
+            # older release if a newer tag already exists.
+            FLOATING=false
+          else
+            GIT_REF="${REF_NAME}"
+            PUBLISH=true
+            FLOATING=true
+          fi
+
+          if [ -z "${GIT_REF}" ]; then
+            echo "::error::git_ref is empty"
+            exit 1
+          fi
+          if ! [[ "${GIT_REF}" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::git_ref contains characters outside [A-Za-z0-9._/-]"
+            exit 1
+          fi
+
+          VERSION="${GIT_REF#v}"
+          if [[ "${GIT_REF}" =~ ^[0-9a-f]{40}$ ]]; then
+            VERSION="sha-$(printf '%s' "${GIT_REF}" | cut -c1-12)"
+            FLOATING=false
+          fi
+          # Prereleases must not move latest / major / minor floating tags.
+          if [[ "${VERSION}" == *-* ]]; then
+            FLOATING=false
+          fi
+          IS_SEMVER=false
+          if [[ "${GIT_REF}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
+            IS_SEMVER=true
+          fi
+
+          {
+            echo "image=${IMAGE}"
+            echo "git_ref=${GIT_REF}"
+            echo "version=${VERSION}"
+            echo "semver_value=v${VERSION}"
+            echo "publish=${PUBLISH}"
+            echo "floating_tags=${FLOATING}"
+            echo "is_semver=${IS_SEMVER}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "image=${IMAGE}"
+          echo "git_ref=${GIT_REF}"
+          echo "version=${VERSION}"
+          echo "publish=${PUBLISH}"
+          echo "floating_tags=${FLOATING}"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.git_ref || github.sha }}
+
+      - name: Verify version tag matches package.json
+        if: startsWith(steps.coords.outputs.git_ref, 'v')
+        env:
+          EXPECTED: ${{ steps.coords.outputs.version }}
+        run: |
+          set -euo pipefail
+          PKG="$(sed -n 's/^[[:space:]]*"version": "\([^"]*\)".*/\1/p' package.json | head -n1)"
+          if [ "${EXPECTED}" != "${PKG}" ]; then
+            echo "::error::Ref v${EXPECTED} does not match package.json version ${PKG}"
+            exit 1
+          fi
+          echo "Ref and package.json agree on ${PKG}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: steps.coords.outputs.publish == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.coords.outputs.image }}
+          flavor: |
+            latest=${{ steps.coords.outputs.floating_tags }}
+          tags: |
+            type=raw,value=${{ steps.coords.outputs.version }}
+            type=raw,value=v${{ steps.coords.outputs.version }}
+            type=semver,pattern={{version}},value=${{ steps.coords.outputs.semver_value }},enable=${{ steps.coords.outputs.is_semver }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.coords.outputs.semver_value }},enable=${{ steps.coords.outputs.floating_tags }}
+            type=semver,pattern={{major}},value=${{ steps.coords.outputs.semver_value }},enable=${{ steps.coords.outputs.floating_tags }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ steps.coords.outputs.publish == 'true' }}
+          load: ${{ steps.coords.outputs.publish != 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: ${{ steps.coords.outputs.publish == 'true' && 'mode=max' || 'false' }}
+          sbom: ${{ steps.coords.outputs.publish == 'true' }}
+
+      - name: Smoke the loaded image
+        if: steps.coords.outputs.publish != 'true'
+        env:
+          IMAGE: ${{ steps.coords.outputs.image }}
+          VERSION: ${{ steps.coords.outputs.version }}
+        run: docker run --rm "${IMAGE}:${VERSION}" node -e "console.log('ok')"
+
+      - name: Dry-run summary
+        if: steps.coords.outputs.publish != 'true'
+        env:
+          IMAGE: ${{ steps.coords.outputs.image }}
+          VERSION: ${{ steps.coords.outputs.version }}
+          GIT_REF: ${{ steps.coords.outputs.git_ref }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Container image (dry-run)"
+            echo
+            echo "Built \`${IMAGE}:${VERSION}\` from \`${GIT_REF}\` and did **not** push, sign, or record a digest."
+            echo
+            echo "A pushed image's digest differs from this local load (provenance/SBOM change the index). Pin only a published \`name@sha256:…\`."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Install Cosign
+        if: steps.coords.outputs.publish == 'true'
+        uses: sigstore/cosign-installer@v4
+
+      - name: Sign image (keyless Sigstore / GitHub OIDC)
+        if: steps.coords.outputs.publish == 'true'
+        env:
+          IMAGE: ${{ steps.coords.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DIGEST}" ]; then
+            echo "::error::Build step produced no digest"
+            exit 1
+          fi
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Attest build provenance
+        if: steps.coords.outputs.publish == 'true'
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.coords.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Record digest on the GitHub Release and job summary
+        if: steps.coords.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.coords.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ steps.coords.outputs.version }}
+          GIT_REF: ${{ steps.coords.outputs.git_ref }}
+          GIT_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DIGEST}" ]; then
+            echo "::error::Build step produced no digest"
+            exit 1
+          fi
+          REF="${IMAGE}@${DIGEST}"
+          printf '%s\n' "${REF}" > image-digest.txt
+          python3 - "${REF}" <<'PY'
+          import json, os, sys
+          ref = sys.argv[1]
+          payload = {
+              "image": os.environ["IMAGE"],
+              "digest": os.environ["DIGEST"],
+              "ref": ref,
+              "version": os.environ["VERSION"],
+              "git_ref": os.environ["GIT_REF"],
+              "git_sha": os.environ["GIT_SHA"],
+              "workflow": "release.yml",
+              "run_url": os.environ["RUN_URL"],
+          }
+          with open("image-digest.json", "w", encoding="utf-8") as fh:
+              json.dump(payload, fh, indent=2)
+              fh.write("\n")
+          PY
+
+          IDENTITY_REGEXP='^https://github.com/Wilkes-Liberty/drupal-mcp-connector/\\.github/workflows/release\\.yml@.+$'
+          ISSUER='https://token.actions.githubusercontent.com'
+
+          VERIFY_COSIGN=$(cat <<EOF
+          cosign verify \\
+            ${REF} \\
+            --certificate-identity-regexp='${IDENTITY_REGEXP}' \\
+            --certificate-oidc-issuer=${ISSUER}
+          EOF
+          )
+          VERIFY_ATTEST=$(cat <<EOF
+          gh attestation verify \\
+            oci://${REF} \\
+            --repo ${REPO}
+          EOF
+          )
+
+          {
+            echo "## Container image"
+            echo
+            echo "Pin (immutable):"
+            echo
+            echo "\`\`\`"
+            echo "${REF}"
+            echo "\`\`\`"
+            echo
+            echo "Version tags: \`${VERSION}\`, \`v${VERSION}\`"
+            echo
+            echo "Verify the keyless Sigstore signature:"
+            echo
+            echo "\`\`\`"
+            echo "${VERIFY_COSIGN}"
+            echo "\`\`\`"
+            echo
+            echo "Verify GitHub Artifact Attestations (SLSA provenance):"
+            echo
+            echo "\`\`\`"
+            echo "${VERIFY_ATTEST}"
+            echo "\`\`\`"
+            echo
+            echo "Run: ${RUN_URL}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${GIT_REF}" != v* ]]; then
+            echo "git_ref ${GIT_REF} is not a v* tag; digest is in the job summary only."
+            exit 0
+          fi
+
+          MARKER_START='<!-- ghcr-image-digest -->'
+          MARKER_END='<!-- /ghcr-image-digest -->'
+          cat > image-digest-section.md <<EOF
+          ${MARKER_START}
+          ## Container image
+
+          Immutable digest for hosted pins (\`hosted_mcp_image\`):
+
+          \`\`\`
+          ${REF}
+          \`\`\`
+
+          Verify the keyless Sigstore signature:
+
+          \`\`\`
+          ${VERIFY_COSIGN}
+          \`\`\`
+
+          Verify GitHub Artifact Attestations:
+
+          \`\`\`
+          ${VERIFY_ATTEST}
+          \`\`\`
+          ${MARKER_END}
+          EOF
+
+          CREATE_ARGS=(--title "${GIT_REF}" --verify-tag --notes-file image-digest-section.md)
+          if [ "${EVENT_NAME}" = "push" ] && [[ "${VERSION}" != *-* ]]; then
+            CREATE_ARGS+=(--latest)
+          fi
+
+          if gh release view "${GIT_REF}" >/dev/null 2>&1; then
+            gh release view "${GIT_REF}" --json body --jq .body > image-digest-notes.md
+            python3 - <<'PY'
+          import pathlib
+          import re
+          start = "<!-- ghcr-image-digest -->"
+          end = "<!-- /ghcr-image-digest -->"
+          notes = pathlib.Path("image-digest-notes.md").read_text(encoding="utf-8")
+          section = pathlib.Path("image-digest-section.md").read_text(encoding="utf-8").strip()
+          pat = re.compile(re.escape(start) + r".*?" + re.escape(end), re.S)
+          if pat.search(notes):
+              notes = pat.sub(section, notes)
+          else:
+              notes = notes.rstrip() + "\n\n" + section + "\n"
+          pathlib.Path("image-digest-notes.md").write_text(notes, encoding="utf-8")
+          PY
+            gh release edit "${GIT_REF}" --notes-file image-digest-notes.md
+          else
+            gh release create "${GIT_REF}" "${CREATE_ARGS[@]}"
+          fi
+
+          gh release upload "${GIT_REF}" image-digest.txt image-digest.json --clobber
+          echo "Recorded ${REF} on ${GIT_REF}"

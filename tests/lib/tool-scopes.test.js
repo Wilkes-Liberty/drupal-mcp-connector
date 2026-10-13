@@ -65,7 +65,7 @@ describe("every network entry point runs the scope-table assertion before it ser
   const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 
   it.each([
-    ["src/index.js", "../../src/index.js", ".listen("],
+    ["src/index.js", "../../src/index.js", "startHttpsTransport("],
     ["bin/drupal-mcp-agent.js", "../../bin/drupal-mcp-agent.js", "createRelayAgent("],
   ])("%s asserts the table before %s", (_label, rel, serveMarker) => {
     const source = read(rel);
