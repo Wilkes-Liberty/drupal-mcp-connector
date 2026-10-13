@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **IPv6 loopback startup url and log, edge router driven by its route table, eval prerequisites (DEV-866 follow-up).**
+  `startHttpsTransport` brackets an IPv6 literal in both the returned url
+  and the listen log (`http://[::1]:3443/mcp`). `EDGE_NORTHBOUND_AUX_ROUTES`
+  is now the edge's router, so a route change alters runtime behavior and
+  the eval coverage pin together. The HTTP eval pack names `openssl` as a
+  prerequisite and fails by name when it is missing. A stray `node_modules`
+  symlink committed by #456 is removed and the ignore pattern now covers a
+  symlink too.
+
 ### Added
 - **Signed GHCR image on every release tag (DEV-923).** Pushing a `v*` tag
   still publishes npm exactly as before, and now also builds the repo

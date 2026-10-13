@@ -256,11 +256,13 @@ describe("startHttpsTransport", () => {
     expect(result.server).toBeUndefined();
   });
 
-  it("brackets an IPv6 loopback literal in the returned url", async () => {
-    const result = await baseStartup({ bindHost: "::1" });
+  it("brackets an IPv6 loopback literal in the returned url and the listen log", async () => {
+    const logged = [];
+    const result = await baseStartup({ bindHost: "::1", log: (line) => { logged.push(line); } });
     expect(result.started).toBe(true);
     try {
       expect(result.url).toMatch(/^http:\/\/\[::1\]:\d+\/mcp$/);
+      expect(logged.join("\n")).toMatch(/Listening on http:\/\/\[::1\]:\d+\/mcp/);
       // The url is usable as-is.
       const res = await fetch(new URL("/health", result.url));
       expect(res.status).toBe(200);
