@@ -39,7 +39,34 @@ export function normalizeIp(address) {
   if (value.startsWith("::ffff:") && isIP(value.slice(7)) === 4) {
     value = value.slice(7);
   }
+  if (isIP(value) === 6) return canonicalIpv6(value);
   return isIP(value) ? value : "";
+}
+
+/**
+ * RFC 5952 text form of an IPv6 literal, so `2001:0db8:0:0:0:0:0:1`,
+ * `2001:DB8::1`, and `2001:db8::1` key one bucket. The WHATWG URL parser
+ * does the canonicalization; an IPv4-mapped address that arrives in hex
+ * (`::ffff:cb00:7109`) is folded to its dotted IPv4 form like the dotted
+ * spelling already is.
+ *
+ * @param {string} value Validated IPv6 literal (no brackets, zone, or port).
+ * @returns {string} Canonical text, or "" when the parser rejects it.
+ */
+function canonicalIpv6(value) {
+  let canonical;
+  try {
+    canonical = new URL(`http://[${value}]`).hostname.slice(1, -1);
+  } catch {
+    return "";
+  }
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(canonical);
+  if (mapped) {
+    const hi = parseInt(mapped[1], 16);
+    const lo = parseInt(mapped[2], 16);
+    return `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+  }
+  return canonical;
 }
 
 /**

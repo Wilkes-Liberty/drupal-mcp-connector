@@ -21,6 +21,14 @@ describe("normalizeIp", () => {
     expect(normalizeIp("[::FfFf:203.0.113.9]:8443")).toBe("203.0.113.9");
     expect(normalizeIp("2001:DB8::1")).toBe("2001:db8::1");
     expect(normalizeIp("2001:DB8::1")).toBe(normalizeIp("2001:db8::1"));
+    // Equivalent IPv6 spellings canonicalize to one RFC 5952 form.
+    expect(normalizeIp("2001:0db8:0000:0000:0000:0000:0000:0001")).toBe("2001:db8::1");
+    expect(normalizeIp("2001:0db8:0:0:0:0:0:1")).toBe(normalizeIp("2001:db8::1"));
+    expect(normalizeIp("0:0:0:0:0:0:0:1")).toBe("::1");
+    expect(normalizeIp("[2001:DB8:0:0::1]:8443")).toBe("2001:db8::1");
+    // An IPv4-mapped address spelled in hex folds to the same IPv4 key.
+    expect(normalizeIp("::ffff:cb00:7109")).toBe("203.0.113.9");
+    expect(normalizeIp("::FFFF:CB00:7109")).toBe(normalizeIp("::ffff:203.0.113.9"));
     expect(normalizeIp("203.0.113.9:8443")).toBe("203.0.113.9");
     expect(normalizeIp("[2001:db8::1]")).toBe("2001:db8::1");
     expect(normalizeIp("fe80::1%eth0")).toBe("fe80::1");
