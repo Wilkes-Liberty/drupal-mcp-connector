@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Release workflow pins an existing cosign-installer version.** The GHCR
+  image job referenced `sigstore/cosign-installer@v4`, a major tag that
+  upstream never published (only `v4.x.y` releases exist), so the v5.0.0
+  tag published npm but failed before building the image. The step now pins
+  `v4.1.2`. The v5.0.0 image still has to be backfilled by running the
+  workflow's dispatch path against the existing tag once this lands.
+
 ## [5.0.0] - 2026-10-13
 
 ### Added
