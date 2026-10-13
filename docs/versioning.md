@@ -93,4 +93,6 @@ publishing and a signed container image to GHCR
 digest (`name@sha256:…`), recorded on the GitHub Release. See
 [deployment.md](deployment.md). [CHANGELOG.md](../CHANGELOG.md) (Keep a
 Changelog format) is the source of truth for what changed. Release
-candidates use `-rc.N` suffixes.
+candidates use `-rc.N` suffixes and publish to the npm `next` dist-tag
+(GitHub Release marked prerelease; GHCR keeps only the exact version
+tags). They never take npm or GHCR `latest`.
