@@ -1,6 +1,6 @@
 # Drupal MCP Connector
 
-> Multi-site MCP server for Drupal over JSON:API and GraphQL, with governed writes and an SSH Drush bridge. Hosted HTTPS authenticates only as an OAuth resource server and introspects every call at the issuer. The shared bearer is gone in 4.0. `init` writes a client config from a transport preset. `doctor` checks reachability, auth, and version skew.
+> Multi-site MCP server for Drupal over JSON:API and GraphQL, with governed writes and an SSH Drush bridge. Hosted HTTPS is an OAuth resource server that introspects every authenticated call at the issuer. The shared bearer is gone in 4.0. `init` writes a client config from a transport preset. `doctor` checks reachability, auth, and version skew.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-green)](https://nodejs.org)
