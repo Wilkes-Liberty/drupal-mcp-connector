@@ -19,7 +19,7 @@ import {
   resolveInboundAuthMode,
 } from "./http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "./http-handler.js";
-import { resolveAllowedOrigins } from "./http-transport.js";
+import { resolveAllowedHosts, resolveAllowedOrigins } from "./http-transport.js";
 import { createRateLimiter } from "./rate-limit.js";
 
 /**
@@ -36,6 +36,7 @@ export const ALLOWED_HANDLER_OVERRIDE_KEYS = Object.freeze([
   "sessionlessMethodRefusedFn",
   "isJsonRpcBatchFn",
   "sessionPrincipalKeyFn",
+  "hostAllowedFn",
 ]);
 
 const FORBIDDEN_HANDLER_OVERRIDE_KEYS = Object.freeze([
@@ -89,6 +90,7 @@ function pickHandlerOverrides(overrides = {}) {
   if (overrides.sessionPrincipalKeyFn !== undefined) {
     picked.sessionPrincipalKeyFn = overrides.sessionPrincipalKeyFn;
   }
+  if (overrides.hostAllowedFn !== undefined) picked.hostAllowedFn = overrides.hostAllowedFn;
   return picked;
 }
 
@@ -370,6 +372,14 @@ export async function startHttpsTransport({
       allowedOrigins: inboundCfg?.allowedOrigins,
       resource: inboundCfg?.resource,
       audience: inboundCfg?.audience,
+    }),
+    // DEV-861: Host allowlist from config/env plus the resource host; loopback
+    // names are added when the process binds loopback.
+    allowedHosts: resolveAllowedHosts({
+      allowedHosts: inboundCfg?.allowedHosts,
+      resource: inboundCfg?.resource,
+      audience: inboundCfg?.audience,
+      loopbackBind,
     }),
     ...(auditWriter !== undefined ? { auditWriter } : {}),
     ...(clientKey ? { clientKey } : {}),

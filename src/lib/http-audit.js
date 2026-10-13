@@ -1,9 +1,9 @@
 /**
  * Hosted HTTP audit writer (DEV-858).
  *
- * Every hosted request — including refusals (401, 429, bad Origin) — leaves
- * exactly one row. The writer is fail-safe: a sink error never changes the
- * HTTP verdict (rows are emitted after the response is finished).
+ * Every hosted request — including refusals (401, 429, bad Origin, bad Host)
+ * — leaves exactly one row. The writer is fail-safe: a sink error never
+ * changes the HTTP verdict (rows are emitted after the response is finished).
  *
  * Rows are a closed field set. Bearer tokens, Authorization, Cookie,
  * Proxy-Authorization, and raw bodies are never copied in.
@@ -17,6 +17,7 @@ export const HTTP_AUDIT_CODES = Object.freeze([
   "invalid_token",
   "rate_limited",
   "bad_origin",
+  "bad_host",
   "forbidden",
   "aborted",
   "ok",
@@ -28,6 +29,8 @@ const ATTACHED = new WeakSet();
 const WRITTEN = new WeakSet();
 /** Requests whose /mcp Origin check refused them (set by the handler that wrote the 403). */
 const ORIGIN_REFUSED = new WeakSet();
+/** Requests whose /mcp Host check refused them (set by the handler that wrote the 403). */
+const HOST_REFUSED = new WeakSet();
 /** Tenant resolved for a request, when the route resolved one. */
 const TENANTS = new WeakMap();
 
@@ -147,6 +150,17 @@ export function markHttpAuditOriginRefused(req) {
 }
 
 /**
+ * Record that the handler refused this request on its Host check. The audit
+ * row classifies `bad_host` from this mark only, never by re-running the
+ * predicate.
+ *
+ * @param {import("http").IncomingMessage} req
+ */
+export function markHttpAuditHostRefused(req) {
+  if (req && typeof req === "object") HOST_REFUSED.add(req);
+}
+
+/**
  * Record the tenant a route resolved for this request so the row carries it
  * even when the identity object has no `tenant` field.
  *
@@ -162,14 +176,15 @@ export function markHttpAuditTenant(req, tenant) {
 /**
  * Classify a finished response into a closed denial code.
  *
- * Codes are mutually exclusive outcomes of the finished response. Origin
- * denial only wins on the 403 the handler actually emitted for `/mcp`,
- * and only when that handler marked the refusal on the request.
+ * Codes are mutually exclusive outcomes of the finished response. Host
+ * and Origin denial only win on the 403 the handler actually emitted for
+ * `/mcp`, and only when that handler marked the refusal on the request.
  *
  * @param {object} fields
  * @param {number} [fields.status]
  * @param {boolean} [fields.hasAuthorization]
  * @param {boolean} [fields.originDenied]
+ * @param {boolean} [fields.hostDenied]
  * @param {boolean} [fields.aborted] Client went away before any status was written.
  * @returns {typeof HTTP_AUDIT_CODES[number]}
  */
@@ -177,12 +192,14 @@ export function classifyHttpAuditCode({
   status,
   hasAuthorization = false,
   originDenied = false,
+  hostDenied = false,
   aborted = false,
 } = {}) {
   if (aborted) return "aborted";
   const code = Number(status);
   if (code === 429) return "rate_limited";
   if (code === 401) return hasAuthorization ? "invalid_token" : "unauthenticated";
+  if (hostDenied && code === 403) return "bad_host";
   if (originDenied && code === 403) return "bad_origin";
   if (Number.isFinite(code) && code >= 200 && code < 400) return "ok";
   return "forbidden";
@@ -256,6 +273,7 @@ export function buildHttpAuditRow(req, res, {
 } = {}) {
   const status = aborted ? 0 : Number(res?.statusCode);
   const originDenied = Boolean(req && ORIGIN_REFUSED.has(req));
+  const hostDenied = Boolean(req && HOST_REFUSED.has(req));
   const identity = req?.mcpIdentity && typeof req.mcpIdentity === "object"
     ? req.mcpIdentity
     : null;
@@ -268,6 +286,7 @@ export function buildHttpAuditRow(req, res, {
       status,
       hasAuthorization: requestHasAuthorization(req),
       originDenied,
+      hostDenied,
       aborted,
     }),
     requestId: requestId || resolveRequestId(req),

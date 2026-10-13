@@ -113,13 +113,20 @@ refusal there is a `Bearer` challenge with `error="invalid_token"` and no
 `GET /.well-known/oauth-protected-resource` (and `/mcp` on that path).
 
 After the token is accepted, tool / resource / prompt / site discovery is
-filtered by that principal (#178). `auth.grants` (optional) maps inbound
-`client_id` / `azp` to configured site names; when the map is present,
-unknown clients see no targets. When the map is omitted, a token with no
-`sites` / `mcp_sites` claim is entitled to no sites (DEV-848). Caller-supplied
-`site` / `environment` / `tenant` / `target` arguments cannot widen the grant.
+filtered by that principal (#178). A **built-in** tool without an explicit
+`requiredScopes` row in the deny-by-default scope table is omitted from
+`tools/list` and refused on `tools/call` (DEV-862). Hosted/network startup
+is fatal when any registered built-in tool is missing from the table or has
+empty `requiredScopes`. Module-owned tools (`drupal_module_*`) are the one
+exception: they are appended by the module-tool registry and gated by the
+`scope` their binding policy declares, not by a table row. `auth.grants` (optional) maps inbound `client_id` / `azp`
+to configured site names; when the map is present, unknown clients see no
+targets. When the map is omitted, a token with no `sites` / `mcp_sites`
+claim is entitled to no sites (DEV-848). Caller-supplied `site` /
+`environment` / `tenant` / `target` arguments cannot widen the grant.
 Stdio and loopback without a resource-server identity are unchanged (local
-operator).
+operator), except that the scope-table gate still applies on any network
+listener.
 
 `/health` stays open as a liveness probe (`{status: "ok"}`) and does
 not expose a tool catalog. Missing a required scope is `403` with
@@ -153,8 +160,16 @@ export MCP_ALLOWED_ORIGINS="https://app.example.com"
 allowlist. A missing `Origin` is allowed (Cursor, Grok Bot, and other
 non-browser clients typically omit it). A present `Origin` that is not on the
 list is `403`. The origin of `auth.resource` / `auth.audience` is always
-included. Session ids never replace per-request token validation: a stolen
-`Mcp-Session-Id` presented with another principal's bearer is `403`.
+included.
+
+`auth.allowedHosts` / `MCP_ALLOWED_HOSTS` is the Host allowlist (DEV-861).
+After a resolved identity, a missing or disallowed `Host` is `403`. The
+default list is the host of `auth.resource` / `auth.audience`; a loopback
+bind also includes `localhost`, `127.0.0.1`, and `::1`. A hostname-only
+entry matches any port. Unauthenticated requests still receive the shared
+`401` with `resource_metadata` first. Session ids never replace per-request
+token validation: a stolen `Mcp-Session-Id` presented with another
+principal's bearer is `403`.
 
 Unexpected conversion/classification/dispatch failures return only a generic
 500 before headers. If a handler already began a response, the connection is

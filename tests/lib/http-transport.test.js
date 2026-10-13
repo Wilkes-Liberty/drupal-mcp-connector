@@ -12,6 +12,11 @@ import {
   normalizeOrigin,
   originAllowed,
   parseOriginList,
+  hostAllowed,
+  normalizeHost,
+  parseHostHeader,
+  parseHostList,
+  resolveAllowedHosts,
   resolveAllowedOrigins,
   sessionPrincipalKey,
 } from "../../src/lib/http-transport.js";
@@ -87,6 +92,70 @@ describe("http-transport helpers", () => {
     expect(mcpAcceptOk("POST", "")).toBe(false);
     expect(mcpAcceptOk("GET", "   ")).toBe(false);
     expect(mcpAcceptOk("POST", undefined)).toBe(true);
+  });
+
+  it("builds the Host allowlist from config, resource, and loopback binds (DEV-861)", () => {
+    expect(normalizeHost("MCP.Example.com:8443")).toBe("mcp.example.com:8443");
+    expect(normalizeHost("https://not-a-host")).toBeNull();
+    expect(normalizeHost("example.com:80")).toBe("example.com:80");
+    expect(normalizeHost("[::1]:3443")).toBe("[::1]:3443");
+    expect(parseHostHeader("example.com:80")).toEqual({ hostname: "example.com", port: "80" });
+    expect(parseHostHeader("[::1]:80")).toEqual({ hostname: "::1", port: "80" });
+    expect(parseHostList("mcp.example.com, 127.0.0.1")).toEqual(["mcp.example.com", "127.0.0.1"]);
+    expect(resolveAllowedHosts({
+      allowedHosts: ["app.example.com:8443"],
+      resource: "https://mcp.example.com/mcp",
+      loopbackBind: true,
+    })).toEqual(["app.example.com:8443", "mcp.example.com", "localhost", "127.0.0.1", "::1"]);
+    expect(resolveAllowedHosts({
+      allowedHosts: ["[2001:db8::1]:8443", "app.example.com:80"],
+    })).toEqual(["[2001:db8::1]:8443", "app.example.com:80"]);
+  });
+
+  it("refuses a missing or disallowed Host and accepts an allowlisted one (DEV-861)", () => {
+    const allow = ["mcp.example.com", "127.0.0.1"];
+    expect(hostAllowed(undefined, allow)).toBe(false);
+    expect(hostAllowed("", allow)).toBe(false);
+    expect(hostAllowed("evil.example", allow)).toBe(false);
+    expect(hostAllowed("mcp.example.com", allow)).toBe(true);
+    expect(hostAllowed("mcp.example.com:3443", allow)).toBe(true);
+    expect(hostAllowed("127.0.0.1:9", allow)).toBe(true);
+    expect(hostAllowed("mcp.example.com", ["mcp.example.com:8443"])).toBe(false);
+    expect(hostAllowed("mcp.example.com:8443", ["mcp.example.com:8443"])).toBe(true);
+    expect(hostAllowed("example.com:80", ["example.com:80"])).toBe(true);
+    expect(hostAllowed("example.com", ["example.com:80"])).toBe(false);
+    expect(hostAllowed("example.com:8080", ["example.com:80"])).toBe(false);
+    expect(hostAllowed("::1", ["::1"])).toBe(true);
+    expect(hostAllowed("[::1]:3443", ["::1"])).toBe(true);
+    expect(hostAllowed("[::1]:3443", ["[::1]:3443"])).toBe(true);
+    expect(hostAllowed("[2001:db8::1]:8443", ["[2001:db8::1]:8443"])).toBe(true);
+    expect(hostAllowed("[2001:db8::1:8443]", ["[2001:db8::1]:8443"])).toBe(false);
+  });
+
+  it("rejects Host values that carry URL syntax instead of host[:port] (DEV-861)", () => {
+    // `URL` would absorb userinfo, query, fragment, and backslashes and hand
+    // back the allowlisted hostname; the raw grammar check refuses them first.
+    for (const bad of [
+      "evil.example@mcp.example.com",
+      "user:pw@mcp.example.com:443",
+      "mcp.example.com?x=1",
+      "mcp.example.com#frag",
+      "mcp.example.com\\x",
+      "mcp.example.com:",
+      "mcp.example.com:443:1",
+      "mcp.example.com:8o80",
+      "[::1",
+      "::1]:3443",
+    ]) {
+      expect(parseHostHeader(bad), bad).toBeNull();
+      expect(hostAllowed(bad, ["mcp.example.com", "::1"]), bad).toBe(false);
+    }
+    // Explicit default ports are kept, not dropped by URL normalization.
+    expect(parseHostHeader("mcp.example.com:80")).toEqual({ hostname: "mcp.example.com", port: "80" });
+    expect(parseHostHeader("mcp.example.com:443")).toEqual({ hostname: "mcp.example.com", port: "443" });
+    expect(parseHostHeader("MCP.Example.COM.")).toEqual({ hostname: "mcp.example.com", port: "" });
+    // IPv6 zone ids are not valid in a Host header and are refused.
+    expect(parseHostHeader("[fe80::1%25eth0]:3443")).toBeNull();
   });
 
   it("detects JSON-RPC batches, notifications, and responses", () => {

@@ -13,6 +13,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { request as nodeRequest } from "node:http";
 import { EVAL_TOOL_NAMES } from "./labels.js";
 import { installFakeClock } from "./clock.js";
 import {
@@ -25,6 +26,7 @@ import {
   principal,
   rateLimit,
   relayEdge,
+  toolScopes,
   usage,
 } from "./connector.js";
 import { createCounters } from "./counters.js";
@@ -46,6 +48,7 @@ const TENANTS = [
 const TOOL_DEFINITIONS = [
   { name: "drupal_list_nodes", description: "List nodes (read).", inputSchema: { type: "object", properties: {} } },
   { name: "drupal_create_node", description: "Create a node (write).", inputSchema: { type: "object", properties: {} } },
+  { name: "drupal_eval_unscoped", description: "Eval-only name with no scope-table row.", inputSchema: { type: "object", properties: {} } },
 ];
 
 if (JSON.stringify(TOOL_DEFINITIONS.map((tool) => tool.name)) !== JSON.stringify([...EVAL_TOOL_NAMES])) {
@@ -163,6 +166,13 @@ const MUTANTS = {
   T13: () => ({ acceptOkFn: () => true }),
   T14: () => ({ isJsonRpcBatchFn: () => false }),
   T16: () => ({ isUnauthenticatedRouteFn: () => false }),
+  // T17 (DEV-862): restore the v3.2.x default (unknown tool -> mcp_read / listed + callable).
+  T17: () => ({
+    filterToolsByPrincipal: (defs) => defs,
+    networkToolScopeDenial: () => null,
+  }),
+  // T18 (DEV-861): skip Host validation so a disallowed Host is served.
+  T18: () => ({ hostAllowedFn: () => true }),
 };
 
 /**
@@ -233,6 +243,8 @@ export async function buildHarness({
   const defaultGrants = Object.fromEntries(TENANTS.map(({ clientId, site }) => [clientId, [site]]));
   const grants = grantsOption === undefined ? defaultGrants : grantsOption;
   const resolveGrantedSites = swap.resolveGrantedSites ?? principal.resolveGrantedSites;
+  const filterToolsByPrincipal = swap.filterToolsByPrincipal ?? principal.filterToolsByPrincipal;
+  const networkToolScopeDenial = swap.networkToolScopeDenial ?? toolScopes.networkToolScopeDenial;
 
   const inboundCfg = {
     issuer: issuer.issuer,
@@ -249,11 +261,20 @@ export async function buildHarness({
     serverInfo: { name: "eval-http-connector", version: "0" },
     tools: {
       definitions: TOOL_DEFINITIONS,
-      list: async () => principal.filterToolsByPrincipal(
+      list: async () => filterToolsByPrincipal(
         TOOL_DEFINITIONS, sites, principal.getRequestIdentity(), grants),
       call: async (name) => {
-        if (name !== "drupal_list_nodes") return { content: [{ type: "text", text: "Unknown tool" }], isError: true };
         const identity = principal.getRequestIdentity();
+        const scopeDenial = networkToolScopeDenial(name);
+        if (scopeDenial) {
+          return {
+            content: [{ type: "text", text: `Access denied: ${scopeDenial}` }],
+            isError: true,
+          };
+        }
+        if (name !== "drupal_list_nodes" && name !== "drupal_eval_unscoped") {
+          return { content: [{ type: "text", text: "Unknown tool" }], isError: true };
+        }
         const entitled = resolveGrantedSites(identity, sites, grants);
         if (!entitled.length) {
           return {
@@ -280,6 +301,8 @@ export async function buildHarness({
   const handlerSwap = { ...swap };
   delete handlerSwap.resolveGrantedSites;
   delete handlerSwap.resolveInboundAuthMode;
+  delete handlerSwap.filterToolsByPrincipal;
+  delete handlerSwap.networkToolScopeDenial;
   delete handlerSwap.wrapRequestHandler;
   const sink = auditSink ?? (() => {
     throw new Error("eval audit sink failed (fail-safe: must not change the HTTP verdict)");
@@ -409,9 +432,40 @@ export async function buildHarness({
         ...(requestId ? { "x-request-id": requestId } : {}),
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       };
-      const res = await fetch(`${root}${route}`, { method: request.method, headers, body: request.body });
-      const text = await res.text();
-      const entry = { status: res.status, headers: Object.fromEntries(res.headers), text, route };
+      const hostOverride = headers.host ?? headers.Host;
+      let entry;
+      if (hostOverride) {
+        // undici fetch forbids setting Host; node:http is how T18 presents a
+        // disallowed Host against the loopback listener.
+        entry = await new Promise((resolve, reject) => {
+          const parsed = new URL(`${root}${route}`);
+          const req = nodeRequest({
+            hostname: parsed.hostname,
+            port: parsed.port,
+            path: parsed.pathname,
+            method: request.method,
+            headers,
+          }, (res) => {
+            const chunks = [];
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () => {
+              resolve({
+                status: res.statusCode,
+                headers: { ...res.headers },
+                text: Buffer.concat(chunks).toString("utf8"),
+                route,
+              });
+            });
+          });
+          req.on("error", reject);
+          if (request.body !== undefined) req.write(request.body);
+          req.end();
+        });
+      } else {
+        const res = await fetch(`${root}${route}`, { method: request.method, headers, body: request.body });
+        const text = await res.text();
+        entry = { status: res.status, headers: Object.fromEntries(res.headers), text, route };
+      }
       tap.record(entry);
       return entry;
     },

@@ -13,13 +13,16 @@ import { NodeStreamableHTTPServerTransport, toWebRequest } from "@modelcontextpr
 import { writeUnauthorized } from "./http-auth.js";
 import {
   attachHttpAudit,
+  markHttpAuditHostRefused,
   markHttpAuditOriginRefused,
   createHttpAuditWriter,
   defaultHttpAuditSink,
 } from "./http-audit.js";
 import {
+  LOOPBACK_HOSTS,
   MCP_PROTOCOL_VERSIONS,
   UNSUPPORTED_PROTOCOL_VERSION_CODE,
+  hostAllowed,
   isJsonRpcBatch,
   isSupportedProtocolVersion,
   mcpAcceptOk,
@@ -83,7 +86,7 @@ function refuseUnresolvedIdentity(res, resourceMetadataUrl) {
 
 /**
  * JSON-RPC error body with no `id` (Streamable HTTP MAY attach one to an
- * HTTP-level refusal). Used for Origin and protocol-version denials.
+ * HTTP-level refusal). Used for Host, Origin, and protocol-version denials.
  *
  * @param {import("http").ServerResponse} res
  * @param {number} status
@@ -321,8 +324,14 @@ export function createLegacySessionHandler({
  *   (DEV-858). Default: stderr JSONL (silent under Vitest). `null` disables
  *   the writer (eval mutant). One finish-time row per response.
  * @param {readonly string[]} [deps.allowedOrigins] Normalized Origin allowlist.
+ * @param {readonly string[]} [deps.allowedHosts] Normalized Host allowlist
+ *   (DEV-861). Defaults to loopback hostnames so unit tests that omit the
+ *   production resolver still accept `Host: 127.0.0.1`. An explicit list
+ *   (including an empty one) is enforced fail-closed.
  * @param {(origin: unknown, allowlist: readonly string[]) => boolean} [deps.originAllowedFn]
  *   Injectable Origin guard (eval mutants swap this).
+ * @param {(host: unknown, allowlist: readonly string[]) => boolean} [deps.hostAllowedFn]
+ *   Injectable Host guard (eval mutants swap this).
  * @param {(version: unknown) => boolean} [deps.protocolVersionSupportedFn]
  *   Injectable protocol-version guard (eval mutants swap this).
  * @param {(method: string, accept: unknown) => boolean} [deps.acceptOkFn]
@@ -352,7 +361,9 @@ export function createMcpRequestHandler({
   onError = defaultOnError,
   auditWriter,
   allowedOrigins = [],
+  allowedHosts = LOOPBACK_HOSTS,
   originAllowedFn = originAllowed,
+  hostAllowedFn = hostAllowed,
   protocolVersionSupportedFn = isSupportedProtocolVersion,
   acceptOkFn = mcpAcceptOk,
   isUnauthenticatedRouteFn = isUnauthenticatedRoute,
@@ -463,6 +474,11 @@ export function createMcpRequestHandler({
     if (!await gateAuth(req, res)) return;
 
     if (path === MCP_HTTP_PATH) {
+      if (!hostAllowedFn(req.headers.host, allowedHosts)) {
+        markHttpAuditHostRefused(req);
+        writeJsonRpcHttpError(res, 403, { message: "Forbidden host" });
+        return;
+      }
       if (!originAllowedFn(req.headers.origin, allowedOrigins)) {
         markHttpAuditOriginRefused(req);
         writeJsonRpcHttpError(res, 403, { message: "Forbidden origin" });

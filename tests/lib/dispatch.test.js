@@ -33,6 +33,8 @@ vi.mock("../../src/lib/config.js", async (orig) => {
 import fetch from "node-fetch";
 import { getSiteConfig, listSiteNames } from "../../src/lib/config.js";
 import { securityMiddleware, callTool, invokeReadTool, listResolvableSiteConfigs } from "../../src/lib/dispatch.js";
+import { runWithIdentity } from "../../src/lib/principal.js";
+import { allHandlers } from "../../src/tools/index.js";
 import {
   clearTextFormatContextCache,
   installTextFormatContextFetcher,
@@ -476,5 +478,86 @@ describe("securityMiddleware northbound data-flow (#179)", () => {
     );
     expect(getDataFlowContext()).toBeNull();
     expect(handler).toHaveBeenCalledOnce();
+  });
+});
+
+describe("GraphQL mutations need mcp_write on the network path (DEV-862)", () => {
+  const sites = [{
+    _name: "open",
+    baseUrl: "https://open.example.com",
+    security: { preset: "development", allowGraphql: true, allowGraphqlMutations: true },
+  }];
+  const grants = { "content-agent": ["open"] };
+
+  it("refuses a drupal_graphql mutation for a read-only principal before any upstream call", async () => {
+    const identity = { sub: "reader", clientId: "content-agent", scopes: ["mcp_read"] };
+    const result = await runWithIdentity(
+      identity,
+      () => callTool("drupal_graphql", { site: "open", query: "mutation { ping }" }, {
+        identity, sites, grants, defaultSite: "open",
+      }),
+      { surface: "network" },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Access denied: Not entitled to invoke drupal_graphql as a write/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not refuse the same principal's query, and lets mcp_write past the entitlement gate", async () => {
+    const reader = { sub: "reader", clientId: "content-agent", scopes: ["mcp_read"] };
+    const query = await runWithIdentity(
+      reader,
+      () => callTool("drupal_graphql", { site: "open", query: "{ ping }" }, {
+        identity: reader, sites, grants, defaultSite: "open",
+      }),
+      { surface: "network" },
+    );
+    expect(String(query.content?.[0]?.text ?? "")).not.toMatch(/Not entitled/);
+    const writer = { sub: "writer", clientId: "content-agent", scopes: ["mcp_read", "mcp_write"] };
+    const mutation = await runWithIdentity(
+      writer,
+      () => callTool("drupal_graphql", { site: "open", query: "mutation { ping }" }, {
+        identity: writer, sites, grants, defaultSite: "open",
+      }),
+      { surface: "network" },
+    );
+    expect(String(mutation.content?.[0]?.text ?? "")).not.toMatch(/Not entitled/);
+  });
+});
+
+describe("deny-by-default tool scope table on the network path (DEV-862)", () => {
+  it("refuses tools/call for a registered tool missing from the table with zero handler calls", async () => {
+    const probe = vi.fn(async () => ({ ok: true }));
+    allHandlers.drupal_eval_unscoped = probe;
+    const identity = {
+      sub: "reader",
+      clientId: "content-agent",
+      scopes: ["mcp_read"],
+    };
+    try {
+      const result = await runWithIdentity(
+        identity,
+        () => callTool("drupal_eval_unscoped", { site: "open" }, {
+          identity,
+          sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" } }],
+          grants: { "content-agent": ["open"] },
+          defaultSite: "open",
+        }),
+        { surface: "network" },
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/scope table/i);
+      expect(probe).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      delete allHandlers.drupal_eval_unscoped;
+    }
+  });
+
+  it("does not apply the network table gate on stdio", async () => {
+    const result = await callTool("drupal_not_a_real_tool", {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Unknown tool/);
+    expect(result.content[0].text).not.toMatch(/scope table/i);
   });
 });

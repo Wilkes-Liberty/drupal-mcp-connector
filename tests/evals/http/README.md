@@ -19,6 +19,11 @@ Everything is synthetic: keys are generated in memory, the token issuer is
 a stub that is **not Paladin**, and the upstream is a fake loopback server
 with per-tenant canaries. It proves connector logic, not Paladin, Keystone,
 or production Sentinel.
+DEV-862 adds T17: a built-in tool with no scope-table row is absent from
+`tools/list` and refused on `tools/call` with zero upstream calls. DEV-861
+adds T18: a disallowed Host is 403 after auth with no dispatch, while an
+unauthenticated request with a bad Host is still the shared 401
+(DEV-845 / DEV-877).
 
 | Piece | Where |
 |-------|-------|
@@ -42,3 +47,5 @@ mutant switch. The only `src/` change in this increment is the test seam:
 `startHttpsTransport` (what `index.js` calls) plus injectable handler
 predicates the mutants swap. `EVAL_HTTP_SRC` points the harness at a scratch
 copy of `src/`.
+T17 swaps in a fail-open scope table (the v3.2.x default) and T18 a Host
+no-op; both go red.

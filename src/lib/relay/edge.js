@@ -70,6 +70,7 @@ import {
 } from "../evidence.js";
 import {
   createInboundHttpsAuth,
+  isLoopbackBind,
   resolveIntrospectionCredentials,
   writeUnauthorized,
   SPOOFABLE_IDENTITY_HEADERS,
@@ -81,7 +82,7 @@ import {
   defaultHttpAuditSink,
 } from "../http-audit.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../http-handler.js";
-import { resolveAllowedOrigins } from "../http-transport.js";
+import { resolveAllowedHosts, resolveAllowedOrigins } from "../http-transport.js";
 import { isWriteLikeCall } from "../operations.js";
 import {
   eligiblePromotions,
@@ -1532,6 +1533,12 @@ export async function startEdge({
       allowedOrigins: auth.allowedOrigins,
       resource: auth.resource,
       audience: auth.audience,
+    }),
+    allowedHosts: resolveAllowedHosts({
+      allowedHosts: auth.allowedHosts,
+      resource: auth.resource,
+      audience: auth.audience,
+      loopbackBind: isLoopbackBind(bindHost),
     }),
   });
 

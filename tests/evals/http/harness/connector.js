@@ -23,6 +23,7 @@ export const httpsStartup = await load("lib/https-startup.js");
 export const mcpServer = await load("lib/mcp-server.js");
 export const principal = await load("lib/principal.js");
 export const rateLimit = await load("lib/rate-limit.js");
+export const toolScopes = await load("lib/tool-scopes.js");
 export const relayEdge = await load("lib/relay/edge.js");
 export const usage = await load("lib/usage.js");
 export const evidence = await load("lib/evidence.js");

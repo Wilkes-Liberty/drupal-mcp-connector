@@ -15,9 +15,10 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getDefaultSiteName, getInboundGrants } from "./config.js";
-import { inferOperation } from "./operations.js";
+import { inferOperation, isWriteLikeCall } from "./operations.js";
 import { POLICY_DIGEST } from "./policy-promotion.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
+import { networkToolScopeDenial, requiredScopesForTool } from "./tool-scopes.js";
 import { lookupWorkflow } from "./workflow-prompts.js";
 
 const identityStore = new AsyncLocalStorage();
@@ -61,12 +62,12 @@ export const DIAGNOSTIC_TOOLS = new Set([
 const CONFIG_READ_TOOLS = new Set([
   "drupal_config_get",
   "drupal_config_list",
-  "drupal_drush_config_export",
   "drupal_drush_config_status",
 ]);
 
 const CONFIG_WRITE_TOOLS = new Set([
   "drupal_config_set",
+  "drupal_drush_config_export",
   "drupal_drush_config_import",
 ]);
 
@@ -142,11 +143,17 @@ function isUnresolvedNetworkPrincipal(identity) {
 
 /**
  * Inbound scope required to discover or invoke a tool. Diagnostics need none.
+ * Names in the explicit table (DEV-862) use that row. A name with no row
+ * still returns `mcp_read` so stdio keeps the historical default; network
+ * listeners refuse that name before this function is consulted.
+ *
  * @param {string} toolName
  * @returns {string|null}
  */
 export function requiredScopeForTool(toolName) {
   if (DIAGNOSTIC_TOOLS.has(toolName)) return null;
+  const scopes = requiredScopesForTool(toolName);
+  if (scopes?.length) return scopes[0];
   if (toolName === "drupal_drush_sql_query") return "mcp_admin";
   if (CONFIG_WRITE_TOOLS.has(toolName)) return "mcp_config";
   if (CONFIG_READ_TOOLS.has(toolName)) return "mcp_config_read";
@@ -154,6 +161,20 @@ export function requiredScopeForTool(toolName) {
   const op = inferOperation(toolName);
   if (op === "write" || op === "delete") return "mcp_write";
   return "mcp_read";
+}
+
+/**
+ * Inbound scope required for one concrete invocation. The per-tool row is
+ * the floor; `drupal_graphql` carrying a mutation is a write and needs
+ * `mcp_write` even though queries stay on `mcp_read` (DEV-862).
+ *
+ * @param {string} toolName
+ * @param {object} [args]
+ * @returns {string|null}
+ */
+export function requiredScopeForCall(toolName, args = {}) {
+  if (toolName === "drupal_graphql" && isWriteLikeCall(toolName, args ?? {})) return "mcp_write";
+  return requiredScopeForTool(toolName);
 }
 
 /**
@@ -391,6 +412,9 @@ function siteAllowsTool(site, toolName) {
  */
 export function principalMayUseTool(toolName, identity, sites, grants) {
   if (isUnresolvedNetworkPrincipal(identity)) return false;
+  if (getRequestSurface() === "network" && networkToolScopeDenial(toolName)) {
+    return false;
+  }
   if (isLocalOperator(identity)) return true;
   if (DIAGNOSTIC_TOOLS.has(toolName)) return true;
   if (!principalHasScope(identity, requiredScopeForTool(toolName))) return false;
@@ -411,7 +435,10 @@ export function principalMayUseTool(toolName, identity, sites, grants) {
  */
 export function filterToolsByPrincipal(definitions, sites, identity, grants) {
   if (isUnresolvedNetworkPrincipal(identity)) return [];
-  if (isLocalOperator(identity)) return definitions;
+  // The local-operator shortcut is for stdio only. On a network listener
+  // (loopback HTTP included) discovery goes through `principalMayUseTool`
+  // so the scope-table denial applies to every listener (DEV-862).
+  if (isLocalOperator(identity) && getRequestSurface() !== "network") return definitions;
   return definitions.filter((definition) =>
     principalMayUseTool(definition.name, identity, sites, grants));
 }
@@ -546,6 +573,11 @@ export function assertPrincipalEntitlement({
   if (isLocalOperator(identity)) return null;
   if (!principalMayUseTool(toolName, identity, sites, grants)) {
     throw new SecurityError(`Not entitled to invoke ${toolName}.`);
+  }
+  // Invocation-aware check: a GraphQL mutation is a write regardless of the
+  // site's own allowGraphqlMutations policy, which is checked later.
+  if (!principalHasScope(identity, requiredScopeForCall(toolName, args))) {
+    throw new SecurityError(`Not entitled to invoke ${toolName} as a write.`);
   }
   // list_sites has no target. governance_status without a hint reports every
   // granted site — pinning it to the default would hide the rest.
