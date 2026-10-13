@@ -16,6 +16,11 @@ function req(remoteAddress, headers = {}) {
 describe("normalizeIp", () => {
   it("strips IPv4-mapped prefixes, ports, brackets, and zone ids", () => {
     expect(normalizeIp("::ffff:203.0.113.9")).toBe("203.0.113.9");
+    // Hex is case-insensitive: the same endpoint must always get one key.
+    expect(normalizeIp("::FFFF:203.0.113.9")).toBe("203.0.113.9");
+    expect(normalizeIp("[::FfFf:203.0.113.9]:8443")).toBe("203.0.113.9");
+    expect(normalizeIp("2001:DB8::1")).toBe("2001:db8::1");
+    expect(normalizeIp("2001:DB8::1")).toBe(normalizeIp("2001:db8::1"));
     expect(normalizeIp("203.0.113.9:8443")).toBe("203.0.113.9");
     expect(normalizeIp("[2001:db8::1]")).toBe("2001:db8::1");
     expect(normalizeIp("fe80::1%eth0")).toBe("fe80::1");

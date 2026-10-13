@@ -33,6 +33,9 @@ export function normalizeIp(address) {
   }
   const zone = value.indexOf("%");
   if (zone !== -1) value = value.slice(0, zone);
+  // Hex digits are case-insensitive: one spelling per endpoint, so the
+  // mapped prefix is recognized in any case and IPv6 keys are lowercase.
+  value = value.toLowerCase();
   if (value.startsWith("::ffff:") && isIP(value.slice(7)) === 4) {
     value = value.slice(7);
   }

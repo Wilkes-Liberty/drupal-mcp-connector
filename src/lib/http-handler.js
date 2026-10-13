@@ -396,6 +396,7 @@ export function createMcpRequestHandler({
     isUnauthenticatedRouteFn,
     sessionlessMethodRefusedFn,
     isJsonRpcBatchFn,
+    principalRateKeyFn,
   };
   for (const [name, fn] of Object.entries(injectedPredicates)) {
     if (typeof fn !== "function") {

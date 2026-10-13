@@ -265,6 +265,13 @@ describe("startHttpsTransport", () => {
     await ok.close();
   });
 
+  it("throws at construction when principalRateKeyFn is supplied but not a function", async () => {
+    for (const bad of [null, "nope", 42]) {
+      await expect(baseStartup({ handlerOverrides: { principalRateKeyFn: bad } }))
+        .rejects.toThrow(/principalRateKeyFn must be a function/);
+    }
+  });
+
   it("throws at construction when sessionPrincipalKeyFn is supplied but not a function", async () => {
     await expect(baseStartup({ handlerOverrides: { sessionPrincipalKeyFn: null } }))
       .rejects.toThrow(/sessionPrincipalKeyFn must be a function/);
