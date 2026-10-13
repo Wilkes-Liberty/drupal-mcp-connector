@@ -6,6 +6,8 @@
  * once the hosted/network gate is in place.
  */
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { allDefinitions } from "../../src/tools/index.js";
 import {
@@ -56,6 +58,22 @@ describe("assertHostedToolScopeTable (DEV-862)", () => {
       [{ name: "drupal_get_node" }, { name: "drupal_probe_missing" }],
       { drupal_get_node: { requiredScopes: ["mcp_read"] } },
     )).toThrow(new RegExp(`${MISSING_SCOPE_ENTRY_REASON}.*drupal_probe_missing`));
+  });
+});
+
+describe("every network entry point runs the scope-table assertion before it serves (DEV-862)", () => {
+  const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+
+  it.each([
+    ["src/index.js", "../../src/index.js", ".listen("],
+    ["bin/drupal-mcp-agent.js", "../../bin/drupal-mcp-agent.js", "createRelayAgent("],
+  ])("%s asserts the table before %s", (_label, rel, serveMarker) => {
+    const source = read(rel);
+    const assertAt = source.indexOf("assertHostedToolScopeTable(allDefinitions)");
+    const serveAt = source.indexOf(serveMarker);
+    expect(assertAt).toBeGreaterThan(-1);
+    expect(serveAt).toBeGreaterThan(-1);
+    expect(assertAt).toBeLessThan(serveAt);
   });
 });
 

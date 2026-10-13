@@ -41,12 +41,22 @@ import {
   visibleSiteTargets,
 } from "../src/lib/principal.js";
 import { createRelayAgent } from "../src/lib/relay/agent.js";
+import { assertHostedToolScopeTable } from "../src/lib/tool-scopes.js";
 import { buildToolPrompts, getToolPromptMessages } from "../src/lib/tool-prompts.js";
 import { allDefinitions, definitionsByName } from "../src/tools/index.js";
 
 function fatal(message) {
   console.error(`[drupal-mcp-agent] FATAL: ${message}`);
   process.exit(1);
+}
+
+// The relay agent exposes the full registry under surface "network", so it
+// is held to the same fail-closed scope table as the HTTPS entry point
+// (DEV-862): an unscoped tool refuses to start here too, before any dial.
+try {
+  assertHostedToolScopeTable(allDefinitions);
+} catch (error) {
+  fatal(error instanceof Error ? error.message : String(error));
 }
 
 const host = process.env.MCP_EDGE_HOST || "";
