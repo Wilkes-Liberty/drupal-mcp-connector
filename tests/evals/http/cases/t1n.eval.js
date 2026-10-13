@@ -22,7 +22,12 @@ import { SRC_DIR, httpAuth, httpsStartup, mcpServer } from "../harness/connector
 // index/startup mutant applied to the scratch copy is what the probe runs.
 const INDEX = join(SRC_DIR, "index.js");
 
-function spawnRealIndex() {
+/**
+ * Throwaway self-signed TLS pair. The DEV-845 scenario is a non-loopback
+ * bind **with** TLS; without certificates the cleartext boundary refuses
+ * first and the fail-open mutant could never be observed.
+ */
+function makeTlsPair() {
   const dir = mkdtempSync(join(tmpdir(), "eval-t1n-"));
   const cert = join(dir, "cert.pem");
   const key = join(dir, "key.pem");
@@ -36,6 +41,11 @@ function spawnRealIndex() {
     rmSync(dir, { recursive: true, force: true });
     throw new Error(`openssl failed: ${openssl.stderr || openssl.stdout}`);
   }
+  return { dir, cert, key };
+}
+
+function spawnRealIndex() {
+  const { dir, cert, key } = makeTlsPair();
   const child = spawnSync(process.execPath, [INDEX], {
     encoding: "utf8",
     timeout: 15_000,
@@ -70,13 +80,15 @@ defineCase({
       prompts: { definitions: [], get: () => [] },
     });
     const exits = [];
+    const tlsPair = makeTlsPair();
     const result = await httpsStartup.startHttpsTransport({
       bindHost: "0.0.0.0",
       port: 0,
-      allowHttp: true,
+      allowHttp: false,
       allowUnauth: true,
       sharedToken: "",
       inboundCfg: { issuer: "", audience: "" },
+      tls: { certPath: tlsPair.cert, keyPath: tlsPair.key },
       listenHost: "127.0.0.1",
       buildServer: dummyServer,
       toolCount: 0,
@@ -90,6 +102,7 @@ defineCase({
       expectEqual(h, "startup called exit(1)", exits[0]?.code, 1);
     } finally {
       if (result.started) await result.close?.();
+      rmSync(tlsPair.dir, { recursive: true, force: true });
     }
 
     if (!h.mutant) {
