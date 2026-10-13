@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   route and method shapes, DEV-858 / #451 audit rows on `/mcp`, `/usage`,
   and `/assessor`, and the increment-1 review holes: a dispatch-then-401
   mutant (a-1), pinned mutant kill-labels (a-2), T7 twins for every T1
-  shape (a-3), manifest-pinned request labels and routes (a-5), known-red
+  shape (a-3), live tool-registry and route-table coverage pin (a-5), known-red
   ticket + expiry + reason (c-1, c-2), and T1n real startup (c-4). A
   separate, non-required GitHub Actions job runs the pack. Known-red
   entries that expire or omit a ticket fail the pack. No production

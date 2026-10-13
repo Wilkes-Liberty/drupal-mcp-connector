@@ -1,14 +1,9 @@
 /**
- * Pinned request-label and route sets (DEV-866 increment 2, a-5).
- *
- * The pack fails if these drift from `manifest.json`, or if src grows a
- * route that is not listed. Cases import the same arrays so T1/T7 cannot
- * silently drop a shape.
+ * T1/T7 request-label twins (a-3) and the stand-in eval tool surface.
+ * Live connector tools and HTTP routes are pinned in Ta5 / coverage.js (a-5).
  */
 
-import { EDGE_NORTHBOUND_AUX_ROUTES, httpHandler } from "./connector.js";
-
-/** Stand-in tool names the eval surface exposes. A new name needs a case. */
+/** Stand-in tool names the eval HTTP surface exposes (not the full registry). */
 export const EVAL_TOOL_NAMES = Object.freeze([
   "drupal_list_nodes",
   "drupal_create_node",
@@ -34,20 +29,3 @@ export const UNAUTHENTICATED_LABELS = Object.freeze([
   "DELETE with session",
 ]);
 
-/** #452 / #451 HTTP routes the pack must pin. */
-export function srcRoutes() {
-  return [
-    ...httpHandler.UNAUTHENTICATED_ROUTES.map((route) => ({
-      method: route.method,
-      path: route.path,
-    })),
-    ...httpHandler.MCP_HTTP_METHODS.map((method) => ({
-      method,
-      path: httpHandler.MCP_HTTP_PATH,
-    })),
-    ...EDGE_NORTHBOUND_AUX_ROUTES.map((route) => ({
-      method: route.method,
-      path: route.path,
-    })),
-  ];
-}

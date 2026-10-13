@@ -16,7 +16,9 @@
  *      expiry date, and pinned reason (c-1, c-2).
  *   5. No ambient credentials: DRUPAL_*, MCP_*, TLS_*, and issuer variables are
  *      cleared from the child environment. Keys are generated in memory.
- *   a-5. Request-label and route sets are pinned to the manifest.
+ *   a-5. Live tools (allDefinitions) and HTTP routes (transport tables)
+ *      each have a covering case (Ta5). T1/T7 request labels stay pinned
+ *      to manifest.requestLabels.
  * Rule 4 (scanner self-test first) arrives with X1s in increment 4.
  * Also (R-A7): src/ must not mention the harness's own switches.
  *
@@ -31,13 +33,8 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, w
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { EDGE_NORTHBOUND_AUX_ROUTES } from "../../../src/lib/relay/edge.js";
-import {
-  MCP_HTTP_METHODS,
-  MCP_HTTP_PATH,
-  UNAUTHENTICATED_ROUTES,
-} from "../../../src/lib/http-handler.js";
-import { EVAL_TOOL_NAMES, UNAUTHENTICATED_LABELS } from "./harness/labels.js";
+import { UNAUTHENTICATED_LABELS } from "./harness/labels.js";
+import { liveRoutes, liveTools, loadAssignment } from "./harness/coverage.js";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO = resolve(HERE, "../../..");
@@ -87,14 +84,6 @@ function normalizeKnownRed(raw) {
   return out;
 }
 
-function srcRouteList() {
-  return [
-    ...UNAUTHENTICATED_ROUTES.map((route) => `${route.method} ${route.path}`),
-    ...MCP_HTTP_METHODS.map((method) => `${method} ${MCP_HTTP_PATH}`),
-    ...EDGE_NORTHBOUND_AUX_ROUTES.map((route) => `${route.method} ${route.path}`),
-  ].sort();
-}
-
 function main() {
   const manifestFile = readJson("manifest.json");
   const manifest = manifestFile.cases;
@@ -108,28 +97,31 @@ function main() {
     violations.push("a-4: src/index.js does not call startHttpsTransport (eval must drive real startup wiring)");
   }
 
-  const pinnedRoutes = (manifestFile.routes || []).map((route) => `${route.method} ${route.path}`).sort();
-  const discoveredRoutes = srcRouteList();
-  if (JSON.stringify(pinnedRoutes) !== JSON.stringify(discoveredRoutes)) {
-    violations.push(
-      `a-5: manifest.routes [${pinnedRoutes}] differ from src routes [${discoveredRoutes}]`,
-    );
-  }
-
   const pinnedLabels = [...(manifestFile.requestLabels || [])].sort();
   const expectedLabels = [...UNAUTHENTICATED_LABELS].sort();
   if (JSON.stringify(pinnedLabels) !== JSON.stringify(expectedLabels)) {
     violations.push(
-      `a-5: manifest.requestLabels [${pinnedLabels}] differ from UNAUTHENTICATED_LABELS [${expectedLabels}]`,
+      `a-3: manifest.requestLabels [${pinnedLabels}] differ from UNAUTHENTICATED_LABELS [${expectedLabels}]`,
     );
   }
 
-  const pinnedTools = [...(manifestFile.tools || [])].sort();
-  if (JSON.stringify(pinnedTools) !== JSON.stringify([...EVAL_TOOL_NAMES].sort())) {
-    violations.push(
-      `a-5: manifest.tools [${pinnedTools}] differ from EVAL_TOOL_NAMES [${[...EVAL_TOOL_NAMES]}]`,
-    );
+  const assignment = loadAssignment();
+  const tools = liveTools();
+  const routes = liveRoutes();
+  for (const tool of tools) {
+    const caseId = assignment.tools[tool];
+    if (!caseId) violations.push(`a-5: tool ${tool} has no covering case`);
+    else if (!manifest.includes(caseId)) violations.push(`a-5: covering case ${caseId} is not in the pack`);
   }
+  for (const route of routes) {
+    const caseId = assignment.routes[route];
+    if (!caseId) violations.push(`a-5: route ${route} has no covering case`);
+    else if (!manifest.includes(caseId)) violations.push(`a-5: covering case ${caseId} is not in the pack`);
+  }
+  const extraTools = Object.keys(assignment.tools).filter((name) => !tools.includes(name)).sort();
+  const extraRoutes = Object.keys(assignment.routes).filter((name) => !routes.includes(name)).sort();
+  if (extraTools.length) violations.push(`a-5: assignment tools not in the live registry: ${extraTools.join(", ")}`);
+  if (extraRoutes.length) violations.push(`a-5: assignment routes not in the live route table: ${extraRoutes.join(", ")}`);
 
   const today = todayUtc();
   for (const [id, entry] of Object.entries(knownRed)) {

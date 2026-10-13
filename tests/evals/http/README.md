@@ -22,17 +22,20 @@ or production Sentinel.
 
 | Piece | Where |
 |-------|-------|
-| Case ids, request labels, routes, stand-in tools | `manifest.json` |
+| Case ids and T1/T7 request-label twins | `manifest.json` |
+| Live tool/route → covering case (a-5) | `coverage.json`, `cases/ta5.eval.js` |
 | Strict known-red list (`ticket` + `expires` + `reason`) | `known-red.json` |
 | Stub issuer, keys, fake upstream, counters, taps, fake clock, handler build | `harness/` |
 | Cases | `cases/*.eval.js` |
 | Pack rules and report (`evals-http-report.json`, gitignored) | `run-pack.js` |
 
-Pack rules: empty or skipped pack fails; discovered ids, request labels,
-routes, and stand-in tools must equal the manifest; every run must execute
-counted assertions; every non-known-red case needs a mutant killed on its
-pinned assertion label (a-2); a known-red case must fail for its pinned
-reason, and needs an open ticket plus an expiry date (c-1, c-2).
+Pack rules: empty or skipped pack fails; discovered ids must equal the
+manifest; T1/T7 request labels must equal `manifest.requestLabels`; every
+live tool (`allDefinitions`) and HTTP route (transport tables) must have
+a covering case (Ta5); every run must execute counted assertions; every
+non-known-red case needs a mutant killed on its pinned assertion label
+(a-2); a known-red case must fail for its pinned reason, and needs an
+open ticket plus an expiry date (c-1, c-2).
 
 Mutants are dependency swaps in `harness/build.js`. `src/` has no eval or
 mutant switch. The only `src/` change in this increment is the test seam:

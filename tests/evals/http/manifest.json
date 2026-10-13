@@ -1,6 +1,6 @@
 {
-  "_comment": "Exact lists the pack must run (DEV-866 increment 2). The run fails if discovered ids, routes, request labels, or stand-in tools differ.",
-  "cases": ["T1", "T1n", "T2", "T4", "T4b", "T7", "T8", "T9", "T10", "T11", "T12", "T13", "T14", "T16"],
+  "_comment": "Case ids the pack must run, plus T1/T7 request-label twins (a-3). Live tools and HTTP routes are pinned in Ta5 from allDefinitions and the transport route tables (a-5); see coverage.json for the case assignment.",
+  "cases": ["T1", "T1n", "T2", "T4", "T4b", "T7", "T8", "T9", "T10", "T11", "T12", "T13", "T14", "T16", "Ta5"],
   "requestLabels": [
     "POST initialize",
     "POST server/discover",
@@ -15,15 +15,5 @@
     "GET with session",
     "DELETE without session",
     "DELETE with session"
-  ],
-  "tools": ["drupal_list_nodes", "drupal_create_node"],
-  "routes": [
-    { "method": "GET", "path": "/health" },
-    { "method": "GET", "path": "/.well-known/oauth-protected-resource" },
-    { "method": "POST", "path": "/mcp" },
-    { "method": "GET", "path": "/mcp" },
-    { "method": "DELETE", "path": "/mcp" },
-    { "method": "GET", "path": "/usage" },
-    { "method": "GET", "path": "/assessor" }
   ]
 }
