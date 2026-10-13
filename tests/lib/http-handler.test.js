@@ -276,6 +276,33 @@ describe("createMcpRequestHandler", () => {
     expect(codes.filter((c) => c === 429)).toHaveLength(24);
   });
 
+  it("charges the address bucket when introspection fails with 503 so an issuer outage cannot be probed for free", async () => {
+    const rateLimiter = createRateLimiter({ limit: 2, windowMs: 60_000, now: () => 0 });
+    const authenticate = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      headers: { "Retry-After": "2" },
+      body: "Service Unavailable",
+    }));
+    const h = createMcpRequestHandler({
+      authenticate,
+      rateLimiter,
+      modernHandler: vi.fn(),
+      legacyHandler: vi.fn(),
+      toolCount: 66,
+      toWebRequestFn: vi.fn(),
+    });
+    const codes = [];
+    for (let i = 0; i < 4; i += 1) {
+      const res = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "ping" }, { authorization: "Bearer outage" }), res);
+      codes.push(res.statusCode);
+    }
+    // Two 503s consumed the two slots; the next two never reached the issuer.
+    expect(codes).toEqual([503, 503, 429, 429]);
+    expect(authenticate).toHaveBeenCalledTimes(2);
+  });
+
   it("gives a verified principal its address hold back so only the principal gate charges it", async () => {
     const rateLimiter = createRateLimiter({ limit: 1, windowMs: 60_000, now: () => 0 });
     const principalLimiter = createRateLimiter({ limit: 100, windowMs: 60_000, now: () => 0 });

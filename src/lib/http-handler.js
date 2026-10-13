@@ -409,12 +409,12 @@ export function createMcpRequestHandler({
   }
 
   /**
-   * After a 401 or 403 from the bearer path, charge the address bucket so a
-   * spray of bad or under-scoped bearers is eventually refused before the
-   * next introspection. A valid token that lacks a required scope never
-   * reaches the principal gate, so without this it could trigger unlimited
-   * issuer calls. With a reservation the hold is committed; otherwise the
-   * bucket is charged now.
+   * After any error response from the bearer path (401, 403, the 503 an
+   * unreachable issuer produces, …), charge the address bucket so a spray
+   * of bad, under-scoped, or outage-probing bearers is eventually refused
+   * before the next introspection. None of those reach the principal gate,
+   * so without this they could keep invoking the issuer for free. With a
+   * reservation the hold is committed; otherwise the bucket is charged now.
    *
    * @param {import("http").IncomingMessage} req
    * @param {import("http").ServerResponse} res
@@ -422,7 +422,7 @@ export function createMcpRequestHandler({
   function noteFailedAuthAddress(req, res) {
     if (!rateLimiter) return;
     if (!parseBearerToken(req.headers.authorization)) return;
-    const failed = res.statusCode === 401 || res.statusCode === 403;
+    const failed = typeof res.statusCode === "number" && res.statusCode >= 400;
     if (req.mcpAddressHold) {
       if (failed) req.mcpAddressHold.commit();
       else req.mcpAddressHold.release();
