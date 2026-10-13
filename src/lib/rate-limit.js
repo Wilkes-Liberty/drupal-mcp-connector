@@ -59,7 +59,9 @@ export function createRateLimiter({
 
   function prune(t) {
     for (const [k, b] of buckets) {
-      if (t >= b.resetAt) buckets.delete(k);
+      // A bucket with outstanding holds stays until they settle, so the
+      // in-flight map can never outgrow the capped bucket map.
+      if (t >= b.resetAt && !held(k)) buckets.delete(k);
     }
   }
 
@@ -102,6 +104,13 @@ export function createRateLimiter({
   function bucketFor(key, t) {
     let b = buckets.get(key);
     if (b && t < b.resetAt) return { b, target: key };
+    if (b && held(key)) {
+      // Expired but still held: roll the window in place rather than
+      // dropping the holds' bucket.
+      b.count = 0;
+      b.resetAt = t + windowMs;
+      return { b, target: key };
+    }
     if (!b && buckets.size >= cap) {
       prune(t);
       // Fail closed: a full map never evicts a live bucket (that would let
@@ -111,33 +120,6 @@ export function createRateLimiter({
     b = { count: 0, resetAt: t + windowMs };
     buckets.set(key, b);
     return { b, target: key };
-  }
-
-  /**
-   * Resolve the live bucket for `key` without inserting a row. New keys
-   * while the map is full share overflow, matching `peek`.
-   */
-  function inspect(key, t) {
-    const b = buckets.get(key);
-    if (b && t < b.resetAt) return { b, target: key };
-    if (!b && buckets.size >= cap) {
-      prune(t);
-      if (buckets.size >= cap) return { b: overflow, target: OVERFLOW_KEY };
-    }
-    return { b: null, target: key };
-  }
-
-  /**
-   * Consume one slot on the target that `reserve` held. Overflow stays
-   * overflow even if prune has since freed dedicated capacity.
-   */
-  function charge(target) {
-    const t = now();
-    if (target === OVERFLOW_KEY) {
-      return consume(overflowBucket(t), t, OVERFLOW_KEY);
-    }
-    const resolved = bucketFor(target, t);
-    return consume(resolved.b, t, resolved.target);
   }
 
   return {
@@ -168,12 +150,11 @@ export function createRateLimiter({
     /**
      * Atomically hold one slot for a request whose outcome is not known
      * yet (a bearer awaiting introspection). While held, the slot counts
-     * against `check` and `peek` for the same target, so a concurrent burst
-     * cannot all observe a free bucket. Does not insert an unused map row.
-     * `commit()` charges the reserved target (failed auth), including the
-     * overflow bucket; `release()` gives the hold back (verified principal,
-     * which the principal limiter then charges). Either is a no-op after
-     * the first call.
+     * against `check` and `peek` for the same key, so a concurrent burst
+     * cannot all observe a free bucket. `commit()` turns the hold into a
+     * consumed slot (failed auth); `release()` gives it back (verified
+     * principal, which the principal limiter then charges). Either is a
+     * no-op after the first call.
      *
      * @param {string} key
      * @returns {RateVerdict & {commit: () => void, release: () => void}}
@@ -182,7 +163,7 @@ export function createRateLimiter({
       const noop = () => {};
       if (!enabled) return { allowed: true, remaining: Infinity, retryAfterSec: 0, commit: noop, release: noop };
       const t = now();
-      const { b, target } = inspect(key, t);
+      const { b, target } = bucketFor(key, t);
       const verdict = verdictFor(b, t, held(target));
       if (!verdict.allowed) return { ...verdict, commit: noop, release: noop };
       inflight.set(target, held(target) + 1);
@@ -197,8 +178,21 @@ export function createRateLimiter({
         allowed: true,
         remaining: verdict.remaining - 1,
         retryAfterSec: 0,
-        commit: () => { if (close()) charge(target); },
-        release: () => { close(); },
+        commit: () => {
+          if (!close()) return;
+          // Charge the same target the hold was taken on: a hold on the
+          // shared overflow bucket must not mint a fresh dedicated bucket.
+          const tc = now();
+          if (target === OVERFLOW_KEY) consume(overflowBucket(tc), tc, OVERFLOW_KEY);
+          else consume(bucketFor(key, tc).b, tc, key);
+        },
+        release: () => {
+          if (!close()) return;
+          // A verified principal leaves no trace: an untouched bucket is
+          // dropped so many verified addresses cannot fill the key cap.
+          const b = buckets.get(key);
+          if (target === key && b && b.count === 0 && !held(key)) buckets.delete(key);
+        },
       };
     },
     size() { return buckets.size; },

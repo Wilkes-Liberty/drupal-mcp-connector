@@ -35,11 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `application/json` nor `text/event-stream` is `406`.
 
 ### Fixed
-- **Address limiter reserve/commit keeps overflow charged and does not pin empty keys (DEV-860).**
-  `commit` charges the reserved overflow bucket instead of re-resolving the
-  caller key after prune. `reserve` holds a slot without inserting an unused
-  address row, so verified clients from many IPs cannot fill `maxKeys` and
-  push new unauthenticated traffic into overflow.
+- **Address limiter holds are bounded, overflow-aware, and leave no trace (DEV-860).**
+  A bucket with an outstanding hold survives pruning and rolls its window
+  in place, so in-flight reservations can never outgrow the `maxKeys` cap.
+  `commit` charges the target the hold was taken on, including the shared
+  overflow bucket, instead of re-resolving the caller key after prune. A
+  released hold drops the untouched bucket it created, so verified clients
+  from many IPs cannot fill `maxKeys` and push new unauthenticated traffic
+  into overflow.
 
 ### Security
 - **Standalone `/mcp` rate-limits authenticated requests per verified principal (DEV-860).**

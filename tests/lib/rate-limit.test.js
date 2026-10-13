@@ -105,6 +105,49 @@ describe("createRateLimiter", () => {
     expect(rl.check("b").allowed).toBe(true);
   });
 
+  it("keeps a held bucket across window rollover and never lets holds exceed the key cap", () => {
+    let t = 0;
+    const rl = createRateLimiter({ limit: 1, windowMs: 1000, now: () => t, maxKeys: 1 });
+    const a = rl.reserve("a");
+    expect(a.allowed).toBe(true);
+    t = 2000;                                    // a's window expired, hold still open
+    // The map is full with a held bucket; a new key lands on the overflow
+    // bucket, and the overflow limit bounds further holds.
+    const b = rl.reserve("b");
+    expect(b.allowed).toBe(true);
+    expect(rl.reserve("c").allowed).toBe(false);
+    expect(rl.size()).toBeLessThanOrEqual(1);
+    t = 4000;
+    expect(rl.reserve("d").allowed).toBe(false); // overflow still held by b
+    a.release();
+    b.release();
+    expect(rl.reserve("e").allowed).toBe(true);
+  });
+
+  it("commits a hold taken on the overflow bucket against the overflow bucket", () => {
+    let t = 0;
+    const rl = createRateLimiter({ limit: 1, windowMs: 1000, now: () => t, maxKeys: 1 });
+    expect(rl.check("occupant").allowed).toBe(true);   // map full
+    const hold = rl.reserve("spray-1");                 // overflow hold
+    expect(hold.allowed).toBe(true);
+    hold.commit();
+    // Overflow is now consumed for the rest of the window: the next unique
+    // address is refused, and no dedicated bucket was minted for spray-1.
+    expect(rl.size()).toBe(1);
+    expect(rl.peek("spray-2").allowed).toBe(false);
+    expect(rl.check("spray-2").allowed).toBe(false);
+  });
+
+  it("drops the bucket a released hold left untouched", () => {
+    const rl = createRateLimiter({ limit: 5, windowMs: 1000, now: () => 0, maxKeys: 3 });
+    for (let i = 0; i < 10; i += 1) rl.reserve(`verified-${i}`).release();
+    expect(rl.size()).toBe(0);
+    // A bucket with real charges is kept.
+    rl.check("charged");
+    rl.reserve("charged").release();
+    expect(rl.size()).toBe(1);
+  });
+
   it("commits a reserved overflow slot even after prune frees dedicated capacity", () => {
     let t = 0;
     const rl = createRateLimiter({ limit: 2, windowMs: 1000, now: () => t, maxKeys: 2 });
