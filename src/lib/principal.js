@@ -15,7 +15,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getDefaultSiteName, getInboundGrants } from "./config.js";
-import { inferOperation } from "./operations.js";
+import { inferOperation, isWriteLikeCall } from "./operations.js";
 import { POLICY_DIGEST } from "./policy-promotion.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
 import { networkToolScopeDenial, requiredScopesForTool } from "./tool-scopes.js";
@@ -62,12 +62,12 @@ export const DIAGNOSTIC_TOOLS = new Set([
 const CONFIG_READ_TOOLS = new Set([
   "drupal_config_get",
   "drupal_config_list",
-  "drupal_drush_config_export",
   "drupal_drush_config_status",
 ]);
 
 const CONFIG_WRITE_TOOLS = new Set([
   "drupal_config_set",
+  "drupal_drush_config_export",
   "drupal_drush_config_import",
 ]);
 
@@ -161,6 +161,20 @@ export function requiredScopeForTool(toolName) {
   const op = inferOperation(toolName);
   if (op === "write" || op === "delete") return "mcp_write";
   return "mcp_read";
+}
+
+/**
+ * Inbound scope required for one concrete invocation. The per-tool row is
+ * the floor; `drupal_graphql` carrying a mutation is a write and needs
+ * `mcp_write` even though queries stay on `mcp_read` (DEV-862).
+ *
+ * @param {string} toolName
+ * @param {object} [args]
+ * @returns {string|null}
+ */
+export function requiredScopeForCall(toolName, args = {}) {
+  if (toolName === "drupal_graphql" && isWriteLikeCall(toolName, args ?? {})) return "mcp_write";
+  return requiredScopeForTool(toolName);
 }
 
 /**
@@ -556,6 +570,11 @@ export function assertPrincipalEntitlement({
   if (isLocalOperator(identity)) return null;
   if (!principalMayUseTool(toolName, identity, sites, grants)) {
     throw new SecurityError(`Not entitled to invoke ${toolName}.`);
+  }
+  // Invocation-aware check: a GraphQL mutation is a write regardless of the
+  // site's own allowGraphqlMutations policy, which is checked later.
+  if (!principalHasScope(identity, requiredScopeForCall(toolName, args))) {
+    throw new SecurityError(`Not entitled to invoke ${toolName} as a write.`);
   }
   // list_sites has no target. governance_status without a hint reports every
   // granted site — pinning it to the default would hide the rest.

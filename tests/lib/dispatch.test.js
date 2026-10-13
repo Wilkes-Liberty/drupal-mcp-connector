@@ -481,6 +481,50 @@ describe("securityMiddleware northbound data-flow (#179)", () => {
   });
 });
 
+describe("GraphQL mutations need mcp_write on the network path (DEV-862)", () => {
+  const sites = [{
+    _name: "open",
+    baseUrl: "https://open.example.com",
+    security: { preset: "development", allowGraphql: true, allowGraphqlMutations: true },
+  }];
+  const grants = { "content-agent": ["open"] };
+
+  it("refuses a drupal_graphql mutation for a read-only principal before any upstream call", async () => {
+    const identity = { sub: "reader", clientId: "content-agent", scopes: ["mcp_read"] };
+    const result = await runWithIdentity(
+      identity,
+      () => callTool("drupal_graphql", { site: "open", query: "mutation { ping }" }, {
+        identity, sites, grants, defaultSite: "open",
+      }),
+      { surface: "network" },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Access denied: Not entitled to invoke drupal_graphql as a write/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not refuse the same principal's query, and lets mcp_write past the entitlement gate", async () => {
+    const reader = { sub: "reader", clientId: "content-agent", scopes: ["mcp_read"] };
+    const query = await runWithIdentity(
+      reader,
+      () => callTool("drupal_graphql", { site: "open", query: "{ ping }" }, {
+        identity: reader, sites, grants, defaultSite: "open",
+      }),
+      { surface: "network" },
+    );
+    expect(String(query.content?.[0]?.text ?? "")).not.toMatch(/Not entitled/);
+    const writer = { sub: "writer", clientId: "content-agent", scopes: ["mcp_read", "mcp_write"] };
+    const mutation = await runWithIdentity(
+      writer,
+      () => callTool("drupal_graphql", { site: "open", query: "mutation { ping }" }, {
+        identity: writer, sites, grants, defaultSite: "open",
+      }),
+      { surface: "network" },
+    );
+    expect(String(mutation.content?.[0]?.text ?? "")).not.toMatch(/Not entitled/);
+  });
+});
+
 describe("deny-by-default tool scope table on the network path (DEV-862)", () => {
   it("refuses tools/call for a registered tool missing from the table with zero handler calls", async () => {
     const probe = vi.fn(async () => ({ ok: true }));

@@ -7,6 +7,7 @@ import {
   filterToolsByPrincipal,
   principalHasScope,
   principalMayUseTool,
+  requiredScopeForCall,
   requiredScopeForTool,
   resolveAuthoritativeTarget,
   resolveGrantedSiteNames,
@@ -78,10 +79,22 @@ describe("requiredScopeForTool", () => {
     expect(requiredScopeForTool("drupal_entity_create")).toBe("mcp_write");
     expect(requiredScopeForTool("drupal_entity_delete")).toBe("mcp_write");
     expect(requiredScopeForTool("drupal_config_get")).toBe("mcp_config_read");
-    expect(requiredScopeForTool("drupal_drush_config_export")).toBe("mcp_config_read");
+    // config:export writes the sync directory, so a read-only config scope
+    // must not reach it.
+    expect(requiredScopeForTool("drupal_drush_config_export")).toBe("mcp_config");
+    expect(requiredScopeForTool("drupal_drush_config_status")).toBe("mcp_config_read");
     expect(requiredScopeForTool("drupal_config_set")).toBe("mcp_config");
     expect(requiredScopeForTool("drupal_drush_config_import")).toBe("mcp_config");
     expect(requiredScopeForTool("drupal_drush_sql_query")).toBe("mcp_admin");
+  });
+
+  it("requires mcp_write for a drupal_graphql mutation but mcp_read for a query", () => {
+    expect(requiredScopeForCall("drupal_graphql", { query: "{ nodeQuery { entities { entityId } } }" })).toBe("mcp_read");
+    expect(requiredScopeForCall("drupal_graphql", { query: "mutation { createArticle(input: {}) { entity { entityId } } }" })).toBe("mcp_write");
+    expect(requiredScopeForCall("drupal_graphql", {})).toBe("mcp_read");
+    expect(requiredScopeForCall("drupal_get_node", { query: "mutation { x }" })).toBe("mcp_read");
+    const reader = identity({ scopes: ["mcp_read"] });
+    expect(principalHasScope(reader, requiredScopeForCall("drupal_graphql", { query: "mutation { x }" }))).toBe(false);
   });
 
   it("treats mcp_config as satisfying the read-only mcp_config_read scope (#397)", () => {

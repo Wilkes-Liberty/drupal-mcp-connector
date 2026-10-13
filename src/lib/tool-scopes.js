@@ -48,12 +48,14 @@ export const TOOL_SCOPE_TABLE = Object.freeze(Object.fromEntries([
   ]),
   ...scoped("mcp_config", [
     "drupal_config_set",
+    // config:export writes the sync directory and refuses read-only sites;
+    // it is a config write, not a read.
+    "drupal_drush_config_export",
     "drupal_drush_config_import",
   ]),
   ...scoped("mcp_config_read", [
     "drupal_config_get",
     "drupal_config_list",
-    "drupal_drush_config_export",
     "drupal_drush_config_status",
   ]),
   ...scoped("mcp_write", [
