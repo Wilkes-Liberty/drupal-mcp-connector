@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Signed GHCR image on every release tag (DEV-923).** Pushing a `v*` tag
+  still publishes npm exactly as before, and now also builds the repo
+  `Dockerfile`, pushes `ghcr.io/wilkes-liberty/drupal-mcp-connector` with the
+  release version tags, signs the immutable digest keyless with
+  Sigstore/cosign (GitHub OIDC), and attaches SLSA provenance plus an SBOM.
+  The pin (`name@sha256:…`) is written to the GitHub Release (notes and
+  `image-digest.json` / `image-digest.txt` assets) and the job summary so
+  hosted deploys can set `hosted_mcp_image`. CI builds the image on pull
+  requests without pushing. A `workflow_dispatch` on `release.yml` can
+  backfill a tag such as `v4.0.0` without moving the git tag.
 - **Streamable HTTP 2026-07-28 conformance on `/mcp` (DEV-840).** The connector
   HTTP surface now matches the current MCP Streamable HTTP revision so
   non-stdio clients can add the operator-run URL with an OAuth bearer.
