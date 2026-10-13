@@ -366,11 +366,12 @@ export function createMcpRequestHandler({
   }
 
   /**
-   * Unauthenticated `/mcp`: consume the address bucket before any auth work.
-   * Bearer-present: peek only — a prior flood of missing/invalid tokens can
-   * 429 before introspection, but a valid principal is not charged here
-   * (DEV-860). Failed 401s increment the address bucket after the shared
-   * writer has already run.
+   * Any method on `/mcp`: consume the address bucket before any auth work.
+   * Bearer-present: atomically reserve a slot (held while introspection is
+   * in flight, so a concurrent burst cannot all observe a free bucket);
+   * the hold is committed on a failed auth and released for a verified
+   * principal, which the principal limiter then charges (DEV-860). A
+   * limiter without `reserve` falls back to peek-then-charge.
    *
    * @param {import("http").IncomingMessage} req
    * @param {import("http").ServerResponse} res
@@ -388,6 +389,15 @@ export function createMcpRequestHandler({
       }
       return true;
     }
+    if (typeof rateLimiter.reserve === "function") {
+      const hold = rateLimiter.reserve(key);
+      if (!hold.allowed) {
+        writeTooManyRequests(res, hold.retryAfterSec);
+        return false;
+      }
+      req.mcpAddressHold = hold;
+      return true;
+    }
     if (typeof rateLimiter.peek === "function") {
       const verdict = rateLimiter.peek(key);
       if (!verdict.allowed) {
@@ -399,19 +409,35 @@ export function createMcpRequestHandler({
   }
 
   /**
-   * After a 401 or 403 from the bearer path, count the attempt against the
-   * address bucket so a spray of bad or under-scoped bearers is eventually
-   * refused before the next introspection. A valid token that lacks a
-   * required scope never reaches the principal gate, so without this it
-   * could trigger unlimited issuer calls.
+   * After a 401 or 403 from the bearer path, charge the address bucket so a
+   * spray of bad or under-scoped bearers is eventually refused before the
+   * next introspection. A valid token that lacks a required scope never
+   * reaches the principal gate, so without this it could trigger unlimited
+   * issuer calls. With a reservation the hold is committed; otherwise the
+   * bucket is charged now.
    *
    * @param {import("http").IncomingMessage} req
    * @param {import("http").ServerResponse} res
    */
   function noteFailedAuthAddress(req, res) {
-    if (!rateLimiter || (res.statusCode !== 401 && res.statusCode !== 403)) return;
+    if (!rateLimiter) return;
     if (!parseBearerToken(req.headers.authorization)) return;
-    rateLimiter.check(addressKey(req));
+    const failed = res.statusCode === 401 || res.statusCode === 403;
+    if (req.mcpAddressHold) {
+      if (failed) req.mcpAddressHold.commit();
+      else req.mcpAddressHold.release();
+      req.mcpAddressHold = null;
+      return;
+    }
+    if (failed) rateLimiter.check(addressKey(req));
+  }
+
+  /** A verified principal gives its address hold back; the principal gate charges it instead. */
+  function releaseAddressHold(req) {
+    if (req.mcpAddressHold) {
+      req.mcpAddressHold.release();
+      req.mcpAddressHold = null;
+    }
   }
 
   /**
@@ -499,15 +525,19 @@ export function createMcpRequestHandler({
       return;
     }
 
-    const isMcp = path === "/mcp" && ["POST", "GET", "DELETE"].includes(req.method);
-    if (isMcp && !gateUnauthenticatedAddressLimit(req, res)) return;
+    // Every method on /mcp is metered, including ones the transport does not
+    // serve: an unsupported verb still carries a bearer through `gateAuth`,
+    // and introspection must never be free. Method validation comes after.
+    const isMcpPath = path === "/mcp";
+    if (isMcpPath && !gateUnauthenticatedAddressLimit(req, res)) return;
 
     if (!await gateAuth(req, res)) {
-      if (isMcp) noteFailedAuthAddress(req, res);
+      if (isMcpPath) noteFailedAuthAddress(req, res);
       return;
     }
+    if (isMcpPath) releaseAddressHold(req);
 
-    if (isMcp && !gatePrincipalLimit(req, res)) return;
+    if (isMcpPath && !gatePrincipalLimit(req, res)) return;
 
     if (path === "/mcp") {
       if (!originAllowedFn(req.headers.origin, allowedOrigins)) {

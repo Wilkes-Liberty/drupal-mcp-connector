@@ -38,7 +38,7 @@ export const DEFAULT_RATE_MAX_KEYS = 10_000;
  *   never evicted. Keys that arrive while the map is full share one
  *   fail-closed overflow bucket, so a key spray can neither exhaust memory
  *   nor reset an already-denied key.
- * @returns {{ check: (key: string) => RateVerdict, peek: (key: string) => RateVerdict, size: () => number }}
+ * @returns {{ check: (key: string) => RateVerdict, peek: (key: string) => RateVerdict, reserve: (key: string) => RateVerdict & {commit: () => void, release: () => void}, size: () => number }}
  */
 export function createRateLimiter({
   limit,
@@ -52,6 +52,10 @@ export function createRateLimiter({
   const buckets = new Map();
   /** Shared bucket for keys admitted while the map is at capacity. */
   let overflow = null;
+  const OVERFLOW_KEY = "\0overflow";
+  /** In-flight reservations per key: bearer requests still awaiting auth. */
+  const inflight = new Map();
+  const held = (key) => inflight.get(key) || 0;
 
   function prune(t) {
     for (const [k, b] of buckets) {
@@ -64,22 +68,49 @@ export function createRateLimiter({
     return overflow;
   }
 
-  function consume(b, t) {
-    b.count += 1;
-    if (b.count > limit) {
+  function consume(b, t, target) {
+    if (b.count + held(target) >= limit) {
       return { allowed: false, remaining: 0, retryAfterSec: Math.ceil((b.resetAt - t) / 1000) };
     }
-    return { allowed: true, remaining: limit - b.count, retryAfterSec: 0 };
+    b.count += 1;
+    return { allowed: true, remaining: limit - b.count - held(target), retryAfterSec: 0 };
   }
 
-  function verdictFor(b, t) {
+  function settle(target) {
+    const left = held(target) - 1;
+    if (left > 0) inflight.set(target, left);
+    else inflight.delete(target);
+  }
+
+  function verdictFor(b, t, pending = 0) {
     if (!b || t >= b.resetAt) {
-      return { allowed: true, remaining: limit, retryAfterSec: 0 };
+      return pending >= limit
+        ? { allowed: false, remaining: 0, retryAfterSec: Math.ceil(windowMs / 1000) }
+        : { allowed: true, remaining: limit - pending, retryAfterSec: 0 };
     }
-    if (b.count >= limit) {
+    if (b.count + pending >= limit) {
       return { allowed: false, remaining: 0, retryAfterSec: Math.ceil((b.resetAt - t) / 1000) };
     }
-    return { allowed: true, remaining: limit - b.count, retryAfterSec: 0 };
+    return { allowed: true, remaining: limit - b.count - pending, retryAfterSec: 0 };
+  }
+
+  /**
+   * Current bucket for `key` (reset or created as needed), or the overflow
+   * bucket when the map is full. Returns the bucket and the key its
+   * in-flight reservations are tracked under.
+   */
+  function bucketFor(key, t) {
+    let b = buckets.get(key);
+    if (b && t < b.resetAt) return { b, target: key };
+    if (!b && buckets.size >= cap) {
+      prune(t);
+      // Fail closed: a full map never evicts a live bucket (that would let
+      // a denied key spray its way back in). New keys share one bucket.
+      if (buckets.size >= cap) return { b: overflowBucket(t), target: OVERFLOW_KEY };
+    }
+    b = { count: 0, resetAt: t + windowMs };
+    buckets.set(key, b);
+    return { b, target: key };
   }
 
   return {
@@ -97,25 +128,50 @@ export function createRateLimiter({
       const b = buckets.get(key);
       if (!b && buckets.size >= cap) {
         prune(t);
-        if (buckets.size >= cap) return verdictFor(overflow, t);
+        if (buckets.size >= cap) return verdictFor(overflow, t, held(OVERFLOW_KEY));
       }
-      return verdictFor(b, t);
+      return verdictFor(b, t, held(key));
     },
     check(key) {
       if (!enabled) return { allowed: true, remaining: Infinity, retryAfterSec: 0 };
       const t = now();
-      let b = buckets.get(key);
-      if (!b || t >= b.resetAt) {
-        if (!b && buckets.size >= cap) {
-          prune(t);
-          // Fail closed: a full map never evicts a live bucket (that would let
-          // a denied key spray its way back in). New keys share one bucket.
-          if (buckets.size >= cap) return consume(overflowBucket(t), t);
-        }
-        b = { count: 0, resetAt: t + windowMs };
-        buckets.set(key, b);
-      }
-      return consume(b, t);
+      const { b, target } = bucketFor(key, t);
+      return consume(b, t, target);
+    },
+    /**
+     * Atomically hold one slot for a request whose outcome is not known
+     * yet (a bearer awaiting introspection). While held, the slot counts
+     * against `check` and `peek` for the same key, so a concurrent burst
+     * cannot all observe a free bucket. `commit()` turns the hold into a
+     * consumed slot (failed auth); `release()` gives it back (verified
+     * principal, which the principal limiter then charges). Either is a
+     * no-op after the first call.
+     *
+     * @param {string} key
+     * @returns {RateVerdict & {commit: () => void, release: () => void}}
+     */
+    reserve(key) {
+      const noop = () => {};
+      if (!enabled) return { allowed: true, remaining: Infinity, retryAfterSec: 0, commit: noop, release: noop };
+      const t = now();
+      const { b, target } = bucketFor(key, t);
+      const verdict = verdictFor(b, t, held(target));
+      if (!verdict.allowed) return { ...verdict, commit: noop, release: noop };
+      inflight.set(target, held(target) + 1);
+      let open = true;
+      const close = () => {
+        if (!open) return false;
+        open = false;
+        settle(target);
+        return true;
+      };
+      return {
+        allowed: true,
+        remaining: verdict.remaining - 1,
+        retryAfterSec: 0,
+        commit: () => { if (close()) this.check(key); },
+        release: () => { close(); },
+      };
     },
     size() { return buckets.size; },
   };

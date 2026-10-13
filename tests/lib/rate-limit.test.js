@@ -82,6 +82,29 @@ describe("createRateLimiter", () => {
     expect(rl.peek("spray-unseen").allowed).toBe(false);
   });
 
+  it("reserve holds a slot atomically until it is committed or released", () => {
+    const rl = createRateLimiter({ limit: 2, windowMs: 60_000, now: () => 0 });
+    const first = rl.reserve("a");
+    const second = rl.reserve("a");
+    expect(first.allowed).toBe(true);
+    expect(second.allowed).toBe(true);
+    // Both slots are held: a third caller, a check, and a peek all see exhaustion.
+    expect(rl.reserve("a").allowed).toBe(false);
+    expect(rl.check("a").allowed).toBe(false);
+    expect(rl.peek("a").allowed).toBe(false);
+    // A released hold gives the slot back; a committed one consumes it.
+    first.release();
+    expect(rl.peek("a").allowed).toBe(true);
+    second.commit();
+    expect(rl.check("a").allowed).toBe(true);
+    expect(rl.check("a").allowed).toBe(false);
+    // Settling twice is a no-op.
+    second.commit();
+    first.release();
+    expect(rl.peek("a").allowed).toBe(false);
+    expect(rl.check("b").allowed).toBe(true);
+  });
+
   it("peek reports exhaustion without consuming a slot", () => {
     let t = 0;
     const rl = createRateLimiter({ limit: 1, windowMs: 1000, now: () => t });
