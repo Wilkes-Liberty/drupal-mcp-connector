@@ -210,6 +210,16 @@ describe("startHttpsTransport", () => {
     }
   });
 
+  it("does not keep the listen-time error handler after bind", async () => {
+    const result = await baseStartup();
+    expect(result.started).toBe(true);
+    try {
+      expect(result.server.listenerCount("error")).toBe(0);
+    } finally {
+      await result.close();
+    }
+  });
+
   it("throws at construction when sessionPrincipalKeyFn is supplied but not a function", async () => {
     await expect(baseStartup({ handlerOverrides: { sessionPrincipalKeyFn: null } }))
       .rejects.toThrow(/sessionPrincipalKeyFn must be a function/);

@@ -368,7 +368,10 @@ export async function startHttpsTransport({
 
   await new Promise((resolve, reject) => {
     nodeServer.once("error", reject);
-    nodeServer.listen(port, listenHost || bindHost, () => resolve());
+    nodeServer.listen(port, listenHost || bindHost, () => {
+      nodeServer.removeListener("error", reject);
+      resolve();
+    });
   });
   const address = nodeServer.address();
   const proto = tls?.certPath && tls?.keyPath ? "https" : "http";

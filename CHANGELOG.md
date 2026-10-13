@@ -47,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   marketplace listings remain DEV-817 / Keystone — this change does not
   claim a public URL is live.
 
+### Fixed
+- **HTTPS listen error handler is detached after bind.** A leftover
+  `once("error")` on the listen promise consumed the first later `server`
+  error as a no-op. The listener is removed when bind succeeds so a
+  post-listen failure is visible again.
+
 ### Changed
 - **Sessionless `GET`/`DELETE` `/mcp` is `405` (DEV-840, breaking).** Those
   methods without `Mcp-Session-Id` previously reached the 2025 arm and
