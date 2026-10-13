@@ -215,6 +215,13 @@ describe("startHttpsTransport", () => {
     expect(result.started).toBe(true);
     try {
       expect(result.server.listenerCount("error")).toBe(0);
+      // A bind failure still rejects the startup promise.
+      await expect(baseStartup({ port: result.server.address().port }))
+        .rejects.toThrow(/EADDRINUSE/);
+      // A later server error surfaces (unhandled "error" throws) instead of
+      // being consumed by the settled listen promise.
+      const late = new Error("late server error");
+      expect(() => result.server.emit("error", late)).toThrow(late);
     } finally {
       await result.close();
     }
