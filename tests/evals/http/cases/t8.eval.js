@@ -1,14 +1,8 @@
 /**
  * T8 (DEV-858 / R-A1): every hosted HTTP request leaves exactly one audit row,
- * refused ones included.
- *
- * Covers a missing-token 401, a 429, a bad-Origin 403 (disallowed by the
- * DEV-840 allowlist), and a legitimate
- * allow, each with the closed denial code. A sentinel bearer token is fed
- * and must appear in no row.
- *
- * Mutant (dependency swap): `auditWriter: null` so the finish hook writes
- * nothing. The row assertions then fail, proving the check can go red.
+ * refused ones included. Increment 2 covers `/mcp`, `/usage`, and `/assessor`
+ * on the same writer (no double-writes), a throwing sink that still refuses,
+ * and a writer-disabled mutant.
  */
 
 import { defineCase } from "../harness/case.js";
@@ -19,7 +13,7 @@ import {
   expectNoSecretInAudit,
   expectRefused,
 } from "../harness/assert.js";
-import { modernPost } from "../harness/requests.js";
+import { assessorGet, modernPost, usageGet } from "../harness/requests.js";
 
 const EVIL_ORIGIN = "https://evil.example";
 const SENTINEL = "SENTINEL_TOKEN_DEV858_DO_NOT_LOG_9f3c2a1b";
@@ -36,10 +30,15 @@ defineCase({
   harness: {
     rateLimit: 1,
     clientKey: t8ClientKey,
+    edge: true,
   },
+  mutants: [
+    { id: "T8", expectedLabel: "missing-token 401: exactly one row" },
+  ],
   async run(h) {
     const missing = await h.send(modernPost("tools/list"), { requestId: "t8-missing-token" });
     expectRefused(h, "missing token", missing);
+    expectAuditRow(h, "missing-token 401", "t8-missing-token", { code: "unauthenticated", status: 401 });
 
     await h.send(modernPost("ping"), {
       requestId: "t8-flood-1",
@@ -52,7 +51,6 @@ defineCase({
     expectEqual(h, "rate-limited status", limited.status, 429);
 
     const token = await h.tokenFor("A");
-    // DEV-840 checks Origin after auth, so the probe carries a valid token.
     const origin = await h.send(modernPost("tools/list"), {
       token,
       requestId: "t8-bad-origin",
@@ -66,18 +64,49 @@ defineCase({
     });
     expectAllowed(h, "legitimate request", allowed);
 
+    const failingSink = await h.send(modernPost("tools/list"), { requestId: "t8-failing-sink" });
+    expectRefused(h, "failing-sink request still refused", failingSink);
+
     await h.send(modernPost("tools/list"), {
       token: SENTINEL,
       requestId: "t8-sentinel",
       headers: { cookie: `auth=${SENTINEL}` },
     });
 
-    expectEqual(h, "one row per request", h.auditRows.length, 6);
+    const edgeMissingUsage = await h.send(usageGet(), {
+      requestId: "t8-usage-missing",
+      base: h.edgeUrl,
+    });
+    expectRefused(h, "edge /usage missing token", edgeMissingUsage);
+    const edgeMissingAssessor = await h.send(assessorGet(), {
+      requestId: "t8-assessor-missing",
+      base: h.edgeUrl,
+    });
+    expectRefused(h, "edge /assessor missing token", edgeMissingAssessor);
+    const edgeOkUsage = await h.send(usageGet(), {
+      token,
+      requestId: "t8-usage-ok",
+      base: h.edgeUrl,
+    });
+    expectEqual(h, "edge /usage authenticated status", edgeOkUsage.status, 200);
+    const edgeOkAssessor = await h.send(assessorGet(), {
+      token,
+      requestId: "t8-assessor-ok",
+      base: h.edgeUrl,
+    });
+    expectEqual(h, "edge /assessor authenticated status", edgeOkAssessor.status, 200);
+
+    expectEqual(h, "one row per request (no double-writes)", h.auditRows.length, 11);
     expectAuditRow(h, "missing-token 401", "t8-missing-token", { code: "unauthenticated", status: 401 });
     expectAuditRow(h, "429", "t8-rate-limited", { code: "rate_limited", status: 429 });
     expectAuditRow(h, "bad-Origin", "t8-bad-origin", { code: "bad_origin", status: 403 });
     expectAuditRow(h, "legitimate", "t8-ok", { code: "ok", status: 200 });
+    expectAuditRow(h, "failing-sink 401", "t8-failing-sink", { code: "unauthenticated", status: 401 });
     expectAuditRow(h, "sentinel 401", "t8-sentinel", { code: "invalid_token", status: 401 });
+    expectAuditRow(h, "usage missing", "t8-usage-missing", { code: "unauthenticated", status: 401, route: "/usage" });
+    expectAuditRow(h, "assessor missing", "t8-assessor-missing", { code: "unauthenticated", status: 401, route: "/assessor" });
+    expectAuditRow(h, "usage ok", "t8-usage-ok", { code: "ok", status: 200, route: "/usage" });
+    expectAuditRow(h, "assessor ok", "t8-assessor-ok", { code: "ok", status: 200, route: "/assessor" });
     expectNoSecretInAudit(h, "sentinel token", SENTINEL);
 
     const okRow = h.auditRows.find((row) => row.requestId === "t8-ok");

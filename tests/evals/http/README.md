@@ -1,41 +1,41 @@
-# HTTP transport eval pack (DEV-866, increment 1: skeleton)
+# HTTP transport eval pack (DEV-866, increment 2)
 
-Run: `npm run eval:http`. It is not part of `npm test` or `npm run check` yet.
+Run: `npm run eval:http`. It is not part of `npm test` or `npm run check`.
+A separate, non-required GitHub Actions job runs the pack on pull requests.
 
-What it proves: the connector's HTTP request handler, wired as in hosted
-(resource-server) mode, refuses a missing identity with 401 before any
-dispatch (T1), still serves a legitimate request (T7, the allow twin),
-asserts that a non-loopback bind with `MCP_ALLOW_UNAUTHENTICATED=1` is
-fatal at startup (T1n, DEV-845; tests `resolveInboundAuthMode` directly),
-and (DEV-848) refuses a verified token with no grant entry and no `sites`
-claim (T4b) while an explicit grant for site A still reaches A only (T4),
-records exactly one audit row per hosted request including 401 / 429 /
-bad-Origin refusals (T8, DEV-858 / R-A1), and (DEV-840) refuses an
-unsupported protocol version (T9), cross-principal session reuse (T10),
-and a disallowed Origin (T11) without dispatch.
-Everything is synthetic:
-keys are generated in memory, the token issuer is a stub that is **not
-Paladin**, and the upstream is a fake loopback server with per-tenant canaries.
-It proves connector logic, not Paladin, Keystone, or production Sentinel.
+What it proves: the connector HTTP transport, started through the same
+`startHttpsTransport` path `src/index.js` uses, refuses a missing identity
+with 401 and `resource_metadata` before any dispatch (T1), refuses a bad
+token (T2), still serves a legitimate request (T7, the allow twin of every
+T1 shape), and exercises the DEV-840 / #452 route and method shapes (T9–T14,
+T16). T1n drives real startup (the shared function plus a spawn of
+`src/index.js`) so a non-loopback bind with `MCP_ALLOW_UNAUTHENTICATED=1`
+is fatal (DEV-845). T4/T4b cover grant deny-by-default (DEV-848). T8 records
+exactly one audit row per hosted request on `/mcp`, `/usage`, and `/assessor`,
+including 401 / 429 / bad-Origin, with a throwing sink that still refuses
+(DEV-858 / #451).
+
+Everything is synthetic: keys are generated in memory, the token issuer is
+a stub that is **not Paladin**, and the upstream is a fake loopback server
+with per-tenant canaries. It proves connector logic, not Paladin, Keystone,
+or production Sentinel.
 
 | Piece | Where |
 |-------|-------|
-| Case ids the pack must run | `manifest.json` |
-| Strict known-red list (case id -> ticket) | `known-red.json` |
+| Case ids, request labels, routes, stand-in tools | `manifest.json` |
+| Strict known-red list (`ticket` + `expires` + `reason`) | `known-red.json` |
 | Stub issuer, keys, fake upstream, counters, taps, fake clock, handler build | `harness/` |
 | Cases | `cases/*.eval.js` |
 | Pack rules and report (`evals-http-report.json`, gitignored) | `run-pack.js` |
 
-Pack rules: empty or skipped pack fails; discovered ids must equal the
-manifest; every run must execute counted assertions; every non-known-red case
-needs a mutant that goes red; a known-red case must fail, and fails the pack if
-it passes (flip detection).
+Pack rules: empty or skipped pack fails; discovered ids, request labels,
+routes, and stand-in tools must equal the manifest; every run must execute
+counted assertions; every non-known-red case needs a mutant killed on its
+pinned assertion label (a-2); a known-red case must fail for its pinned
+reason, and needs an open ticket plus an expiry date (c-1, c-2).
 
-Mutants in this increment are dependency swaps in `harness/build.js` (the
-handler defaults for T1, a deny-everything authenticator for T7, all-sites
-grants for T4, the pre-DEV-848 fall-through for T4b, a disabled audit
-writer for T8, and protocol-version / session-principal / Origin no-ops
-for T9–T11). `src/` has no eval or mutant switch, and `run-pack.js` fails
-if it ever mentions one. The patch-based mutant runner, remaining T2+ cases,
-and `eval:http:mutants` are later increments. `EVAL_HTTP_SRC` points the
-harness at a scratch copy of `src/`.
+Mutants are dependency swaps in `harness/build.js`. `src/` has no eval or
+mutant switch. The only `src/` change in this increment is the test seam:
+`startHttpsTransport` (what `index.js` calls) plus injectable handler
+predicates the mutants swap. `EVAL_HTTP_SRC` points the harness at a scratch
+copy of `src/`.

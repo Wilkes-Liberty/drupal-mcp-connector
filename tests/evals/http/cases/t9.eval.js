@@ -13,6 +13,9 @@ import { modernPost } from "../harness/requests.js";
 defineCase({
   id: "T9",
   title: "unsupported protocol version is 400 before dispatch",
+  mutants: [
+    { id: "T9", expectedLabel: "unsupported protocol version: dispatch counters (Ch, Ct, Cu)" },
+  ],
   async run(h) {
     const token = await h.tokenFor("A");
     const request = modernPost("tools/list");

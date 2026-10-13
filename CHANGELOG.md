@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hosted deploys can set `hosted_mcp_image`. CI builds the image on pull
   requests without pushing. A `workflow_dispatch` on `release.yml` can
   backfill a tag such as `v4.0.0` without moving the git tag.
+
+- **HTTP transport eval pack increment 2 (DEV-866).** `npm run eval:http`
+  now drives the hosted HTTP surface through `startHttpsTransport` (the
+  same startup path `src/index.js` uses) and covers the DEV-840 / #452
+  route and method shapes, DEV-858 / #451 audit rows on `/mcp`, `/usage`,
+  and `/assessor`, and the increment-1 review holes: a dispatch-then-401
+  mutant (a-1), pinned mutant kill-labels (a-2), T7 twins for every T1
+  shape (a-3), manifest-pinned request labels and routes (a-5), known-red
+  ticket + expiry + reason (c-1, c-2), and T1n real startup (c-4). A
+  separate, non-required GitHub Actions job runs the pack. Known-red
+  entries that expire or omit a ticket fail the pack. No production
+  request behavior changes.
+
 - **Streamable HTTP 2026-07-28 conformance on `/mcp` (DEV-840).** The connector
   HTTP surface now matches the current MCP Streamable HTTP revision so
   non-stdio clients can add the operator-run URL with an OAuth bearer.

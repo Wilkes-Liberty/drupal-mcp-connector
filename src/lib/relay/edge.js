@@ -108,6 +108,16 @@ import {
 export const EDGE_MCP_PROTOCOL = "2026-07-28";
 
 /**
+ * Extra northbound routes the edge serves beside `/mcp`. Each is
+ * authenticated on the same resource server; omit usage/evidence and the
+ * handler still records one audit row (404).
+ */
+export const EDGE_NORTHBOUND_AUX_ROUTES = Object.freeze([
+  Object.freeze({ method: "GET", path: "/usage" }),
+  Object.freeze({ method: "GET", path: "/assessor" }),
+]);
+
+/**
  * Revocation bound restated from the outbound-relay lab for both credential kinds.
  * The next request after revoke is denied; an in-flight request may finish.
  */

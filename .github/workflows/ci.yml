@@ -65,3 +65,24 @@ jobs:
 
       - name: Smoke the loaded image
         run: docker run --rm drupal-mcp-connector:ci node -e "console.log('ok')"
+
+  # Not a required status check. Do not rename lint-and-syntax or add this
+  # job to branch protection. Failures are visible on the PR without blocking
+  # merge (DEV-866 increment 2, c-3).
+  eval-http:
+    name: HTTP transport evals (non-required)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: npm run eval:http
+        run: npm run eval:http

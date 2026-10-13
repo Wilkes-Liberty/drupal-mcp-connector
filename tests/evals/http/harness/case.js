@@ -3,10 +3,11 @@
  *
  *   - Green run: the case must pass, unless its id is in known-red.json, in
  *     which case it must FAIL on an assertion. A listed case that passes
- *     throws (flip detection), so the list cannot rot.
- *   - Mutant run: if the case has a dependency-swap mutant, `run(h)` against
- *     the mutated build must FAIL on an assertion. A mutant that leaves the case
- *     green throws (survived mutant).
+ *     throws (flip detection), so the list cannot rot. The failing assertion
+ *     label must match the pinned `reason` (c-1).
+ *   - Mutant run: each declared mutant must FAIL on the pinned assertion
+ *     label (a-2). A mutant that stays green, or is killed by a different
+ *     label, throws.
  *   - A run that executes zero counted assertions throws.
  *
  * Every run appends one synthetic-only record to EVAL_HTTP_EVIDENCE (a JSONL
@@ -17,10 +18,22 @@
 
 import { appendFileSync, readFileSync } from "node:fs";
 import { describe, it } from "vitest";
-import { buildHarness, mutantIds } from "./build.js";
+import { buildHarness } from "./build.js";
 
 const KNOWN_RED = JSON.parse(readFileSync(new URL("../known-red.json", import.meta.url), "utf8"));
 delete KNOWN_RED._comment;
+delete KNOWN_RED._schema;
+
+/**
+ * @param {unknown} value
+ * @returns {{ticket?: string, expires?: string, reason?: string}|null}
+ */
+export function knownRedEntry(value) {
+  if (!value) return null;
+  if (typeof value === "string") return { ticket: value };
+  if (typeof value === "object") return value;
+  return null;
+}
 
 function record(entry) {
   if (process.env.EVAL_HTTP_EVIDENCE) {
@@ -31,6 +44,15 @@ function record(entry) {
 /** A failed assertion is a verdict; any other error is a broken harness. */
 const isVerdict = (error) => error?.name === "AssertionError";
 
+function assertionLabel(reason) {
+  return String(reason || "").split("\n")[0];
+}
+
+function labelMatches(actual, expected) {
+  if (!expected) return false;
+  return assertionLabel(actual).includes(expected);
+}
+
 async function attempt(id, mutant, needsHarness, run, harness = {}) {
   const h = needsHarness
     ? await buildHarness({ ...harness, mutant })
@@ -40,18 +62,32 @@ async function attempt(id, mutant, needsHarness, run, harness = {}) {
     return { passed: true, h };
   } catch (error) {
     if (!isVerdict(error)) throw error;
-    return { passed: false, h, reason: String(error.message).split("\n")[0] };
+    return { passed: false, h, reason: assertionLabel(error.message) };
   } finally {
     await h.close();
   }
 }
 
 /**
- * @param {{id: string, title: string, run: (h: object) => Promise<void>, needsHarness?: boolean, harness?: object}} definition
+ * @param {{
+ *   id: string,
+ *   title: string,
+ *   run: (h: object) => Promise<void>,
+ *   needsHarness?: boolean,
+ *   harness?: object,
+ *   mutants?: Array<{id: string, expectedLabel: string}>,
+ * }} definition
  */
-export function defineCase({ id, title, run, needsHarness = true, harness = {} } = {}) {
-  const ticket = KNOWN_RED[id];
-  const hasMutant = mutantIds().includes(id);
+export function defineCase({
+  id,
+  title,
+  run,
+  needsHarness = true,
+  harness = {},
+  mutants = [],
+} = {}) {
+  const ticketEntry = knownRedEntry(KNOWN_RED[id]);
+  const ticket = ticketEntry?.ticket;
 
   describe(`${id} ${title}`, () => {
     it(`${id} green run`, async () => {
@@ -66,6 +102,12 @@ export function defineCase({ id, title, run, needsHarness = true, harness = {} }
           record({ ...base, result: "flipped", ticket });
           throw new Error(`${id}: listed as known-red (${ticket}) but PASSED. Remove it from known-red.json.`);
         }
+        if (ticketEntry.reason && !labelMatches(result.reason, ticketEntry.reason)) {
+          record({ ...base, result: "wrong-red-reason", ticket, reason: result.reason });
+          throw new Error(
+            `${id}: known-red failed on "${result.reason}" but known-red.json pins "${ticketEntry.reason}"`,
+          );
+        }
         record({ ...base, result: "expected-red", ticket, reason: result.reason });
         return;
       }
@@ -73,16 +115,32 @@ export function defineCase({ id, title, run, needsHarness = true, harness = {} }
       if (!result.passed) throw new Error(`${id}: green run failed: ${result.reason}`);
     });
 
-    if (hasMutant && !ticket) {
-      it(`${id} mutant run`, async () => {
-        const result = await attempt(id, id, needsHarness, run, harness);
-        const base = { caseId: id, mutant: id, configDigest: result.h.configDigest, assertions: result.h.assertions };
-        if (result.passed) {
-          record({ ...base, result: "survived" });
-          throw new Error(`${id}: mutant ${id} SURVIVED (the case stayed green with its guard removed)`);
-        }
-        record({ ...base, result: "killed", reason: result.reason });
-      });
+    if (!ticket) {
+      for (const mutant of mutants) {
+        it(`${id} mutant ${mutant.id}`, async () => {
+          if (!mutant.expectedLabel) {
+            throw new Error(`${id}: mutant ${mutant.id} is missing expectedLabel (a-2)`);
+          }
+          const result = await attempt(id, mutant.id, needsHarness, run, harness);
+          const base = {
+            caseId: id,
+            mutant: mutant.id,
+            configDigest: result.h.configDigest,
+            assertions: result.h.assertions,
+          };
+          if (result.passed) {
+            record({ ...base, result: "survived" });
+            throw new Error(`${id}: mutant ${mutant.id} SURVIVED (the case stayed green with its guard removed)`);
+          }
+          if (!labelMatches(result.reason, mutant.expectedLabel)) {
+            record({ ...base, result: "killed-wrong-label", reason: result.reason, expectedLabel: mutant.expectedLabel });
+            throw new Error(
+              `${id}: mutant ${mutant.id} was killed by "${result.reason}" but expected label "${mutant.expectedLabel}"`,
+            );
+          }
+          record({ ...base, result: "killed", reason: result.reason, expectedLabel: mutant.expectedLabel });
+        });
+      }
     }
   });
 }
