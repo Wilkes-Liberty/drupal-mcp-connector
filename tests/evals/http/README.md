@@ -1,6 +1,8 @@
 # HTTP transport eval pack (DEV-866, increment 2)
 
-Run: `npm run eval:http`. It is not part of `npm test` or `npm run check`.
+Run: `npm run eval:http`. Prerequisites: Node, npm, and an `openssl`
+executable on `PATH` (T1n generates a one-day throwaway TLS pair with it;
+the pack names the missing binary rather than failing on ENOENT). It is not part of `npm test` or `npm run check`.
 A separate, non-required GitHub Actions job runs the pack on pull requests.
 
 What it proves: the connector HTTP transport, started through the same
