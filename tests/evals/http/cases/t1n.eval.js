@@ -27,6 +27,12 @@ const INDEX = join(SRC_DIR, "index.js");
  * bind **with** TLS; without certificates the cleartext boundary refuses
  * first and the fail-open mutant could never be observed.
  */
+/** True when an `openssl` executable answers `openssl version`. */
+export function opensslAvailable() {
+  const probe = spawnSync("openssl", ["version"], { encoding: "utf8" });
+  return probe.status === 0;
+}
+
 function makeTlsPair() {
   const dir = mkdtempSync(join(tmpdir(), "eval-t1n-"));
   const cert = join(dir, "cert.pem");
@@ -73,6 +79,10 @@ defineCase({
     { id: "T1n", expectedLabel: "non-loopback + allow-unauthenticated: mode" },
   ],
   async run(h) {
+    // The throwaway TLS pair comes from an `openssl` executable: a documented
+    // prerequisite of this pack. A missing binary fails here, by name, instead
+    // of as an ENOENT deep inside the probe.
+    expectEqual(h, "openssl executable available for the T1n TLS pair", opensslAvailable(), true);
     const dummyServer = mcpServer.createConnectorServerFactory({
       serverInfo: { name: "eval-t1n", version: "0" },
       tools: { definitions: [], list: async () => [], call: async () => ({}) },

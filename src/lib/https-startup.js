@@ -420,9 +420,12 @@ export async function startHttpsTransport({
   const address = nodeServer.address();
   const proto = tls?.certPath && tls?.keyPath ? "https" : "http";
   const host = address.address === "::" ? "127.0.0.1" : address.address;
-  const url = `${proto}://${host}:${address.port}/mcp`;
+  // An IPv6 literal must be bracketed inside a URL (`http://[::1]:3443/mcp`).
+  const urlHost = host.includes(":") ? `[${host}]` : host;
+  const url = `${proto}://${urlHost}:${address.port}/mcp`;
+  const logHost = String(bindHost).includes(":") ? `[${bindHost}]` : bindHost;
   log(
-    `[drupal-mcp-connector v${CLIENT_VERSION}] Listening on ${proto}://${bindHost}:${address.port}/mcp\n` +
+    `[drupal-mcp-connector v${CLIENT_VERSION}] Listening on ${proto}://${logHost}:${address.port}/mcp\n` +
     `  ${listenLabel || `${toolCount} tools`}`,
   );
 
