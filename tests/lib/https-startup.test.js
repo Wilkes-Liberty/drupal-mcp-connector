@@ -13,6 +13,10 @@ const PRODUCTION_STARTUP_HOOKS = Object.freeze([
   "handlerOverrides",
   "wrapHandler",
   "wrapRequestHandler",
+  "checkAuth",
+  "authenticate",
+  "allowLocalOperator",
+  "resolveInboundAuthModeFn",
 ]);
 
 const dummyServer = createConnectorServerFactory({
@@ -56,7 +60,12 @@ function startHttpsTransportCall(source) {
  */
 function productionStartupHookKeys(source) {
   const call = startHttpsTransportCall(source);
-  return PRODUCTION_STARTUP_HOOKS.filter((key) => new RegExp(`\\b${key}\\s*:`).test(call));
+  // `key:` syntax, shorthand (`key,` / `key}`), and any spread, which could
+  // smuggle a seam in without naming it.
+  const found = PRODUCTION_STARTUP_HOOKS.filter((key) =>
+    new RegExp(`(^|[\\s{,])${key}\\s*[:,}]`).test(call));
+  if (/(^|[\s{,])\.\.\./.test(call)) found.push("...spread");
+  return found;
 }
 
 /**
@@ -227,6 +236,26 @@ describe("startHttpsTransport", () => {
     }
   });
 
+  it("refuses a cleartext listener on a non-loopback bind even with a resource server configured", async () => {
+    const exits = [];
+    let discovered = 0;
+    const result = await baseStartup({
+      bindHost: "0.0.0.0",
+      allowHttp: true,
+      inboundCfg: { issuer: "https://issuer.example", audience: "https://mcp.example/mcp" },
+      // A complete resource-server mode: the cleartext boundary must still
+      // refuse, and before any issuer discovery fetch.
+      resolveInboundAuthModeFn: () => ({ mode: "resource_server" }),
+      fetchFn: async () => { discovered += 1; throw new Error("must not discover"); },
+      exit: (code, reason) => { exits.push({ code, reason }); },
+    });
+    expect(discovered).toBe(0);
+    expect(result.started).toBe(false);
+    expect(result.reason).toMatch(/Plain HTTP binds loopback only/);
+    expect(exits).toEqual([{ code: 1, reason: result.reason }]);
+    expect(result.server).toBeUndefined();
+  });
+
   it("throws at construction when sessionPrincipalKeyFn is supplied but not a function", async () => {
     await expect(baseStartup({ handlerOverrides: { sessionPrincipalKeyFn: null } }))
       .rejects.toThrow(/sessionPrincipalKeyFn must be a function/);
@@ -238,6 +267,21 @@ describe("startHttpsTransport", () => {
 describe("src/index.js production startup call", () => {
   it("passes none of fetchFn, auditWriter, handlerOverrides, wrapHandler or wrapRequestHandler", () => {
     assertProductionStartupHasNoEvalHooks(indexSource());
+  });
+
+  it.each([
+    ["checkAuth: () => true", "checkAuth"],
+    ["authenticate: null", "authenticate"],
+    ["allowLocalOperator: true", "allowLocalOperator"],
+    ["resolveInboundAuthModeFn: () => ({ mode: \"unauthenticated\" })", "resolveInboundAuthModeFn"],
+    ["authenticate", "authenticate"],
+    ["allowLocalOperator", "allowLocalOperator"],
+    ["...evalHooks", "...spread"],
+  ])("fails when a mutant startHttpsTransport call injects %s", (injected, expected) => {
+    const mutated = indexSource().replace("rateLimiter,\n  });", `rateLimiter,\n    ${injected},\n  });`);
+    expect(mutated).not.toBe(indexSource());
+    expect(productionStartupHookKeys(mutated)).toContain(expected);
+    expect(() => assertProductionStartupHasNoEvalHooks(mutated)).toThrow(/passes eval hooks/);
   });
 
   it("fails when a mutant startHttpsTransport call passes fetchFn", () => {

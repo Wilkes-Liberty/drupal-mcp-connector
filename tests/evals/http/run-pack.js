@@ -32,6 +32,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { UNAUTHENTICATED_LABELS } from "./harness/labels.js";
+import { isCalendarDay } from "./harness/calendar.js";
 import { liveRoutes, liveTools, loadAssignment } from "./harness/coverage.js";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -40,7 +41,6 @@ const SRC_DIR = process.env.EVAL_HTTP_SRC ? resolve(process.env.EVAL_HTTP_SRC) :
 const REPORT_PATH = resolve(process.env.EVAL_HTTP_REPORT || "evals-http-report.json");
 const SWITCH_PATTERN = /EVAL_HTTP_|eval:http|tests\/evals\//;
 const TICKET = /^DEV-\d+$/;
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 const readJson = (name) => JSON.parse(readFileSync(join(HERE, name), "utf8"));
 
@@ -131,8 +131,8 @@ function main() {
     if (!TICKET.test(entry.ticket || "")) {
       violations.push(`known-red.json: ${id} needs an open ticket key, got "${entry.ticket ?? ""}"`);
     }
-    if (!DAY.test(entry.expires || "")) {
-      violations.push(`known-red.json: ${id} needs an expiry date (YYYY-MM-DD)`);
+    if (!isCalendarDay(entry.expires)) {
+      violations.push(`known-red.json: ${id} needs a real expiry date (YYYY-MM-DD), got "${entry.expires ?? ""}"`);
     } else if (entry.expires < today) {
       violations.push(`known-red.json: ${id} expired on ${entry.expires} (today ${today})`);
     }

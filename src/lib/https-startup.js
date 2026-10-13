@@ -93,6 +93,16 @@ function pickHandlerOverrides(overrides = {}) {
 }
 
 /**
+ * Startup refusal for a cleartext listener on a non-loopback bind host.
+ *
+ * @param {string} bindHost
+ * @returns {string}
+ */
+export function plainHttpNonLoopbackReason(bindHost) {
+  return `Plain HTTP binds loopback only; refusing to listen on ${bindHost} without TLS certificates.`;
+}
+
+/**
  * Last-resort fail-closed response when `onRequest` throws or rejects.
  * Does not dispatch. Once headers went out the socket is destroyed instead.
  *
@@ -272,6 +282,16 @@ export async function startHttpsTransport({
   }
 
   const loopbackBind = isLoopbackBind(bindHost);
+  const hasTls = Boolean(tls?.certPath && tls?.keyPath);
+  // Cleartext never leaves loopback, whatever the auth mode. `src/index.js`
+  // already forces 127.0.0.1 without TLS; the extracted API enforces the
+  // same boundary itself, before issuer discovery and before listen.
+  if (!hasTls && !loopbackBind) {
+    const reason = plainHttpNonLoopbackReason(bindHost);
+    log(`[drupal-mcp-connector] FATAL: ${reason}`);
+    exit(1, reason);
+    return { started: false, inboundMode: { mode: "fatal", reason }, reason };
+  }
   let checkAuth = () => true;
   let authenticate = null;
   let protectedResource = null;

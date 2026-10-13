@@ -20,7 +20,14 @@ defineCase({
     expectAllowed(h, "GET /health", health);
     expectEqual(h, "GET /health body", JSON.parse(health.text), { status: "ok" });
 
-    const metadata = await h.send(resourceMetadataGet());
+    // Probe the path the 401 challenges advertise (`…/oauth-protected-resource/mcp`
+    // for the `/mcp` resource), not the bare root, so a regression in the
+    // advertised URL cannot leave this case green.
+    const metadataPath = h.resourceMetadataUrl
+      ? new URL(h.resourceMetadataUrl).pathname
+      : "/.well-known/oauth-protected-resource";
+    expectEqual(h, "advertised metadata path is resource-specific", metadataPath.startsWith("/.well-known/oauth-protected-resource/"), true);
+    const metadata = await h.send(resourceMetadataGet(metadataPath));
     expectAllowed(h, "GET resource metadata", metadata);
     expectEqual(h, "GET resource metadata has resource", typeof JSON.parse(metadata.text).resource, "string");
   },

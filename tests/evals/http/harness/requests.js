@@ -116,10 +116,10 @@ export function healthGet() {
 }
 
 /** GET RFC 9728 protected-resource metadata. */
-export function resourceMetadataGet() {
+export function resourceMetadataGet(path = "/.well-known/oauth-protected-resource") {
   return {
     method: "GET",
-    path: "/.well-known/oauth-protected-resource",
+    path,
     headers: { accept: "application/json" },
   };
 }
