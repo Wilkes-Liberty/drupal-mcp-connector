@@ -42,7 +42,7 @@ describe("parseTrustedProxies / resolveTrustedProxies", () => {
   });
 
   it("skips invalid specs so a typo cannot widen trust", () => {
-    expect(parseTrustedProxies(["10.0.0.1", "not-a-proxy", "10.0.0.0/99"])).toEqual(["10.0.0.1"]);
+    expect(parseTrustedProxies(["10.0.0.1", "not-a-proxy", "10.0.0.0/99", "10.0.0.0/", "2001:db8::/"])).toEqual(["10.0.0.1"]);
   });
 
   it("lets MCP_TRUSTED_PROXIES replace the configured list, including empty", () => {
