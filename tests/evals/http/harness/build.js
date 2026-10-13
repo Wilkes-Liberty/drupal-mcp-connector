@@ -128,6 +128,9 @@ const MUTANTS = {
   T10: () => ({ sessionPrincipalKeyFn: () => "eval-shared" }),
   // T11: skip Origin validation so a disallowed browser origin is served.
   T11: () => ({ originAllowedFn: () => true }),
+  // T12 (DEV-860): drop the verified-principal key so both tenants share
+  // the address bucket (the pre-DEV-860 standalone /mcp behavior).
+  T12: () => ({ principalRateKeyFn: () => null }),
 };
 
 /**
@@ -158,14 +161,18 @@ function assertNoAmbientCredentials() {
  * @param {object} [options]
  * @param {string|null} [options.mutant] Case id of the dependency-swap mutant, or null for the real build.
  * @param {object|null} [options.grants] Grant table; `null` is T4b (no table), undefined is the fixture default.
- * @param {number} [options.rateLimit] Per-key /mcp limit (default: fixture high water).
- * @param {(req: object) => string} [options.clientKey] Optional rate-limit key.
+ * @param {number} [options.rateLimit] Per-address /mcp limit (default: fixture high water).
+ * @param {number} [options.principalRateLimit] Per-principal /mcp limit
+ *   (default: fixture high water, so T8's address-only flood does not
+ *   starve a later authenticated principal).
+ * @param {(req: object) => string} [options.clientKey] Optional address key.
  * @returns {Promise<object>} harness handle
  */
 export async function buildHarness({
   mutant = null,
   grants: grantsOption,
   rateLimit: rateLimitOpt,
+  principalRateLimit: principalRateLimitOpt,
   clientKey,
 } = {}) {
   assertNoAmbientCredentials();
@@ -245,6 +252,20 @@ export async function buildHarness({
     authenticate: inbound.authenticate,
     ...handlerSwap,
   };
+  const addressLimit = rateLimitOpt ?? FIXTURE_RATE_LIMIT;
+  const principalLimit = principalRateLimitOpt ?? FIXTURE_RATE_LIMIT;
+  const addressLimiter = rateLimit.createRateLimiter({
+    limit: addressLimit,
+    windowMs: 60_000,
+    now: clock.now,
+  });
+  const principalLimiter = principalLimit === addressLimit
+    ? addressLimiter
+    : rateLimit.createRateLimiter({
+      limit: principalLimit,
+      windowMs: 60_000,
+      now: clock.now,
+    });
   const handler = httpHandler.createMcpRequestHandler({
     ...deps,
     auditWriter: deps.auditWriter !== undefined ? deps.auditWriter : evalWriter,
@@ -257,11 +278,8 @@ export async function buildHarness({
       mode: "serve",
       sessionPrincipalKeyFn: deps.sessionPrincipalKeyFn ?? httpTransport.sessionPrincipalKey,
     })),
-    rateLimiter: rateLimit.createRateLimiter({
-      limit: rateLimitOpt ?? FIXTURE_RATE_LIMIT,
-      windowMs: 60_000,
-      now: clock.now,
-    }),
+    rateLimiter: addressLimiter,
+    principalLimiter,
     ...(clientKey ? { clientKey } : {}),
     allowedOrigins: httpTransport.resolveAllowedOrigins({
       allowedOrigins: inboundCfg.allowedOrigins,
@@ -270,6 +288,7 @@ export async function buildHarness({
     }),
     originAllowedFn: deps.originAllowedFn ?? httpTransport.originAllowed,
     protocolVersionSupportedFn: deps.protocolVersionSupportedFn ?? httpTransport.isSupportedProtocolVersion,
+    ...(deps.principalRateKeyFn ? { principalRateKeyFn: deps.principalRateKeyFn } : {}),
   });
 
   const server = createServer((req, res) => {
@@ -286,7 +305,8 @@ export async function buildHarness({
     requiredScopes: REQUIRED_SCOPES,
     grants,
     tools: TOOL_DEFINITIONS.map((tool) => tool.name),
-    rateLimit: rateLimitOpt ?? FIXTURE_RATE_LIMIT,
+    rateLimit: addressLimit,
+    principalRateLimit: principalLimit,
     mutant,
     audit: deps.auditWriter !== null,
   })).digest("hex").slice(0, 16);

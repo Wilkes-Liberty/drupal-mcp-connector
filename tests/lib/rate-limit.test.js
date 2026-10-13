@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { createRateLimiter } from "../../src/lib/rate-limit.js";
+import {
+  createHttpRateLimiters,
+  createRateLimiter,
+  DEFAULT_HTTPS_RATE_LIMIT,
+  DEFAULT_RATE_MAX_KEYS,
+  DEFAULT_RATE_WINDOW_SEC,
+  rateLimitAddressKey,
+  rateLimitPrincipalKey,
+  resolveHttpRateLimitOptions,
+} from "../../src/lib/rate-limit.js";
 
 describe("createRateLimiter", () => {
   it("allows requests up to the limit, then denies within the window", () => {
@@ -49,4 +58,86 @@ describe("createRateLimiter", () => {
     rl.check("c");                               // triggers prune of expired entries
     expect(rl.size()).toBeLessThanOrEqual(2);
   });
+
+  it("hard-caps tracked keys when many distinct principals or addresses are sprayed", () => {
+    const rl = createRateLimiter({ limit: 1, windowMs: 60_000, now: () => 0, maxKeys: 8 });
+    for (let i = 0; i < 200; i += 1) {
+      rl.check(`spray-${i}`);
+    }
+    expect(rl.size()).toBeLessThanOrEqual(8);
+  });
+
+  it("peek reports exhaustion without consuming a slot", () => {
+    let t = 0;
+    const rl = createRateLimiter({ limit: 1, windowMs: 1000, now: () => t });
+    expect(rl.peek("a").allowed).toBe(true);
+    expect(rl.check("a").allowed).toBe(true);
+    expect(rl.peek("a").allowed).toBe(false);
+    expect(rl.peek("a").retryAfterSec).toBe(1);
+    expect(rl.check("b").allowed).toBe(true);
+  });
 });
+
+describe("rate-limit keys", () => {
+  it("builds a principal key from verified sub+clientId and never from headers", () => {
+    expect(rateLimitPrincipalKey({ sub: "alice", clientId: "client-a" })).toBe("principal:alice\0client-a");
+    expect(rateLimitPrincipalKey({ localOperator: true, sub: "ignored" })).toBe("principal:local-operator");
+    expect(rateLimitPrincipalKey(null)).toBeNull();
+    expect(rateLimitPrincipalKey({ sub: "", clientId: "" })).toBeNull();
+    expect(rateLimitAddressKey("203.0.113.9")).toBe("addr:203.0.113.9");
+  });
+});
+
+describe("resolveHttpRateLimitOptions", () => {
+  it("defaults to 120/60s on non-loopback TLS and off on loopback", () => {
+    expect(resolveHttpRateLimitOptions({ hasTls: true, loopbackBind: false, env: {} })).toEqual({
+      addressLimit: DEFAULT_HTTPS_RATE_LIMIT,
+      principalLimit: DEFAULT_HTTPS_RATE_LIMIT,
+      windowSec: DEFAULT_RATE_WINDOW_SEC,
+      windowMs: DEFAULT_RATE_WINDOW_SEC * 1000,
+      maxKeys: DEFAULT_RATE_MAX_KEYS,
+    });
+    expect(resolveHttpRateLimitOptions({ hasTls: true, loopbackBind: true, env: {} }).addressLimit).toBe(0);
+  });
+
+  it("lets MCP_RATE_LIMIT set both gates and MCP_PRINCIPAL_RATE_LIMIT override the principal gate", () => {
+    const both = resolveHttpRateLimitOptions({
+      hasTls: true,
+      loopbackBind: false,
+      env: { MCP_RATE_LIMIT: "50", MCP_RATE_WINDOW_SEC: "30", MCP_RATE_MAX_KEYS: "100" },
+    });
+    expect(both.addressLimit).toBe(50);
+    expect(both.principalLimit).toBe(50);
+    expect(both.windowSec).toBe(30);
+    expect(both.maxKeys).toBe(100);
+
+    const split = resolveHttpRateLimitOptions({
+      hasTls: true,
+      loopbackBind: false,
+      env: { MCP_RATE_LIMIT: "50", MCP_PRINCIPAL_RATE_LIMIT: "10" },
+    });
+    expect(split.addressLimit).toBe(50);
+    expect(split.principalLimit).toBe(10);
+
+    const off = resolveHttpRateLimitOptions({
+      hasTls: true,
+      loopbackBind: false,
+      env: { MCP_RATE_LIMIT: "0" },
+    });
+    expect(off.addressLimit).toBe(0);
+    expect(off.principalLimit).toBe(0);
+  });
+
+  it("shares one limiter instance when both limits are equal and positive", () => {
+    const { rateLimiter, principalLimiter } = createHttpRateLimiters({
+      addressLimit: 5,
+      principalLimit: 5,
+      windowMs: 1000,
+      maxKeys: 10,
+      now: () => 0,
+    });
+    expect(rateLimiter).toBe(principalLimiter);
+    expect(rateLimiter).not.toBeNull();
+  });
+});
+

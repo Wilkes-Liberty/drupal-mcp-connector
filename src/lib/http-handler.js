@@ -10,7 +10,9 @@
 import { randomUUID } from "node:crypto";
 import { isInitializeRequest, isJsonContentType, isLegacyRequest } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport, toWebRequest } from "@modelcontextprotocol/node";
-import { writeUnauthorized } from "./http-auth.js";
+import { parseBearerToken, writeUnauthorized } from "./http-auth.js";
+import { resolveClientAddress } from "./client-address.js";
+import { rateLimitAddressKey, rateLimitPrincipalKey } from "./rate-limit.js";
 import {
   attachHttpAudit,
   markHttpAuditOriginRefused,
@@ -287,10 +289,20 @@ export function createLegacySessionHandler({
  *   keep compiling. `/health` no longer exposes a tool count.
  * @param {(req: object, res: object, body?: unknown) => Promise<void>} deps.modernHandler
  * @param {(req: object, res: object, body?: unknown) => Promise<void>} deps.legacyHandler
- * @param {?{check: (key: string) => {allowed: boolean, retryAfterSec: number}}} [deps.rateLimiter]
- *   Optional rate limiter (see rate-limit.js). Omit/null to disable.
+ * @param {?{check: (key: string) => {allowed: boolean, retryAfterSec: number}, peek?: (key: string) => {allowed: boolean, retryAfterSec: number}}} [deps.rateLimiter]
+ *   Address limiter (see rate-limit.js). Unauthenticated `/mcp` requests are
+ *   checked against it before auth work (DEV-860). Omit/null to disable.
+ * @param {?{check: (key: string) => {allowed: boolean, retryAfterSec: number}}} [deps.principalLimiter]
+ *   Post-auth principal limiter. `undefined` reuses `rateLimiter`; `null`
+ *   disables the principal gate. Keys come from the validated identity,
+ *   never from a caller-supplied header.
  * @param {(req: import("http").IncomingMessage) => string} [deps.clientKey]
- *   Maps a request to a rate-limit key (default: client IP).
+ *   Maps a request to the unauthenticated address key (default: trusted-proxy
+ *   aware client address; trust none).
+ * @param {(identity: object|null|undefined) => ?string} [deps.principalRateKeyFn]
+ *   Maps a verified identity to the principal rate-limit key.
+ * @param {readonly string[]} [deps.trustedProxies]
+ *   CIDR/IP list of peers allowed to set `X-Forwarded-For`. Default empty.
  * @param {number} [deps.maxBodyBytes] Maximum accepted POST body size.
  * @param {typeof toWebRequest} [deps.toWebRequestFn] Injectable Node-to-Web adapter.
  * @param {typeof isLegacyRequest} [deps.isLegacyRequestFn] Injectable SDK era classifier.
@@ -317,7 +329,10 @@ export function createMcpRequestHandler({
   modernHandler = null,
   legacyHandler = null,
   rateLimiter = null,
-  clientKey = (req) => req.socket?.remoteAddress || "unknown",
+  principalLimiter,
+  clientKey = null,
+  principalRateKeyFn = rateLimitPrincipalKey,
+  trustedProxies = [],
   maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
   toWebRequestFn = toWebRequest,
   isLegacyRequestFn = isLegacyRequest,
@@ -335,9 +350,84 @@ export function createMcpRequestHandler({
   const writer = auditWriter === undefined
     ? createHttpAuditWriter({ sink: defaultHttpAuditSink })
     : auditWriter;
+  const identityLimiter = principalLimiter !== undefined ? principalLimiter : rateLimiter;
 
   function requestPath(req) {
     return String(req.url || "").split("?")[0];
+  }
+
+  function addressKey(req) {
+    if (clientKey) return clientKey(req);
+    return rateLimitAddressKey(resolveClientAddress(req, trustedProxies));
+  }
+
+  function writeTooManyRequests(res, retryAfterSec) {
+    res.writeHead(429, { "Retry-After": String(retryAfterSec) }).end("Too Many Requests");
+  }
+
+  /**
+   * Unauthenticated `/mcp`: consume the address bucket before any auth work.
+   * Bearer-present: peek only — a prior flood of missing/invalid tokens can
+   * 429 before introspection, but a valid principal is not charged here
+   * (DEV-860). Failed 401s increment the address bucket after the shared
+   * writer has already run.
+   *
+   * @param {import("http").IncomingMessage} req
+   * @param {import("http").ServerResponse} res
+   * @returns {boolean} `false` when the request was already refused.
+   */
+  function gateUnauthenticatedAddressLimit(req, res) {
+    if (!rateLimiter) return true;
+    const key = addressKey(req);
+    const hasBearer = Boolean(parseBearerToken(req.headers.authorization));
+    if (!hasBearer) {
+      const verdict = rateLimiter.check(key);
+      if (!verdict.allowed) {
+        writeTooManyRequests(res, verdict.retryAfterSec);
+        return false;
+      }
+      return true;
+    }
+    if (typeof rateLimiter.peek === "function") {
+      const verdict = rateLimiter.peek(key);
+      if (!verdict.allowed) {
+        writeTooManyRequests(res, verdict.retryAfterSec);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * After a 401, count the attempt against the address bucket so a spray of
+   * bad bearers is eventually refused before the next auth call.
+   *
+   * @param {import("http").IncomingMessage} req
+   * @param {import("http").ServerResponse} res
+   */
+  function noteFailedAuthAddress(req, res) {
+    if (!rateLimiter || res.statusCode !== 401) return;
+    if (!parseBearerToken(req.headers.authorization)) return;
+    rateLimiter.check(addressKey(req));
+  }
+
+  /**
+   * Authenticated `/mcp`: consume the verified-principal bucket. A 429 here
+   * is only `Too Many Requests` — no tool catalog or handler dispatch.
+   *
+   * @param {import("http").IncomingMessage} req
+   * @param {import("http").ServerResponse} res
+   * @returns {boolean}
+   */
+  function gatePrincipalLimit(req, res) {
+    if (!identityLimiter) return true;
+    const principalKey = principalRateKeyFn(req.mcpIdentity);
+    const verdict = identityLimiter.check(principalKey || addressKey(req));
+    if (!verdict.allowed) {
+      writeTooManyRequests(res, verdict.retryAfterSec);
+      return false;
+    }
+    return true;
   }
 
   async function gateAuth(req, res) {
@@ -407,16 +497,14 @@ export function createMcpRequestHandler({
     }
 
     const isMcp = path === "/mcp" && ["POST", "GET", "DELETE"].includes(req.method);
-    if (isMcp && rateLimiter) {
-      // Rate limit BEFORE auth so repeated bad-token attempts are throttled too.
-      const verdict = rateLimiter.check(clientKey(req));
-      if (!verdict.allowed) {
-        res.writeHead(429, { "Retry-After": String(verdict.retryAfterSec) }).end("Too Many Requests");
-        return;
-      }
+    if (isMcp && !gateUnauthenticatedAddressLimit(req, res)) return;
+
+    if (!await gateAuth(req, res)) {
+      if (isMcp) noteFailedAuthAddress(req, res);
+      return;
     }
 
-    if (!await gateAuth(req, res)) return;
+    if (isMcp && !gatePrincipalLimit(req, res)) return;
 
     if (path === "/mcp") {
       if (!originAllowedFn(req.headers.origin, allowedOrigins)) {

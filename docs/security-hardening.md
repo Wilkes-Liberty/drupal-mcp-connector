@@ -178,26 +178,44 @@ outbound HTTPS connections to Drupal.
 
 ## Rate limiting
 
-The HTTPS transport throttles `/mcp` requests per client IP with a built-in
-fixed-window limiter.
+The HTTPS transport throttles `/mcp` with a built-in fixed-window limiter
+(DEV-860):
 
-- **Non-loopback TLS bind:** defaults to **120 requests per 60s** per client IP
-  when `MCP_RATE_LIMIT` is unset.
+- **Unauthenticated** requests (no Bearer) are limited **per client address
+  before any auth work**. A request still under that limit is refused with the
+  shared 401 writer (`writeUnauthorized`, DEV-845 / DEV-877). A 429 body is
+  only `Too Many Requests` and never includes tool data.
+- **Authenticated** requests are limited **per verified principal** (`sub` +
+  `clientId` from the validated token). Caller-supplied identity headers
+  (`X-MCP-Subject`, `X-Forwarded-User`, …) are never the key.
+- **Non-loopback TLS bind:** defaults to **120 requests per 60s** for both
+  gates when `MCP_RATE_LIMIT` is unset.
 - **Loopback / plain-HTTP dev:** off unless you set a positive `MCP_RATE_LIMIT`.
-- Set `MCP_RATE_LIMIT=0` to disable even on non-loopback.
+- Set `MCP_RATE_LIMIT=0` to disable even on non-loopback. `MCP_PRINCIPAL_RATE_LIMIT`
+  overrides the post-auth gate only.
+- Tracked keys are hard-capped (`MCP_RATE_MAX_KEYS`, default 10_000) so
+  spraying principals or addresses cannot grow limiter memory without bound.
 
 ```sh
-export MCP_RATE_LIMIT=120        # max requests per window per client IP
-export MCP_RATE_WINDOW_SEC=60    # window length in seconds (default 60)
+export MCP_RATE_LIMIT=120              # per-address (unauth) and default per-principal
+export MCP_PRINCIPAL_RATE_LIMIT=120    # optional post-auth override
+export MCP_RATE_WINDOW_SEC=60          # window length in seconds (default 60)
+export MCP_RATE_MAX_KEYS=10000         # hard cap on tracked keys (default 10000)
+export MCP_TRUSTED_PROXIES=""          # default: trust none
 ```
 
-Over-limit requests get `429 Too Many Requests` with a `Retry-After` header. The
-check runs **before** auth, so repeated bad-token attempts are throttled too. The
-`/health` probe is never rate limited.
+`X-Forwarded-For` is honored **only** when the immediate peer is on
+`MCP_TRUSTED_PROXIES` or `auth.trustedProxies` (CIDR or single IP). The
+default list is empty: a spoofed forwarded header from an untrusted peer is
+ignored and the socket address is used. There is still no trusted-proxy
+exception to the DEV-845 loopback-only unauthenticated bind.
+
+Over-limit requests get `429 Too Many Requests` with a `Retry-After` header.
+The `/health` probe is never rate limited.
 
 Counts are kept per process, so this protects a single connector instance. For
 multi-replica deployments, prefer rate limiting at the reverse proxy (shared
-state) — or use both.
+state) — or use both. This change does not claim a hosted MCP URL is live.
 
 ## Local file upload roots
 

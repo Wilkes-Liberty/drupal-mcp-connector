@@ -35,6 +35,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `application/json` nor `text/event-stream` is `406`.
 
 ### Security
+- **Standalone `/mcp` rate-limits authenticated requests per verified principal (DEV-860).**
+  Authenticated Streamable-HTTP requests are keyed by `sub` + `clientId` from
+  the validated token — never a caller-supplied identity header.
+  Unauthenticated requests are still limited per client address **before**
+  auth work, so a missing token stays on the shared 401 writer (DEV-845 /
+  DEV-877) and a 429 body is only `Too Many Requests` (no tool data).
+  `X-Forwarded-For` is honored only when the immediate peer is on
+  `auth.trustedProxies` / `MCP_TRUSTED_PROXIES` (default: trust none).
+  Defaults remain **120 req / 60s** on non-loopback TLS; `MCP_RATE_LIMIT=0`
+  disables; `MCP_PRINCIPAL_RATE_LIMIT` overrides the post-auth gate;
+  `MCP_RATE_MAX_KEYS` (default 10_000) hard-caps tracked keys so spray
+  cannot exhaust limiter memory. Counts stay per-process — multi-replica
+  deployments still need a shared limiter at the reverse proxy. This does
+  not claim a hosted MCP URL is live.
 - **Hosted HTTP path writes one audit row per request, refusals included (DEV-858).**
   Streamable-HTTP `/mcp` and the relay northbound edge emit a closed-field
   row (`timestamp`, `route`, `method`, `status`, denial `code`, `requestId`,

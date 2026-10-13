@@ -270,10 +270,11 @@ describe("createMcpRequestHandler", () => {
     expect(legacyHandler).not.toHaveBeenCalled();
   });
 
-  it("rate-limits before auth so brute-force attempts are throttled", async () => {
+  it("rate-limits unauthenticated /mcp before auth so missing-token floods are throttled", async () => {
+    const authenticate = vi.fn(async () => ({ ok: false, status: 401, headers: {}, body: "Unauthorized" }));
     const rateLimiter = { check: () => ({ allowed: false, retryAfterSec: 1, remaining: 0 }) };
     const h = createMcpRequestHandler({
-      checkAuth: () => false,
+      authenticate,
       modernHandler: vi.fn(),
       legacyHandler,
       toolCount: 66,
@@ -281,8 +282,9 @@ describe("createMcpRequestHandler", () => {
       clientKey: () => "ip",
     });
     const res = mockRes();
-    await h(req("POST", "/mcp", { authorization: "Bearer bad" }), res);
+    await h(req("POST", "/mcp"), res);
     expect(res.statusCode).toBe(429); // limiter precedes the 401
+    expect(authenticate).not.toHaveBeenCalled();
   });
 
   it("does not rate-limit the /health probe", async () => {
