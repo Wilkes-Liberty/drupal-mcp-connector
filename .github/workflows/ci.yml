@@ -38,3 +38,30 @@ jobs:
 
       - name: npm run check
         run: npm run check
+
+  # Proves the Dockerfile still builds. Never logs in, never pushes, never
+  # signs. The release workflow is the only publisher (DEV-923).
+  container-image:
+    name: Container image (build only)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: drupal-mcp-connector:ci
+          provenance: false
+          sbom: false
+
+      - name: Smoke the loaded image
+        run: docker run --rm drupal-mcp-connector:ci node -e "console.log('ok')"

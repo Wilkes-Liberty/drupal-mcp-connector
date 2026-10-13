@@ -130,8 +130,9 @@ See [SECURITY.md](SECURITY.md) for private reporting.
 
 ## Releasing
 
-Releases are cut from `master` and published to npm by the `release.yml` GitHub
-Actions workflow when a `v*` tag is pushed.
+Releases are cut from `master` and published by the `release.yml` GitHub
+Actions workflow when a `v*` tag is pushed: npm (trusted publishing) and a
+signed container image to GHCR.
 
 Because `master` is protected, the release commit lands via a PR and the tag is
 created **after** the merge, on the resulting `master` commit:
@@ -147,9 +148,17 @@ created **after** the merge, on the resulting `master` commit:
    `git checkout master && git pull && git tag -a vX.Y.Z -m "vX.Y.Z"`.
 7. Push the tag: `git push origin vX.Y.Z`.
    The tag push triggers `release.yml`, which re-runs `npm run check`, verifies the
-   tag matches `package.json`, and publishes with provenance.
-8. Create the GitHub Release for the tag with the CHANGELOG notes:
-   `gh release create vX.Y.Z --title vX.Y.Z --verify-tag --latest --notes-file -`.
+   tag matches `package.json`, publishes npm with provenance, and publishes a
+   signed GHCR image (`ghcr.io/wilkes-liberty/drupal-mcp-connector`). The
+   image job records the immutable `name@sha256:…` digest on the GitHub
+   Release (creates the release if it does not exist yet) as notes plus
+   `image-digest.json` / `image-digest.txt` assets, and on the job summary.
+8. If the image job created a digest-only release stub, edit it to include
+   the CHANGELOG notes and **keep** the `<!-- ghcr-image-digest -->` section:
+   `gh release edit vX.Y.Z --notes-file -`.
+   If you prefer to draft the notes first, create the release before or after
+   the tag push — the image job will append or replace only that marked
+   section and upload the digest assets (`--clobber` on rerun).
 
 The connector reports its own version from `package.json` at runtime (MCP
 handshake, `X-MCP-Client` header, startup logs), so step 3 is the only place a
@@ -166,7 +175,20 @@ rotate. Configure it once on npmjs.com:
 > - Workflow filename: `release.yml`
 > - Environment: *(leave blank)*
 
-The workflow already has `id-token: write`; provenance is attached automatically.
+The npm job has `id-token: write`; npm provenance is attached automatically.
+The image job adds `packages: write`, `id-token: write`, `attestations: write`,
+and `contents: write` (release notes/assets only).
+
+**One-time setup — GHCR (after the first image lands):** set the
+`drupal-mcp-connector` container package to **Public** if hosted deploys
+must pull without a GitHub token
+(https://github.com/orgs/Wilkes-Liberty/packages/container/drupal-mcp-connector/settings).
+No image-signing secret is stored; cosign is keyless via GitHub OIDC.
+
+To backfill an image for an already-shipped tag (for example `v4.0.0`)
+without moving the git tag: Actions → Release → Run workflow, set
+`git_ref` to that tag and check `publish_image`. Only exact version tags
+are pushed on that path (`4.0.0` / `v4.0.0`), not `latest` / major / minor.
 
 To publish manually instead, run `npm publish --access public` in a real terminal
 (no `--otp`); npm opens a browser challenge and you tap the YubiKey. The `--otp=`
