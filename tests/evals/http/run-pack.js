@@ -33,6 +33,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { UNAUTHENTICATED_LABELS } from "./harness/labels.js";
 import { isCalendarDay } from "./harness/calendar.js";
+import { isPinnedLabel } from "./harness/pinned-label.js";
 import { liveRoutes, liveTools, loadAssignment } from "./harness/coverage.js";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -136,8 +137,8 @@ function main() {
     } else if (entry.expires < today) {
       violations.push(`known-red.json: ${id} expired on ${entry.expires} (today ${today})`);
     }
-    if (!entry.reason || typeof entry.reason !== "string") {
-      violations.push(`known-red.json: ${id} needs the pinned failing assertion label (c-1)`);
+    if (!isPinnedLabel(entry.reason)) {
+      violations.push(`known-red.json: ${id} needs the pinned failing assertion label (c-1), got "${entry.reason ?? ""}"`);
     }
   }
 

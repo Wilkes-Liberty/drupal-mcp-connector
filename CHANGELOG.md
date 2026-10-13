@@ -28,8 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shape (a-3), live tool-registry and route-table coverage pin (a-5), known-red
   ticket + expiry + reason (c-1, c-2), and T1n real startup (c-4). A
   separate, non-required GitHub Actions job runs the pack. Known-red
-  entries that expire or omit a ticket fail the pack. No production
-  request behavior changes.
+  entries that expire or omit a ticket fail the pack. Production request
+  handling is unchanged except for the fail-closed `500` on an `onRequest`
+  throw or rejection described under DEV-840 below.
 
 - **Streamable HTTP 2026-07-28 conformance on `/mcp` (DEV-840).** The connector
   HTTP surface now matches the current MCP Streamable HTTP revision so

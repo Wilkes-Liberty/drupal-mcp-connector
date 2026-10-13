@@ -17,6 +17,7 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { describe, it } from "vitest";
 import { buildHarness } from "./build.js";
+import { assertionLabel, labelMatches } from "./pinned-label.js";
 
 const KNOWN_RED = JSON.parse(readFileSync(new URL("../known-red.json", import.meta.url), "utf8"));
 delete KNOWN_RED._comment;
@@ -41,15 +42,6 @@ function record(entry) {
 
 /** A failed assertion is a verdict; any other error is a broken harness. */
 const isVerdict = (error) => error?.name === "AssertionError";
-
-function assertionLabel(reason) {
-  return String(reason || "").split("\n")[0];
-}
-
-function labelMatches(actual, expected) {
-  if (!expected) return false;
-  return assertionLabel(actual).includes(expected);
-}
 
 async function attempt(id, mutant, needsHarness, run, harness = {}) {
   const h = needsHarness
