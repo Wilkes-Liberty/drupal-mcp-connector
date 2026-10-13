@@ -233,6 +233,16 @@ describe("rate-limit keys", () => {
 });
 
 describe("resolveHttpRateLimitOptions", () => {
+  it("treats a fractional limit as invalid (disabled) instead of rounding it", () => {
+    const opts = resolveHttpRateLimitOptions({ hasTls: true, loopbackBind: false, env: { MCP_RATE_LIMIT: "1.5" } });
+    expect(opts.addressLimit).toBe(0);
+    expect(opts.principalLimit).toBe(0);
+    const explicit = resolveHttpRateLimitOptions({ hasTls: true, loopbackBind: false, env: { MCP_PRINCIPAL_RATE_LIMIT: "2.5" } });
+    expect(explicit.addressLimit).toBe(120);
+    expect(explicit.principalLimit).toBe(0);
+    expect(resolveHttpRateLimitOptions({ hasTls: true, loopbackBind: false, env: { MCP_RATE_LIMIT: "3" } }).addressLimit).toBe(3);
+  });
+
   it("defaults to 120/60s on non-loopback TLS and off on loopback", () => {
     expect(resolveHttpRateLimitOptions({ hasTls: true, loopbackBind: false, env: {} })).toEqual({
       addressLimit: DEFAULT_HTTPS_RATE_LIMIT,

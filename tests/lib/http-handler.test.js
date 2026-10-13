@@ -307,6 +307,27 @@ describe("createMcpRequestHandler", () => {
     expect(authenticate).toHaveBeenCalledTimes(2);
   });
 
+  it("charges a verified token with no principal to one shared bucket, not to its client address", async () => {
+    const principalLimiter = createRateLimiter({ limit: 1, windowMs: 60_000, now: () => 0 });
+    const h = createMcpRequestHandler({
+      authenticate: async () => ({ ok: true, identity: { scopes: ["mcp_read"] } }),
+      principalLimiter,
+      modernHandler: vi.fn(async (req, res) => { res.writeHead(200).end("ok"); }),
+      legacyHandler: vi.fn(),
+      toolCount: 66,
+      toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
+      isLegacyRequestFn: async () => false,
+    });
+    const first = mockRes();
+    await h({ ...bodyReq({ jsonrpc: "2.0", id: 1, method: "ping" }, { authorization: "Bearer anon" }), socket: { remoteAddress: "198.51.100.1" } }, first);
+    expect(first.statusCode).toBe(200);
+    // Same unidentifiable token from a different address: still over the limit.
+    const second = mockRes();
+    await h({ ...bodyReq({ jsonrpc: "2.0", id: 1, method: "ping" }, { authorization: "Bearer anon" }), socket: { remoteAddress: "198.51.100.2" } }, second);
+    expect(second.statusCode).toBe(429);
+    expect(principalLimiter.peek("principal:unresolved").allowed).toBe(false);
+  });
+
   it("gives a verified principal its address hold back so only the principal gate charges it", async () => {
     const rateLimiter = createRateLimiter({ limit: 1, windowMs: 60_000, now: () => 0 });
     const principalLimiter = createRateLimiter({ limit: 100, windowMs: 60_000, now: () => 0 });

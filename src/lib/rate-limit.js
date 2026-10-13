@@ -227,6 +227,14 @@ export function rateLimitPrincipalKey(identity) {
 }
 
 /**
+ * Shared fail-closed bucket for a verified token that carries neither `sub`
+ * nor `client_id` / `azp`. Such a bearer has no principal to key on; keying
+ * it by client address instead would let one token rotate addresses for
+ * fresh quota, so every unidentifiable principal shares this one bucket.
+ */
+export const UNRESOLVED_PRINCIPAL_RATE_KEY = "principal:unresolved";
+
+/**
  * Rate-limit key for a resolved client address.
  *
  * @param {string} [address]
@@ -237,8 +245,9 @@ export function rateLimitAddressKey(address) {
 }
 
 /**
- * Parse a rate-limit integer. Unset/empty uses `fallback`. Non-numeric or
- * negative values become 0 (disabled), matching the pre-DEV-860 env reader.
+ * Parse a rate-limit integer. Unset/empty uses `fallback`. Non-numeric,
+ * fractional, or negative values become 0 (disabled), matching the
+ * pre-DEV-860 env reader for invalid input.
  *
  * @param {unknown} value
  * @param {number} fallback
@@ -247,7 +256,11 @@ export function rateLimitAddressKey(address) {
 function parseLimit(value, fallback) {
   if (value === undefined || value === null || value === "") return fallback;
   const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return 0;
+  // A request count is a non-negative integer. A fractional value would let
+  // `consume` admit one request too many and report a negative remainder, so
+  // it is treated like any other invalid value (0, disabled) rather than
+  // silently rounded.
+  if (!Number.isInteger(n) || n < 0) return 0;
   return n;
 }
 

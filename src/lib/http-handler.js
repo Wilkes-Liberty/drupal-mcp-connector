@@ -12,7 +12,7 @@ import { isInitializeRequest, isJsonContentType, isLegacyRequest } from "@modelc
 import { NodeStreamableHTTPServerTransport, toWebRequest } from "@modelcontextprotocol/node";
 import { parseBearerToken, writeUnauthorized } from "./http-auth.js";
 import { resolveClientAddress } from "./client-address.js";
-import { rateLimitAddressKey, rateLimitPrincipalKey } from "./rate-limit.js";
+import { rateLimitAddressKey, rateLimitPrincipalKey, UNRESOLVED_PRINCIPAL_RATE_KEY } from "./rate-limit.js";
 import {
   attachHttpAudit,
   markHttpAuditHostRefused,
@@ -507,8 +507,11 @@ export function createMcpRequestHandler({
    */
   function gatePrincipalLimit(req, res) {
     if (!identityLimiter) return true;
-    const principalKey = principalRateKeyFn(req.mcpIdentity);
-    const verdict = identityLimiter.check(principalKey || addressKey(req));
+    // No principal key (token without sub / client_id): one shared
+    // fail-closed bucket, never the client address, so the same token cannot
+    // rotate source addresses for fresh quota.
+    const principalKey = principalRateKeyFn(req.mcpIdentity) || UNRESOLVED_PRINCIPAL_RATE_KEY;
+    const verdict = identityLimiter.check(principalKey);
     if (!verdict.allowed) {
       writeTooManyRequests(res, verdict.retryAfterSec);
       return false;
