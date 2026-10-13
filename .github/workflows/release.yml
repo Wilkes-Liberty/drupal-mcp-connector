@@ -200,6 +200,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.git_ref || github.sha }}
 
+      # workflow_dispatch's github.sha is the "Use workflow from" branch, not
+      # inputs.git_ref. Record the tree that was actually checked out so the
+      # digest asset and OCI revision label match the built commit.
+      - name: Record built commit
+        id: built
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+
       - name: Verify version tag matches package.json
         if: startsWith(steps.coords.outputs.git_ref, 'v')
         env:
@@ -229,6 +238,8 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ steps.coords.outputs.image }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.built.outputs.sha }}
           flavor: |
             latest=${{ steps.coords.outputs.floating_tags }}
           tags: |
@@ -307,7 +318,7 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
           VERSION: ${{ steps.coords.outputs.version }}
           GIT_REF: ${{ steps.coords.outputs.git_ref }}
-          GIT_SHA: ${{ github.sha }}
+          GIT_SHA: ${{ steps.built.outputs.sha }}
           EVENT_NAME: ${{ github.event_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REPO: ${{ github.repository }}
@@ -337,7 +348,7 @@ jobs:
               fh.write("\n")
           PY
 
-          IDENTITY_REGEXP='^https://github.com/Wilkes-Liberty/drupal-mcp-connector/\\.github/workflows/release\\.yml@.+$'
+          IDENTITY_REGEXP='^https://github.com/Wilkes-Liberty/drupal-mcp-connector/\.github/workflows/release\.yml@.+$'
           ISSUER='https://token.actions.githubusercontent.com'
 
           VERIFY_COSIGN=$(cat <<EOF
