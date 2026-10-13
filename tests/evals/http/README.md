@@ -12,7 +12,10 @@ claim (T4b) while an explicit grant for site A still reaches A only (T4),
 records exactly one audit row per hosted request including 401 / 429 /
 bad-Origin refusals (T8, DEV-858 / R-A1), and (DEV-840) refuses an
 unsupported protocol version (T9), cross-principal session reuse (T10),
-and a disallowed Origin (T11) without dispatch.
+a disallowed Origin (T11) without dispatch, an unscoped tool that is
+absent from tools/list and refused on tools/call (T12, DEV-862), and a
+disallowed Host (T13, DEV-861) without dispatch. An unauthenticated
+request with a bad Host is still the shared 401 (DEV-845 / DEV-877).
 Everything is synthetic:
 keys are generated in memory, the token issuer is a stub that is **not
 Paladin**, and the upstream is a fake loopback server with per-tenant canaries.
@@ -35,7 +38,8 @@ Mutants in this increment are dependency swaps in `harness/build.js` (the
 handler defaults for T1, a deny-everything authenticator for T7, all-sites
 grants for T4, the pre-DEV-848 fall-through for T4b, a disabled audit
 writer for T8, and protocol-version / session-principal / Origin no-ops
-for T9–T11). `src/` has no eval or mutant switch, and `run-pack.js` fails
+for T9–T11, a fail-open scope table for T12, and a Host no-op for T13).
+`src/` has no eval or mutant switch, and `run-pack.js` fails
 if it ever mentions one. The patch-based mutant runner, remaining T2+ cases,
 and `eval:http:mutants` are later increments. `EVAL_HTTP_SRC` points the
 harness at a scratch copy of `src/`.

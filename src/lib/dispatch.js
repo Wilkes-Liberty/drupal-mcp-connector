@@ -21,6 +21,7 @@ import {
   assertPrincipalEntitlement, callerTargetHints, DIAGNOSTIC_TOOLS,
   getRequestIdentity, getRequestSurface, principalHasScope, resolveAuthoritativeTarget,
 } from "./principal.js";
+import { networkToolScopeDenial } from "./tool-scopes.js";
 import { assertExplicitSiteForWrite, withResolvedTarget } from "./site-target.js";
 import { buildDataFlowContext, consumeBudgetIfEnforced, runWithDataFlow } from "./data-flow.js";
 import { allHandlers } from "../tools/index.js";
@@ -215,15 +216,18 @@ export async function callTool(name, args, context = {}) {
   // eslint-disable-next-line security/detect-object-injection -- name is an MCP tool name from validated schema; allHandlers is a closed dispatch table built at startup
   const handler = allHandlers[name];
 
-  if (!handler) {
-    return toolError(new Error(
-      `Unknown tool "${name}". Call drupal_list_entity_types to discover available resources.`
-    ));
-  }
-
   try {
     if (getRequestSurface() === "network" && getRequestIdentity() === null) {
       throw new SecurityError("Unauthenticated network request.");
+    }
+    if (getRequestSurface() === "network") {
+      const denial = networkToolScopeDenial(name);
+      if (denial) throw new SecurityError(denial);
+    }
+    if (!handler) {
+      return toolError(new Error(
+        `Unknown tool "${name}". Call drupal_list_entity_types to discover available resources.`
+      ));
     }
     const ctx = { ...context };
     const result = await securityMiddleware(name, args ?? {}, handler, ctx);

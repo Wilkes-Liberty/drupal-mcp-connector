@@ -120,6 +120,128 @@ export function originAllowed(originHeader, allowlist) {
   return allowlist.includes(origin);
 }
 
+/** Hostnames treated as loopback for the default Host allowlist. */
+export const LOOPBACK_HOSTS = Object.freeze(["localhost", "127.0.0.1", "::1"]);
+
+/**
+ * Parse `Host` into hostname + optional port. Rejects absolute URLs and
+ * values that are not a host[:port] token.
+ *
+ * @param {unknown} value
+ * @returns {?{hostname: string, port: string}}
+ */
+export function parseHostHeader(value) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw || raw.includes("://") || /[\s/]/.test(raw)) return null;
+  const urlHost = raw.startsWith("[") || /^[^:]+:\d+$/.test(raw)
+    ? raw
+    : (raw.includes(":") ? `[${raw}]` : raw);
+  try {
+    const url = new URL(`http://${urlHost}`);
+    let hostname = url.hostname;
+    if (hostname.startsWith("[") && hostname.endsWith("]")) {
+      hostname = hostname.slice(1, -1);
+    }
+    hostname = hostname.replace(/\.$/, "");
+    if (!hostname) return null;
+    return { hostname, port: url.port };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Normalize a Host token to `hostname` or `hostname:port` (port kept only
+ * when the value named one). Returns null when the value is missing or not
+ * a host[:port] token.
+ *
+ * @param {unknown} value
+ * @returns {?string}
+ */
+export function normalizeHost(value) {
+  const parsed = parseHostHeader(value);
+  if (!parsed) return null;
+  return parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
+}
+
+/**
+ * Split a config array or comma/space-separated env string into raw Host
+ * tokens. Values are not normalized here.
+ *
+ * @param {unknown} value
+ * @returns {string[]}
+ */
+export function parseHostList(value) {
+  return parseOriginList(value);
+}
+
+/**
+ * Hostname of an absolute http(s) URL, or a bare host token.
+ *
+ * @param {unknown} value
+ * @returns {?string}
+ */
+function hostFromResource(value) {
+  const origin = normalizeOrigin(value);
+  if (origin) {
+    return parseHostHeader(new URL(origin).host)?.hostname ?? null;
+  }
+  return parseHostHeader(value)?.hostname ?? null;
+}
+
+/**
+ * Build the Host allowlist (DEV-861). Env/config entries are normalized;
+ * the host of `resource` (or `audience`) is always included; loopback
+ * hostnames are added when the process binds loopback so a local client
+ * can present `Host: 127.0.0.1[:port]`.
+ *
+ * @param {object} [options]
+ * @param {unknown} [options.allowedHosts]
+ * @param {string} [options.resource]
+ * @param {string} [options.audience]
+ * @param {boolean} [options.loopbackBind]
+ * @returns {readonly string[]}
+ */
+export function resolveAllowedHosts({
+  allowedHosts = [],
+  resource = "",
+  audience = "",
+  loopbackBind = false,
+} = {}) {
+  const listed = new Set();
+  for (const item of parseHostList(allowedHosts)) {
+    const host = normalizeHost(item);
+    if (host) listed.add(host);
+  }
+  const auto = hostFromResource(resource) || hostFromResource(audience);
+  if (auto) listed.add(auto);
+  if (loopbackBind) {
+    for (const host of LOOPBACK_HOSTS) listed.add(host);
+  }
+  return Object.freeze([...listed]);
+}
+
+/**
+ * DNS-rebinding / Host-header guard. A missing or unparseable Host is
+ * refused. A hostname-only allowlist entry matches any port; an entry
+ * that names a port matches only that port.
+ *
+ * @param {unknown} hostHeader
+ * @param {readonly string[]} allowlist
+ * @returns {boolean}
+ */
+export function hostAllowed(hostHeader, allowlist) {
+  const incoming = parseHostHeader(hostHeader);
+  if (!incoming) return false;
+  return allowlist.some((entry) => {
+    const allowed = parseHostHeader(entry);
+    if (!allowed) return false;
+    if (incoming.hostname !== allowed.hostname) return false;
+    if (!allowed.port) return true;
+    return incoming.port === allowed.port;
+  });
+}
+
 /**
  * Stable principal key for binding a 2025-era session. Same `sub` +
  * `clientId` is the same principal (token refresh). A local-operator

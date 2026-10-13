@@ -22,3 +22,4 @@ export const httpTransport = await load("lib/http-transport.js");
 export const mcpServer = await load("lib/mcp-server.js");
 export const principal = await load("lib/principal.js");
 export const rateLimit = await load("lib/rate-limit.js");
+export const toolScopes = await load("lib/tool-scopes.js");

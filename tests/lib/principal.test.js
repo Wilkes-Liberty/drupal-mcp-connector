@@ -92,6 +92,32 @@ describe("requiredScopeForTool", () => {
   });
 });
 
+describe("deny-by-default tool scope table (DEV-862)", () => {
+  const grants = { "content-agent": ["production"] };
+  const reader = identity({ scopes: ["mcp_read"] });
+
+  it("does not list or allow a tool missing from the table on a network listener", () => {
+    runWithIdentity(reader, () => {
+      expect(principalMayUseTool("drupal_eval_unscoped", reader, sites, grants)).toBe(false);
+      expect(filterToolsByPrincipal(
+        [{ name: "drupal_eval_unscoped" }, { name: "drupal_get_node" }],
+        sites,
+        reader,
+        grants,
+      ).map((tool) => tool.name)).toEqual(["drupal_get_node"]);
+    }, { surface: "network" });
+  });
+
+  it("keeps stdio local-operator discovery unchanged for an unknown name", () => {
+    expect(principalMayUseTool("drupal_eval_unscoped", null, sites, null)).toBe(true);
+    expect(filterToolsByPrincipal(
+      [{ name: "drupal_eval_unscoped" }],
+      sites,
+      null,
+    ).map((tool) => tool.name)).toEqual(["drupal_eval_unscoped"]);
+  });
+});
+
 describe("resolveGrantedSiteNames", () => {
   it("does not filter when there is no inbound principal", () => {
     expect(resolveGrantedSiteNames(null, names, null)).toEqual(names);

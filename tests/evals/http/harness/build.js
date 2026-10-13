@@ -17,11 +17,11 @@
  */
 
 import { createHash } from "node:crypto";
-import { createServer } from "node:http";
+import { createServer, request as nodeRequest } from "node:http";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { installFakeClock } from "./clock.js";
-import { httpAuth, httpAudit, httpHandler, httpTransport, mcpServer, principal, rateLimit } from "./connector.js";
+import { httpAuth, httpAudit, httpHandler, httpTransport, mcpServer, principal, rateLimit, toolScopes } from "./connector.js";
 import { createCounters } from "./counters.js";
 import { createFakeDrupal } from "./fake-drupal.js";
 import { createStubIssuer } from "./stub-issuer.js";
@@ -41,6 +41,7 @@ const TENANTS = [
 const TOOL_DEFINITIONS = [
   { name: "drupal_list_nodes", description: "List nodes (read).", inputSchema: { type: "object", properties: {} } },
   { name: "drupal_create_node", description: "Create a node (write).", inputSchema: { type: "object", properties: {} } },
+  { name: "drupal_eval_unscoped", description: "Eval-only name with no scope-table row.", inputSchema: { type: "object", properties: {} } },
 ];
 
 /**
@@ -128,6 +129,13 @@ const MUTANTS = {
   T10: () => ({ sessionPrincipalKeyFn: () => "eval-shared" }),
   // T11: skip Origin validation so a disallowed browser origin is served.
   T11: () => ({ originAllowedFn: () => true }),
+  // T12: restore the v3.2.x default (unknown tool → mcp_read / listed + callable).
+  T12: () => ({
+    filterToolsByPrincipal: (defs) => defs,
+    networkToolScopeDenial: () => null,
+  }),
+  // T13: skip Host validation so a disallowed Host is served.
+  T13: () => ({ hostAllowedFn: () => true }),
 };
 
 /**
@@ -186,6 +194,8 @@ export async function buildHarness({
   const grants = grantsOption === undefined ? defaultGrants : grantsOption;
   const swap = mutant && MUTANTS[mutant] ? MUTANTS[mutant]() : {};
   const resolveGrantedSites = swap.resolveGrantedSites ?? principal.resolveGrantedSites;
+  const filterToolsByPrincipal = swap.filterToolsByPrincipal ?? principal.filterToolsByPrincipal;
+  const networkToolScopeDenial = swap.networkToolScopeDenial ?? toolScopes.networkToolScopeDenial;
 
   const inboundCfg = {
     issuer: issuer.issuer,
@@ -203,11 +213,20 @@ export async function buildHarness({
     serverInfo: { name: "eval-http-connector", version: "0" },
     tools: {
       definitions: TOOL_DEFINITIONS,
-      list: async () => principal.filterToolsByPrincipal(
+      list: async () => filterToolsByPrincipal(
         TOOL_DEFINITIONS, sites, principal.getRequestIdentity(), grants),
       call: async (name) => {
-        if (name !== "drupal_list_nodes") return { content: [{ type: "text", text: "Unknown tool" }], isError: true };
         const identity = principal.getRequestIdentity();
+        const scopeDenial = networkToolScopeDenial(name);
+        if (scopeDenial) {
+          return {
+            content: [{ type: "text", text: `Access denied: ${scopeDenial}` }],
+            isError: true,
+          };
+        }
+        if (name !== "drupal_list_nodes" && name !== "drupal_eval_unscoped") {
+          return { content: [{ type: "text", text: "Unknown tool" }], isError: true };
+        }
         const entitled = resolveGrantedSites(identity, sites, grants);
         if (!entitled.length) {
           return {
@@ -235,6 +254,8 @@ export async function buildHarness({
   const handlerSwap = { ...swap };
   delete handlerSwap.resolveGrantedSites;
   delete handlerSwap.resolveInboundAuthMode;
+  delete handlerSwap.filterToolsByPrincipal;
+  delete handlerSwap.networkToolScopeDenial;
   const auditRows = [];
   const evalWriter = httpAudit.createHttpAuditWriter({
     sink: (row) => { auditRows.push(row); },
@@ -268,7 +289,14 @@ export async function buildHarness({
       resource: inboundCfg.resource,
       audience: inboundCfg.audience,
     }),
+    allowedHosts: httpTransport.resolveAllowedHosts({
+      allowedHosts: inboundCfg.allowedHosts,
+      resource: inboundCfg.resource,
+      audience: inboundCfg.audience,
+      loopbackBind: true,
+    }),
     originAllowedFn: deps.originAllowedFn ?? httpTransport.originAllowed,
+    hostAllowedFn: deps.hostAllowedFn ?? httpTransport.hostAllowed,
     protocolVersionSupportedFn: deps.protocolVersionSupportedFn ?? httpTransport.isSupportedProtocolVersion,
   });
 
@@ -322,9 +350,38 @@ export async function buildHarness({
         ...(requestId ? { "x-request-id": requestId } : {}),
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       };
-      const res = await fetch(url, { method: request.method, headers, body: request.body });
-      const text = await res.text();
-      const entry = { status: res.status, headers: Object.fromEntries(res.headers), text };
+      const hostOverride = headers.host ?? headers.Host;
+      let entry;
+      if (hostOverride) {
+        // undici fetch forbids setting Host; node:http is how T13 presents a
+        // disallowed Host against the loopback listener.
+        entry = await new Promise((resolve, reject) => {
+          const parsed = new URL(url);
+          const req = nodeRequest({
+            hostname: parsed.hostname,
+            port: parsed.port,
+            path: parsed.pathname,
+            method: request.method,
+            headers,
+          }, (res) => {
+            const chunks = [];
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () => {
+              resolve({
+                status: res.statusCode,
+                headers: { ...res.headers },
+                text: Buffer.concat(chunks).toString("utf8"),
+              });
+            });
+          });
+          req.on("error", reject);
+          if (request.body !== undefined) req.write(request.body);
+          req.end();
+        });
+      } else {
+        const res = await fetch(url, { method: request.method, headers, body: request.body });
+        entry = { status: res.status, headers: Object.fromEntries(res.headers), text: await res.text() };
+      }
       tap.record(entry);
       return entry;
     },

@@ -12,6 +12,10 @@ import {
   normalizeOrigin,
   originAllowed,
   parseOriginList,
+  hostAllowed,
+  normalizeHost,
+  parseHostList,
+  resolveAllowedHosts,
   resolveAllowedOrigins,
   sessionPrincipalKey,
 } from "../../src/lib/http-transport.js";
@@ -87,6 +91,31 @@ describe("http-transport helpers", () => {
     expect(mcpAcceptOk("POST", "")).toBe(false);
     expect(mcpAcceptOk("GET", "   ")).toBe(false);
     expect(mcpAcceptOk("POST", undefined)).toBe(true);
+  });
+
+  it("builds the Host allowlist from config, resource, and loopback binds (DEV-861)", () => {
+    expect(normalizeHost("MCP.Example.com:8443")).toBe("mcp.example.com:8443");
+    expect(normalizeHost("https://not-a-host")).toBeNull();
+    expect(parseHostList("mcp.example.com, 127.0.0.1")).toEqual(["mcp.example.com", "127.0.0.1"]);
+    expect(resolveAllowedHosts({
+      allowedHosts: ["app.example.com:8443"],
+      resource: "https://mcp.example.com/mcp",
+      loopbackBind: true,
+    })).toEqual(["app.example.com:8443", "mcp.example.com", "localhost", "127.0.0.1", "::1"]);
+  });
+
+  it("refuses a missing or disallowed Host and accepts an allowlisted one (DEV-861)", () => {
+    const allow = ["mcp.example.com", "127.0.0.1"];
+    expect(hostAllowed(undefined, allow)).toBe(false);
+    expect(hostAllowed("", allow)).toBe(false);
+    expect(hostAllowed("evil.example", allow)).toBe(false);
+    expect(hostAllowed("mcp.example.com", allow)).toBe(true);
+    expect(hostAllowed("mcp.example.com:3443", allow)).toBe(true);
+    expect(hostAllowed("127.0.0.1:9", allow)).toBe(true);
+    expect(hostAllowed("mcp.example.com", ["mcp.example.com:8443"])).toBe(false);
+    expect(hostAllowed("mcp.example.com:8443", ["mcp.example.com:8443"])).toBe(true);
+    expect(hostAllowed("::1", ["::1"])).toBe(true);
+    expect(hostAllowed("[::1]:3443", ["::1"])).toBe(true);
   });
 
   it("detects JSON-RPC batches, notifications, and responses", () => {

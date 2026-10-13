@@ -33,6 +33,12 @@ Drupal Database
 
 Neither layer trusts the other. A misconfigured Drupal permission cannot bypass connector security, and a misconfigured connector preset cannot bypass Drupal's access system. When MCP Sentinel is installed, it is the **authoritative** server-side gate — it enforces policy on the authenticated account's role and OAuth scopes regardless of how any connector is configured.
 
+On a network listener, inbound tool discovery and `tools/call` also require an
+explicit row in the deny-by-default scope table (DEV-862). A tool that is not
+in the table, or that lists empty `requiredScopes`, is not advertised and not
+callable. Hosted/network startup refuses to listen when the registered tool
+set and the table disagree. Stdio local-operator discovery is unchanged.
+
 ### Entity policy on specialized tools
 
 Connector entity allowlists and denylists apply to **specialized tools**

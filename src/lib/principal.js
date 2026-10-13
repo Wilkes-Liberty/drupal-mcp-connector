@@ -18,6 +18,7 @@ import { getDefaultSiteName, getInboundGrants } from "./config.js";
 import { inferOperation } from "./operations.js";
 import { POLICY_DIGEST } from "./policy-promotion.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
+import { networkToolScopeDenial, requiredScopesForTool } from "./tool-scopes.js";
 import { lookupWorkflow } from "./workflow-prompts.js";
 
 const identityStore = new AsyncLocalStorage();
@@ -142,11 +143,17 @@ function isUnresolvedNetworkPrincipal(identity) {
 
 /**
  * Inbound scope required to discover or invoke a tool. Diagnostics need none.
+ * Names in the explicit table (DEV-862) use that row. A name with no row
+ * still returns `mcp_read` so stdio keeps the historical default; network
+ * listeners refuse that name before this function is consulted.
+ *
  * @param {string} toolName
  * @returns {string|null}
  */
 export function requiredScopeForTool(toolName) {
   if (DIAGNOSTIC_TOOLS.has(toolName)) return null;
+  const scopes = requiredScopesForTool(toolName);
+  if (scopes?.length) return scopes[0];
   if (toolName === "drupal_drush_sql_query") return "mcp_admin";
   if (CONFIG_WRITE_TOOLS.has(toolName)) return "mcp_config";
   if (CONFIG_READ_TOOLS.has(toolName)) return "mcp_config_read";
@@ -391,6 +398,9 @@ function siteAllowsTool(site, toolName) {
  */
 export function principalMayUseTool(toolName, identity, sites, grants) {
   if (isUnresolvedNetworkPrincipal(identity)) return false;
+  if (getRequestSurface() === "network" && networkToolScopeDenial(toolName)) {
+    return false;
+  }
   if (isLocalOperator(identity)) return true;
   if (DIAGNOSTIC_TOOLS.has(toolName)) return true;
   if (!principalHasScope(identity, requiredScopeForTool(toolName))) return false;
