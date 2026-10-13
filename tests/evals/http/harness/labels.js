@@ -7,6 +7,8 @@
 export const EVAL_TOOL_NAMES = Object.freeze([
   "drupal_list_nodes",
   "drupal_create_node",
+  // Eval-only name with no scope-table row (T17, DEV-862). Never live.
+  "drupal_eval_unscoped",
 ]);
 
 /**

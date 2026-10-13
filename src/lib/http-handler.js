@@ -15,13 +15,16 @@ import { resolveClientAddress } from "./client-address.js";
 import { rateLimitAddressKey, rateLimitPrincipalKey } from "./rate-limit.js";
 import {
   attachHttpAudit,
+  markHttpAuditHostRefused,
   markHttpAuditOriginRefused,
   createHttpAuditWriter,
   defaultHttpAuditSink,
 } from "./http-audit.js";
 import {
+  LOOPBACK_HOSTS,
   MCP_PROTOCOL_VERSIONS,
   UNSUPPORTED_PROTOCOL_VERSION_CODE,
+  hostAllowed,
   isJsonRpcBatch,
   isSupportedProtocolVersion,
   mcpAcceptOk,
@@ -85,7 +88,7 @@ function refuseUnresolvedIdentity(res, resourceMetadataUrl) {
 
 /**
  * JSON-RPC error body with no `id` (Streamable HTTP MAY attach one to an
- * HTTP-level refusal). Used for Origin and protocol-version denials.
+ * HTTP-level refusal). Used for Host, Origin, and protocol-version denials.
  *
  * @param {import("http").ServerResponse} res
  * @param {number} status
@@ -288,7 +291,8 @@ export function createLegacySessionHandler({
  *   - `GET /health` — unauthenticated liveness probe (`{status: "ok"}`).
  *     No tool catalog or count (DEV-845).
  *   - `GET /.well-known/oauth-protected-resource[/…]` — RFC 9728 metadata.
- *   - everything else — 401 without a resolved identity, 404 after auth.
+ *   - everything else — 401 without a resolved identity, 404 after auth; metered
+ *     like /mcp so an unknown path is never a free introspection.
  *
  * A request with no resolved identity is refused before any handler, Drupal
  * call, or budget charge. `allowLocalOperator` is the unauthenticated-loopback
@@ -333,8 +337,14 @@ export function createLegacySessionHandler({
  *   (DEV-858). Default: stderr JSONL (silent under Vitest). `null` disables
  *   the writer (eval mutant). One finish-time row per response.
  * @param {readonly string[]} [deps.allowedOrigins] Normalized Origin allowlist.
+ * @param {readonly string[]} [deps.allowedHosts] Normalized Host allowlist
+ *   (DEV-861). Defaults to loopback hostnames so unit tests that omit the
+ *   production resolver still accept `Host: 127.0.0.1`. An explicit list
+ *   (including an empty one) is enforced fail-closed.
  * @param {(origin: unknown, allowlist: readonly string[]) => boolean} [deps.originAllowedFn]
  *   Injectable Origin guard (eval mutants swap this).
+ * @param {(host: unknown, allowlist: readonly string[]) => boolean} [deps.hostAllowedFn]
+ *   Injectable Host guard (eval mutants swap this).
  * @param {(version: unknown) => boolean} [deps.protocolVersionSupportedFn]
  *   Injectable protocol-version guard (eval mutants swap this).
  * @param {(method: string, accept: unknown) => boolean} [deps.acceptOkFn]
@@ -367,7 +377,9 @@ export function createMcpRequestHandler({
   onError = defaultOnError,
   auditWriter,
   allowedOrigins = [],
+  allowedHosts = LOOPBACK_HOSTS,
   originAllowedFn = originAllowed,
+  hostAllowedFn = hostAllowed,
   protocolVersionSupportedFn = isSupportedProtocolVersion,
   acceptOkFn = mcpAcceptOk,
   isUnauthenticatedRouteFn = isUnauthenticatedRoute,
@@ -569,21 +581,27 @@ export function createMcpRequestHandler({
       return;
     }
 
-    // Every method on /mcp is metered, including ones the transport does not
-    // serve: an unsupported verb still carries a bearer through `gateAuth`,
-    // and introspection must never be free. Method validation comes after.
-    const isMcpPath = path === MCP_HTTP_PATH;
-    if (isMcpPath && !gateUnauthenticatedAddressLimit(req, res)) return;
+    // Everything past the public routes is metered: every method on /mcp,
+    // and every unknown path too. An unsupported verb or a bogus path still
+    // carries a bearer through `gateAuth` (unknown paths keep the DEV-877 /
+    // DEV-845 401 challenge before their 404), and introspection must never
+    // be free. Method and path validation come after.
+    if (!gateUnauthenticatedAddressLimit(req, res)) return;
 
     if (!await gateAuth(req, res)) {
-      if (isMcpPath) noteFailedAuthAddress(req, res);
+      noteFailedAuthAddress(req, res);
       return;
     }
-    if (isMcpPath) releaseAddressHold(req);
+    releaseAddressHold(req);
 
-    if (isMcpPath && !gatePrincipalLimit(req, res)) return;
+    if (!gatePrincipalLimit(req, res)) return;
 
     if (path === MCP_HTTP_PATH) {
+      if (!hostAllowedFn(req.headers.host, allowedHosts)) {
+        markHttpAuditHostRefused(req);
+        writeJsonRpcHttpError(res, 403, { message: "Forbidden host" });
+        return;
+      }
       if (!originAllowedFn(req.headers.origin, allowedOrigins)) {
         markHttpAuditOriginRefused(req);
         writeJsonRpcHttpError(res, 403, { message: "Forbidden origin" });

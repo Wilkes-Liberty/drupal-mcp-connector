@@ -63,6 +63,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS` are now `403`. A JSON-RPC
   batch array is `400`. An `Accept` header that lists neither
   `application/json` nor `text/event-stream` is `406`.
+- **Authenticated `/mcp` Host must be on the allowlist (DEV-861, breaking).**
+  After a resolved identity, a missing or disallowed `Host` is `403`
+  (`Forbidden host`). The default list is the host of `auth.resource` /
+  `auth.audience`, plus loopback hostnames on a loopback bind. Operators
+  add names with `auth.allowedHosts` / `MCP_ALLOWED_HOSTS` (a present empty
+  env value clears the configured extras). Unauthenticated requests are
+  still the shared `401` with `resource_metadata` first (DEV-845 / DEV-877).
+  This does not claim a hosted MCP URL is live.
+
+### Fixed
+- **Host allowlist port matching (DEV-861).** An `allowedHosts` entry that
+  names port `80` now matches only that port (`http:` URL parsing no longer
+  drops it as "any port"). IPv6 entries that name a port keep RFC 3986
+  brackets (`[2001:db8::1]:8443`) so they accept the intended Host and not
+  a different address.
 
 ### Fixed
 - **Address limiter holds are bounded, overflow-aware, and leave no trace (DEV-860).**
@@ -89,6 +104,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot exhaust limiter memory. Counts stay per-process — multi-replica
   deployments still need a shared limiter at the reverse proxy. This does
   not claim a hosted MCP URL is live.
+- **Deny-by-default tool scope table (DEV-862).** Every built-in tool has an
+  explicit `requiredScopes` row. On any network listener a name missing
+  from the table, or listed with empty `requiredScopes`, is omitted from
+  `tools/list` and refused on `tools/call` with a named reason and no
+  upstream call. Hosted/network startup is fatal when any registered tool
+  lacks a row or has empty `requiredScopes`. Stdio local-operator discovery
+  is unchanged. The v3.2.x default (`mcp_read` for an unknown name) no
+  longer applies on HTTP.
+- **Host header validation on `/mcp` (DEV-861).** Completes Origin+Host
+  validation after the DEV-840 Origin allowlist. `bad_host` is a closed
+  audit code, marked by the handler that wrote the 403, never by
+  re-running the predicate at finish.
 - **HTTPS startup seam hardening (DEV-866 review L1–L3).**
   `handlerOverrides` is allowlisted to predicate `*Fn` hooks and
   `sessionPrincipalKeyFn`; `checkAuth`, `authenticate`,
@@ -101,15 +128,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Streamable-HTTP `/mcp` and the relay northbound edge emit a closed-field
   row (`timestamp`, `route`, `method`, `status`, denial `code`, `requestId`,
   and principal/tenant only when known) when the response finishes. Missing
-  token, invalid token, rate-limit, bad Origin, client abort, and allow each
-  get a code from `unauthenticated` / `invalid_token` / `rate_limited` /
-  `bad_origin` / `forbidden` / `aborted` / `ok`. `bad_origin` is recorded from
-  the handler's own 403 decision, never by re-running the Origin predicate at
-  finish; `/usage` and `/assessor` rows carry the authenticated principal and
-  resolved tenant. Bearer tokens, `Authorization`, cookies, and raw
-  bodies are never copied in. A writer/sink error is swallowed so a refused
-  request cannot become an allowed one. Origin refusals come from the DEV-840
-  `auth.allowedOrigins` guard; stricter Host validation remains DEV-861.
+  token, invalid token, rate-limit, bad Origin, bad Host, client abort, and
+  allow each get a code from `unauthenticated` / `invalid_token` /
+  `rate_limited` / `bad_origin` / `bad_host` / `forbidden` / `aborted` /
+  `ok`. `bad_origin` and `bad_host` are recorded from the handler's own 403
+  decision, never by re-running the predicate at finish; `/usage` and
+  `/assessor` rows carry the authenticated principal and resolved tenant.
+  Bearer tokens, `Authorization`, cookies, and raw bodies are never copied
+  in. A writer/sink error is swallowed so a refused request cannot become
+  an allowed one. Origin refusals come from the DEV-840
+  `auth.allowedOrigins` guard; Host refusals come from the DEV-861
+  `auth.allowedHosts` guard.
 - **Hosted JWT principals without a grant entry or `sites` claim get no sites (DEV-848).**
   When `auth.grants` is omitted, a bearer token that also lacks a `sites` /
   `mcp_sites` claim is entitled to no configured site. Tool calls are

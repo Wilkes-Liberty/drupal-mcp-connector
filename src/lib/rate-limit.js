@@ -111,6 +111,12 @@ export function createRateLimiter({
       b.resetAt = t + windowMs;
       return { b, target: key };
     }
+    if (!b && overflow && t < overflow.resetAt) {
+      // A live overflow bucket stays authoritative for every unknown key
+      // until its own window resets: capacity freed by an unrelated
+      // bucket's expiry must not hand a denied key a fresh quota.
+      return { b: overflow, target: OVERFLOW_KEY };
+    }
     if (!b && buckets.size >= cap) {
       prune(t);
       // Fail closed: a full map never evicts a live bucket (that would let
@@ -135,6 +141,7 @@ export function createRateLimiter({
       if (!enabled) return { allowed: true, remaining: Infinity, retryAfterSec: 0 };
       const t = now();
       const b = buckets.get(key);
+      if (!b && overflow && t < overflow.resetAt) return verdictFor(overflow, t, held(OVERFLOW_KEY));
       if (!b && buckets.size >= cap) {
         prune(t);
         if (buckets.size >= cap) return verdictFor(overflow, t, held(OVERFLOW_KEY));

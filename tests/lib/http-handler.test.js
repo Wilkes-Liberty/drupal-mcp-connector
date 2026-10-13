@@ -34,7 +34,11 @@ function mockRes() {
   });
   return response;
 }
-const req = (method, url, headers = {}) => ({ method, url, headers });
+const req = (method, url, headers = {}) => ({
+  method,
+  url,
+  headers: { host: "127.0.0.1", ...headers },
+});
 
 function bodyReq(body, headers = {}) {
   const bytes = Buffer.from(JSON.stringify(body));
@@ -325,6 +329,31 @@ describe("createMcpRequestHandler", () => {
     // bucket was never charged; the principal bucket was.
     expect(rateLimiter.peek("addr:127.0.0.1").allowed).toBe(true);
     expect(principalLimiter.peek('principal:["agent-1","c"]').remaining).toBe(97);
+  });
+
+  it("meters a bearer on an unknown path before authentication so it is never a free introspection", async () => {
+    const authenticate = vi.fn(async () => ({ ok: true, identity: { sub: "x", scopes: [] } }));
+    const denied = { allowed: false, retryAfterSec: 3, remaining: 0 };
+    const rateLimiter = { check: vi.fn(() => denied), peek: vi.fn(() => denied), reserve: vi.fn(() => ({ ...denied, commit() {}, release() {} })) };
+    const h = createMcpRequestHandler({
+      authenticate,
+      rateLimiter,
+      modernHandler: vi.fn(),
+      legacyHandler: vi.fn(),
+      toolCount: 66,
+      toWebRequestFn: vi.fn(),
+    });
+    for (const url of ["/bogus", "/mcp/extra", "http://evil.example/mcp"]) {
+      const res = mockRes();
+      await h({ ...bodyReq({}, { authorization: "Bearer any" }), url }, res);
+      expect(res.statusCode, url).toBe(429);
+    }
+    expect(authenticate).not.toHaveBeenCalled();
+    // Without a bearer the unknown path charges the address bucket too.
+    const res = mockRes();
+    await h({ ...bodyReq({}), url: "/bogus" }, res);
+    expect(res.statusCode).toBe(429);
+    expect(rateLimiter.check).toHaveBeenCalled();
   });
 
   it("meters a bearer on an unsupported /mcp method before authentication", async () => {
@@ -831,6 +860,52 @@ describe("createMcpRequestHandler", () => {
       const allowed = mockRes();
       await h(bodyReq({ jsonrpc: "2.0", id: 2, method: "tools/list" }, { origin: "https://app.example.com" }), allowed);
       expect(allowed.statusCode).toBe(200);
+    });
+
+    it("returns 403 for a Host that is not on the allowlist (DEV-861)", async () => {
+      const modernHandler = vi.fn();
+      const legacyHandler = vi.fn();
+      const h = authed({
+        modernHandler,
+        legacyHandler,
+        allowedHosts: ["mcp.example.com"],
+      });
+      const res = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { host: "evil.example" }), res);
+      expect(res.statusCode).toBe(403);
+      expect(JSON.parse(res.body).error.message).toMatch(/host/i);
+      expect(modernHandler).not.toHaveBeenCalled();
+      expect(legacyHandler).not.toHaveBeenCalled();
+    });
+
+    it("allows a Host on the allowlist and refuses a missing Host (DEV-861)", async () => {
+      const h = authed({ allowedHosts: ["mcp.example.com", "127.0.0.1"] });
+      const allowed = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { host: "mcp.example.com" }), allowed);
+      expect(allowed.statusCode).toBe(200);
+
+      const missing = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 2, method: "tools/list" }, { host: "" }), missing);
+      expect(missing.statusCode).toBe(403);
+      expect(JSON.parse(missing.body).error.message).toMatch(/host/i);
+    });
+
+    it("returns 401 for an unauthenticated request before the Host guard (DEV-861 / DEV-877)", async () => {
+      const modernHandler = vi.fn();
+      const h = createMcpRequestHandler({
+        checkAuth: () => false,
+        modernHandler,
+        legacyHandler: vi.fn(),
+        toolCount: 66,
+        allowedHosts: ["mcp.example.com"],
+        resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
+      });
+      const res = mockRes();
+      await h(req("POST", "/mcp", { host: "evil.example", authorization: "Bearer nope" }), res);
+      expect(res.statusCode).toBe(401);
+      expect(res.headers["WWW-Authenticate"]).toMatch(/^Bearer\b/);
+      expect(res.headers["WWW-Authenticate"]).toContain("resource_metadata=");
+      expect(modernHandler).not.toHaveBeenCalled();
     });
 
     it("returns 400 for an unsupported MCP-Protocol-Version before dispatch", async () => {

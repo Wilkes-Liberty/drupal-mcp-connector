@@ -54,6 +54,7 @@ function mcpReq({
 
 function handler(overrides = {}) {
   return createMcpRequestHandler({
+      allowedHosts: ["mcp.example"],
     modernHandler: vi.fn(async (_req, res) => res.writeHead(200).end("tools:drupal_list_nodes")),
     legacyHandler: vi.fn(async (_req, res) => res.writeHead(200).end("legacy")),
     toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),

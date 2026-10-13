@@ -954,6 +954,9 @@ export function resolveInboundAuthConfig(cfg = {}, env = process.env) {
     allowedOrigins: env.MCP_ALLOWED_ORIGINS !== undefined
       ? String(env.MCP_ALLOWED_ORIGINS).split(/[\s,]+/).filter(Boolean)
       : (Array.isArray(auth.allowedOrigins) ? auth.allowedOrigins.map(String) : []),
+    allowedHosts: env.MCP_ALLOWED_HOSTS !== undefined
+      ? String(env.MCP_ALLOWED_HOSTS).split(/[\s,]+/).filter(Boolean)
+      : (Array.isArray(auth.allowedHosts) ? auth.allowedHosts.map(String) : []),
   };
 }
 

@@ -7,6 +7,8 @@ import {
   filterToolsByPrincipal,
   principalHasScope,
   principalMayUseTool,
+  LOCAL_OPERATOR,
+  requiredScopeForCall,
   requiredScopeForTool,
   resolveAuthoritativeTarget,
   resolveGrantedSiteNames,
@@ -78,10 +80,22 @@ describe("requiredScopeForTool", () => {
     expect(requiredScopeForTool("drupal_entity_create")).toBe("mcp_write");
     expect(requiredScopeForTool("drupal_entity_delete")).toBe("mcp_write");
     expect(requiredScopeForTool("drupal_config_get")).toBe("mcp_config_read");
-    expect(requiredScopeForTool("drupal_drush_config_export")).toBe("mcp_config_read");
+    // config:export writes the sync directory, so a read-only config scope
+    // must not reach it.
+    expect(requiredScopeForTool("drupal_drush_config_export")).toBe("mcp_config");
+    expect(requiredScopeForTool("drupal_drush_config_status")).toBe("mcp_config_read");
     expect(requiredScopeForTool("drupal_config_set")).toBe("mcp_config");
     expect(requiredScopeForTool("drupal_drush_config_import")).toBe("mcp_config");
     expect(requiredScopeForTool("drupal_drush_sql_query")).toBe("mcp_admin");
+  });
+
+  it("requires mcp_write for a drupal_graphql mutation but mcp_read for a query", () => {
+    expect(requiredScopeForCall("drupal_graphql", { query: "{ nodeQuery { entities { entityId } } }" })).toBe("mcp_read");
+    expect(requiredScopeForCall("drupal_graphql", { query: "mutation { createArticle(input: {}) { entity { entityId } } }" })).toBe("mcp_write");
+    expect(requiredScopeForCall("drupal_graphql", {})).toBe("mcp_read");
+    expect(requiredScopeForCall("drupal_get_node", { query: "mutation { x }" })).toBe("mcp_read");
+    const reader = identity({ scopes: ["mcp_read"] });
+    expect(principalHasScope(reader, requiredScopeForCall("drupal_graphql", { query: "mutation { x }" }))).toBe(false);
   });
 
   it("treats mcp_config as satisfying the read-only mcp_config_read scope (#397)", () => {
@@ -89,6 +103,45 @@ describe("requiredScopeForTool", () => {
     expect(principalHasScope(identity({ scopes: ["mcp_config_read"] }), "mcp_config")).toBe(false);
     expect(principalHasScope(identity({ scopes: ["mcp_config"] }), "mcp_config_read")).toBe(true);
     expect(principalHasScope(identity({ scopes: ["mcp_config"] }), "mcp_config")).toBe(true);
+  });
+});
+
+describe("deny-by-default tool scope table (DEV-862)", () => {
+  const grants = { "content-agent": ["production"] };
+  const reader = identity({ scopes: ["mcp_read"] });
+
+  it("applies the network denial to the loopback local operator during discovery", () => {
+    const definitions = [{ name: "drupal_eval_unscoped" }, { name: "drupal_get_node" }];
+    const sites = [{ _name: "production", baseUrl: "https://prod.example.com" }];
+    const onNetwork = runWithIdentity(
+      LOCAL_OPERATOR,
+      () => filterToolsByPrincipal(definitions, sites, LOCAL_OPERATOR, null),
+      { surface: "network" },
+    );
+    expect(onNetwork.map((d) => d.name)).toEqual(["drupal_get_node"]);
+    // Off the network (stdio), the local operator still sees everything.
+    expect(filterToolsByPrincipal(definitions, sites, LOCAL_OPERATOR, null)).toEqual(definitions);
+  });
+
+  it("does not list or allow a tool missing from the table on a network listener", () => {
+    runWithIdentity(reader, () => {
+      expect(principalMayUseTool("drupal_eval_unscoped", reader, sites, grants)).toBe(false);
+      expect(filterToolsByPrincipal(
+        [{ name: "drupal_eval_unscoped" }, { name: "drupal_get_node" }],
+        sites,
+        reader,
+        grants,
+      ).map((tool) => tool.name)).toEqual(["drupal_get_node"]);
+    }, { surface: "network" });
+  });
+
+  it("keeps stdio local-operator discovery unchanged for an unknown name", () => {
+    expect(principalMayUseTool("drupal_eval_unscoped", null, sites, null)).toBe(true);
+    expect(filterToolsByPrincipal(
+      [{ name: "drupal_eval_unscoped" }],
+      sites,
+      null,
+    ).map((tool) => tool.name)).toEqual(["drupal_eval_unscoped"]);
   });
 });
 

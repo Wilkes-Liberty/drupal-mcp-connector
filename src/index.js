@@ -31,6 +31,10 @@
  *   MCP_LEGACY_TRANSPORT "serve" (default) | "reject" for 2025-era clients
  *   MCP_ALLOWED_ORIGINS Comma/space-separated Origin allowlist (DNS-rebinding);
  *                     a present empty value clears the configured list
+ *   MCP_ALLOWED_HOSTS   Comma/space-separated Host allowlist (DEV-861);
+ *                     a present empty value clears the configured list.
+ *                     Default: host of auth.resource/audience, plus loopback
+ *                     hostnames on a loopback bind.
  *
  * CLI subcommands (anything else starts the MCP server):
  *   wizard | init     Operator install wizard — see src/lib/wizard.js
@@ -48,6 +52,7 @@ import {
 import { createStartupRateLimiters, startHttpsTransport } from "./lib/https-startup.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
 import { resolveTrustedProxies } from "./lib/client-address.js";
+import { assertHostedToolScopeTable } from "./lib/tool-scopes.js";
 import { callTool, invokeReadTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
 import { fetchTextFormatContext, installTextFormatContextFetcher } from "./lib/text-format-context.js";
 import { filterDiscoverableTools } from "./lib/governance.js";
@@ -265,6 +270,12 @@ if (transport === "stdio") {
   );
 
 } else if (transport === "https" || transport === "http") {
+  try {
+    assertHostedToolScopeTable(allDefinitions);
+  } catch (error) {
+    console.error(`[drupal-mcp-connector] FATAL: ${error instanceof Error ? error.message : error}`);
+    process.exit(1);
+  }
   const tlsCfg     = getTlsConfig();
   const allowHttp  = process.env.MCP_ALLOW_HTTP === "1";
   const authToken   = process.env.MCP_AUTH_TOKEN || "";

@@ -138,6 +138,22 @@ describe("createRateLimiter", () => {
     expect(rl.check("spray-2").allowed).toBe(false);
   });
 
+  it("keeps a live overflow bucket authoritative when an unrelated dedicated bucket expires", () => {
+    let t = 0;
+    const rl = createRateLimiter({ limit: 1, windowMs: 1000, now: () => t, maxKeys: 1 });
+    expect(rl.check("a").allowed).toBe(true);        // dedicated bucket, expires at 1000
+    t = 500;
+    expect(rl.check("b").allowed).toBe(true);        // map full -> overflow, live until 1500
+    expect(rl.check("b").allowed).toBe(false);
+    t = 1000;                                        // a expired, capacity is free again
+    expect(rl.check("b").allowed).toBe(false);       // still overflow-denied
+    expect(rl.peek("b").allowed).toBe(false);
+    expect(rl.reserve("b").allowed).toBe(false);
+    expect(rl.size()).toBeLessThanOrEqual(1);         // no bucket minted for b
+    t = 1500;                                        // overflow window reset
+    expect(rl.check("b").allowed).toBe(true);
+  });
+
   it("drops the bucket a released hold left untouched", () => {
     const rl = createRateLimiter({ limit: 5, windowMs: 1000, now: () => 0, maxKeys: 3 });
     for (let i = 0; i < 10; i += 1) rl.reserve(`verified-${i}`).release();
@@ -159,15 +175,19 @@ describe("createRateLimiter", () => {
     // `old` expires; `kept` and the overflow window are still live.
     t = 1000;
     hold.commit();
-    // Freed dedicated capacity is used by a real charge, not by the commit.
+    // The commit charged overflow (slot 1 of 2). While overflow is live it
+    // stays authoritative for every unknown key, so `fresh` takes overflow's
+    // last slot instead of minting a dedicated bucket in the freed space,
+    // and the shared bucket is then exhausted for the rest of its window.
     expect(rl.check("fresh").allowed).toBe(true);
     expect(rl.size()).toBeLessThanOrEqual(2);
-    // Overflow already consumed the reserved slot: one more unique key is
-    // admitted, then the shared bucket is exhausted for the window.
-    expect(rl.check("overflow-a").allowed).toBe(true);
-    expect(rl.check("overflow-b").allowed).toBe(false);
+    expect(rl.check("overflow-a").allowed).toBe(false);
     expect(rl.reserve("overflow-c").allowed).toBe(false);
     expect(rl.peek("overflow-d").allowed).toBe(false);
+    // Once overflow's window resets, unknown keys get dedicated buckets again.
+    t = 1100;
+    expect(rl.check("overflow-e").allowed).toBe(true);
+    expect(rl.size()).toBeLessThanOrEqual(2);
   });
 
   it("does not pin an unused address bucket after a released reserve", () => {

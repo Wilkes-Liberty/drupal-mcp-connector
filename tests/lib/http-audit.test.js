@@ -6,6 +6,7 @@ import {
   buildHttpAuditRow,
   classifyHttpAuditCode,
   createHttpAuditWriter,
+  markHttpAuditHostRefused,
   markHttpAuditOriginRefused,
   markHttpAuditTenant,
   requestHasAuthorization,
@@ -39,7 +40,11 @@ function mockRes() {
   return response;
 }
 
-const req = (method, url, headers = {}) => ({ method, url, headers });
+const req = (method, url, headers = {}) => ({
+  method,
+  url,
+  headers: { host: "127.0.0.1", ...headers },
+});
 
 describe("classifyHttpAuditCode", () => {
   it("maps the closed denial set", () => {
@@ -47,10 +52,12 @@ describe("classifyHttpAuditCode", () => {
     expect(classifyHttpAuditCode({ status: 401, hasAuthorization: true })).toBe("invalid_token");
     expect(classifyHttpAuditCode({ status: 429 })).toBe("rate_limited");
     expect(classifyHttpAuditCode({ status: 403, originDenied: true })).toBe("bad_origin");
+    expect(classifyHttpAuditCode({ status: 403, hostDenied: true })).toBe("bad_host");
     expect(classifyHttpAuditCode({ status: 403 })).toBe("forbidden");
     expect(classifyHttpAuditCode({ status: 200 })).toBe("ok");
     expect(HTTP_AUDIT_CODES).toEqual([
-      "unauthenticated", "invalid_token", "rate_limited", "bad_origin", "forbidden", "aborted", "ok",
+      "unauthenticated", "invalid_token", "rate_limited", "bad_origin", "bad_host",
+      "forbidden", "aborted", "ok",
     ]);
   });
 
@@ -210,6 +217,13 @@ describe("buildHttpAuditRow", () => {
     expect(buildHttpAuditRow(refused, { statusCode: 403 }).code).toBe("bad_origin");
     expect(buildHttpAuditRow(req("POST", "/mcp"), { statusCode: 403 }).code).toBe("forbidden");
   });
+
+  it("labels bad_host only when the handler marked the refusal on a 403", () => {
+    const refused = req("POST", "/mcp");
+    markHttpAuditHostRefused(refused);
+    expect(buildHttpAuditRow(refused, { statusCode: 403 }).code).toBe("bad_host");
+    expect(buildHttpAuditRow(req("POST", "/mcp"), { statusCode: 403 }).code).toBe("forbidden");
+  });
 });
 
 describe("createMcpRequestHandler audit finish hook", () => {
@@ -288,6 +302,24 @@ describe("createMcpRequestHandler audit finish hook", () => {
     expect(unauthRes.statusCode).toBe(401);
     expect(unauth.writer.rows[0].code).toBe("unauthenticated");
     expect(unauth.writer.rows[0].status).toBe(401);
+  });
+
+  it("records bad_host from the handler Host refusal after auth (DEV-861)", async () => {
+    const host = handler({
+      checkAuth: () => true,
+      allowLocalOperator: true,
+      allowedHosts: ["mcp.example.com"],
+    });
+    const hostRes = mockRes();
+    await host.handle(req("POST", "/mcp", { host: "evil.example" }), hostRes);
+    expect(hostRes.statusCode).toBe(403);
+    expect(host.writer.rows[0].code).toBe("bad_host");
+
+    const unauth = handler({ allowedHosts: ["mcp.example.com"] });
+    const unauthRes = mockRes();
+    await unauth.handle(req("POST", "/mcp", { host: "evil.example" }), unauthRes);
+    expect(unauthRes.statusCode).toBe(401);
+    expect(unauth.writer.rows[0].code).toBe("unauthenticated");
   });
 
   it("records a client abort before headers as aborted, not ok", () => {

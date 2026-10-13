@@ -289,6 +289,35 @@ describe("resolveInboundAuthConfig", () => {
     expect(cleared.allowedOrigins).toEqual([]);
   });
 
+  it("reads allowedHosts from config and prefers MCP_ALLOWED_HOSTS", () => {
+    const fromConfig = resolveInboundAuthConfig({
+      auth: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+        allowedHosts: ["mcp.example.com"],
+      },
+    }, {});
+    expect(fromConfig.allowedHosts).toEqual(["mcp.example.com"]);
+
+    const fromEnv = resolveInboundAuthConfig({
+      auth: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+        allowedHosts: ["mcp.example.com"],
+      },
+    }, { MCP_ALLOWED_HOSTS: "edge.example,mcp.example.com" });
+    expect(fromEnv.allowedHosts).toEqual(["edge.example", "mcp.example.com"]);
+
+    const cleared = resolveInboundAuthConfig({
+      auth: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+        allowedHosts: ["mcp.example.com"],
+      },
+    }, { MCP_ALLOWED_HOSTS: "" });
+    expect(cleared.allowedHosts).toEqual([]);
+  });
+
   it("defaults maxTokenLifetime and algorithms, and prefers env overrides", () => {
     const defaults = resolveInboundAuthConfig({
       auth: { issuer: "https://idp.example.com", audience: "https://mcp.example.com/mcp" },
