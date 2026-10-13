@@ -184,6 +184,9 @@ export function createLegacySessionHandler({
   if (mode !== "serve" && mode !== "reject") {
     throw new Error(`Invalid legacy MCP transport mode: "${mode}". Use "serve" or "reject".`);
   }
+  if (typeof sessionPrincipalKeyFn !== "function") {
+    throw new Error("sessionPrincipalKeyFn must be a function");
+  }
 
   function methodNotAllowed(res) {
     res.writeHead(405, { Allow: "POST" }).end("Method Not Allowed");
@@ -358,6 +361,19 @@ export function createMcpRequestHandler({
 }) {
   if (!modernHandler || !legacyHandler) {
     throw new Error("modernHandler and legacyHandler must be configured together for dual-era routing");
+  }
+  const injectedPredicates = {
+    originAllowedFn,
+    protocolVersionSupportedFn,
+    acceptOkFn,
+    isUnauthenticatedRouteFn,
+    sessionlessMethodRefusedFn,
+    isJsonRpcBatchFn,
+  };
+  for (const [name, fn] of Object.entries(injectedPredicates)) {
+    if (typeof fn !== "function") {
+      throw new Error(`${name} must be a function`);
+    }
   }
 
   const writer = auditWriter === undefined

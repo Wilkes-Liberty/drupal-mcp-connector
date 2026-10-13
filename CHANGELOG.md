@@ -58,6 +58,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `application/json` nor `text/event-stream` is `406`.
 
 ### Security
+- **HTTPS startup seam hardening (DEV-866 review L1–L3).**
+  `handlerOverrides` is allowlisted to predicate `*Fn` hooks and
+  `sessionPrincipalKeyFn`; `checkAuth`, `authenticate`,
+  `allowLocalOperator`, `auditWriter`, and unknown keys throw at
+  construction. Injected predicates are type-checked when the handler
+  is built. `onRequest` rejections answer `500` fail-closed with no
+  dispatch. `src/index.js` logs the limit and window from
+  `createStartupRateLimiter` instead of recomputing them.
 - **Hosted HTTP path writes one audit row per request, refusals included (DEV-858).**
   Streamable-HTTP `/mcp` and the relay northbound edge emit a closed-field
   row (`timestamp`, `route`, `method`, `status`, denial `code`, `requestId`,

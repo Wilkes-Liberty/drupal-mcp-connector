@@ -23,6 +23,110 @@ import { resolveAllowedOrigins } from "./http-transport.js";
 import { createRateLimiter } from "./rate-limit.js";
 
 /**
+ * `handlerOverrides` may only swap these predicate hooks. Auth, the audit
+ * writer, and every other `createMcpRequestHandler` dep must be passed as
+ * dedicated options so a spread cannot drop the #451 writer or unauthenticate
+ * `/mcp` (DEV-866 review L1).
+ */
+export const ALLOWED_HANDLER_OVERRIDE_KEYS = Object.freeze([
+  "originAllowedFn",
+  "protocolVersionSupportedFn",
+  "acceptOkFn",
+  "isUnauthenticatedRouteFn",
+  "sessionlessMethodRefusedFn",
+  "isJsonRpcBatchFn",
+  "sessionPrincipalKeyFn",
+]);
+
+const FORBIDDEN_HANDLER_OVERRIDE_KEYS = Object.freeze([
+  "checkAuth",
+  "authenticate",
+  "allowLocalOperator",
+  "auditWriter",
+]);
+
+/**
+ * Reject `handlerOverrides` keys that are not predicate `*Fn` hooks or
+ * `sessionPrincipalKeyFn`. Throws at construction, before listen.
+ *
+ * @param {object} [overrides]
+ */
+export function assertHandlerOverrides(overrides = {}) {
+  if (overrides === null || overrides === undefined || typeof overrides !== "object" || Array.isArray(overrides)) {
+    throw new Error("handlerOverrides must be an object");
+  }
+  const allowed = new Set(ALLOWED_HANDLER_OVERRIDE_KEYS);
+  for (const key of Object.keys(overrides)) {
+    if (FORBIDDEN_HANDLER_OVERRIDE_KEYS.includes(key) || !allowed.has(key)) {
+      throw new Error(
+        `handlerOverrides.${key} is not allowed (only predicate *Fn hooks and sessionPrincipalKeyFn)`,
+      );
+    }
+  }
+}
+
+/**
+ * Copy only allowlisted override keys that the caller actually set.
+ *
+ * @param {object} [overrides]
+ * @returns {object}
+ */
+function pickHandlerOverrides(overrides = {}) {
+  assertHandlerOverrides(overrides);
+  const picked = {};
+  if (overrides.originAllowedFn !== undefined) picked.originAllowedFn = overrides.originAllowedFn;
+  if (overrides.protocolVersionSupportedFn !== undefined) {
+    picked.protocolVersionSupportedFn = overrides.protocolVersionSupportedFn;
+  }
+  if (overrides.acceptOkFn !== undefined) picked.acceptOkFn = overrides.acceptOkFn;
+  if (overrides.isUnauthenticatedRouteFn !== undefined) {
+    picked.isUnauthenticatedRouteFn = overrides.isUnauthenticatedRouteFn;
+  }
+  if (overrides.sessionlessMethodRefusedFn !== undefined) {
+    picked.sessionlessMethodRefusedFn = overrides.sessionlessMethodRefusedFn;
+  }
+  if (overrides.isJsonRpcBatchFn !== undefined) picked.isJsonRpcBatchFn = overrides.isJsonRpcBatchFn;
+  if (overrides.sessionPrincipalKeyFn !== undefined) {
+    picked.sessionPrincipalKeyFn = overrides.sessionPrincipalKeyFn;
+  }
+  return picked;
+}
+
+/**
+ * Last-resort fail-closed response when `onRequest` throws or rejects.
+ * Does not dispatch. Swallows a second write if headers already went out.
+ *
+ * @param {import("http").ServerResponse} res
+ */
+function failClosedRequest(res) {
+  if (res.headersSent) return;
+  try {
+    res.writeHead(500).end("Internal Server Error");
+  } catch {
+    // Response already gone.
+  }
+}
+
+/**
+ * Invoke the assembled request handler and convert a throw or rejection
+ * into 500 fail-closed (DEV-866 review L2).
+ *
+ * @param {Function} onRequest
+ * @param {import("http").IncomingMessage} req
+ * @param {import("http").ServerResponse} res
+ */
+function invokeOnRequest(onRequest, req, res) {
+  try {
+    const result = onRequest(req, res);
+    if (result && typeof result.then === "function") {
+      result.catch(() => failClosedRequest(res));
+    }
+  } catch {
+    failClosedRequest(res);
+  }
+}
+
+/**
  * Security headers applied to every HTTPS/HTTP response in production.
  *
  * @param {import("http").ServerResponse} res
@@ -53,7 +157,7 @@ function createNodeServer({ onRequest, tls, allowHttp, exit, log }) {
     const key = readFileSync(tls.keyPath);
     return createHttpsServer({ cert, key }, (req, res) => {
       applyHttpsSecurityHeaders(res);
-      onRequest(req, res);
+      invokeOnRequest(onRequest, req, res);
     });
   }
 
@@ -73,7 +177,7 @@ function createNodeServer({ onRequest, tls, allowHttp, exit, log }) {
   );
   return createHttpServer((req, res) => {
     applyHttpsSecurityHeaders(res);
-    onRequest(req, res);
+    invokeOnRequest(onRequest, req, res);
   });
 }
 
@@ -94,9 +198,16 @@ function createNodeServer({ onRequest, tls, allowHttp, exit, log }) {
  * @param {number} options.toolCount
  * @param {string} [options.legacyMode]
  * @param {?object} [options.rateLimiter]
- * @param {typeof fetch} [options.fetchFn]
- * @param {{write: Function}|null} [options.auditWriter]
- * @param {object} [options.handlerOverrides] Extra `createMcpRequestHandler` deps.
+ * @param {(req: import("http").IncomingMessage) => string} [options.clientKey]
+ * @param {typeof fetch} [options.fetchFn] Eval/test seam; production omits this.
+ * @param {{write: Function}|null} [options.auditWriter] Eval/test seam; production omits this.
+ * @param {Function} [options.checkAuth] Eval/test seam; production omits this.
+ * @param {Function|null} [options.authenticate] Eval/test seam; production omits this.
+ * @param {boolean} [options.allowLocalOperator] Eval/test seam; production omits this.
+ * @param {object} [options.handlerOverrides]
+ *   Allowlisted predicate `*Fn` hooks plus `sessionPrincipalKeyFn` only.
+ *   `checkAuth`, `authenticate`, `allowLocalOperator`, `auditWriter`, and
+ *   unknown keys throw at construction.
  * @param {(handler: Function) => Function} [options.wrapHandler]
  * @param {(handler: Function, ctx: object) => Function} [options.wrapRequestHandler]
  *   Wraps the assembled `(req, res)` handler (eval mutants / taps).
@@ -127,8 +238,12 @@ export async function startHttpsTransport({
   toolCount,
   legacyMode = "serve",
   rateLimiter = null,
+  clientKey,
   fetchFn,
   auditWriter,
+  checkAuth: checkAuthOption,
+  authenticate: authenticateOption,
+  allowLocalOperator: allowLocalOperatorOption,
   handlerOverrides = {},
   wrapHandler = (handler) => handler,
   wrapRequestHandler = (handler) => handler,
@@ -138,6 +253,7 @@ export async function startHttpsTransport({
   listenLabel,
   listenHost,
 } = {}) {
+  const pickedOverrides = pickHandlerOverrides(handlerOverrides);
   const inboundMode = resolveInboundAuthModeFn({
     bindHost,
     allowUnauth,
@@ -191,13 +307,20 @@ export async function startHttpsTransport({
     legacy: "reject",
     onerror: () => reportMcpTransportStage("modern-protocol"),
   });
+  if (checkAuthOption !== undefined) checkAuth = checkAuthOption;
+  if (authenticateOption !== undefined) authenticate = authenticateOption;
+  const allowLocalOperator = allowLocalOperatorOption !== undefined
+    ? allowLocalOperatorOption
+    : loopbackBind && inboundMode.mode === "unauthenticated";
+
   const modernHandler = wrapHandler(toNodeHandler(modernMcpHandler, {
     onerror: () => reportMcpTransportStage("modern-adapter"),
   }));
+  const { sessionPrincipalKeyFn, ...handlerFns } = pickedOverrides;
   const legacyHandler = wrapHandler(createLegacySessionHandler({
     buildServer,
     mode: legacyMode,
-    sessionPrincipalKeyFn: handlerOverrides.sessionPrincipalKeyFn,
+    ...(sessionPrincipalKeyFn ? { sessionPrincipalKeyFn } : {}),
   }));
 
   const requestHandler = wrapRequestHandler(createMcpRequestHandler({
@@ -205,7 +328,7 @@ export async function startHttpsTransport({
     authenticate,
     protectedResource,
     resourceMetadataUrl,
-    allowLocalOperator: loopbackBind && inboundMode.mode === "unauthenticated",
+    allowLocalOperator,
     modernHandler,
     legacyHandler,
     toolCount,
@@ -216,7 +339,8 @@ export async function startHttpsTransport({
       audience: inboundCfg?.audience,
     }),
     ...(auditWriter !== undefined ? { auditWriter } : {}),
-    ...handlerOverrides,
+    ...(clientKey ? { clientKey } : {}),
+    ...handlerFns,
   }), {
     modernHandler,
     legacyHandler,
@@ -272,7 +396,7 @@ export async function startHttpsTransport({
  * @param {boolean} options.loopbackBind
  * @param {NodeJS.ProcessEnv} [options.env]
  * @param {() => number} [options.now]
- * @returns {?{check: Function}}
+ * @returns {?{check: Function, limit: number, windowSec: number}}
  */
 export function createStartupRateLimiter({
   hasTls,
@@ -287,9 +411,13 @@ export function createStartupRateLimiter({
     ? rateLimitDefault
     : Number(rateLimitEnv);
   if (!(rateLimit > 0)) return null;
-  return createRateLimiter({
+  return {
+    ...createRateLimiter({
+      limit: rateLimit,
+      windowMs: rateWindowSec * 1000,
+      ...(now ? { now } : {}),
+    }),
     limit: rateLimit,
-    windowMs: rateWindowSec * 1000,
-    ...(now ? { now } : {}),
-  });
+    windowSec: rateWindowSec,
+  };
 }

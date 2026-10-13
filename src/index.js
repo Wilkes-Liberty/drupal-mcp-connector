@@ -272,13 +272,8 @@ if (transport === "stdio") {
     loopbackBind: isLoopbackBind(bindHost),
   });
   if (rateLimiter) {
-    const rateWindowSec = Number(process.env.MCP_RATE_WINDOW_SEC || 60);
-    const rateLimitEnv = process.env.MCP_RATE_LIMIT;
-    const rateLimit = rateLimitEnv === undefined || rateLimitEnv === ""
-      ? ((hasTls && !isLoopbackBind(bindHost)) ? 120 : 0)
-      : Number(rateLimitEnv);
     console.error(
-      `[drupal-mcp-connector] Rate limiting: ${rateLimit} req / ${rateWindowSec}s per client IP on /mcp.`,
+      `[drupal-mcp-connector] Rate limiting: ${rateLimiter.limit} req / ${rateLimiter.windowSec}s per client IP on /mcp.`,
     );
   }
 

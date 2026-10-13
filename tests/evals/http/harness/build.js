@@ -290,6 +290,12 @@ export async function buildHarness({
     ? handlerSwap.auditWriter
     : evalWriter;
   delete handlerSwap.auditWriter;
+  const checkAuth = handlerSwap.checkAuth;
+  delete handlerSwap.checkAuth;
+  const authenticate = handlerSwap.authenticate;
+  delete handlerSwap.authenticate;
+  const allowLocalOperator = handlerSwap.allowLocalOperator;
+  delete handlerSwap.allowLocalOperator;
 
   const wrapRequestHandler = (handler, ctx) => {
     const mutated = swap.wrapRequestHandler ? swap.wrapRequestHandler(handler, ctx) : handler;
@@ -320,10 +326,11 @@ export async function buildHarness({
     }),
     fetchFn: issuer.fetchFn,
     auditWriter,
-    handlerOverrides: {
-      ...handlerSwap,
-      ...(clientKey ? { clientKey } : {}),
-    },
+    ...(checkAuth !== undefined ? { checkAuth } : {}),
+    ...(authenticate !== undefined ? { authenticate } : {}),
+    ...(allowLocalOperator !== undefined ? { allowLocalOperator } : {}),
+    ...(clientKey ? { clientKey } : {}),
+    handlerOverrides: handlerSwap,
     wrapHandler: (handler) => counters.wrapHandler(handler),
     wrapRequestHandler,
     resolveInboundAuthModeFn: swap.resolveInboundAuthMode ?? httpAuth.resolveInboundAuthMode,
