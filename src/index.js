@@ -31,26 +31,16 @@
  *   doctor            Connection doctor — see src/lib/doctor.js
  */
 
-import { createServer as createHttpsServer } from "https";
-import { createServer as createHttpServer }  from "http";
-import { readFileSync }                      from "fs";
-
-import { createMcpHandler } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { toNodeHandler } from "@modelcontextprotocol/node";
 
 import { listSiteNames, getTlsConfig, loadConfig, CLIENT_VERSION, SERVER_INFO } from "./lib/config.js";
 import { loadLocalSecrets, secretLoadFatalMessage, secretTableMismatchMessage } from "./lib/load-secrets.js";
 import {
   resolveInboundAuthConfig,
-  resolveInboundAuthMode,
-  createInboundHttpsAuth,
   isLoopbackBind,
 } from "./lib/http-auth.js";
-import { createLegacySessionHandler, createMcpRequestHandler } from "./lib/http-handler.js";
-import { resolveAllowedOrigins } from "./lib/http-transport.js";
+import { createStartupRateLimiter, startHttpsTransport } from "./lib/https-startup.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
-import { createRateLimiter } from "./lib/rate-limit.js";
 import { callTool, invokeReadTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
 import { fetchTextFormatContext, installTextFormatContextFetcher } from "./lib/text-format-context.js";
 import { filterDiscoverableTools } from "./lib/governance.js";
@@ -269,159 +259,37 @@ if (transport === "stdio") {
 
 } else if (transport === "https" || transport === "http") {
   const tlsCfg     = getTlsConfig();
-  const port       = tlsCfg.port;
   const allowHttp  = process.env.MCP_ALLOW_HTTP === "1";
-
   const authToken   = process.env.MCP_AUTH_TOKEN || "";
   const allowUnauth = process.env.MCP_ALLOW_UNAUTHENTICATED === "1";
-
-  // Security headers applied to every response
-  function applySecurityHeaders(res) {
-    res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
-    res.setHeader("X-Content-Type-Options",    "nosniff");
-    res.setHeader("X-Frame-Options",           "DENY");
-    res.setHeader("Referrer-Policy",           "no-referrer");
-    res.setHeader("Cache-Control",             "no-store");
-    res.setHeader("Content-Security-Policy",   "default-src 'none'");
-  }
-
-  function createNodeServer(onRequest) {
-    if (tlsCfg.certPath && tlsCfg.keyPath) {
-      // HTTPS — the only acceptable mode for non-local deployments
-      // eslint-disable-next-line security/detect-non-literal-fs-filename -- TLS cert/key path comes from operator-controlled config, not user input
-      const cert = readFileSync(tlsCfg.certPath);
-      // eslint-disable-next-line security/detect-non-literal-fs-filename -- TLS cert/key path comes from operator-controlled config, not user input
-      const key  = readFileSync(tlsCfg.keyPath);
-      return createHttpsServer({ cert, key }, (req, res) => {
-        applySecurityHeaders(res);
-        onRequest(req, res);
-      });
-    }
-
-    // No TLS certs — allow only if explicitly opted in AND on localhost
-    if (!allowHttp) {
-      console.error(
-        "[drupal-mcp-connector] FATAL: HTTP transport requires TLS certificates.\n" +
-        "  Set TLS_CERT_PATH and TLS_KEY_PATH, or MCP_ALLOW_HTTP=1 for localhost-only dev.\n" +
-        "  See docs/getting-started.md for TLS setup instructions."
-      );
-      process.exit(1);
-    }
-
-    console.error(
-      "[drupal-mcp-connector] WARNING: Running plain HTTP (MCP_ALLOW_HTTP=1). " +
-      "ONLY acceptable for local development. Never expose this to the internet."
-    );
-    return createHttpServer((req, res) => {
-      applySecurityHeaders(res);
-      onRequest(req, res);
-    });
-  }
-
   const hasTls   = Boolean(tlsCfg.certPath && tlsCfg.keyPath);
   // Unauthenticated plain HTTP must never bind beyond loopback. A non-loopback
   // bind is allowed only alongside TLS, via an explicit MCP_BIND_HOST opt-in.
   const bindHost = hasTls ? (process.env.MCP_BIND_HOST || "0.0.0.0") : "127.0.0.1";
-  const loopbackBind = isLoopbackBind(bindHost);
-
   const inboundCfg = resolveInboundAuthConfig(loadConfig());
-  const inboundMode = resolveInboundAuthMode({
-    bindHost,
-    allowUnauth,
-    sharedToken: authToken,
-    resourceServer: inboundCfg,
+  const rateLimiter = createStartupRateLimiter({
+    hasTls,
+    loopbackBind: isLoopbackBind(bindHost),
   });
-  if (inboundMode.mode === "fatal") {
-    console.error(`[drupal-mcp-connector] FATAL: ${inboundMode.reason}`);
-    process.exit(1);
-  }
-  // No pre-dispatch header predicate outside resource-server mode: loopback
-  // without a resource server is the explicit local operator (#231 removed
-  // the shared bearer), and DEV-845 still refuses a null principal elsewhere.
-  let checkAuth = () => true;
-  let authenticate = null;
-  let protectedResource = null;
-  let resourceMetadataUrl;
-  if (inboundMode.mode === "resource_server") {
-    try {
-      const inbound = await createInboundHttpsAuth({ inboundCfg });
-      authenticate = inbound.authenticate;
-      protectedResource = inbound.protectedResource;
-      resourceMetadataUrl = inbound.resourceMetadataUrl;
-      checkAuth = () => false;
-      console.error(
-        `[drupal-mcp-connector] Inbound OAuth resource server: issuer ${inboundCfg.issuer} (introspect every call)`
-      );
-    } catch (error) {
-      console.error(
-        "[drupal-mcp-connector] FATAL: inbound issuer discovery failed.\n" +
-        `  ${error instanceof Error ? error.message : "unknown error"}`
-      );
-      process.exit(1);
-    }
-  } else if (inboundMode.mode === "unauthenticated" && !allowUnauth) {
-    console.error(
-      "[drupal-mcp-connector] WARNING: the /mcp endpoint is UNAUTHENTICATED. " +
-      "Acceptable only on loopback or behind a trusted auth boundary."
-    );
-  }
-
-  // Optional fixed-window rate limiting on /mcp, keyed by client IP.
-  // HTTPS non-loopback defaults to 120 req/min when MCP_RATE_LIMIT is unset (#141).
-  // Set MCP_RATE_LIMIT=0 to disable. Counts are per-process; multi-replica should
-  // also rate-limit at the reverse proxy.
-  const rateWindowSec = Number(process.env.MCP_RATE_WINDOW_SEC || 60);
-  const rateLimitEnv  = process.env.MCP_RATE_LIMIT;
-  const rateLimitDefault = (hasTls && !loopbackBind) ? 120 : 0;
-  const rateLimit = rateLimitEnv === undefined || rateLimitEnv === ""
-    ? rateLimitDefault
-    : Number(rateLimitEnv);
-  const rateLimiter   = rateLimit > 0
-    ? createRateLimiter({ limit: rateLimit, windowMs: rateWindowSec * 1000 })
-    : null;
   if (rateLimiter) {
     console.error(
-      `[drupal-mcp-connector] Rate limiting: ${rateLimit} req / ${rateWindowSec}s per client IP on /mcp.`
+      `[drupal-mcp-connector] Rate limiting: ${rateLimiter.limit} req / ${rateLimiter.windowSec}s per client IP on /mcp.`,
     );
   }
 
-  const legacyMode = process.env.MCP_LEGACY_TRANSPORT || "serve";
-  const modernMcpHandler = createMcpHandler(buildConnectorServer, {
-    legacy: "reject",
-    onerror: () => reportMcpTransportStage("modern-protocol"),
-  });
-  const modernHandler = toNodeHandler(modernMcpHandler, {
-    onerror: () => reportMcpTransportStage("modern-adapter"),
-  });
-  const legacyHandler = createLegacySessionHandler({
+  await startHttpsTransport({
+    bindHost,
+    port: tlsCfg.port,
+    allowHttp,
+    allowUnauth,
+    sharedToken: authToken,
+    inboundCfg,
+    tls: hasTls ? { certPath: tlsCfg.certPath, keyPath: tlsCfg.keyPath } : null,
     buildServer: buildConnectorServer,
-    mode: legacyMode,
-  });
-  const requestHandler = createMcpRequestHandler({
-    checkAuth,
-    authenticate,
-    protectedResource,
-    resourceMetadataUrl,
-    allowLocalOperator: loopbackBind && inboundMode.mode === "unauthenticated",
-    modernHandler,
-    legacyHandler,
     toolCount: allDefinitions.length,
+    listenLabel: `${allDefinitions.length} tools · ${RESOURCES.length} resources · ${ALL_PROMPTS.length} prompts`,
+    legacyMode: process.env.MCP_LEGACY_TRANSPORT || "serve",
     rateLimiter,
-    allowedOrigins: resolveAllowedOrigins({
-      allowedOrigins: inboundCfg.allowedOrigins,
-      resource: inboundCfg.resource,
-      audience: inboundCfg.audience,
-    }),
-  });
-
-  const nodeServer = createNodeServer(requestHandler);
-
-  nodeServer.listen(port, bindHost, () => {
-    const proto = hasTls ? "https" : "http";
-    console.error(
-      `[drupal-mcp-connector v${CLIENT_VERSION}] Listening on ${proto}://${bindHost}:${port}/mcp\n` +
-      `  ${allDefinitions.length} tools · ${RESOURCES.length} resources · ${ALL_PROMPTS.length} prompts`
-    );
   });
 
 } else {

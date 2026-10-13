@@ -12,6 +12,9 @@ import { legacyInitialize, legacyPost } from "../harness/requests.js";
 defineCase({
   id: "T10",
   title: "cross-principal session reuse is refused",
+  mutants: [
+    { id: "T10", expectedLabel: "B riding A's session: status" },
+  ],
   async run(h) {
     const tokenA = await h.tokenFor("A");
     const tokenB = await h.tokenFor("B");

@@ -1,27 +1,32 @@
 /**
- * Compose the connector's HTTP request handler the way production does in
- * hosted (resource-server) mode, over fakes, behind a loopback server.
+ * Compose the connector's HTTP transport the way production does: through
+ * `startHttpsTransport` (the function `src/index.js` calls), over fakes,
+ * behind a loopback server.
  *
  *   inbound auth : real `createInboundHttpsAuth` against the stub issuer
- *   handler      : real `createMcpRequestHandler` with the real rate limiter
+ *   startup      : real `startHttpsTransport` (index.js wiring)
  *   dispatch     : real SDK modern handler and real legacy session handler
- *   tools        : a stand-in surface (see below) over the fake upstream
+ *   tools        : a stand-in surface over the fake upstream
  *
- * The tool surface is a stand-in: it applies the connector's own
- * `filterToolsByPrincipal` and `resolveGrantedSites` against an explicit grant
- * table, then reads the fake upstream. It does not run `dispatch.js` or
- * `drupal-fetch.js` (later increments).
- *
- * Mutants in this increment are dependency swaps at build time. They live
- * here, in `tests/`, and `src/` has no switch.
+ * Mutants are dependency swaps at build time. They live here, in `tests/`.
+ * `src/` has no eval switch.
  */
 
 import { createHash } from "node:crypto";
-import { createServer } from "node:http";
-import { createMcpHandler } from "@modelcontextprotocol/server";
-import { toNodeHandler } from "@modelcontextprotocol/node";
+import { EVAL_TOOL_NAMES } from "./labels.js";
 import { installFakeClock } from "./clock.js";
-import { httpAuth, httpAudit, httpHandler, httpTransport, mcpServer, principal, rateLimit } from "./connector.js";
+import {
+  anchor,
+  evidence,
+  httpAuth,
+  httpAudit,
+  httpsStartup,
+  mcpServer,
+  principal,
+  rateLimit,
+  relayEdge,
+  usage,
+} from "./connector.js";
 import { createCounters } from "./counters.js";
 import { createFakeDrupal } from "./fake-drupal.js";
 import { createStubIssuer } from "./stub-issuer.js";
@@ -43,10 +48,10 @@ const TOOL_DEFINITIONS = [
   { name: "drupal_create_node", description: "Create a node (write).", inputSchema: { type: "object", properties: {} } },
 ];
 
-/**
- * Dependency-swap mutants: each removes exactly one guard from the handler's
- * dependencies. Keyed by the case id whose mutant it is.
- */
+if (JSON.stringify(TOOL_DEFINITIONS.map((tool) => tool.name)) !== JSON.stringify([...EVAL_TOOL_NAMES])) {
+  throw new Error("stand-in tools drifted from EVAL_TOOL_NAMES; add a case and update the manifest");
+}
+
 /**
  * Pre-DEV-845 inbound-mode decision: allowUnauth wins on any bind host.
  * Used only as the T1n mutant (dependency swap in this file).
@@ -101,33 +106,63 @@ function allSitesGranted(_identity, siteList) {
   return [...siteList];
 }
 
+function sinkholeResponse() {
+  return {
+    statusCode: 200,
+    headersSent: false,
+    writeHead(status) {
+      this.statusCode = status;
+      this.headersSent = true;
+      return this;
+    },
+    end() { return this; },
+    setHeader() { return this; },
+    on() { return this; },
+  };
+}
+
+/**
+ * Dependency-swap mutants: each removes exactly one guard. Keyed by mutant
+ * id (a case may declare more than one).
+ */
 const MUTANTS = {
-  // T1: drop the resource-server authenticator and allow a null principal
-  // (the DEV-845 guard). Every request now dispatches under local operator.
   T1: () => ({ authenticate: null, checkAuth: () => true, allowLocalOperator: true }),
-  // T1n: restore the pre-DEV-845 startup decision (allow-unauthenticated
-  // on a non-loopback bind is not fatal).
+  // a-1: dispatch the modern handler, then still write 401. T1 must kill this
+  // by asserting the handler was not reached — a status-only check would miss it.
+  "T1-dispatch-before-auth": () => ({
+    wrapRequestHandler: (_handler, ctx) => async (req, res) => {
+      try {
+        await ctx.modernHandler(req, sinkholeResponse());
+      } catch {
+        // Reaching the handler is the mutation; the 401 is written below.
+      }
+      httpAuth.writeUnauthorized(res, {
+        error: "invalid_token",
+        errorDescription: "Bearer token required",
+        resourceMetadata: ctx.resourceMetadataUrl,
+      });
+    },
+  }),
   T1n: () => ({ resolveInboundAuthMode: failOpenInboundAuthMode }),
-  // T4: ignore the grant table so a site-A grant also reaches B.
+  T2: () => ({
+    authenticate: async () => ({ ok: true, identity: { sub: "mutant", clientId: "client-a" } }),
+  }),
   T4: () => ({ resolveGrantedSites: allSitesGranted }),
-  // T4b: restore the pre-DEV-848 fall-through (no grant, no sites claim → all sites).
   T4b: () => ({ resolveGrantedSites: fallThroughGrantedSites }),
-  // T7: an authenticator that rejects everything (the over-blocking check).
   T7: () => ({
     authenticate: async () => httpAuth.denyAuth(401, {
       error: "invalid_token",
       errorDescription: "Token validation failed",
     }),
   }),
-  // T8 (DEV-858): disable the hosted HTTP audit writer. The green run
-  // asserts one row per request; with the writer off those assertions fail.
   T8: () => ({ auditWriter: null }),
-  // T9: treat every MCP-Protocol-Version as supported at the HTTP layer.
   T9: () => ({ protocolVersionSupportedFn: () => true }),
-  // T10: bind every session to the same key so another principal can ride it.
   T10: () => ({ sessionPrincipalKeyFn: () => "eval-shared" }),
-  // T11: skip Origin validation so a disallowed browser origin is served.
   T11: () => ({ originAllowedFn: () => true }),
+  T12: () => ({ sessionlessMethodRefusedFn: () => false }),
+  T13: () => ({ acceptOkFn: () => true }),
+  T14: () => ({ isJsonRpcBatchFn: () => false }),
+  T16: () => ({ isUnauthenticatedRouteFn: () => false }),
 };
 
 /**
@@ -144,8 +179,17 @@ export function inboundAuthModeForEval(options, mutant = null) {
   return resolve(options);
 }
 
-/** @returns {string[]} case ids that have a dependency-swap mutant */
+/** @returns {string[]} mutant ids that have a dependency-swap */
 export const mutantIds = () => Object.keys(MUTANTS);
+
+/**
+ * @param {string} id
+ * @returns {object}
+ */
+export function mutantSwap(id) {
+  if (id !== null && !MUTANTS[id]) throw new Error(`Unknown mutant "${id}".`);
+  return id && MUTANTS[id] ? MUTANTS[id]() : {};
+}
 
 function assertNoAmbientCredentials() {
   const ambient = Object.keys(process.env).filter((key) => /^(DRUPAL_|MCP_)/.test(key));
@@ -156,10 +200,12 @@ function assertNoAmbientCredentials() {
 
 /**
  * @param {object} [options]
- * @param {string|null} [options.mutant] Case id of the dependency-swap mutant, or null for the real build.
- * @param {object|null} [options.grants] Grant table; `null` is T4b (no table), undefined is the fixture default.
- * @param {number} [options.rateLimit] Per-key /mcp limit (default: fixture high water).
+ * @param {string|null} [options.mutant] Mutant id, or null for the real build.
+ * @param {object|null} [options.grants] Grant table; `null` is T4b (no table).
+ * @param {number} [options.rateLimit] Per-key /mcp limit.
  * @param {(req: object) => string} [options.clientKey] Optional rate-limit key.
+ * @param {boolean} [options.edge] Also start a northbound edge for /usage and /assessor.
+ * @param {(row: object) => void} [options.auditSink] Audit sink (default: throw).
  * @returns {Promise<object>} harness handle
  */
 export async function buildHarness({
@@ -167,9 +213,11 @@ export async function buildHarness({
   grants: grantsOption,
   rateLimit: rateLimitOpt,
   clientKey,
+  edge: withEdge = false,
+  auditSink,
 } = {}) {
   assertNoAmbientCredentials();
-  if (mutant !== null && !MUTANTS[mutant]) throw new Error(`Unknown mutant "${mutant}".`);
+  const swap = mutantSwap(mutant);
 
   const clock = installFakeClock();
   const counters = createCounters();
@@ -184,7 +232,6 @@ export async function buildHarness({
   }));
   const defaultGrants = Object.fromEntries(TENANTS.map(({ clientId, site }) => [clientId, [site]]));
   const grants = grantsOption === undefined ? defaultGrants : grantsOption;
-  const swap = mutant && MUTANTS[mutant] ? MUTANTS[mutant]() : {};
   const resolveGrantedSites = swap.resolveGrantedSites ?? principal.resolveGrantedSites;
 
   const inboundCfg = {
@@ -197,7 +244,6 @@ export async function buildHarness({
     introspectionClientId: "eval-rs",
     introspectionClientSecret: "eval-rs-secret",
   };
-  const inbound = await httpAuth.createInboundHttpsAuth({ inboundCfg, fetchFn: issuer.fetchFn });
 
   const surface = {
     serverInfo: { name: "eval-http-connector", version: "0" },
@@ -230,55 +276,91 @@ export async function buildHarness({
     prompts: { definitions: [], get: () => [] },
   };
   const buildServer = mcpServer.createConnectorServerFactory(surface);
-  const modern = createMcpHandler(buildServer, { legacy: "reject" });
 
   const handlerSwap = { ...swap };
   delete handlerSwap.resolveGrantedSites;
   delete handlerSwap.resolveInboundAuthMode;
-  const auditRows = [];
-  const evalWriter = httpAudit.createHttpAuditWriter({
-    sink: (row) => { auditRows.push(row); },
+  delete handlerSwap.wrapRequestHandler;
+  const sink = auditSink ?? (() => {
+    throw new Error("eval audit sink failed (fail-safe: must not change the HTTP verdict)");
   });
-  const deps = {
-    // Production wiring in resource-server mode (index.js): checkAuth is closed.
-    checkAuth: () => false,
-    authenticate: inbound.authenticate,
-    ...handlerSwap,
+  const evalWriter = httpAudit.createHttpAuditWriter({ sink });
+  const auditWriter = handlerSwap.auditWriter !== undefined
+    ? handlerSwap.auditWriter
+    : evalWriter;
+  delete handlerSwap.auditWriter;
+  const checkAuth = handlerSwap.checkAuth;
+  delete handlerSwap.checkAuth;
+  const authenticate = handlerSwap.authenticate;
+  delete handlerSwap.authenticate;
+  const allowLocalOperator = handlerSwap.allowLocalOperator;
+  delete handlerSwap.allowLocalOperator;
+
+  const wrapRequestHandler = (handler, ctx) => {
+    const mutated = swap.wrapRequestHandler ? swap.wrapRequestHandler(handler, ctx) : handler;
+    return async (req, res) => {
+      try {
+        await mutated(req, res);
+      } finally {
+        tap.serverSide.push({ method: req.method, url: req.url, bodyRead: req.readableDidRead });
+      }
+    };
   };
-  const handler = httpHandler.createMcpRequestHandler({
-    ...deps,
-    auditWriter: deps.auditWriter !== undefined ? deps.auditWriter : evalWriter,
-    protectedResource: inbound.protectedResource,
-    resourceMetadataUrl: inbound.resourceMetadataUrl,
+
+  const started = await httpsStartup.startHttpsTransport({
+    bindHost: "127.0.0.1",
+    port: 0,
+    allowHttp: true,
+    allowUnauth: false,
+    sharedToken: "",
+    inboundCfg,
+    tls: null,
+    buildServer,
     toolCount: TOOL_DEFINITIONS.length,
-    modernHandler: counters.wrapHandler(toNodeHandler(modern)),
-    legacyHandler: counters.wrapHandler(httpHandler.createLegacySessionHandler({
-      buildServer,
-      mode: "serve",
-      sessionPrincipalKeyFn: deps.sessionPrincipalKeyFn ?? httpTransport.sessionPrincipalKey,
-    })),
+    legacyMode: "serve",
     rateLimiter: rateLimit.createRateLimiter({
       limit: rateLimitOpt ?? FIXTURE_RATE_LIMIT,
       windowMs: 60_000,
       now: clock.now,
     }),
+    fetchFn: issuer.fetchFn,
+    auditWriter,
+    ...(checkAuth !== undefined ? { checkAuth } : {}),
+    ...(authenticate !== undefined ? { authenticate } : {}),
+    ...(allowLocalOperator !== undefined ? { allowLocalOperator } : {}),
     ...(clientKey ? { clientKey } : {}),
-    allowedOrigins: httpTransport.resolveAllowedOrigins({
-      allowedOrigins: inboundCfg.allowedOrigins,
-      resource: inboundCfg.resource,
-      audience: inboundCfg.audience,
-    }),
-    originAllowedFn: deps.originAllowedFn ?? httpTransport.originAllowed,
-    protocolVersionSupportedFn: deps.protocolVersionSupportedFn ?? httpTransport.isSupportedProtocolVersion,
+    handlerOverrides: handlerSwap,
+    wrapHandler: (handler) => counters.wrapHandler(handler),
+    wrapRequestHandler,
+    resolveInboundAuthModeFn: swap.resolveInboundAuthMode ?? httpAuth.resolveInboundAuthMode,
+    exit: (code, reason) => {
+      throw new Error(`HTTPS startup exited (${code}): ${reason}`);
+    },
+    log: () => {},
   });
+  if (!started.started) {
+    throw new Error(`HTTPS startup refused to listen: ${started.reason}`);
+  }
 
-  const server = createServer((req, res) => {
-    void handler(req, res).then(() => {
-      tap.serverSide.push({ method: req.method, url: req.url, bodyRead: req.readableDidRead });
+  const origin = started.url.replace(/\/mcp$/, "");
+  let edgeHandle = null;
+  if (withEdge) {
+    const keys = anchor.generateNotaryKeys();
+    edgeHandle = await relayEdge.startEdge({
+      auth: inboundCfg,
+      grants: grants || { "client-a": ["site-a"] },
+      tenantGrants: { "client-a": ["tenant-a"] },
+      sites: [{ _name: "site-a" }],
+      defaultSite: "site-a",
+      channelCredentials: { lookup: () => null },
+      allowHttpLoopback: true,
+      fetchFn: issuer.fetchFn,
+      usage: usage.createUsageLedger(),
+      evidence: evidence.createEvidenceLedger(),
+      evidenceAnchor: { publicKey: keys.publicPin, submit: () => ({ ok: false }) },
+      auditWriter,
     });
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const url = `http://127.0.0.1:${server.address().port}/mcp`;
+  }
 
   const configDigest = createHash("sha256").update(JSON.stringify({
     issuer: issuer.issuer,
@@ -288,17 +370,20 @@ export async function buildHarness({
     tools: TOOL_DEFINITIONS.map((tool) => tool.name),
     rateLimit: rateLimitOpt ?? FIXTURE_RATE_LIMIT,
     mutant,
-    audit: deps.auditWriter !== null,
+    audit: auditWriter !== null,
+    edge: withEdge,
   })).digest("hex").slice(0, 16);
 
   const harness = {
     mutant,
     configDigest,
-    url,
-    resourceMetadataUrl: inbound.resourceMetadataUrl,
+    url: started.url,
+    origin,
+    resourceMetadataUrl: started.resourceMetadataUrl,
+    edgeUrl: edgeHandle?.northboundUrl ?? null,
     counters,
     tap,
-    auditRows,
+    auditRows: evalWriter.rows,
     fake,
     issuer,
     tenants: TENANTS,
@@ -310,41 +395,41 @@ export async function buildHarness({
       return issuer.mint({ sub: `${clientId}-subject`, azp: clientId, scope: scopes.join(" "), jti: `eval-${tenant}-1`, ...extra });
     },
     /**
-     * Send one built request to /mcp and record the response in the tap.
-     * @param {{method: string, headers: object, body?: string}} request
-     * @param {{token?: string, headers?: object, requestId?: string}} [options]
-     *   Authorization is added only when a token is given.
+     * Send one built request. `request.path` or `options.path` selects a
+     * non-`/mcp` route; `options.base` selects the edge origin.
+     * @param {{method: string, headers: object, body?: string, path?: string}} request
+     * @param {{token?: string, headers?: object, requestId?: string, path?: string, base?: string}} [options]
      */
-    async send(request, { token, headers: extra = {}, requestId } = {}) {
+    async send(request, { token, headers: extra = {}, requestId, path, base } = {}) {
+      const route = path || request.path || "/mcp";
+      const root = (base || origin).replace(/\/mcp$/, "");
       const headers = {
         ...request.headers,
         ...extra,
         ...(requestId ? { "x-request-id": requestId } : {}),
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       };
-      const res = await fetch(url, { method: request.method, headers, body: request.body });
+      const res = await fetch(`${root}${route}`, { method: request.method, headers, body: request.body });
       const text = await res.text();
-      const entry = { status: res.status, headers: Object.fromEntries(res.headers), text };
+      const entry = { status: res.status, headers: Object.fromEntries(res.headers), text, route };
       tap.record(entry);
       return entry;
     },
-    /** Wait until the server has finished `count` requests (server-side taps are recorded after the handler returns). */
+    /** Wait until the server has finished `count` requests. */
     async waitServerSide(count) {
       for (let i = 0; i < 200 && tap.serverSide.length < count; i += 1) {
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
     },
-    /** Zero-dispatch snapshot: Ch, Ct, and Cu (all tenants). */
     dispatchCounts: () => ({ ch: counters.ch, ct: counters.ct, cu: fake.count() }),
     async close() {
-      await modern.close();
-      await new Promise((resolve) => {
-        server.close(() => resolve());
-        server.closeAllConnections?.();
-      });
+      await started.close?.();
+      await edgeHandle?.close?.();
       await fake.close();
       clock.restore();
     },
   };
   return harness;
 }
+
+export { failOpenInboundAuthMode };
