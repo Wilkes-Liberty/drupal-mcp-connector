@@ -7,17 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- **IPv6 loopback startup url and log, edge router driven by its route table, eval prerequisites (DEV-866 follow-up).**
-  `startHttpsTransport` brackets an IPv6 literal in both the returned url
-  and the listen log (`http://[::1]:3443/mcp`). `EDGE_NORTHBOUND_AUX_ROUTES`
-  is now the edge's router, so a route change alters runtime behavior and
-  the eval coverage pin together. The HTTP eval pack names `openssl` as a
-  prerequisite and fails by name when it is missing. A stray `node_modules`
-  symlink committed by #456 is removed and the ignore pattern now covers a
-  symlink too.
+## [5.0.0] - 2026-10-13
 
 ### Added
+
 - **Signed GHCR image on every release tag (DEV-923).** Pushing a `v*` tag
   still publishes npm exactly as before, and now also builds the repo
   `Dockerfile`, pushes `ghcr.io/wilkes-liberty/drupal-mcp-connector` with the
@@ -58,13 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   marketplace listings remain DEV-817 / Keystone — this change does not
   claim a public URL is live.
 
-### Fixed
-- **HTTPS listen error handler is detached after bind.** A leftover
-  `once("error")` on the listen promise consumed the first later `server`
-  error as a no-op. The listener is removed when bind succeeds so a
-  post-listen failure is visible again.
-
 ### Changed
+
 - **Sessionless `GET`/`DELETE` `/mcp` is `405` (DEV-840, breaking).** Those
   methods without `Mcp-Session-Id` previously reached the 2025 arm and
   returned `400`. Revision 2026-07-28 has no standalone GET stream; clients
@@ -83,13 +71,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This does not claim a hosted MCP URL is live.
 
 ### Fixed
+
+- **IPv6 loopback startup url and log, edge router driven by its route table, eval prerequisites (DEV-866 follow-up).**
+  `startHttpsTransport` brackets an IPv6 literal in both the returned url
+  and the listen log (`http://[::1]:3443/mcp`). `EDGE_NORTHBOUND_AUX_ROUTES`
+  is now the edge's router, so a route change alters runtime behavior and
+  the eval coverage pin together. The HTTP eval pack names `openssl` as a
+  prerequisite and fails by name when it is missing. A stray `node_modules`
+  symlink committed by #456 is removed and the ignore pattern now covers a
+  symlink too.
+
+- **HTTPS listen error handler is detached after bind.** A leftover
+  `once("error")` on the listen promise consumed the first later `server`
+  error as a no-op. The listener is removed when bind succeeds so a
+  post-listen failure is visible again.
+
 - **Host allowlist port matching (DEV-861).** An `allowedHosts` entry that
   names port `80` now matches only that port (`http:` URL parsing no longer
   drops it as "any port"). IPv6 entries that name a port keep RFC 3986
   brackets (`[2001:db8::1]:8443`) so they accept the intended Host and not
   a different address.
 
-### Fixed
 - **Address limiter holds are bounded, overflow-aware, and leave no trace (DEV-860).**
   A bucket with an outstanding hold survives pruning and rolls its window
   in place, so in-flight reservations can never outgrow the `maxKeys` cap.
@@ -100,6 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into overflow.
 
 ### Security
+
 - **Standalone `/mcp` rate-limits authenticated requests per verified principal (DEV-860).**
   Authenticated Streamable-HTTP requests are keyed by `sub` + `clientId` from
   the validated token — never a caller-supplied identity header.
