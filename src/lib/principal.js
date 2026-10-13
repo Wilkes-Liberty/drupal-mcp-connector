@@ -435,7 +435,10 @@ export function principalMayUseTool(toolName, identity, sites, grants) {
  */
 export function filterToolsByPrincipal(definitions, sites, identity, grants) {
   if (isUnresolvedNetworkPrincipal(identity)) return [];
-  if (isLocalOperator(identity)) return definitions;
+  // The local-operator shortcut is for stdio only. On a network listener
+  // (loopback HTTP included) discovery goes through `principalMayUseTool`
+  // so the scope-table denial applies to every listener (DEV-862).
+  if (isLocalOperator(identity) && getRequestSurface() !== "network") return definitions;
   return definitions.filter((definition) =>
     principalMayUseTool(definition.name, identity, sites, grants));
 }

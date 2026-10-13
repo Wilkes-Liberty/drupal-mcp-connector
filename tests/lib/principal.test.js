@@ -7,6 +7,7 @@ import {
   filterToolsByPrincipal,
   principalHasScope,
   principalMayUseTool,
+  LOCAL_OPERATOR,
   requiredScopeForCall,
   requiredScopeForTool,
   resolveAuthoritativeTarget,
@@ -108,6 +109,19 @@ describe("requiredScopeForTool", () => {
 describe("deny-by-default tool scope table (DEV-862)", () => {
   const grants = { "content-agent": ["production"] };
   const reader = identity({ scopes: ["mcp_read"] });
+
+  it("applies the network denial to the loopback local operator during discovery", () => {
+    const definitions = [{ name: "drupal_eval_unscoped" }, { name: "drupal_get_node" }];
+    const sites = [{ _name: "production", baseUrl: "https://prod.example.com" }];
+    const onNetwork = runWithIdentity(
+      LOCAL_OPERATOR,
+      () => filterToolsByPrincipal(definitions, sites, LOCAL_OPERATOR, null),
+      { surface: "network" },
+    );
+    expect(onNetwork.map((d) => d.name)).toEqual(["drupal_get_node"]);
+    // Off the network (stdio), the local operator still sees everything.
+    expect(filterToolsByPrincipal(definitions, sites, LOCAL_OPERATOR, null)).toEqual(definitions);
+  });
 
   it("does not list or allow a tool missing from the table on a network listener", () => {
     runWithIdentity(reader, () => {
