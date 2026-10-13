@@ -20,8 +20,14 @@
  *                     Inbound OAuth resource-server (required beyond loopback)
  *   MCP_BIND_HOST     Bind address for https mode when TLS is present
  *                     (default: "0.0.0.0"; ignored without TLS, which forces loopback)
- *   MCP_RATE_LIMIT    Max /mcp requests per window per client IP (0/unset = off)
+ *   MCP_RATE_LIMIT    Max /mcp requests per window per client address
+ *                     (unauthenticated) and, unless overridden, per verified
+ *                     principal (0/unset = off on loopback; 120 on non-loopback TLS)
+ *   MCP_PRINCIPAL_RATE_LIMIT  Optional post-auth principal limit override
  *   MCP_RATE_WINDOW_SEC  Rate-limit window in seconds (default: 60)
+ *   MCP_RATE_MAX_KEYS Hard cap on tracked limiter keys (default: 10000)
+ *   MCP_TRUSTED_PROXIES  CIDR/IP list allowed to set X-Forwarded-For
+ *                     (default: empty — trust none)
  *   MCP_LEGACY_TRANSPORT "serve" (default) | "reject" for 2025-era clients
  *   MCP_ALLOWED_ORIGINS Comma/space-separated Origin allowlist (DNS-rebinding);
  *                     a present empty value clears the configured list
@@ -43,8 +49,9 @@ import {
   resolveInboundAuthConfig,
   isLoopbackBind,
 } from "./lib/http-auth.js";
-import { createStartupRateLimiter, startHttpsTransport } from "./lib/https-startup.js";
+import { createStartupRateLimiters, startHttpsTransport } from "./lib/https-startup.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
+import { resolveTrustedProxies } from "./lib/client-address.js";
 import { assertHostedToolScopeTable } from "./lib/tool-scopes.js";
 import { callTool, invokeReadTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
 import { fetchTextFormatContext, installTextFormatContextFetcher } from "./lib/text-format-context.js";
@@ -277,14 +284,25 @@ if (transport === "stdio") {
   // Unauthenticated plain HTTP must never bind beyond loopback. A non-loopback
   // bind is allowed only alongside TLS, via an explicit MCP_BIND_HOST opt-in.
   const bindHost = hasTls ? (process.env.MCP_BIND_HOST || "0.0.0.0") : "127.0.0.1";
-  const inboundCfg = resolveInboundAuthConfig(loadConfig());
-  const rateLimiter = createStartupRateLimiter({
+  const config = loadConfig();
+  const inboundCfg = resolveInboundAuthConfig(config);
+  // Fixed-window rate limiting on /mcp (DEV-860). Unauthenticated requests
+  // are keyed by client address before auth; authenticated requests are keyed
+  // by the verified principal (sub+clientId). Limits, window, and the
+  // non-loopback TLS default (120/min, #141) are resolved once in
+  // createStartupRateLimiters and only logged here. Counts are per-process;
+  // multi-replica should also rate-limit at the reverse proxy.
+  // X-Forwarded-For is honored only from the trusted-proxy list (default: none).
+  const limits = createStartupRateLimiters({
     hasTls,
     loopbackBind: isLoopbackBind(bindHost),
   });
-  if (rateLimiter) {
+  const trustedProxies = resolveTrustedProxies({ trustedProxies: config.auth?.trustedProxies });
+  if (limits.rateLimiter || limits.principalLimiter) {
     console.error(
-      `[drupal-mcp-connector] Rate limiting: ${rateLimiter.limit} req / ${rateLimiter.windowSec}s per client IP on /mcp.`,
+      `[drupal-mcp-connector] Rate limiting: ${limits.addressLimit} req / ${limits.windowSec}s `
+      + `per client address (unauthenticated) and ${limits.principalLimit} req / ${limits.windowSec}s `
+      + `per verified principal on /mcp. Trusted proxies: ${trustedProxies.length} (default trust none).`
     );
   }
 
@@ -300,7 +318,9 @@ if (transport === "stdio") {
     toolCount: allDefinitions.length,
     listenLabel: `${allDefinitions.length} tools · ${RESOURCES.length} resources · ${ALL_PROMPTS.length} prompts`,
     legacyMode: process.env.MCP_LEGACY_TRANSPORT || "serve",
-    rateLimiter,
+    rateLimiter: limits.rateLimiter,
+    principalLimiter: limits.principalLimiter,
+    trustedProxies,
   });
 
 } else {

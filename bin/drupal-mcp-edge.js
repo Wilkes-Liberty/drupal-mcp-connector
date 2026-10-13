@@ -34,9 +34,15 @@
  *   TLS_CERT_PATH / TLS_KEY_PATH
  *                     TLS material for both listeners.
  *   MCP_ALLOW_HTTP    "1" permits plain loopback listeners (dev only).
- *   MCP_RATE_LIMIT / MCP_RATE_WINDOW_SEC
+ *   MCP_RATE_LIMIT / MCP_PRINCIPAL_RATE_LIMIT / MCP_RATE_WINDOW_SEC /
+ *   MCP_RATE_MAX_KEYS
  *                     Northbound /mcp rate limit (same defaults as the
- *                     primary entry point).
+ *                     primary entry point). Unauthenticated requests are
+ *                     per client address; authenticated requests are per
+ *                     verified principal.
+ *   MCP_TRUSTED_PROXIES
+ *                     CIDR/IP list allowed to set X-Forwarded-For
+ *                     (default: empty — trust none).
  *   MCP_EDGE_USAGE_MAX_RECORDS
  *                     Positive integer enables the in-process usage ledger
  *                     (or config relay.usage.maxRecords). Every decision and
@@ -79,8 +85,9 @@ import {
   getTlsConfig,
   loadConfig,
 } from "../src/lib/config.js";
+import { resolveTrustedProxies } from "../src/lib/client-address.js";
 import { resolveInboundAuthConfig } from "../src/lib/http-auth.js";
-import { createRateLimiter } from "../src/lib/rate-limit.js";
+import { createHttpRateLimiters, resolveHttpRateLimitOptions } from "../src/lib/rate-limit.js";
 import { createUsageLedger } from "../src/lib/usage.js";
 import {
   createChannelCredentialStore,
@@ -159,13 +166,10 @@ const isLoopbackBind = bindHost === "127.0.0.1" || bindHost === "::1" || bindHos
 const port = Number(process.env.MCP_EDGE_PORT || tlsCfg.port);
 const agentPort = Number(process.env.MCP_EDGE_AGENT_PORT || port + 1);
 
-// Northbound rate limiting, same defaults as the primary entry point (#141).
-const rateWindowSec = Number(process.env.MCP_RATE_WINDOW_SEC || 60);
-const rateLimitEnv = process.env.MCP_RATE_LIMIT;
-const rateLimitDefault = (tls && !isLoopbackBind) ? 120 : 0;
-const rateLimit = rateLimitEnv === undefined || rateLimitEnv === ""
-  ? rateLimitDefault
-  : Number(rateLimitEnv);
+// Northbound rate limiting, same defaults as the primary entry point (#141, DEV-860).
+const rateOpts = resolveHttpRateLimitOptions({ hasTls: Boolean(tls), loopbackBind: isLoopbackBind });
+const { rateLimiter, principalLimiter } = createHttpRateLimiters(rateOpts);
+const trustedProxies = resolveTrustedProxies({ trustedProxies: config.auth?.trustedProxies });
 
 // Usage ledger (#256): opt-in, in-process, bounded. A restart clears it.
 // A value that is set but unreadable is fatal: the operator asked for
@@ -213,9 +217,9 @@ try {
     agentPort,
     tls,
     allowHttpLoopback: allowHttp,
-    rateLimiter: rateLimit > 0
-      ? createRateLimiter({ limit: rateLimit, windowMs: rateWindowSec * 1000 })
-      : null,
+    rateLimiter,
+    principalLimiter,
+    trustedProxies,
   });
 } catch (error) {
   fatal(error instanceof Error ? error.message : "edge startup failed");
@@ -226,9 +230,11 @@ console.error(
   + `agent channel ${agentBindHost}:${edge.agentPort} · `
   + `issuer ${inboundCfg.issuer}`,
 );
-if (rateLimit > 0) {
+if (rateLimiter || principalLimiter) {
   console.error(
-    `[drupal-mcp-edge] Rate limiting: ${rateLimit} req / ${rateWindowSec}s per client IP on /mcp.`,
+    `[drupal-mcp-edge] Rate limiting: ${rateOpts.addressLimit} req / ${rateOpts.windowSec}s `
+    + `per client address (unauthenticated) and ${rateOpts.principalLimit} req / ${rateOpts.windowSec}s `
+    + `per verified principal on /mcp. Trusted proxies: ${trustedProxies.length} (default trust none).`,
   );
 }
 if (usage) {

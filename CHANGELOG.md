@@ -79,7 +79,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   brackets (`[2001:db8::1]:8443`) so they accept the intended Host and not
   a different address.
 
+### Fixed
+- **Address limiter holds are bounded, overflow-aware, and leave no trace (DEV-860).**
+  A bucket with an outstanding hold survives pruning and rolls its window
+  in place, so in-flight reservations can never outgrow the `maxKeys` cap.
+  `commit` charges the target the hold was taken on, including the shared
+  overflow bucket, instead of re-resolving the caller key after prune. A
+  released hold drops the untouched bucket it created, so verified clients
+  from many IPs cannot fill `maxKeys` and push new unauthenticated traffic
+  into overflow.
+
 ### Security
+- **Standalone `/mcp` rate-limits authenticated requests per verified principal (DEV-860).**
+  Authenticated Streamable-HTTP requests are keyed by `sub` + `clientId` from
+  the validated token — never a caller-supplied identity header.
+  Unauthenticated requests are still limited per client address **before**
+  auth work, so a missing token stays on the shared 401 writer (DEV-845 /
+  DEV-877) and a 429 body is only `Too Many Requests` (no tool data).
+  `X-Forwarded-For` is honored only when the immediate peer is on
+  `auth.trustedProxies` / `MCP_TRUSTED_PROXIES` (default: trust none).
+  Defaults remain **120 req / 60s** on non-loopback TLS; `MCP_RATE_LIMIT=0`
+  disables; `MCP_PRINCIPAL_RATE_LIMIT` overrides the post-auth gate;
+  `MCP_RATE_MAX_KEYS` (default 10_000) hard-caps tracked keys so spray
+  cannot exhaust limiter memory. Counts stay per-process — multi-replica
+  deployments still need a shared limiter at the reverse proxy. This does
+  not claim a hosted MCP URL is live.
 - **Deny-by-default tool scope table (DEV-862).** Every built-in tool has an
   explicit `requiredScopes` row. On any network listener a name missing
   from the table, or listed with empty `requiredScopes`, is omitted from

@@ -1,3 +1,4 @@
+import { createRateLimiter } from "../../src/lib/rate-limit.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../../src/lib/http-handler.js";
 import { getRequestIdentity, LOCAL_OPERATOR } from "../../src/lib/principal.js";
@@ -218,6 +219,191 @@ describe("createMcpRequestHandler", () => {
     expect(getRequestIdentity()).toBeNull();
   });
 
+  it("charges the address bucket for an insufficient-scope 403 so under-scoped bearers cannot introspect for free", async () => {
+    const authenticate = vi.fn(async () => ({
+      ok: false,
+      status: 403,
+      headers: { "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"mcp_read\"" },
+      body: "Forbidden",
+    }));
+    const rateLimiter = {
+      peek: vi.fn(() => ({ allowed: true, remaining: 1, retryAfterSec: 0 })),
+      check: vi.fn(() => ({ allowed: true, remaining: 0, retryAfterSec: 0 })),
+    };
+    const modernHandler = vi.fn();
+    const h = createMcpRequestHandler({
+      authenticate,
+      rateLimiter,
+      modernHandler,
+      legacyHandler: vi.fn(),
+      toolCount: 66,
+      toWebRequestFn: vi.fn(),
+    });
+    const res = mockRes();
+    await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { authorization: "Bearer scoped-wrong" }), res);
+    expect(res.statusCode).toBe(403);
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    // The bearer-present request was only peeked before auth; the 403 then
+    // consumes a slot, exactly like a 401 does.
+    expect(rateLimiter.peek).toHaveBeenCalledWith("addr:127.0.0.1");
+    expect(rateLimiter.check).toHaveBeenCalledTimes(1);
+    expect(rateLimiter.check).toHaveBeenCalledWith("addr:127.0.0.1");
+    expect(modernHandler).not.toHaveBeenCalled();
+  });
+
+  it("reserves address quota atomically so a concurrent bearer burst cannot all reach introspection", async () => {
+    let settle;
+    const gate = new Promise((resolve) => { settle = resolve; });
+    const authenticate = vi.fn(async () => {
+      await gate;
+      return { ok: false, status: 401, headers: { "WWW-Authenticate": "Bearer error=\"invalid_token\"" }, body: "Unauthorized" };
+    });
+    const h = createMcpRequestHandler({
+      authenticate,
+      rateLimiter: createRateLimiter({ limit: 1, windowMs: 60_000, now: () => 0 }),
+      modernHandler: vi.fn(),
+      legacyHandler: vi.fn(),
+      toolCount: 66,
+      toWebRequestFn: vi.fn(),
+    });
+    const responses = Array.from({ length: 25 }, () => mockRes());
+    const inflight = responses.map((res) =>
+      h(bodyReq({ jsonrpc: "2.0", id: 1, method: "ping" }, { authorization: "Bearer burst" }), res));
+    await new Promise((resolve) => setImmediate(resolve));
+    // Only the first request reserved the single slot; the rest were refused
+    // before any auth work, while the first introspection was still pending.
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    settle();
+    await Promise.all(inflight);
+    const codes = responses.map((res) => res.statusCode).sort((a, b) => a - b);
+    expect(codes.filter((c) => c === 401)).toHaveLength(1);
+    expect(codes.filter((c) => c === 429)).toHaveLength(24);
+  });
+
+  it("charges the address bucket when introspection fails with 503 so an issuer outage cannot be probed for free", async () => {
+    const rateLimiter = createRateLimiter({ limit: 2, windowMs: 60_000, now: () => 0 });
+    const authenticate = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      headers: { "Retry-After": "2" },
+      body: "Service Unavailable",
+    }));
+    const h = createMcpRequestHandler({
+      authenticate,
+      rateLimiter,
+      modernHandler: vi.fn(),
+      legacyHandler: vi.fn(),
+      toolCount: 66,
+      toWebRequestFn: vi.fn(),
+    });
+    const codes = [];
+    for (let i = 0; i < 4; i += 1) {
+      const res = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "ping" }, { authorization: "Bearer outage" }), res);
+      codes.push(res.statusCode);
+    }
+    // Two 503s consumed the two slots; the next two never reached the issuer.
+    expect(codes).toEqual([503, 503, 429, 429]);
+    expect(authenticate).toHaveBeenCalledTimes(2);
+  });
+
+  it("charges a verified token with no principal to one shared bucket, not to its client address", async () => {
+    const principalLimiter = createRateLimiter({ limit: 1, windowMs: 60_000, now: () => 0 });
+    const h = createMcpRequestHandler({
+      authenticate: async () => ({ ok: true, identity: { scopes: ["mcp_read"] } }),
+      principalLimiter,
+      modernHandler: vi.fn(async (req, res) => { res.writeHead(200).end("ok"); }),
+      legacyHandler: vi.fn(),
+      toolCount: 66,
+      toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
+      isLegacyRequestFn: async () => false,
+    });
+    const first = mockRes();
+    await h({ ...bodyReq({ jsonrpc: "2.0", id: 1, method: "ping" }, { authorization: "Bearer anon" }), socket: { remoteAddress: "198.51.100.1" } }, first);
+    expect(first.statusCode).toBe(200);
+    // Same unidentifiable token from a different address: still over the limit.
+    const second = mockRes();
+    await h({ ...bodyReq({ jsonrpc: "2.0", id: 1, method: "ping" }, { authorization: "Bearer anon" }), socket: { remoteAddress: "198.51.100.2" } }, second);
+    expect(second.statusCode).toBe(429);
+    expect(principalLimiter.peek("principal:unresolved").allowed).toBe(false);
+  });
+
+  it("gives a verified principal its address hold back so only the principal gate charges it", async () => {
+    const rateLimiter = createRateLimiter({ limit: 1, windowMs: 60_000, now: () => 0 });
+    const principalLimiter = createRateLimiter({ limit: 100, windowMs: 60_000, now: () => 0 });
+    const h = createMcpRequestHandler({
+      authenticate: async () => ({ ok: true, identity: { sub: "agent-1", clientId: "c", scopes: ["mcp_read"] } }),
+      rateLimiter,
+      principalLimiter,
+      modernHandler: vi.fn(async (req, res) => { res.writeHead(200).end("ok"); }),
+      legacyHandler: vi.fn(),
+      toolCount: 66,
+      toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
+      isLegacyRequestFn: async () => false,
+    });
+    for (let i = 0; i < 3; i += 1) {
+      const res = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "ping" }, { authorization: "Bearer good" }), res);
+      expect(res.statusCode).toBe(200);
+    }
+    // Three verified requests, one-per-window address limit: the address
+    // bucket was never charged; the principal bucket was.
+    expect(rateLimiter.peek("addr:127.0.0.1").allowed).toBe(true);
+    expect(principalLimiter.peek('principal:["agent-1","c"]').remaining).toBe(97);
+  });
+
+  it("meters a bearer on an unknown path before authentication so it is never a free introspection", async () => {
+    const authenticate = vi.fn(async () => ({ ok: true, identity: { sub: "x", scopes: [] } }));
+    const denied = { allowed: false, retryAfterSec: 3, remaining: 0 };
+    const rateLimiter = { check: vi.fn(() => denied), peek: vi.fn(() => denied), reserve: vi.fn(() => ({ ...denied, commit() {}, release() {} })) };
+    const h = createMcpRequestHandler({
+      authenticate,
+      rateLimiter,
+      modernHandler: vi.fn(),
+      legacyHandler: vi.fn(),
+      toolCount: 66,
+      toWebRequestFn: vi.fn(),
+    });
+    for (const url of ["/bogus", "/mcp/extra", "http://evil.example/mcp"]) {
+      const res = mockRes();
+      await h({ ...bodyReq({}, { authorization: "Bearer any" }), url }, res);
+      expect(res.statusCode, url).toBe(429);
+    }
+    expect(authenticate).not.toHaveBeenCalled();
+    // Without a bearer the unknown path charges the address bucket too.
+    const res = mockRes();
+    await h({ ...bodyReq({}), url: "/bogus" }, res);
+    expect(res.statusCode).toBe(429);
+    expect(rateLimiter.check).toHaveBeenCalled();
+  });
+
+  it("meters a bearer on an unsupported /mcp method before authentication", async () => {
+    const authenticate = vi.fn(async () => ({ ok: true, identity: { sub: "x", scopes: [] } }));
+    const rateLimiter = {
+      check: vi.fn(() => ({ allowed: false, retryAfterSec: 3, remaining: 0 })),
+      peek: vi.fn(() => ({ allowed: false, retryAfterSec: 3, remaining: 0 })),
+    };
+    const h = createMcpRequestHandler({
+      authenticate,
+      rateLimiter,
+      modernHandler: vi.fn(),
+      legacyHandler: vi.fn(),
+      toolCount: 66,
+      toWebRequestFn: vi.fn(),
+    });
+    for (const method of ["PUT", "OPTIONS", "PATCH"]) {
+      const res = mockRes();
+      await h({ ...bodyReq({}, { authorization: "Bearer any" }), method }, res);
+      expect(res.statusCode, method).toBe(429);
+    }
+    expect(authenticate).not.toHaveBeenCalled();
+    // And without a bearer the address bucket is charged for the same verbs.
+    const res = mockRes();
+    await h({ ...bodyReq({}), method: "PUT" }, res);
+    expect(res.statusCode).toBe(429);
+    expect(rateLimiter.check).toHaveBeenCalled();
+  });
+
   it("returns the authenticator challenge without reading the body", async () => {
     const modernHandler = vi.fn();
     const toWebRequestFn = vi.fn();
@@ -274,10 +460,11 @@ describe("createMcpRequestHandler", () => {
     expect(legacyHandler).not.toHaveBeenCalled();
   });
 
-  it("rate-limits before auth so brute-force attempts are throttled", async () => {
+  it("rate-limits unauthenticated /mcp before auth so missing-token floods are throttled", async () => {
+    const authenticate = vi.fn(async () => ({ ok: false, status: 401, headers: {}, body: "Unauthorized" }));
     const rateLimiter = { check: () => ({ allowed: false, retryAfterSec: 1, remaining: 0 }) };
     const h = createMcpRequestHandler({
-      checkAuth: () => false,
+      authenticate,
       modernHandler: vi.fn(),
       legacyHandler,
       toolCount: 66,
@@ -285,8 +472,9 @@ describe("createMcpRequestHandler", () => {
       clientKey: () => "ip",
     });
     const res = mockRes();
-    await h(req("POST", "/mcp", { authorization: "Bearer bad" }), res);
+    await h(req("POST", "/mcp"), res);
     expect(res.statusCode).toBe(429); // limiter precedes the 401
+    expect(authenticate).not.toHaveBeenCalled();
   });
 
   it("does not rate-limit the /health probe", async () => {

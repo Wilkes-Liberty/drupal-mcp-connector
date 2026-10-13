@@ -81,8 +81,10 @@ import {
   createHttpAuditWriter,
   defaultHttpAuditSink,
 } from "../http-audit.js";
+import { resolveClientAddress } from "../client-address.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "../http-handler.js";
 import { resolveAllowedHosts, resolveAllowedOrigins } from "../http-transport.js";
+import { rateLimitAddressKey } from "../rate-limit.js";
 import { isWriteLikeCall } from "../operations.js";
 import {
   eligiblePromotions,
@@ -663,7 +665,11 @@ function byteLength(value) {
  *   (`createMemoryApproval`). Injected by tests; created automatically when
  *   the tool list is non-empty.
  * @param {() => number} [options.now] Clock for quotas and cost signals.
- * @param {?object} [options.rateLimiter] Optional rate limiter (rate-limit.js).
+ * @param {?object} [options.rateLimiter] Optional address rate limiter (rate-limit.js).
+ * @param {?object} [options.principalLimiter] Optional post-auth principal limiter.
+ *   `undefined` reuses `rateLimiter`; `null` disables the principal gate.
+ * @param {readonly string[]} [options.trustedProxies] Peers allowed to set
+ *   `X-Forwarded-For` (default: none).
  * @param {number} [options.fanDownTimeoutMs]
  * @param {typeof fetch} [options.fetchFn] Issuer discovery/JWKS fetch.
  * @param {Function} [options.inboundAuthenticate] Test seam that replaces
@@ -698,6 +704,8 @@ export async function startEdge({
   approvals = null,
   now = () => Date.now(),
   rateLimiter = null,
+  principalLimiter,
+  trustedProxies = [],
   fanDownTimeoutMs = DEFAULT_FAN_DOWN_TIMEOUT_MS,
   fetchFn = fetch,
   inboundAuthenticate = null,
@@ -1378,7 +1386,7 @@ export async function startEdge({
       return;
     }
     if (rateLimiter) {
-      const verdict = rateLimiter.check(req.socket?.remoteAddress || "unknown");
+      const verdict = rateLimiter.check(rateLimitAddressKey(resolveClientAddress(req, trustedProxies)));
       if (!verdict.allowed) {
         res.writeHead(429, { "Retry-After": String(verdict.retryAfterSec) }).end("Too Many Requests");
         return;
@@ -1450,7 +1458,7 @@ export async function startEdge({
       return;
     }
     if (rateLimiter) {
-      const verdict = rateLimiter.check(req.socket?.remoteAddress || "unknown");
+      const verdict = rateLimiter.check(rateLimitAddressKey(resolveClientAddress(req, trustedProxies)));
       if (!verdict.allowed) {
         res.writeHead(429, { "Retry-After": String(verdict.retryAfterSec) }).end("Too Many Requests");
         return;
@@ -1529,6 +1537,8 @@ export async function startEdge({
     }),
     toolCount: 0,
     rateLimiter,
+    principalLimiter,
+    trustedProxies,
     allowedOrigins: resolveAllowedOrigins({
       allowedOrigins: auth.allowedOrigins,
       resource: auth.resource,

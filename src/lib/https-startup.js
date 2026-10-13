@@ -20,7 +20,7 @@ import {
 } from "./http-auth.js";
 import { createLegacySessionHandler, createMcpRequestHandler } from "./http-handler.js";
 import { resolveAllowedHosts, resolveAllowedOrigins } from "./http-transport.js";
-import { createRateLimiter } from "./rate-limit.js";
+import { createHttpRateLimiters, resolveHttpRateLimitOptions } from "./rate-limit.js";
 
 /**
  * `handlerOverrides` may only swap these predicate hooks. Auth, the audit
@@ -36,6 +36,7 @@ export const ALLOWED_HANDLER_OVERRIDE_KEYS = Object.freeze([
   "sessionlessMethodRefusedFn",
   "isJsonRpcBatchFn",
   "sessionPrincipalKeyFn",
+  "principalRateKeyFn",
   "hostAllowedFn",
 ]);
 
@@ -60,7 +61,7 @@ export function assertHandlerOverrides(overrides = {}) {
   for (const key of Object.keys(overrides)) {
     if (FORBIDDEN_HANDLER_OVERRIDE_KEYS.includes(key) || !allowed.has(key)) {
       throw new Error(
-        `handlerOverrides.${key} is not allowed (only predicate *Fn hooks and sessionPrincipalKeyFn)`,
+        `handlerOverrides.${key} is not allowed (only predicate *Fn hooks, sessionPrincipalKeyFn, and principalRateKeyFn)`,
       );
     }
   }
@@ -90,6 +91,7 @@ function pickHandlerOverrides(overrides = {}) {
   if (overrides.sessionPrincipalKeyFn !== undefined) {
     picked.sessionPrincipalKeyFn = overrides.sessionPrincipalKeyFn;
   }
+  if (overrides.principalRateKeyFn !== undefined) picked.principalRateKeyFn = overrides.principalRateKeyFn;
   if (overrides.hostAllowedFn !== undefined) picked.hostAllowedFn = overrides.hostAllowedFn;
   return picked;
 }
@@ -214,7 +216,9 @@ function createNodeServer({ onRequest, tls, allowHttp, exit, log }) {
  * @param {Function} options.buildServer
  * @param {number} options.toolCount
  * @param {string} [options.legacyMode]
- * @param {?object} [options.rateLimiter]
+ * @param {?object} [options.rateLimiter] Per-address limiter (unauthenticated / failed-auth traffic).
+ * @param {?object} [options.principalLimiter] Per-verified-principal limiter (DEV-860).
+ * @param {readonly string[]} [options.trustedProxies] Peers allowed to set `X-Forwarded-For`.
  * @param {(req: import("http").IncomingMessage) => string} [options.clientKey]
  * @param {typeof fetch} [options.fetchFn] Eval/test seam; production omits this.
  * @param {{write: Function}|null} [options.auditWriter] Eval/test seam; production omits this.
@@ -255,6 +259,8 @@ export async function startHttpsTransport({
   toolCount,
   legacyMode = "serve",
   rateLimiter = null,
+  principalLimiter,
+  trustedProxies = [],
   clientKey,
   fetchFn,
   auditWriter,
@@ -368,6 +374,8 @@ export async function startHttpsTransport({
     legacyHandler,
     toolCount,
     rateLimiter,
+    ...(principalLimiter !== undefined ? { principalLimiter } : {}),
+    trustedProxies,
     allowedOrigins: resolveAllowedOrigins({
       allowedOrigins: inboundCfg?.allowedOrigins,
       resource: inboundCfg?.resource,
@@ -435,35 +443,36 @@ export async function startHttpsTransport({
 }
 
 /**
- * Build the rate limiter `src/index.js` attaches to `/mcp`.
+ * Build the address and principal limiters `src/index.js` attaches to `/mcp`
+ * (DEV-860), plus the resolved values it logs. Either limiter is `null`
+ * when its gate is off.
  *
- * @param {object} options
- * @param {boolean} options.hasTls
- * @param {boolean} options.loopbackBind
+ * @param {object} [options]
+ * @param {boolean} [options.hasTls]
+ * @param {boolean} [options.loopbackBind]
  * @param {NodeJS.ProcessEnv} [options.env]
  * @param {() => number} [options.now]
- * @returns {?{check: Function, limit: number, windowSec: number}}
+ * @returns {{
+ *   rateLimiter: ?object,
+ *   principalLimiter: ?object,
+ *   addressLimit: number,
+ *   principalLimit: number,
+ *   windowSec: number,
+ * }}
  */
-export function createStartupRateLimiter({
+export function createStartupRateLimiters({
   hasTls,
   loopbackBind,
   env = process.env,
   now,
 } = {}) {
-  const rateWindowSec = Number(env.MCP_RATE_WINDOW_SEC || 60);
-  const rateLimitEnv = env.MCP_RATE_LIMIT;
-  const rateLimitDefault = (hasTls && !loopbackBind) ? 120 : 0;
-  const rateLimit = rateLimitEnv === undefined || rateLimitEnv === ""
-    ? rateLimitDefault
-    : Number(rateLimitEnv);
-  if (!(rateLimit > 0)) return null;
+  const opts = resolveHttpRateLimitOptions({ hasTls, loopbackBind, env });
+  const { rateLimiter, principalLimiter } = createHttpRateLimiters({ ...opts, ...(now ? { now } : {}) });
   return {
-    ...createRateLimiter({
-      limit: rateLimit,
-      windowMs: rateWindowSec * 1000,
-      ...(now ? { now } : {}),
-    }),
-    limit: rateLimit,
-    windowSec: rateWindowSec,
+    rateLimiter,
+    principalLimiter,
+    addressLimit: opts.addressLimit,
+    principalLimit: opts.principalLimit,
+    windowSec: opts.windowSec,
   };
 }

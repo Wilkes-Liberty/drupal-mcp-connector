@@ -166,6 +166,9 @@ const MUTANTS = {
   T13: () => ({ acceptOkFn: () => true }),
   T14: () => ({ isJsonRpcBatchFn: () => false }),
   T16: () => ({ isUnauthenticatedRouteFn: () => false }),
+  // T15 (DEV-860): drop the verified-principal key so both tenants share
+  // the address bucket (the pre-DEV-860 standalone /mcp behavior).
+  T15: () => ({ principalRateKeyFn: () => null }),
   // T17 (DEV-862): restore the v3.2.x default (unknown tool -> mcp_read / listed + callable).
   T17: () => ({
     filterToolsByPrincipal: (defs) => defs,
@@ -216,12 +219,16 @@ function assertNoAmbientCredentials() {
  * @param {(req: object) => string} [options.clientKey] Optional rate-limit key.
  * @param {boolean} [options.edge] Also start a northbound edge for /usage and /assessor.
  * @param {(row: object) => void} [options.auditSink] Audit sink (default: throw).
+ * @param {number} [options.principalRateLimit] Per-principal /mcp limit
+ *   (default: fixture high water, so T8's address-only flood does not
+ *   starve a later authenticated principal).
  * @returns {Promise<object>} harness handle
  */
 export async function buildHarness({
   mutant = null,
   grants: grantsOption,
   rateLimit: rateLimitOpt,
+  principalRateLimit: principalRateLimitOpt,
   clientKey,
   edge: withEdge = false,
   auditSink,
@@ -346,6 +353,11 @@ export async function buildHarness({
       windowMs: 60_000,
       now: clock.now,
     }),
+    principalLimiter: rateLimit.createRateLimiter({
+      limit: principalRateLimitOpt ?? FIXTURE_RATE_LIMIT,
+      windowMs: 60_000,
+      now: clock.now,
+    }),
     fetchFn: issuer.fetchFn,
     auditWriter,
     ...(checkAuth !== undefined ? { checkAuth } : {}),
@@ -392,6 +404,7 @@ export async function buildHarness({
     grants,
     tools: TOOL_DEFINITIONS.map((tool) => tool.name),
     rateLimit: rateLimitOpt ?? FIXTURE_RATE_LIMIT,
+    principalRateLimit: principalRateLimitOpt ?? FIXTURE_RATE_LIMIT,
     mutant,
     audit: auditWriter !== null,
     edge: withEdge,

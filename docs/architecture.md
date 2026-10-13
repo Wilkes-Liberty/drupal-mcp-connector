@@ -173,7 +173,8 @@ algorithm on `auth.algorithms`. `MCP_AUTH_TOKEN` was
 removed in 4.0.0 (#231). `MCP_ALLOW_UNAUTHENTICATED=1` is loopback-only; a non-loopback
 bind with that flag is fatal. They
 default to a 120
-req/min rate limit when `MCP_RATE_LIMIT` is unset. Bind-address restriction
+req/min rate limit when `MCP_RATE_LIMIT` is unset (per client address
+before auth; per verified principal after). Bind-address restriction
 (`MCP_BIND_HOST`) and related controls are documented in
 [security-hardening.md](security-hardening.md).
 

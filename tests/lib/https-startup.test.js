@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { NON_LOOPBACK_UNAUTHENTICATED_REASON } from "../../src/lib/http-auth.js";
-import { createStartupRateLimiter, startHttpsTransport } from "../../src/lib/https-startup.js";
+import { createStartupRateLimiters, startHttpsTransport } from "../../src/lib/https-startup.js";
 import { createConnectorServerFactory } from "../../src/lib/mcp-server.js";
 
 const INDEX_PATH = fileURLToPath(new URL("../../src/index.js", import.meta.url));
@@ -265,6 +265,13 @@ describe("startHttpsTransport", () => {
     await ok.close();
   });
 
+  it("throws at construction when principalRateKeyFn is supplied but not a function", async () => {
+    for (const bad of [null, "nope", 42]) {
+      await expect(baseStartup({ handlerOverrides: { principalRateKeyFn: bad } }))
+        .rejects.toThrow(/principalRateKeyFn must be a function/);
+    }
+  });
+
   it("throws at construction when sessionPrincipalKeyFn is supplied but not a function", async () => {
     await expect(baseStartup({ handlerOverrides: { sessionPrincipalKeyFn: null } }))
       .rejects.toThrow(/sessionPrincipalKeyFn must be a function/);
@@ -287,40 +294,47 @@ describe("src/index.js production startup call", () => {
     ["allowLocalOperator", "allowLocalOperator"],
     ["...evalHooks", "...spread"],
   ])("fails when a mutant startHttpsTransport call injects %s", (injected, expected) => {
-    const mutated = indexSource().replace("rateLimiter,\n  });", `rateLimiter,\n    ${injected},\n  });`);
+    const anchor = "legacyMode: process.env.MCP_LEGACY_TRANSPORT || \"serve\",";
+    const mutated = indexSource().replace(anchor, `${anchor}\n    ${injected},`);
     expect(mutated).not.toBe(indexSource());
     expect(productionStartupHookKeys(mutated)).toContain(expected);
     expect(() => assertProductionStartupHasNoEvalHooks(mutated)).toThrow(/passes eval hooks/);
   });
 
   it("fails when a mutant startHttpsTransport call passes fetchFn", () => {
-    const mutant = indexSource().replace(
-      "    rateLimiter,\n  });",
-      "    rateLimiter,\n    fetchFn: fetch,\n  });",
-    );
+    const anchor = "legacyMode: process.env.MCP_LEGACY_TRANSPORT || \"serve\",";
+    const mutant = indexSource().replace(anchor, `${anchor}\n    fetchFn: fetch,`);
+    expect(mutant).not.toBe(indexSource());
     expect(() => assertProductionStartupHasNoEvalHooks(mutant)).toThrow(/fetchFn/);
   });
 
-  it("logs createStartupRateLimiter values instead of recomputing MCP_RATE_LIMIT", () => {
+  it("logs createStartupRateLimiters values instead of recomputing MCP_RATE_LIMIT", () => {
     const callBlock = indexSource().slice(
       indexSource().indexOf("} else if (transport === \"https\""),
       indexSource().indexOf("await startHttpsTransport"),
     );
-    expect(callBlock).toMatch(/rateLimiter\.limit/);
-    expect(callBlock).toMatch(/rateLimiter\.windowSec/);
+    expect(callBlock).toMatch(/limits\.addressLimit/);
+    expect(callBlock).toMatch(/limits\.principalLimit/);
+    expect(callBlock).toMatch(/limits\.windowSec/);
     expect(callBlock).not.toMatch(/MCP_RATE_LIMIT/);
   });
 });
 
-describe("createStartupRateLimiter", () => {
-  it("defaults off on loopback without TLS", () => {
-    expect(createStartupRateLimiter({ hasTls: false, loopbackBind: true, env: {} })).toBeNull();
+describe("createStartupRateLimiters", () => {
+  it("defaults both gates off on loopback without TLS", () => {
+    const limits = createStartupRateLimiters({ hasTls: false, loopbackBind: true, env: {} });
+    expect(limits.rateLimiter).toBeNull();
+    expect(limits.principalLimiter).toBeNull();
+    expect(limits.addressLimit).toBe(0);
   });
 
-  it("exposes the applied limit and window on a TLS non-loopback limiter", () => {
-    const limiter = createStartupRateLimiter({ hasTls: true, loopbackBind: false, env: {} });
-    expect(limiter.limit).toBe(120);
-    expect(limiter.windowSec).toBe(60);
-    expect(typeof limiter.check).toBe("function");
+  it("exposes the applied limits and window on a TLS non-loopback listener, as two separate limiters", () => {
+    const limits = createStartupRateLimiters({ hasTls: true, loopbackBind: false, env: {} });
+    expect(limits.addressLimit).toBe(120);
+    expect(limits.principalLimit).toBe(120);
+    expect(limits.windowSec).toBe(60);
+    expect(typeof limits.rateLimiter.check).toBe("function");
+    expect(typeof limits.rateLimiter.reserve).toBe("function");
+    expect(limits.principalLimiter).not.toBe(limits.rateLimiter);
   });
 });

@@ -10,7 +10,9 @@
 import { randomUUID } from "node:crypto";
 import { isInitializeRequest, isJsonContentType, isLegacyRequest } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport, toWebRequest } from "@modelcontextprotocol/node";
-import { writeUnauthorized } from "./http-auth.js";
+import { parseBearerToken, writeUnauthorized } from "./http-auth.js";
+import { resolveClientAddress } from "./client-address.js";
+import { rateLimitAddressKey, rateLimitPrincipalKey, UNRESOLVED_PRINCIPAL_RATE_KEY } from "./rate-limit.js";
 import {
   attachHttpAudit,
   markHttpAuditHostRefused,
@@ -289,7 +291,8 @@ export function createLegacySessionHandler({
  *   - `GET /health` — unauthenticated liveness probe (`{status: "ok"}`).
  *     No tool catalog or count (DEV-845).
  *   - `GET /.well-known/oauth-protected-resource[/…]` — RFC 9728 metadata.
- *   - everything else — 401 without a resolved identity, 404 after auth.
+ *   - everything else — 401 without a resolved identity, 404 after auth; metered
+ *     like /mcp so an unknown path is never a free introspection.
  *
  * A request with no resolved identity is refused before any handler, Drupal
  * call, or budget charge. `allowLocalOperator` is the unauthenticated-loopback
@@ -312,10 +315,20 @@ export function createLegacySessionHandler({
  *   keep compiling. `/health` no longer exposes a tool count.
  * @param {(req: object, res: object, body?: unknown) => Promise<void>} deps.modernHandler
  * @param {(req: object, res: object, body?: unknown) => Promise<void>} deps.legacyHandler
- * @param {?{check: (key: string) => {allowed: boolean, retryAfterSec: number}}} [deps.rateLimiter]
- *   Optional rate limiter (see rate-limit.js). Omit/null to disable.
+ * @param {?{check: (key: string) => {allowed: boolean, retryAfterSec: number}, peek?: (key: string) => {allowed: boolean, retryAfterSec: number}}} [deps.rateLimiter]
+ *   Address limiter (see rate-limit.js). Unauthenticated `/mcp` requests are
+ *   checked against it before auth work (DEV-860). Omit/null to disable.
+ * @param {?{check: (key: string) => {allowed: boolean, retryAfterSec: number}}} [deps.principalLimiter]
+ *   Post-auth principal limiter. `undefined` reuses `rateLimiter`; `null`
+ *   disables the principal gate. Keys come from the validated identity,
+ *   never from a caller-supplied header.
  * @param {(req: import("http").IncomingMessage) => string} [deps.clientKey]
- *   Maps a request to a rate-limit key (default: client IP).
+ *   Maps a request to the unauthenticated address key (default: trusted-proxy
+ *   aware client address; trust none).
+ * @param {(identity: object|null|undefined) => ?string} [deps.principalRateKeyFn]
+ *   Maps a verified identity to the principal rate-limit key.
+ * @param {readonly string[]} [deps.trustedProxies]
+ *   CIDR/IP list of peers allowed to set `X-Forwarded-For`. Default empty.
  * @param {number} [deps.maxBodyBytes] Maximum accepted POST body size.
  * @param {typeof toWebRequest} [deps.toWebRequestFn] Injectable Node-to-Web adapter.
  * @param {typeof isLegacyRequest} [deps.isLegacyRequestFn] Injectable SDK era classifier.
@@ -354,7 +367,10 @@ export function createMcpRequestHandler({
   modernHandler = null,
   legacyHandler = null,
   rateLimiter = null,
-  clientKey = (req) => req.socket?.remoteAddress || "unknown",
+  principalLimiter,
+  clientKey = null,
+  principalRateKeyFn = rateLimitPrincipalKey,
+  trustedProxies = [],
   maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
   toWebRequestFn = toWebRequest,
   isLegacyRequestFn = isLegacyRequest,
@@ -380,6 +396,7 @@ export function createMcpRequestHandler({
     isUnauthenticatedRouteFn,
     sessionlessMethodRefusedFn,
     isJsonRpcBatchFn,
+    principalRateKeyFn,
   };
   for (const [name, fn] of Object.entries(injectedPredicates)) {
     if (typeof fn !== "function") {
@@ -390,9 +407,116 @@ export function createMcpRequestHandler({
   const writer = auditWriter === undefined
     ? createHttpAuditWriter({ sink: defaultHttpAuditSink })
     : auditWriter;
+  const identityLimiter = principalLimiter !== undefined ? principalLimiter : rateLimiter;
 
   function requestPath(req) {
     return String(req.url || "").split("?")[0];
+  }
+
+  function addressKey(req) {
+    if (clientKey) return clientKey(req);
+    return rateLimitAddressKey(resolveClientAddress(req, trustedProxies));
+  }
+
+  function writeTooManyRequests(res, retryAfterSec) {
+    res.writeHead(429, { "Retry-After": String(retryAfterSec) }).end("Too Many Requests");
+  }
+
+  /**
+   * Any method on `/mcp`: consume the address bucket before any auth work.
+   * Bearer-present: atomically reserve a slot (held while introspection is
+   * in flight, so a concurrent burst cannot all observe a free bucket);
+   * the hold is committed on a failed auth and released for a verified
+   * principal, which the principal limiter then charges (DEV-860). A
+   * limiter without `reserve` falls back to peek-then-charge.
+   *
+   * @param {import("http").IncomingMessage} req
+   * @param {import("http").ServerResponse} res
+   * @returns {boolean} `false` when the request was already refused.
+   */
+  function gateUnauthenticatedAddressLimit(req, res) {
+    if (!rateLimiter) return true;
+    const key = addressKey(req);
+    const hasBearer = Boolean(parseBearerToken(req.headers.authorization));
+    if (!hasBearer) {
+      const verdict = rateLimiter.check(key);
+      if (!verdict.allowed) {
+        writeTooManyRequests(res, verdict.retryAfterSec);
+        return false;
+      }
+      return true;
+    }
+    if (typeof rateLimiter.reserve === "function") {
+      const hold = rateLimiter.reserve(key);
+      if (!hold.allowed) {
+        writeTooManyRequests(res, hold.retryAfterSec);
+        return false;
+      }
+      req.mcpAddressHold = hold;
+      return true;
+    }
+    if (typeof rateLimiter.peek === "function") {
+      const verdict = rateLimiter.peek(key);
+      if (!verdict.allowed) {
+        writeTooManyRequests(res, verdict.retryAfterSec);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * After any error response from the bearer path (401, 403, the 503 an
+   * unreachable issuer produces, …), charge the address bucket so a spray
+   * of bad, under-scoped, or outage-probing bearers is eventually refused
+   * before the next introspection. None of those reach the principal gate,
+   * so without this they could keep invoking the issuer for free. With a
+   * reservation the hold is committed; otherwise the bucket is charged now.
+   *
+   * @param {import("http").IncomingMessage} req
+   * @param {import("http").ServerResponse} res
+   */
+  function noteFailedAuthAddress(req, res) {
+    if (!rateLimiter) return;
+    if (!parseBearerToken(req.headers.authorization)) return;
+    const failed = typeof res.statusCode === "number" && res.statusCode >= 400;
+    if (req.mcpAddressHold) {
+      if (failed) req.mcpAddressHold.commit();
+      else req.mcpAddressHold.release();
+      req.mcpAddressHold = null;
+      return;
+    }
+    if (failed) rateLimiter.check(addressKey(req));
+  }
+
+  /** A verified principal gives its address hold back; the principal gate charges it instead. */
+  function releaseAddressHold(req) {
+    if (req.mcpAddressHold) {
+      req.mcpAddressHold.release();
+      req.mcpAddressHold = null;
+    }
+  }
+
+  /**
+   * Authenticated `/mcp`: consume the verified-principal bucket. A 429 here
+   * is only `Too Many Requests` — no tool catalog or handler dispatch.
+   *
+   * @param {import("http").IncomingMessage} req
+   * @param {import("http").ServerResponse} res
+   * @returns {boolean}
+   */
+  function gatePrincipalLimit(req, res) {
+    if (!identityLimiter) return true;
+    // No principal key (token without sub / client_id): one shared
+    // fail-closed bucket, never the client address, so the same token cannot
+    // rotate source addresses for fresh quota.
+    const principalKey = principalRateKeyFn(req.mcpIdentity) || UNRESOLVED_PRINCIPAL_RATE_KEY;
+    const verdict = identityLimiter.check(principalKey);
+    if (!verdict.allowed) {
+      writeTooManyRequests(res, verdict.retryAfterSec);
+      return false;
+    }
+    return true;
   }
 
   async function gateAuth(req, res) {
@@ -461,17 +585,20 @@ export function createMcpRequestHandler({
       return;
     }
 
-    const isMcp = path === MCP_HTTP_PATH && MCP_HTTP_METHODS.includes(req.method);
-    if (isMcp && rateLimiter) {
-      // Rate limit BEFORE auth so repeated bad-token attempts are throttled too.
-      const verdict = rateLimiter.check(clientKey(req));
-      if (!verdict.allowed) {
-        res.writeHead(429, { "Retry-After": String(verdict.retryAfterSec) }).end("Too Many Requests");
-        return;
-      }
-    }
+    // Everything past the public routes is metered: every method on /mcp,
+    // and every unknown path too. An unsupported verb or a bogus path still
+    // carries a bearer through `gateAuth` (unknown paths keep the DEV-877 /
+    // DEV-845 401 challenge before their 404), and introspection must never
+    // be free. Method and path validation come after.
+    if (!gateUnauthenticatedAddressLimit(req, res)) return;
 
-    if (!await gateAuth(req, res)) return;
+    if (!await gateAuth(req, res)) {
+      noteFailedAuthAddress(req, res);
+      return;
+    }
+    releaseAddressHold(req);
+
+    if (!gatePrincipalLimit(req, res)) return;
 
     if (path === MCP_HTTP_PATH) {
       if (!hostAllowedFn(req.headers.host, allowedHosts)) {

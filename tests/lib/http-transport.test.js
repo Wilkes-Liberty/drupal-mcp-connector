@@ -58,11 +58,14 @@ describe("http-transport helpers", () => {
 
   it("binds sessions to sub+clientId and never to an empty identity", () => {
     expect(sessionPrincipalKey(LOCAL_OPERATOR)).toBe("local-operator");
-    expect(sessionPrincipalKey({ sub: "a", clientId: "c" })).toBe("a\0c");
+    expect(sessionPrincipalKey({ sub: "a", clientId: "c" })).toBe('["a","c"]');
+    // Structural encoding: a NUL inside a claim cannot alias another principal.
+    expect(sessionPrincipalKey({ sub: "a\0b", clientId: "c" }))
+      .not.toBe(sessionPrincipalKey({ sub: "a", clientId: "b\0c" }));
     expect(sessionPrincipalKey({ sub: "a", clientId: "other" })).not.toBe(
       sessionPrincipalKey({ sub: "a", clientId: "c" }),
     );
-    expect(sessionPrincipalKey({ sub: "a" })).toBe("a\0");
+    expect(sessionPrincipalKey({ sub: "a" })).toBe('["a",""]');
     expect(sessionPrincipalKey({})).toBeNull();
     expect(sessionPrincipalKey(null)).toBeNull();
   });
