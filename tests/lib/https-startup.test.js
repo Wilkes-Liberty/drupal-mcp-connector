@@ -256,6 +256,19 @@ describe("startHttpsTransport", () => {
     expect(result.server).toBeUndefined();
   });
 
+  it("brackets an IPv6 loopback literal in the returned url", async () => {
+    const result = await baseStartup({ bindHost: "::1" });
+    expect(result.started).toBe(true);
+    try {
+      expect(result.url).toMatch(/^http:\/\/\[::1\]:\d+\/mcp$/);
+      // The url is usable as-is.
+      const res = await fetch(new URL("/health", result.url));
+      expect(res.status).toBe(200);
+    } finally {
+      await result.close();
+    }
+  });
+
   it("refuses a non-loopback listenHost so the test override cannot widen exposure", async () => {
     for (const listenHost of ["0.0.0.0", "::", "192.0.2.10"]) {
       await expect(baseStartup({ listenHost })).rejects.toThrow(/listenHost must be a loopback address/);

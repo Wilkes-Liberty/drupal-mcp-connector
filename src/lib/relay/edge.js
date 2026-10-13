@@ -110,11 +110,14 @@ export const EDGE_MCP_PROTOCOL = "2026-07-28";
 /**
  * Extra northbound routes the edge serves beside `/mcp`. Each is
  * authenticated on the same resource server; omit usage/evidence and the
- * handler still records one audit row (404).
+ * handler still records one audit row (404). This table **is** the
+ * router: `northbound()` dispatches by `path` to the server named in
+ * `serve`, so a route removed here is removed from the runtime and from
+ * the eval coverage pin (a-5) at the same time.
  */
 export const EDGE_NORTHBOUND_AUX_ROUTES = Object.freeze([
-  Object.freeze({ method: "GET", path: "/usage" }),
-  Object.freeze({ method: "GET", path: "/assessor" }),
+  Object.freeze({ method: "GET", path: "/usage", serve: "usage" }),
+  Object.freeze({ method: "GET", path: "/assessor", serve: "assessor" }),
 ]);
 
 /**
@@ -1535,15 +1538,13 @@ export async function startEdge({
     }),
   });
 
+  const auxServers = { usage: serveUsage, assessor: serveAssessor };
   function northbound(req, res) {
     if (hostedAudit) attachHttpAudit(req, res, hostedAudit);
     const path = String(req.url || "").split("?")[0];
-    if (path === "/usage") {
-      void serveUsage(req, res);
-      return;
-    }
-    if (path === "/assessor") {
-      void serveAssessor(req, res);
+    const aux = EDGE_NORTHBOUND_AUX_ROUTES.find((route) => route.path === path);
+    if (aux) {
+      void auxServers[aux.serve](req, res);
       return;
     }
     void requestHandler(req, res);
