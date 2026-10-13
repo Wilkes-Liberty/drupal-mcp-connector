@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still the shared `401` with `resource_metadata` first (DEV-845 / DEV-877).
   This does not claim a hosted MCP URL is live.
 
+### Fixed
+- **Host allowlist port matching (DEV-861).** An `allowedHosts` entry that
+  names port `80` now matches only that port (`http:` URL parsing no longer
+  drops it as "any port"). IPv6 entries that name a port keep RFC 3986
+  brackets (`[2001:db8::1]:8443`) so they accept the intended Host and not
+  a different address.
+
 ### Security
 - **Deny-by-default tool scope table (DEV-862).** Every built-in tool has an
   explicit `requiredScopes` row. On any network listener a name missing

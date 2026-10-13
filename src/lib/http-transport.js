@@ -124,6 +124,30 @@ export function originAllowed(originHeader, allowlist) {
 export const LOOPBACK_HOSTS = Object.freeze(["localhost", "127.0.0.1", "::1"]);
 
 /**
+ * Decimal port written on a host[:port] token. WHATWG `http:` hides `:80`,
+ * so callers recover it from the original token rather than `url.port`.
+ *
+ * @param {string} token
+ * @returns {string}
+ */
+function explicitHostPort(token) {
+  let port = "";
+  if (token.startsWith("[")) {
+    const close = token.lastIndexOf("]:");
+    if (close !== -1) port = token.slice(close + 2);
+  } else {
+    const colon = token.lastIndexOf(":");
+    if (colon !== -1 && token.indexOf(":") === colon) {
+      port = token.slice(colon + 1);
+    }
+  }
+  if (!/^\d+$/.test(port)) return "";
+  const n = Number(port);
+  if (!Number.isInteger(n) || n < 0 || n > 65535) return "";
+  return String(n);
+}
+
+/**
  * Parse `Host` into hostname + optional port. Rejects absolute URLs and
  * values that are not a host[:port] token.
  *
@@ -144,7 +168,7 @@ export function parseHostHeader(value) {
     }
     hostname = hostname.replace(/\.$/, "");
     if (!hostname) return null;
-    return { hostname, port: url.port };
+    return { hostname, port: url.port || explicitHostPort(raw) };
   } catch {
     return null;
   }
@@ -152,8 +176,9 @@ export function parseHostHeader(value) {
 
 /**
  * Normalize a Host token to `hostname` or `hostname:port` (port kept only
- * when the value named one). Returns null when the value is missing or not
- * a host[:port] token.
+ * when the value named one). IPv6 literals with a port are bracketed
+ * (`[::1]:3443`) so the token round-trips through `parseHostHeader`.
+ * Returns null when the value is missing or not a host[:port] token.
  *
  * @param {unknown} value
  * @returns {?string}
@@ -161,7 +186,9 @@ export function parseHostHeader(value) {
 export function normalizeHost(value) {
   const parsed = parseHostHeader(value);
   if (!parsed) return null;
-  return parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
+  if (!parsed.port) return parsed.hostname;
+  const name = parsed.hostname.includes(":") ? `[${parsed.hostname}]` : parsed.hostname;
+  return `${name}:${parsed.port}`;
 }
 
 /**
