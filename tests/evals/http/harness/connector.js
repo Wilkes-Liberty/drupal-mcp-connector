@@ -27,6 +27,7 @@ export const relayEdge = await load("lib/relay/edge.js");
 export const usage = await load("lib/usage.js");
 export const evidence = await load("lib/evidence.js");
 export const anchor = await load("lib/anchor.js");
+export const tools = await load("tools/index.js");
 
 /** Edge auxiliary routes (DEV-858 / #451). Re-exported for the label pin. */
 export const EDGE_NORTHBOUND_AUX_ROUTES = relayEdge.EDGE_NORTHBOUND_AUX_ROUTES;

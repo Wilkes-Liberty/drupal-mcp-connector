@@ -185,6 +185,37 @@ describe("startHttpsTransport", () => {
       await result.close();
     }
   });
+  it("destroys the socket when onRequest rejects after headers were sent", async () => {
+    let closed = false;
+    const result = await baseStartup({
+      wrapRequestHandler: () => async (req, res) => {
+        res.on("close", () => { closed = true; });
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.write("partial");
+        throw new Error("late boom");
+      },
+    });
+    expect(result.started).toBe(true);
+    try {
+      // The body never completes: the response must be torn down, not left
+      // open until the client times out.
+      await expect(fetch(result.url, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+      }).then((res) => res.text())).rejects.toThrow();
+      expect(closed).toBe(true);
+    } finally {
+      await result.close();
+    }
+  });
+
+  it("throws at construction when sessionPrincipalKeyFn is supplied but not a function", async () => {
+    await expect(baseStartup({ handlerOverrides: { sessionPrincipalKeyFn: null } }))
+      .rejects.toThrow(/sessionPrincipalKeyFn must be a function/);
+    await expect(baseStartup({ handlerOverrides: { sessionPrincipalKeyFn: "nope" } }))
+      .rejects.toThrow(/sessionPrincipalKeyFn must be a function/);
+  });
 });
 
 describe("src/index.js production startup call", () => {

@@ -13,13 +13,13 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { allDefinitions } from "../../../../src/tools/index.js";
-import {
-  MCP_HTTP_METHODS,
-  MCP_HTTP_PATH,
-  UNAUTHENTICATED_ROUTES,
-} from "../../../../src/lib/http-handler.js";
-import { EDGE_NORTHBOUND_AUX_ROUTES } from "../../../../src/lib/relay/edge.js";
+import { httpHandler, relayEdge, tools } from "./connector.js";
+
+// Inventory the selected source tree (EVAL_HTTP_SRC), never the checkout,
+// so a route or registry mutation in the target cannot evade the pin.
+const { allDefinitions } = tools;
+const { MCP_HTTP_METHODS, MCP_HTTP_PATH, UNAUTHENTICATED_ROUTES } = httpHandler;
+const { EDGE_NORTHBOUND_AUX_ROUTES } = relayEdge;
 
 /** Synthetic name used only by the Ta5-add-orphan mutant. Not a real tool. */
 export const ORPHAN_TOOL = "drupal_eval_orphan_no_case";

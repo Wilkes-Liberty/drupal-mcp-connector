@@ -14,8 +14,6 @@
  * path set by run-pack.js) for the report and the pack-level rules.
  */
 
-/* eslint-disable security/detect-non-literal-fs-filename -- the evidence path is set by run-pack.js; the known-red path is this file's own sibling */
-
 import { appendFileSync, readFileSync } from "node:fs";
 import { describe, it } from "vitest";
 import { buildHarness } from "./build.js";

@@ -94,12 +94,17 @@ function pickHandlerOverrides(overrides = {}) {
 
 /**
  * Last-resort fail-closed response when `onRequest` throws or rejects.
- * Does not dispatch. Swallows a second write if headers already went out.
+ * Does not dispatch. Once headers went out the socket is destroyed instead.
  *
  * @param {import("http").ServerResponse} res
  */
 function failClosedRequest(res) {
-  if (res.headersSent) return;
+  if (res.headersSent) {
+    // A 500 can no longer be written. Close the socket so the client does
+    // not wait for an end that never comes and the audit close hook fires.
+    if (!res.writableEnded) res.destroy();
+    return;
+  }
   try {
     res.writeHead(500).end("Internal Server Error");
   } catch {
@@ -320,7 +325,9 @@ export async function startHttpsTransport({
   const legacyHandler = wrapHandler(createLegacySessionHandler({
     buildServer,
     mode: legacyMode,
-    ...(sessionPrincipalKeyFn ? { sessionPrincipalKeyFn } : {}),
+    // Pass every explicitly supplied value (including null) so the
+    // handler's construction-time type check runs instead of the default.
+    ...(sessionPrincipalKeyFn !== undefined ? { sessionPrincipalKeyFn } : {}),
   }));
 
   const requestHandler = wrapRequestHandler(createMcpRequestHandler({

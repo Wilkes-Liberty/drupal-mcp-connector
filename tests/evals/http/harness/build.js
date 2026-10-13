@@ -281,7 +281,6 @@ export async function buildHarness({
   delete handlerSwap.resolveGrantedSites;
   delete handlerSwap.resolveInboundAuthMode;
   delete handlerSwap.wrapRequestHandler;
-  const auditRows = [];
   const sink = auditSink ?? (() => {
     throw new Error("eval audit sink failed (fail-safe: must not change the HTTP verdict)");
   });

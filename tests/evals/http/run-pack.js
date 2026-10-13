@@ -26,8 +26,6 @@
  * Only synthetic data enters it.
  */
 
-/* eslint-disable security/detect-non-literal-fs-filename -- every path comes from this file's location, a temp dir, or the operator-set report path */
-
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

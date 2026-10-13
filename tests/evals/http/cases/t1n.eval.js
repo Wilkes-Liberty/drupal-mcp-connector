@@ -13,13 +13,14 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { defineCase } from "../harness/case.js";
 import { expectEqual, expectStartupFatal, expectStartupNotListening } from "../harness/assert.js";
 import { failOpenInboundAuthMode } from "../harness/build.js";
-import { httpAuth, httpsStartup, mcpServer } from "../harness/connector.js";
+import { SRC_DIR, httpAuth, httpsStartup, mcpServer } from "../harness/connector.js";
 
-const INDEX = fileURLToPath(new URL("../../../../src/index.js", import.meta.url));
+// Spawn the selected source tree (EVAL_HTTP_SRC), not the checkout, so an
+// index/startup mutant applied to the scratch copy is what the probe runs.
+const INDEX = join(SRC_DIR, "index.js");
 
 function spawnRealIndex() {
   const dir = mkdtempSync(join(tmpdir(), "eval-t1n-"));
