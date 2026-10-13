@@ -1,44 +1,29 @@
 /**
- * T12 (DEV-860): per-principal rate limit on standalone /mcp.
+ * T12 (DEV-840): authenticated sessionless GET/DELETE `/mcp` are 405.
+ * Allow twin: T7's GET/DELETE without session (same 405) and T7's session
+ * DELETE after initialize.
  *
- * Two verified principals from the same client address: the first exceeds
- * its window and is 429 + Retry-After with no tool data; the second is
- * unaffected. A missing-token request under the address limit still uses
- * the shared 401 writer (DEV-845 / DEV-877).
- *
- * Mutant (dependency swap): `principalRateKeyFn` always returns null, so
- * the post-auth gate falls back to the address key. Both principals then
- * share one bucket and the second principal is 429 — the case goes red.
+ * Mutant: sessionlessMethodRefusedFn always false, so the 405 is skipped.
  */
 
 import { defineCase } from "../harness/case.js";
-import { expectAllowed, expectEqual, expectRefused } from "../harness/assert.js";
-import { modernPost } from "../harness/requests.js";
+import { expectHandlerUnreached, expectNoDispatch, expectTransportDenied } from "../harness/assert.js";
+import { sessionRequest } from "../harness/requests.js";
 
 defineCase({
   id: "T12",
-  title: "authenticated /mcp is limited per verified principal, not per socket address",
-  harness: {
-    rateLimit: 1,
-    principalRateLimit: 1,
-  },
+  title: "authenticated sessionless GET/DELETE are 405 before dispatch",
+  mutants: [
+    { id: "T12", expectedLabel: "GET without session: handler was not reached" },
+  ],
   async run(h) {
-    const tokenA = await h.tokenFor("A");
-    const tokenB = await h.tokenFor("B");
-
-    const first = await h.send(modernPost("server/discover"), { token: tokenA, requestId: "t12-a1" });
-    expectAllowed(h, "principal A under limit", first);
-
-    const limited = await h.send(modernPost("server/discover"), { token: tokenA, requestId: "t12-a2" });
-    expectEqual(h, "principal A over limit", limited.status, 429);
-    expectEqual(h, "Retry-After present", Number(limited.headers["retry-after"]) > 0, true);
-    expectEqual(h, "429 body has no tool data", limited.text, "Too Many Requests");
-    expectEqual(h, "429 does not name tools", /drupal_|tools/i.test(limited.text), false);
-
-    const other = await h.send(modernPost("server/discover"), { token: tokenB, requestId: "t12-b1" });
-    expectAllowed(h, "principal B from the same IP", other);
-
-    const missing = await h.send(modernPost("tools/list"), { requestId: "t12-missing" });
-    expectRefused(h, "missing token under address limit", missing);
+    const token = await h.tokenFor("A");
+    for (const method of ["GET", "DELETE"]) {
+      const label = `${method} without session`;
+      const res = await h.send(sessionRequest(method), { token });
+      expectTransportDenied(h, label, res, { status: 405 });
+      expectHandlerUnreached(h, label);
+      expectNoDispatch(h, label);
+    }
   },
 });

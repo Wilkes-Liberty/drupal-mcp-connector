@@ -38,6 +38,24 @@ orchestrator's secrets.
 
 ## Option A — Docker
 
+Release tags publish a signed image to GHCR (linux/amd64):
+
+```
+ghcr.io/wilkes-liberty/drupal-mcp-connector:<version>
+ghcr.io/wilkes-liberty/drupal-mcp-connector@sha256:<digest>
+```
+
+Pin hosted deploys (`hosted_mcp_image`) to the digest, not a floating tag.
+Each GitHub Release records that pin as notes plus `image-digest.txt` /
+`image-digest.json` assets. Verify the keyless Sigstore signature:
+
+```sh
+cosign verify \
+  ghcr.io/wilkes-liberty/drupal-mcp-connector@sha256:<digest> \
+  --certificate-identity-regexp='^https://github.com/Wilkes-Liberty/drupal-mcp-connector/\.github/workflows/release\.yml@.+$' \
+  --certificate-oidc-issuer=https://token.actions.githubusercontent.com
+```
+
 ```sh
 docker build -t drupal-mcp-connector .
 docker run -d --name drupal-mcp \

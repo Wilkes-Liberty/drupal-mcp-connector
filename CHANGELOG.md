@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Signed GHCR image on every release tag (DEV-923).** Pushing a `v*` tag
+  still publishes npm exactly as before, and now also builds the repo
+  `Dockerfile`, pushes `ghcr.io/wilkes-liberty/drupal-mcp-connector` with the
+  release version tags, signs the immutable digest keyless with
+  Sigstore/cosign (GitHub OIDC), and attaches SLSA provenance plus an SBOM.
+  The pin (`name@sha256:…`) is written to the GitHub Release (notes and
+  `image-digest.json` / `image-digest.txt` assets) and the job summary so
+  hosted deploys can set `hosted_mcp_image`. CI builds the image on pull
+  requests without pushing. A `workflow_dispatch` on `release.yml` can
+  backfill a tag such as `v4.0.0` without moving the git tag.
+
+- **HTTP transport eval pack increment 2 (DEV-866).** `npm run eval:http`
+  now drives the hosted HTTP surface through `startHttpsTransport` (the
+  same startup path `src/index.js` uses) and covers the DEV-840 / #452
+  route and method shapes, DEV-858 / #451 audit rows on `/mcp`, `/usage`,
+  and `/assessor`, and the increment-1 review holes: a dispatch-then-401
+  mutant (a-1), pinned mutant kill-labels (a-2), T7 twins for every T1
+  shape (a-3), live tool-registry and route-table coverage pin (a-5), known-red
+  ticket + expiry + reason (c-1, c-2), and T1n real startup (c-4). A
+  separate, non-required GitHub Actions job runs the pack. Known-red
+  entries that expire or omit a ticket fail the pack. Production request
+  handling is unchanged except for the fail-closed `500` on an `onRequest`
+  throw or rejection described under DEV-840 below.
+
 - **Streamable HTTP 2026-07-28 conformance on `/mcp` (DEV-840).** The connector
   HTTP surface now matches the current MCP Streamable HTTP revision so
   non-stdio clients can add the operator-run URL with an OAuth bearer.
@@ -23,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   revision does not support them). Hosted rollout, TLS termination, and
   marketplace listings remain DEV-817 / Keystone — this change does not
   claim a public URL is live.
+
+### Fixed
+- **HTTPS listen error handler is detached after bind.** A leftover
+  `once("error")` on the listen promise consumed the first later `server`
+  error as a no-op. The listener is removed when bind succeeds so a
+  post-listen failure is visible again.
 
 ### Changed
 - **Sessionless `GET`/`DELETE` `/mcp` is `405` (DEV-840, breaking).** Those
@@ -59,6 +89,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot exhaust limiter memory. Counts stay per-process — multi-replica
   deployments still need a shared limiter at the reverse proxy. This does
   not claim a hosted MCP URL is live.
+- **HTTPS startup seam hardening (DEV-866 review L1–L3).**
+  `handlerOverrides` is allowlisted to predicate `*Fn` hooks and
+  `sessionPrincipalKeyFn`; `checkAuth`, `authenticate`,
+  `allowLocalOperator`, `auditWriter`, and unknown keys throw at
+  construction. Injected predicates are type-checked when the handler
+  is built. `onRequest` rejections answer `500` fail-closed with no
+  dispatch. `src/index.js` logs the limit and window from
+  `createStartupRateLimiter` instead of recomputing them.
 - **Hosted HTTP path writes one audit row per request, refusals included (DEV-858).**
   Streamable-HTTP `/mcp` and the relay northbound edge emit a closed-field
   row (`timestamp`, `route`, `method`, `status`, denial `code`, `requestId`,

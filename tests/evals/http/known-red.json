@@ -1,3 +1,4 @@
 {
-  "_comment": "Strict expected-failure list: case id -> ticket key. A listed case must FAIL on the green run. If it passes while still listed, the pack fails until the entry is removed (flip detection). Do not add an entry without a ticket."
+  "_comment": "Strict expected-failure list. Each entry is { ticket, expires, reason }. A listed case must FAIL on the green run with that assertion label. An expired or incomplete entry fails the pack (c-1, c-2). Do not add an entry without an open ticket.",
+  "_schema": "{ \"<caseId>\": { \"ticket\": \"DEV-n\", \"expires\": \"YYYY-MM-DD\", \"reason\": \"assertion label\" } }"
 }

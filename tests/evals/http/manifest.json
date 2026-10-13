@@ -1,4 +1,19 @@
 {
-  "_comment": "Exact list of case ids the pack must run (DEV-866 increment 1). The run fails if the discovered ids differ from this list.",
-  "cases": ["T1", "T1n", "T4", "T4b", "T7", "T8", "T9", "T10", "T11", "T12"]
+  "_comment": "Case ids the pack must run, plus T1/T7 request-label twins (a-3). Live tools and HTTP routes are pinned in Ta5 from allDefinitions and the transport route tables (a-5); see coverage.json for the case assignment.",
+  "cases": ["T1", "T1n", "T2", "T4", "T4b", "T7", "T8", "T9", "T10", "T11", "T12", "T13", "T14", "T15", "T16", "Ta5"],
+  "requestLabels": [
+    "POST initialize",
+    "POST server/discover",
+    "POST tools/list",
+    "POST tools/call",
+    "POST resources/list",
+    "POST prompts/list",
+    "POST ping",
+    "POST notification",
+    "POST empty body",
+    "GET without session",
+    "GET with session",
+    "DELETE without session",
+    "DELETE with session"
+  ]
 }

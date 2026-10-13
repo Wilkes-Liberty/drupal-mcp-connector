@@ -88,5 +88,9 @@ greater risk; such exceptions are documented in the release notes.
 ## Releases
 
 Releases are cut by pushing a `vX.Y.Z` tag; CI publishes to npm via trusted
-publishing. [CHANGELOG.md](../CHANGELOG.md) (Keep a Changelog format) is the
-source of truth for what changed. Release candidates use `-rc.N` suffixes.
+publishing and a signed container image to GHCR
+(`ghcr.io/wilkes-liberty/drupal-mcp-connector`). Pin hosted deploys by
+digest (`name@sha256:…`), recorded on the GitHub Release. See
+[deployment.md](deployment.md). [CHANGELOG.md](../CHANGELOG.md) (Keep a
+Changelog format) is the source of truth for what changed. Release
+candidates use `-rc.N` suffixes.

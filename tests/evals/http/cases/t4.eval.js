@@ -16,6 +16,9 @@ import { modernPost } from "../harness/requests.js";
 defineCase({
   id: "T4",
   title: "allow twin: an explicit grant for site A reaches A only, not B",
+  mutants: [
+    { id: "T4", expectedLabel: "Cu(B)" },
+  ],
   async run(h) {
     const token = await h.tokenFor("A");
     const call = await h.send(modernPost(
