@@ -19,6 +19,7 @@ import {
   discoverAuthorizationServer,
   introspectToken,
   resolveInboundAuthMode,
+  NETWORK_INTROSPECTION_REQUIRED_REASON,
   SHARED_BEARER_REMOVED_REASON,
   resolveInboundAuthConfig,
   INBOUND_IDP_TIMEOUT_MS,
@@ -236,6 +237,68 @@ describe("resolveInboundAuthMode", () => {
       bindHost: "127.0.0.1",
       allowUnauth: true,
     }).mode).toBe("unauthenticated");
+  });
+
+  it("accepts a complete resource server on loopback", () => {
+    expect(resolveInboundAuthMode({
+      bindHost: "127.0.0.1",
+      resourceServer: rs,
+    }).mode).toBe("resource_server");
+  });
+
+  it("is fatal on loopback when issuer and audience are set without introspection credentials", () => {
+    const decision = resolveInboundAuthMode({
+      bindHost: "127.0.0.1",
+      allowUnauth: false,
+      resourceServer: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+      },
+    });
+    expect(decision.mode).toBe("fatal");
+    expect(decision.reason).toContain("auth.introspectionUrl");
+    expect(decision.reason).toContain("introspection client id");
+    expect(decision.reason).toContain("introspection client secret");
+  });
+
+  it("is fatal on loopback when only the issuer is set, even with allow-unauthenticated", () => {
+    const decision = resolveInboundAuthMode({
+      bindHost: "localhost",
+      allowUnauth: true,
+      resourceServer: { issuer: "https://idp.example.com" },
+    });
+    expect(decision.mode).toBe("fatal");
+    expect(decision.reason).toContain("auth.audience");
+  });
+
+  it("stays unauthenticated on loopback when no resource-server config is present", () => {
+    expect(resolveInboundAuthMode({
+      bindHost: "127.0.0.1",
+      allowUnauth: false,
+      sharedToken: "",
+      resourceServer: {
+        issuer: "",
+        audience: "",
+        introspectionUrl: "",
+        introspectionClientId: "",
+        introspectionClientSecret: "",
+      },
+    }).mode).toBe("unauthenticated");
+    expect(resolveInboundAuthMode({
+      bindHost: "::1",
+    }).mode).toBe("unauthenticated");
+  });
+
+  it("stays fatal on a non-loopback bind when introspection is missing", () => {
+    const decision = resolveInboundAuthMode({
+      bindHost: "0.0.0.0",
+      resourceServer: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+      },
+    });
+    expect(decision.mode).toBe("fatal");
+    expect(decision.reason).toBe(NETWORK_INTROSPECTION_REQUIRED_REASON);
   });
 });
 

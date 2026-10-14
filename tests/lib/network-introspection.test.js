@@ -2,14 +2,15 @@
  * DEV-844: every authenticated network call is introspected at the issuer.
  *
  * In-process fake issuer (not Paladin). Each deny assertion checks that the
- * MCP handler never ran. Toggle `NETWORK_INTROSPECTION_GUARD.required` or
- * `MCP_TEST_DISABLE_INTROSPECTION_GUARD=1` (Vitest only) to reproduce the
- * red run: a live JWT is admitted without a live introspection result.
+ * MCP handler never ran. Call `setNetworkIntrospectionGuard(false)` to
+ * reproduce the red run: a live JWT is admitted without a live introspection
+ * result. Environment variables cannot turn the guard off.
  */
 
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFakeIssuer,
@@ -20,6 +21,7 @@ import {
   createInboundHttpsAuth,
   NETWORK_INTROSPECTION_GUARD,
   NETWORK_INTROSPECTION_REQUIRED_REASON,
+  networkIntrospectionRequired,
   resolveInboundAuthMode,
   resolveInboundAuthConfig,
   setNetworkIntrospectionGuard,
@@ -322,5 +324,71 @@ describe("DEV-844 guard toggle (test-only red evidence)", () => {
       bindHost: "0.0.0.0",
       resourceServer: { issuer: FAKE_ISSUER_URL, audience: FAKE_AUDIENCE },
     }).mode).toBe("resource_server");
+  });
+});
+
+const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+
+function javascriptSources(dir) {
+  const files = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...javascriptSources(path));
+    else if (entry.name.endsWith(".js")) files.push(path);
+  }
+  return files;
+}
+
+describe("DEV-844 introspection guard is not an environment switch", () => {
+  it("keeps the guard on when VITEST and MCP_TEST_DISABLE_INTROSPECTION_GUARD are set", async () => {
+    setNetworkIntrospectionGuard(true);
+    const previousVitest = process.env.VITEST;
+    const previousFlag = process.env.MCP_TEST_DISABLE_INTROSPECTION_GUARD;
+    process.env.VITEST = "1";
+    process.env.MCP_TEST_DISABLE_INTROSPECTION_GUARD = "1";
+    try {
+      expect(networkIntrospectionRequired()).toBe(true);
+      expect(resolveInboundAuthMode({
+        bindHost: "0.0.0.0",
+        resourceServer: { issuer: FAKE_ISSUER_URL, audience: FAKE_AUDIENCE },
+      }).mode).toBe("fatal");
+      const fetchFn = vi.fn(async () => {
+        throw new Error("issuer discovery must not run");
+      });
+      await expect(createInboundHttpsAuth({
+        inboundCfg: {
+          issuer: FAKE_ISSUER_URL,
+          audience: FAKE_AUDIENCE,
+          resource: FAKE_AUDIENCE,
+        },
+        fetchFn,
+      })).rejects.toThrow(/RFC 7662 introspection/);
+      expect(fetchFn).not.toHaveBeenCalled();
+    } finally {
+      if (previousVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = previousVitest;
+      if (previousFlag === undefined) delete process.env.MCP_TEST_DISABLE_INTROSPECTION_GUARD;
+      else process.env.MCP_TEST_DISABLE_INTROSPECTION_GUARD = previousFlag;
+    }
+  });
+
+  it("does not read a bypass variable from production source", () => {
+    const hits = javascriptSources(join(REPO_ROOT, "src")).filter((file) => {
+      const text = readFileSync(file, "utf8");
+      return text.includes("MCP_TEST_DISABLE_INTROSPECTION_GUARD")
+        || text.includes("process.env.VITEST");
+    });
+    expect(hits).toEqual([]);
+  });
+});
+
+describe("DEV-844 stdio revocation docs", () => {
+  it("says stdio has no bearer authentication or revocation path", () => {
+    const doc = readFileSync(join(REPO_ROOT, "docs/security-hardening.md"), "utf8");
+    const example = readFileSync(join(REPO_ROOT, "config/config.example.json"), "utf8");
+    for (const text of [doc, example]) {
+      expect(text).toMatch(/stdio has no bearer authentication or revocation path/i);
+      expect(text).not.toMatch(/stdio-dev/);
+    }
   });
 });

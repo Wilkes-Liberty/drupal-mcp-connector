@@ -10,7 +10,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync, utimesSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { connect as netConnect } from "node:net";
 import { join } from "node:path";

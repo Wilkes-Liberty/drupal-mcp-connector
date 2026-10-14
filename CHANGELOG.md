@@ -37,6 +37,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   harness no longer carries a dead `shared_bearer` inbound-mode arm.
 
 ### Fixed
+- **Introspection cannot be turned off from the environment (DEV-844).**
+  The hosted resource-server guard no longer reads `VITEST` or
+  `MCP_TEST_DISABLE_INTROSPECTION_GUARD`. A production launch that sets
+  those variables still introspects every authenticated network call.
+  Tests that need the pre-DEV-844 path call `setNetworkIntrospectionGuard`
+  in-process.
+- **Incomplete loopback OAuth no longer starts unauthenticated (DEV-844).**
+  A loopback bind with any resource-server setting (`auth.issuer`,
+  `auth.audience`, or RFC 7662 introspection) but an incomplete set fails
+  at startup and names the missing setting. It does not fall through to
+  unauthenticated. This can stop a misconfigured loopback install from
+  starting, which is intended. Loopback with no resource-server config at
+  all stays unauthenticated. Non-loopback startup rules are unchanged.
+- **Stdio has no revocation path (DEV-844).** The security docs and the
+  example config no longer say the revocation file is an extra deny on
+  stdio. Stdio has no bearer authentication or revocation path. No stdio
+  authenticator was added.
 - **Image backfill works for tags cut before the release tooling.**
   A `workflow_dispatch` rebuild of `v5.0.0` failed at "Resolve image
   coordinates" because the job ran `scripts/release-channel.js` from the

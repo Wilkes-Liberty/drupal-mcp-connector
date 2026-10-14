@@ -66,9 +66,11 @@ algorithms are pinned (`none` never; `HS*` only when explicitly configured).
 Issuer discovery and JWKS retrieval abort after 30s; introspection uses the
 shorter timeout above. A stuck issuer fails closed.
 
-The JSON revocation file (`{ "jti": [], "sub": [] }`) is **not** an authority
-on network surfaces. Keep it only as an additional deny for stdio-dev. Do
-not treat a file revoke as sufficient for a hosted bind.
+The JSON revocation file (`{ "jti": [], "sub": [] }`) is not read on stdio.
+Stdio has no bearer authentication or revocation path. The file is also
+not an authority on network admission: a hosted bind accepts or rejects a
+bearer from the live introspection result. Do not treat a file revoke as
+sufficient for a hosted bind.
 
 **Bearer lifetime and algorithms (DEV-876).** Access tokens must carry numeric
 `exp` and `iat`. `exp` must still be in the future (jose `clockTolerance`,
@@ -124,9 +126,10 @@ to configured site names; when the map is present, unknown clients see no
 targets. When the map is omitted, a token with no `sites` / `mcp_sites`
 claim is entitled to no sites (DEV-848). Caller-supplied `site` /
 `environment` / `tenant` / `target` arguments cannot widen the grant.
-Stdio and loopback without a resource-server identity are unchanged (local
-operator), except that the scope-table gate still applies on any network
-listener.
+Stdio has no bearer authentication or revocation path. Loopback with no
+resource-server config stays the local operator. A loopback bind that sets
+`auth.issuer` or `auth.audience` without a complete resource server refuses
+to start. The scope-table gate still applies on any network listener.
 
 `/health` stays open as a liveness probe (`{status: "ok"}`) and does
 not expose a tool catalog. Missing a required scope is `403` with
@@ -152,10 +155,16 @@ The inbound access token is never forwarded to Drupal. Outbound Drupal
 credentials stay the per-site OAuth client or `apiTokenEnv`.
 
 **Loopback:** the shared bearer (`MCP_AUTH_TOKEN`) was removed in 4.0.0 (#231).
-Loopback HTTPS is either the resource server or unauthenticated (local
-operator); a set `MCP_AUTH_TOKEN` is fatal at startup.
-**`MCP_ALLOW_UNAUTHENTICATED=1`** is loopback-only. A non-loopback bind with
-that flag is fatal at startup (DEV-845). There is no trusted-proxy exception
+Loopback HTTPS is unauthenticated (local operator) only when no resource-server
+config is present. Once `auth.issuer` or `auth.audience` is set, startup
+requires the complete resource server (issuer, audience, and RFC 7662
+introspection) and names any missing setting. An incomplete loopback config
+is fatal and does not fall through to unauthenticated. A set `MCP_AUTH_TOKEN`
+is fatal at startup.
+**`MCP_ALLOW_UNAUTHENTICATED=1`** is loopback-only, and on loopback it does
+not override a partial resource server. Remove the resource-server settings
+to run unauthenticated. A non-loopback bind with that flag is fatal at
+startup (DEV-845). There is no trusted-proxy exception
 beyond loopback: network-facing HTTPS requires `auth.issuer` + `auth.audience`
 + RFC 7662 introspection.
 

@@ -51,13 +51,31 @@ const MAX_REQUEST_ID = 128;
 const MAX_BUFFERED_ROWS = 10_000;
 
 /**
- * Default production sink: one JSON line on stderr. Silent under Vitest so
- * unit and eval runs do not flood the log; those inject their own sink.
+ * When false, {@link defaultHttpAuditSink} does not write. Production leaves
+ * this true. The test setup turns it off in-process so a suite does not
+ * flood the log. No environment variable is consulted.
+ */
+let writeDefaultHttpAuditSink = true;
+
+/**
+ * Enable or silence the default stderr audit sink. Tests call this from
+ * Vitest setup. Production does not.
+ *
+ * @param {boolean} enabled
+ * @returns {void}
+ */
+export function setDefaultHttpAuditSinkEnabled(enabled) {
+  writeDefaultHttpAuditSink = Boolean(enabled);
+}
+
+/**
+ * Default production sink: one JSON line on stderr. Callers that must stay
+ * quiet pass their own sink, or tests call {@link setDefaultHttpAuditSinkEnabled}.
  *
  * @param {object} row
  */
 export function defaultHttpAuditSink(row) {
-  if (process.env.VITEST) return;
+  if (!writeDefaultHttpAuditSink) return;
   try {
     process.stderr.write(`[drupal-mcp-http-audit] ${JSON.stringify(row)}\n`);
   } catch {

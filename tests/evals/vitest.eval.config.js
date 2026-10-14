@@ -9,6 +9,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["tests/evals/http/cases/*.eval.js"],
+    setupFiles: ["tests/setup-http-audit-sink.js"],
     allowOnly: false,
     passWithNoTests: false,
     testTimeout: 30_000,

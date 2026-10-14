@@ -104,7 +104,9 @@ launchctl load -w ~/Library/LaunchAgents/com.example.drupal-mcp-connector.plist
 To terminate public TLS and add IP allow-listing, put Caddy/nginx in front and
 bind the connector to loopback. See [`deploy/Caddyfile.example`](../deploy/Caddyfile.example).
 Bind the connector to loopback and configure the inbound resource server even
-behind the proxy (defense in depth). Restrict
+behind the proxy (defense in depth). An incomplete resource server
+(`auth.issuer` or `auth.audience` without RFC 7662 introspection) refuses
+to start instead of serving `/mcp` with no authentication. Restrict
 to the client vendor's documented egress range where you can.
 
 ## Pre-exposure checklist

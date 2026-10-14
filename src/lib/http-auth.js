@@ -11,9 +11,10 @@
  *     401. `iss` must be present and equal the configured issuer; audience is
  *     an exact match against the one configured plane. JWT algorithms are
  *     pinned (`none` never; `HS*` only when explicitly configured). The
- *     revocation file is not an authority on network surfaces (stdio-dev
- *     additional deny only). Bearer tokens must carry `exp` and `iat` and
- *     stay within `auth.maxTokenLifetime`. Caller-supplied identity headers
+ *     revocation file is not an authority on network admission. Stdio has
+ *     no bearer authentication and no revocation path. Bearer tokens must
+ *     carry `exp` and `iat` and stay within `auth.maxTokenLifetime`.
+ *     Caller-supplied identity headers
  *     never become the principal. Issuer discovery / JWKS abort after
  *     `INBOUND_IDP_TIMEOUT_MS` (30s). Introspection aborts after
  *     `DEFAULT_INTROSPECTION_TIMEOUT_MS` (2s, configurable).
@@ -34,11 +35,11 @@ export const INBOUND_IDP_TIMEOUT_MS = 30_000;
 export const DEFAULT_INTROSPECTION_TIMEOUT_MS = 2000;
 
 /**
- * Test-only guard (DEV-844). Production callers never flip this. When
- * `required` is false, the resource-server path may admit a JWT without a
- * live introspection result — the pre-DEV-844 behavior used to prove deny
- * tests can fail. Vitest can also set
- * `MCP_TEST_DISABLE_INTROSPECTION_GUARD=1`.
+ * In-process guard (DEV-844). Production leaves `required` true. The only
+ * way to relax it is {@link setNetworkIntrospectionGuard}, which tests call
+ * in-process. No environment variable is read. When `required` is false,
+ * the resource-server path may admit a JWT without a live introspection
+ * result — the pre-DEV-844 behavior used to prove deny tests can fail.
  */
 export const NETWORK_INTROSPECTION_GUARD = { required: true };
 
@@ -55,16 +56,12 @@ export function setNetworkIntrospectionGuard(required) {
 
 /**
  * Whether the hosted resource-server path must introspect every bearer.
- * Never honors an env flag outside Vitest.
+ * Environment variables cannot turn this off.
  *
  * @returns {boolean}
  */
 export function networkIntrospectionRequired() {
-  if (!NETWORK_INTROSPECTION_GUARD.required) return false;
-  if (process.env.VITEST && process.env.MCP_TEST_DISABLE_INTROSPECTION_GUARD === "1") {
-    return false;
-  }
-  return true;
+  return NETWORK_INTROSPECTION_GUARD.required;
 }
 
 /**
@@ -803,8 +800,9 @@ export function createResourceAuthenticator({
     }
 
     const identity = buildIdentity(claims);
-    // Revocation file is an additional stdio-dev deny only. Network admission
-    // is the live introspection result (DEV-844).
+    // Network admission is the live introspection result (DEV-844). Stdio
+    // never builds this authenticator, so the file is not a stdio deny.
+    // It applies only when introspection is not required.
     if (!requireIntrospection && revocationStore?.isRevoked(identity)) {
       return fail(401, { error: "invalid_token", errorDescription: "Token has been revoked" });
     }
@@ -866,6 +864,58 @@ export function hasCompleteNetworkResourceServer(resourceServer) {
 }
 
 /**
+ * True when any resource-server setting is present. Empty strings from
+ * {@link resolveInboundAuthConfig} do not count.
+ *
+ * @param {object|null|undefined} resourceServer
+ * @returns {boolean}
+ */
+function hasResourceServerIntent(resourceServer) {
+  const rs = resourceServer && typeof resourceServer === "object" ? resourceServer : {};
+  return Boolean(
+    rs.issuer
+    || rs.audience
+    || rs.introspectionUrl
+    || rs.introspectionClientId
+    || rs.introspectionClientSecret,
+  );
+}
+
+/**
+ * Labels for resource-server settings that are still empty.
+ *
+ * @param {object|null|undefined} resourceServer
+ * @returns {string[]}
+ */
+function missingResourceServerSettings(resourceServer) {
+  const rs = resourceServer && typeof resourceServer === "object" ? resourceServer : {};
+  const missing = [];
+  if (!rs.issuer) missing.push("auth.issuer");
+  if (!rs.audience) missing.push("auth.audience");
+  if (!rs.introspectionUrl) missing.push("auth.introspectionUrl");
+  if (!rs.introspectionClientId) missing.push("introspection client id");
+  if (!rs.introspectionClientSecret) missing.push("introspection client secret");
+  return missing;
+}
+
+/**
+ * Startup refusal for a loopback bind whose resource server is incomplete.
+ * Names every missing setting.
+ *
+ * @param {object|null|undefined} resourceServer
+ * @returns {string}
+ */
+function incompleteResourceServerReason(resourceServer) {
+  const missing = missingResourceServerSettings(resourceServer);
+  return "Loopback bind has an incomplete inbound OAuth resource server. Missing: "
+    + missing.join(", ")
+    + ". Startup refuses to listen and will not fall through to unauthenticated. "
+    + "Configure auth.issuer, auth.audience, and RFC 7662 introspection "
+    + "(auth.introspectionUrl plus introspection client id and secret), "
+    + "or remove the resource-server settings to run unauthenticated on loopback.";
+}
+
+/**
  * Startup refusal when `MCP_AUTH_TOKEN` is set (#231). The shared bearer was
  * removed in 4.0.0; a stale deployment must not keep running while believing
  * the token still gates `/mcp`. Named so callers and tests can match it.
@@ -879,10 +929,13 @@ export const SHARED_BEARER_REMOVED_REASON =
  * Decide how inbound HTTPS /mcp is authenticated.
  *
  * Network-facing product paths require a resource server with live
- * introspection (DEV-844). Loopback is either the resource server or
- * unauthenticated (local operator). A set `MCP_AUTH_TOKEN` is fatal at any
- * bind host (#231). `MCP_ALLOW_UNAUTHENTICATED` is loopback-only; a
- * non-loopback bind with that flag is fatal (DEV-845).
+ * introspection (DEV-844). Loopback is unauthenticated only when no
+ * resource-server config is present. Any issuer, audience, or introspection
+ * field with an incomplete set is fatal and does not fall through to
+ * unauthenticated.
+ * A set `MCP_AUTH_TOKEN` is fatal at any bind host (#231).
+ * `MCP_ALLOW_UNAUTHENTICATED` is loopback-only; a non-loopback bind with
+ * that flag is fatal (DEV-845).
  *
  * @param {object} options
  * @param {string} options.bindHost
@@ -904,6 +957,14 @@ export function resolveInboundAuthMode({
     ? hasCompleteNetworkResourceServer(resourceServer)
     : hasRs;
   if (ready) return { mode: "resource_server" };
+  // Any resource-server field means the operator asked for that auth.
+  // A loopback bind must not serve /mcp with no authentication when the
+  // config is incomplete. Non-loopback keeps its existing fatal reasons.
+  // src/index.js passes inboundCfg here via startHttpsTransport and does
+  // not choose the mode itself.
+  if (isLoopback && hasResourceServerIntent(resourceServer)) {
+    return { mode: "fatal", reason: incompleteResourceServerReason(resourceServer) };
+  }
   if (allowUnauth && !isLoopback) {
     return { mode: "fatal", reason: NON_LOOPBACK_UNAUTHENTICATED_REASON };
   }
@@ -1006,8 +1067,9 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
     [customFetch]: (url, options) => fetchFn(url, withInboundTimeout(options)),
   });
   const resourceMetadataUrl = resourceMetadataUrlFor(resource);
-  // Keep the file store for stdio-dev revoke() and for the edge offboard
-  // API. Authenticate on the network path does not consult it (DEV-844).
+  // The file store backs edge offboard revoke(). Stdio does not build this
+  // authenticator, so the file is not a stdio revocation path. Network
+  // admission does not consult it when introspection is required (DEV-844).
   const revocationStore = inboundCfg.revocationFile
     ? createRevocationStore({ filePath: inboundCfg.revocationFile })
     : null;
