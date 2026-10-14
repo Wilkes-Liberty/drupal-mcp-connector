@@ -25,9 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI resolves every workflow action reference on pull requests (#464).**
   `npm run lint:actions` (`scripts/lint-actions.js`) reads each `uses:` in
   `.github/workflows/*.yml` and checks the tag, branch, or commit exists on
-  GitHub; a SHA pin's `# vX.Y.Z` comment must point at that commit. The
-  required CI job runs it, so a reference that would fail at "Set up job"
-  fails on the pull request, not on the release tag.
+  GitHub; a SHA pin's full `# vX.Y.Z` comment must point at that commit
+  (a floating `# v4` is not checked), and a reusable-workflow path must
+  exist at the resolved commit. An unknown SHA (GitHub answers 422) is
+  reported as missing. Lookups retry on 5xx / 429 / network errors; a
+  lookup that still fails is reported as `ERROR` next to the other results
+  and never as missing. The required CI job runs it, so a reference that
+  would fail at "Set up job" fails on the pull request, not on the release
+  tag.
 
 ## [5.0.0] - 2026-10-13
 
