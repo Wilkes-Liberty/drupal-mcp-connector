@@ -4,6 +4,7 @@
  * test-only fixture handler, not a production toggle.
  */
 import { describe, expect, it } from "vitest";
+import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createMcpRequestHandler, isUnauthenticatedRoute } from "../../src/lib/http-handler.js";
@@ -257,6 +258,52 @@ describe("ops listener serves /ready and /metrics", () => {
     const res = mockRes();
     await handle(req("POST", "/ready"), res);
     expect(res.statusCode).toBe(404);
+  });
+
+  it("close() shuts the ops listener and releases the port", async () => {
+    const ops = await startOpsListener({
+      resolved: { enabled: true, host: "127.0.0.1", port: 0 },
+      metrics: createOpsMetrics(),
+      readiness: {
+        definitions: SCOPED_DEFS,
+        sites: [{ security: { preset: "production-strict" } }],
+        inboundCfg: {},
+        loopbackBind: true,
+      },
+      exit: (code, reason) => { throw new Error(`ops exited (${code}): ${reason}`); },
+      log: () => {},
+    });
+    expect(ops.started).toBe(true);
+    const { port } = ops.server.address();
+    expect(port).toBeGreaterThan(0);
+    const readyUrl = new URL("/ready", `${ops.url}/`);
+    expect((await fetch(readyUrl)).status).toBe(200);
+
+    const publicClose = async () => {};
+    const started = {
+      close: async () => {
+        await ops.close();
+        await publicClose();
+      },
+    };
+    await started.close();
+    expect(ops.server.listening).toBe(false);
+    await expect(fetch(readyUrl)).rejects.toThrow();
+
+    const rebound = createServer();
+    try {
+      await new Promise((resolve, reject) => {
+        rebound.once("error", reject);
+        rebound.listen(port, "127.0.0.1", () => {
+          rebound.removeListener("error", reject);
+          resolve();
+        });
+      });
+      expect(rebound.listening).toBe(true);
+      expect(rebound.address().port).toBe(port);
+    } finally {
+      await new Promise((resolve) => rebound.close(() => resolve()));
+    }
   });
 });
 
