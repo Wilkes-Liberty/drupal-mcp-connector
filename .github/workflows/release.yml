@@ -26,6 +26,11 @@ name: Release
 #     Visibility: Public (if Keystone or anyone without a GH token must pull)
 #     Linked repository: Wilkes-Liberty/drupal-mcp-connector (usually automatic)
 #
+# Dist-tag / prerelease (DEV-841): scripts/release-channel.js derives the
+# npm dist-tag from the version. A semver prerelease (`-rc`, `-pre`, …)
+# publishes to `next`, is a GitHub prerelease, and never takes GHCR
+# `:latest` / `:X` / `:X.Y`. A final `X.Y.Z` takes npm `latest`.
+#
 # workflow_dispatch is an image-only path (build, optional push). It never
 # publishes npm. Use it to dry-run, or to backfill a tag such as v4.0.0
 # without moving the git tag.
@@ -96,6 +101,10 @@ jobs:
       - name: npm run check
         run: npm run check
 
+      - name: Resolve npm dist-tag
+        id: channel
+        run: node scripts/release-channel.js --version "$(node -p 'require("./package.json").version')" --github-output
+
       # Re-pushing or moving a release tag is a normal recovery operation — a
       # tag pushed before its commit reached the default branch, a tag deleted
       # and recreated. Without this check the rerun dies on npm's E403
@@ -116,7 +125,9 @@ jobs:
 
       - name: Publish (trusted publishing — no token)
         if: steps.published.outputs.already == 'false'
-        run: npm publish --access public
+        env:
+          NPM_DIST_TAG: ${{ steps.channel.outputs.npm_dist_tag }}
+        run: npm publish --access public --tag "$NPM_DIST_TAG"
 
   publish-image:
     name: Publish container image to GHCR
@@ -133,6 +144,10 @@ jobs:
     env:
       REGISTRY: ghcr.io
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.git_ref || github.sha }}
+
       - name: Resolve image coordinates
         id: coords
         env:
@@ -150,11 +165,11 @@ jobs:
             PUBLISH="${INPUT_PUBLISH}"
             # Backfill must not move floating tags (latest / 4 / 4.0) onto an
             # older release if a newer tag already exists.
-            FLOATING=false
+            ALLOW_FLOATING=false
           else
             GIT_REF="${REF_NAME}"
             PUBLISH=true
-            FLOATING=true
+            ALLOW_FLOATING=true
           fi
 
           if [ -z "${GIT_REF}" ]; then
@@ -169,36 +184,26 @@ jobs:
           VERSION="${GIT_REF#v}"
           if [[ "${GIT_REF}" =~ ^[0-9a-f]{40}$ ]]; then
             VERSION="sha-$(printf '%s' "${GIT_REF}" | cut -c1-12)"
-            FLOATING=false
-          fi
-          # Prereleases must not move latest / major / minor floating tags.
-          if [[ "${VERSION}" == *-* ]]; then
-            FLOATING=false
-          fi
-          IS_SEMVER=false
-          if [[ "${GIT_REF}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
-            IS_SEMVER=true
+            ALLOW_FLOATING=false
           fi
 
           {
             echo "image=${IMAGE}"
             echo "git_ref=${GIT_REF}"
             echo "version=${VERSION}"
-            echo "semver_value=v${VERSION}"
             echo "publish=${PUBLISH}"
-            echo "floating_tags=${FLOATING}"
-            echo "is_semver=${IS_SEMVER}"
           } >> "${GITHUB_OUTPUT}"
+
+          CHANNEL_ARGS=(--version "${VERSION}" --github-output)
+          if [ "${ALLOW_FLOATING}" = "true" ]; then
+            CHANNEL_ARGS+=(--allow-floating)
+          fi
+          node scripts/release-channel.js "${CHANNEL_ARGS[@]}"
 
           echo "image=${IMAGE}"
           echo "git_ref=${GIT_REF}"
           echo "version=${VERSION}"
           echo "publish=${PUBLISH}"
-          echo "floating_tags=${FLOATING}"
-
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.git_ref || github.sha }}
 
       - name: Verify version tag matches package.json
         if: startsWith(steps.coords.outputs.git_ref, 'v')
@@ -309,6 +314,7 @@ jobs:
           GIT_REF: ${{ steps.coords.outputs.git_ref }}
           GIT_SHA: ${{ github.sha }}
           EVENT_NAME: ${{ github.event_name }}
+          GITHUB_PRERELEASE: ${{ steps.coords.outputs.github_prerelease }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REPO: ${{ github.repository }}
         run: |
@@ -412,7 +418,11 @@ jobs:
           EOF
 
           CREATE_ARGS=(--title "${GIT_REF}" --verify-tag --notes-file image-digest-section.md)
-          if [ "${EVENT_NAME}" = "push" ] && [[ "${VERSION}" != *-* ]]; then
+          EDIT_ARGS=(--notes-file image-digest-notes.md)
+          if [ "${GITHUB_PRERELEASE}" = "true" ]; then
+            CREATE_ARGS+=(--prerelease)
+            EDIT_ARGS+=(--prerelease)
+          elif [ "${EVENT_NAME}" = "push" ]; then
             CREATE_ARGS+=(--latest)
           fi
 
@@ -432,7 +442,7 @@ jobs:
               notes = notes.rstrip() + "\n\n" + section + "\n"
           pathlib.Path("image-digest-notes.md").write_text(notes, encoding="utf-8")
           PY
-            gh release edit "${GIT_REF}" --notes-file image-digest-notes.md
+            gh release edit "${GIT_REF}" "${EDIT_ARGS[@]}"
           else
             gh release create "${GIT_REF}" "${CREATE_ARGS[@]}"
           fi

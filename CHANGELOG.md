@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Prerelease tags publish to npm `next`, not `latest` (DEV-841).**
+  `release.yml` derived no dist-tag, so a `vX.Y.Z-rc.N` (or any semver
+  prerelease) would have taken npm `latest` or failed. The workflow now
+  runs `scripts/release-channel.js`: prereleases (`-rc`, `-pre`, …) use
+  `--tag next`, are GitHub prereleases, and do not receive GHCR `:latest`
+  / `:X` / `:X.Y`. A final `X.Y.Z` still takes `latest`. CI dry-runs both
+  channels on every pull request (no publish).
 - **Release workflow pins an existing cosign-installer version.** The GHCR
   image job referenced `sigstore/cosign-installer@v4`, a major tag that
   upstream never published (only `v4.x.y` releases exist), so the v5.0.0

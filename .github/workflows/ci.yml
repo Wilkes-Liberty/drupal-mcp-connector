@@ -39,6 +39,90 @@ jobs:
       - name: npm run check
         run: npm run check
 
+  # DEV-841: prove an rc cannot take npm/GHCR `latest`, and a final does.
+  # Uses the same docker/metadata-action wiring as release.yml. Never publishes.
+  release-channel:
+    name: Release channel (dry-run)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: RC cannot take npm latest
+        run: node scripts/release-channel.js --version 5.1.0-rc.1 --allow-floating --expect-npm-tag next
+
+      - name: Final takes npm latest
+        run: node scripts/release-channel.js --version 5.1.0 --allow-floating --expect-npm-tag latest
+
+      - name: Channel for rc image tags
+        id: rc
+        run: node scripts/release-channel.js --version 5.1.0-rc.1 --allow-floating --github-output
+
+      - name: GHCR metadata for 5.1.0-rc.1
+        id: rc-meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/wilkes-liberty/drupal-mcp-connector
+          flavor: |
+            latest=${{ steps.rc.outputs.floating_tags }}
+          tags: |
+            type=raw,value=${{ steps.rc.outputs.version }}
+            type=raw,value=v${{ steps.rc.outputs.version }}
+            type=semver,pattern={{version}},value=${{ steps.rc.outputs.semver_value }},enable=${{ steps.rc.outputs.is_semver }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.rc.outputs.semver_value }},enable=${{ steps.rc.outputs.floating_tags }}
+            type=semver,pattern={{major}},value=${{ steps.rc.outputs.semver_value }},enable=${{ steps.rc.outputs.floating_tags }}
+
+      - name: Assert rc image tags omit latest / X / X.Y
+        env:
+          TAGS: ${{ steps.rc-meta.outputs.tags }}
+        run: node scripts/release-channel.js --version 5.1.0-rc.1 --allow-floating --assert-image-tags --tags "$TAGS"
+
+      - name: Channel for final image tags
+        id: final
+        run: node scripts/release-channel.js --version 5.1.0 --allow-floating --github-output
+
+      - name: GHCR metadata for 5.1.0
+        id: final-meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/wilkes-liberty/drupal-mcp-connector
+          flavor: |
+            latest=${{ steps.final.outputs.floating_tags }}
+          tags: |
+            type=raw,value=${{ steps.final.outputs.version }}
+            type=raw,value=v${{ steps.final.outputs.version }}
+            type=semver,pattern={{version}},value=${{ steps.final.outputs.semver_value }},enable=${{ steps.final.outputs.is_semver }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.final.outputs.semver_value }},enable=${{ steps.final.outputs.floating_tags }}
+            type=semver,pattern={{major}},value=${{ steps.final.outputs.semver_value }},enable=${{ steps.final.outputs.floating_tags }}
+
+      - name: Assert final image tags include latest / X / X.Y
+        env:
+          TAGS: ${{ steps.final-meta.outputs.tags }}
+        run: node scripts/release-channel.js --version 5.1.0 --allow-floating --assert-image-tags --tags "$TAGS"
+
+      - name: Summarize
+        env:
+          RC_TAGS: ${{ steps.rc-meta.outputs.tags }}
+          FINAL_TAGS: ${{ steps.final-meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Release channel dry-run (DEV-841)"
+            echo
+            echo "\`5.1.0-rc.1\` → npm \`next\`, GitHub prerelease, GHCR tags:"
+            echo
+            echo "\`\`\`"
+            echo "${RC_TAGS}"
+            echo "\`\`\`"
+            echo
+            echo "\`5.1.0\` → npm \`latest\`, GHCR tags:"
+            echo
+            echo "\`\`\`"
+            echo "${FINAL_TAGS}"
+            echo "\`\`\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   # Proves the Dockerfile still builds. Never logs in, never pushes, never
   # signs. The release workflow is the only publisher (DEV-923).
   container-image:

@@ -148,11 +148,15 @@ created **after** the merge, on the resulting `master` commit:
    `git checkout master && git pull && git tag -a vX.Y.Z -m "vX.Y.Z"`.
 7. Push the tag: `git push origin vX.Y.Z`.
    The tag push triggers `release.yml`, which re-runs `npm run check`, verifies the
-   tag matches `package.json`, publishes npm with provenance, and publishes a
-   signed GHCR image (`ghcr.io/wilkes-liberty/drupal-mcp-connector`). The
-   image job records the immutable `name@sha256:…` digest on the GitHub
-   Release (creates the release if it does not exist yet) as notes plus
-   `image-digest.json` / `image-digest.txt` assets, and on the job summary.
+   tag matches `package.json`, publishes npm with provenance (`--tag next` for
+   a semver prerelease such as `vX.Y.Z-rc.N`, `--tag latest` only for a
+   final `X.Y.Z`), and publishes a
+   signed GHCR image (`ghcr.io/wilkes-liberty/drupal-mcp-connector`).
+   Prereleases are GitHub prereleases and do not move `:latest` / `:X` /
+   `:X.Y`. The image job records the immutable `name@sha256:…` digest on
+   the GitHub Release (creates the release if it does not exist yet) as
+   notes plus `image-digest.json` / `image-digest.txt` assets, and on the
+   job summary.
 8. If the image job created a digest-only release stub, edit it to include
    the CHANGELOG notes and **keep** the `<!-- ghcr-image-digest -->` section:
    `gh release edit vX.Y.Z --notes-file -`.
