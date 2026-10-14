@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+- Optional exact client/subject admission policy for authenticated HTTP access.
+  Unlisted identities receive 403 before dispatch, an empty configured list
+  denies all, and malformed policies prevent startup. Existing scope and
+  site authorization still apply.
+
 - **Mesh-only readiness and metrics listener (DEV-863).** Disabled by
   default. Set `MCP_OPS_LISTEN=<addr:port>` (or `ops.listen`) to bind a
   second socket that serves `GET /ready` and `GET /metrics`. The bind may
