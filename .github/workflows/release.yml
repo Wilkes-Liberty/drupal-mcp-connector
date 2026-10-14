@@ -148,6 +148,25 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.git_ref || github.sha }}
 
+      # The release tooling comes from this workflow's own commit, not from
+      # the ref being built: a backfill of a tag cut before the tool existed
+      # (v5.0.0 predates scripts/release-channel.js) must still resolve its
+      # channel. Copied to RUNNER_TEMP so it never enters the image context.
+      - name: Check out the release tooling at the workflow commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: .release-tooling
+          sparse-checkout: scripts/release-channel.js
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Stage the release tooling outside the build context
+        run: |
+          set -euo pipefail
+          cp .release-tooling/scripts/release-channel.js "${RUNNER_TEMP}/release-channel.js"
+          rm -rf .release-tooling
+
       - name: Resolve image coordinates
         id: coords
         env:
@@ -198,7 +217,7 @@ jobs:
           if [ "${ALLOW_FLOATING}" = "true" ]; then
             CHANNEL_ARGS+=(--allow-floating)
           fi
-          node scripts/release-channel.js "${CHANNEL_ARGS[@]}"
+          node "${RUNNER_TEMP}/release-channel.js" "${CHANNEL_ARGS[@]}"
 
           echo "image=${IMAGE}"
           echo "git_ref=${GIT_REF}"

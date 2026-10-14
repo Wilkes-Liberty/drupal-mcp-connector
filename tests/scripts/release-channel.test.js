@@ -169,6 +169,14 @@ describe("workflow wiring (DEV-841)", () => {
     expect(release).not.toMatch(/^\s*run:\s*npm publish --access public\s*$/m);
   });
 
+  it("runs the image job's channel tool from the workflow commit, so older tags can be backfilled", () => {
+    const job = release.slice(release.indexOf("publish-image:"));
+    expect(job).toMatch(/path: \.release-tooling[\s\S]*?ref: \$\{\{ github\.sha \}\}|ref: \$\{\{ github\.sha \}\}[\s\S]*?path: \.release-tooling/);
+    expect(job).toContain('node "${RUNNER_TEMP}/release-channel.js"');
+    expect(job).toContain("rm -rf .release-tooling");
+    expect(job).not.toMatch(/node scripts\/release-channel\.js "\$\{CHANNEL_ARGS/);
+  });
+
   it("marks the GitHub Release as a prerelease when the channel says so", () => {
     expect(release).toMatch(/--prerelease/);
     expect(release).toContain("github_prerelease");
