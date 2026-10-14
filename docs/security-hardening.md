@@ -182,10 +182,18 @@ export MCP_ALLOWED_ORIGINS="https://app.example.com"
 ```
 
 `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS` is the Streamable HTTP Origin
-allowlist. A missing `Origin` is allowed (Cursor, Grok Bot, and other
-non-browser clients typically omit it). A present `Origin` that is not on the
-list is `403`. The origin of `auth.resource` / `auth.audience` is always
-included.
+allowlist. Matching is exact (`https://host[:port]` after URL normalization);
+there are no wildcards. A missing `Origin` is allowed (desktop Cursor, Grok
+Bot, and other non-browser clients typically omit it). A present `Origin`
+that is not on the list is `403` (`bad_origin` on the audit row). An omitted
+or empty list refuses every present Origin (fail closed, DEV-953). The
+example config lists `https://cursor.com` and `https://www.cursor.com`
+(Cursor's documented OAuth callback host). Lookalikes such as
+`http://cursor.com` or `https://www.cursor.com.evil.example` stay refused.
+Grok Bot's distinct browser Origin is not verified — add that exact origin
+via config or env once confirmed. A present `MCP_ALLOWED_ORIGINS`, including
+empty, replaces the list. The origin of `auth.resource` / `auth.audience` is
+always included.
 
 `auth.allowedHosts` / `MCP_ALLOWED_HOSTS` is the Host allowlist (DEV-861).
 After a resolved identity, a missing or disallowed `Host` is `403`. The

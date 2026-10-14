@@ -32,7 +32,9 @@
  *                     (default: empty — trust none)
  *   MCP_LEGACY_TRANSPORT "serve" (default) | "reject" for 2025-era clients
  *   MCP_ALLOWED_ORIGINS Comma/space-separated Origin allowlist (DNS-rebinding);
- *                     a present empty value clears the configured list
+ *                     exact https origins only, no wildcards. Omitted/empty
+ *                     config refuses every present Origin (DEV-953). A
+ *                     present empty value clears the list.
  *   MCP_ALLOWED_HOSTS   Comma/space-separated Host allowlist (DEV-861);
  *                     a present empty value clears the configured list.
  *                     Default: host of auth.resource/audience, plus loopback

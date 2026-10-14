@@ -18,7 +18,11 @@ import {
   parseHostList,
   resolveAllowedHosts,
   resolveAllowedOrigins,
+  resolveConfiguredOrigins,
   sessionPrincipalKey,
+  CURSOR_BROWSER_ORIGIN,
+  CURSOR_WWW_BROWSER_ORIGIN,
+  CURSOR_BROWSER_ORIGINS,
 } from "../../src/lib/http-transport.js";
 
 describe("http-transport helpers", () => {
@@ -54,6 +58,39 @@ describe("http-transport helpers", () => {
     expect(originAllowed("null", allow)).toBe(false);
     expect(originAllowed("null", ["null"])).toBe(true);
     expect(originAllowed(":::bad", allow)).toBe(false);
+  });
+
+  it("matches Origins exactly and refuses Cursor lookalikes (DEV-953)", () => {
+    const allow = [...CURSOR_BROWSER_ORIGINS];
+    expect(CURSOR_BROWSER_ORIGINS).toEqual([CURSOR_BROWSER_ORIGIN, CURSOR_WWW_BROWSER_ORIGIN]);
+    expect(originAllowed("https://cursor.com", allow)).toBe(true);
+    expect(originAllowed("https://www.cursor.com", allow)).toBe(true);
+    expect(originAllowed("https://Cursor.com", allow)).toBe(true);
+    expect(originAllowed("https://www.cursor.com/", allow)).toBe(true);
+    expect(originAllowed("http://cursor.com", allow)).toBe(false);
+    expect(originAllowed("http://www.cursor.com", allow)).toBe(false);
+    expect(originAllowed("https://cursor.com.evil.example", allow)).toBe(false);
+    expect(originAllowed("https://www.cursor.com.evil.example", allow)).toBe(false);
+    expect(originAllowed("https://evil.cursor.com", allow)).toBe(false);
+    expect(originAllowed("https://evil.www.cursor.com", allow)).toBe(false);
+  });
+
+  it("refuses every present Origin when the configured list is empty (DEV-953)", () => {
+    expect(resolveConfiguredOrigins(undefined, undefined)).toEqual([]);
+    expect(resolveConfiguredOrigins([], undefined)).toEqual([]);
+    expect(resolveConfiguredOrigins(["https://app.example.com"], undefined))
+      .toEqual(["https://app.example.com"]);
+    expect(resolveConfiguredOrigins(["https://app.example.com"], "https://cursor.com"))
+      .toEqual(["https://cursor.com"]);
+    expect(resolveConfiguredOrigins(["https://app.example.com"], "")).toEqual([]);
+    const empty = resolveAllowedOrigins({
+      allowedOrigins: resolveConfiguredOrigins([], undefined),
+      resource: "https://mcp.example.com/mcp",
+    });
+    expect(empty).toEqual(["https://mcp.example.com"]);
+    expect(originAllowed("https://cursor.com", empty)).toBe(false);
+    expect(originAllowed("https://www.cursor.com", empty)).toBe(false);
+    expect(originAllowed("https://mcp.example.com", empty)).toBe(true);
   });
 
   it("binds sessions to sub+clientId and never to an empty identity", () => {

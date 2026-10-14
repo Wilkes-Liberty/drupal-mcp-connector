@@ -22,6 +22,7 @@
 
 import { readFileSync, statSync, writeFileSync } from "fs";
 import { createRemoteJWKSet, customFetch, decodeProtectedHeader, jwtVerify } from "jose";
+import { resolveConfiguredOrigins } from "./http-transport.js";
 
 /** Inbound IdP HTTP timeout (discovery / JWKS). Matches Drupal/Drush outbound HTTP. */
 export const INBOUND_IDP_TIMEOUT_MS = 30_000;
@@ -1052,11 +1053,9 @@ export function resolveInboundAuthConfig(cfg = {}, env = process.env) {
       env.MCP_MAX_TOKEN_LIFETIME || auth.maxTokenLifetime || DEFAULT_MAX_TOKEN_LIFETIME,
     ),
     algorithms: normalizeTokenAlgorithms(env.MCP_TOKEN_ALGORITHMS || auth.algorithms),
-    // A present env value replaces the configured list, even when empty, so an
-    // operator can clear a configured allowlist from the environment.
-    allowedOrigins: env.MCP_ALLOWED_ORIGINS !== undefined
-      ? String(env.MCP_ALLOWED_ORIGINS).split(/[\s,]+/).filter(Boolean)
-      : (Array.isArray(auth.allowedOrigins) ? auth.allowedOrigins.map(String) : []),
+    // A present env value replaces the configured list, even when empty.
+    // An omitted or empty config list is empty (fail closed, DEV-953).
+    allowedOrigins: resolveConfiguredOrigins(auth.allowedOrigins, env.MCP_ALLOWED_ORIGINS),
     allowedHosts: env.MCP_ALLOWED_HOSTS !== undefined
       ? String(env.MCP_ALLOWED_HOSTS).split(/[\s,]+/).filter(Boolean)
       : (Array.isArray(auth.allowedHosts) ? auth.allowedHosts.map(String) : []),

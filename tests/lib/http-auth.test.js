@@ -352,6 +352,22 @@ describe("resolveInboundAuthConfig", () => {
     expect(cleared.allowedOrigins).toEqual([]);
   });
 
+  it("pins omitted or empty allowedOrigins to an empty list (DEV-953)", () => {
+    const omitted = resolveInboundAuthConfig({
+      auth: { issuer: "https://idp.example.com", audience: "https://mcp.example.com/mcp" },
+    }, {});
+    expect(omitted.allowedOrigins).toEqual([]);
+
+    const empty = resolveInboundAuthConfig({
+      auth: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+        allowedOrigins: [],
+      },
+    }, {});
+    expect(empty.allowedOrigins).toEqual([]);
+  });
+
   it("reads allowedHosts from config and prefers MCP_ALLOWED_HOSTS", () => {
     const fromConfig = resolveInboundAuthConfig({
       auth: {
