@@ -55,11 +55,15 @@ requests are stateless; legacy clients keep a session bound to the authenticated
 principal. Operators can set `MCP_LEGACY_TRANSPORT=reject` once all registered
 clients are current. Browser clients that send `Origin` must be listed on
 `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS` (exact match, no wildcards).
-An omitted or empty list refuses every present Origin. The example config
-lists `https://cursor.com` and `https://www.cursor.com` (DEV-953). Desktop
-clients that omit `Origin` are unchanged. The `Host` header must match
-`auth.allowedHosts` / `MCP_ALLOWED_HOSTS` (default: the host of
-`auth.resource` / `auth.audience`, plus loopback on a loopback bind).
+This guard only limits browsers and DNS rebinding; it does not
+authenticate. A request with no `Origin` is allowed by design for
+non-browser clients. An omitted or empty extra list refuses every present
+third-party Origin. The origin of `auth.resource` / `auth.audience` is
+still auto-included (same-origin browser of the MCP URL). The example
+config lists `https://cursor.com` and `https://www.cursor.com` (DEV-953).
+The `Host` header must match `auth.allowedHosts` / `MCP_ALLOWED_HOSTS`
+(default: the host of `auth.resource` / `auth.audience`, plus loopback on
+a loopback bind).
 
 ---
 

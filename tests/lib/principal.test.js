@@ -161,6 +161,43 @@ describe("resolveGrantedSiteNames", () => {
     expect(resolveGrantedSiteNames(identity(), names, grants)).toEqual([]);
   });
 
+  it("denies a valid mcp_read principal with no site grants when staff grants exist", () => {
+    const grants = { "staff-agent": ["production", "staging"] };
+    const reader = identity({
+      clientId: "prod-realm-user",
+      scopes: ["mcp_read"],
+      sites: null,
+    });
+    expect(resolveGrantedSiteNames(reader, names, grants)).toEqual([]);
+    expect(principalMayUseTool("drupal_get_node", reader, sites, grants)).toBe(false);
+    const call = {
+      toolName: "drupal_get_node",
+      args: {},
+      identity: reader,
+      sites,
+      grants,
+      defaultSite: "production",
+    };
+    expect(() => assertPrincipalEntitlement(call)).toThrow(SecurityError);
+    expect(() => assertPrincipalEntitlement(call)).toThrow(/Not entitled to invoke drupal_get_node/);
+  });
+
+  it("denies a valid mcp_read principal whose grant row lists no sites", () => {
+    const grants = { "staff-agent": ["production"], "prod-realm-user": [] };
+    const reader = identity({
+      clientId: "prod-realm-user",
+      scopes: ["mcp_read"],
+    });
+    expect(resolveGrantedSiteNames(reader, names, grants)).toEqual([]);
+    expect(() => assertPrincipalEntitlement({
+      toolName: "drupal_get_node",
+      args: {},
+      identity: reader,
+      sites,
+      grants,
+    })).toThrow(/Not entitled to invoke drupal_get_node/);
+  });
+
   it("intersects a JWT sites claim with configured names when no grant table", () => {
     expect(resolveGrantedSiteNames(identity({ sites: ["staging", "ghost"] }), names, null))
       .toEqual(["staging"]);

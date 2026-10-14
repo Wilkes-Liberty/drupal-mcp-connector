@@ -49,7 +49,7 @@ describe("http-transport helpers", () => {
     })).toEqual(["https://cursor.example", "https://mcp.example.com"]);
   });
 
-  it("allows a missing Origin and denies a disallowed or malformed one", () => {
+  it("allows a missing Origin by design and denies a disallowed or malformed one", () => {
     const allow = ["https://app.example.com"];
     expect(originAllowed(undefined, allow)).toBe(true);
     expect(originAllowed("", allow)).toBe(true);
@@ -75,7 +75,7 @@ describe("http-transport helpers", () => {
     expect(originAllowed("https://evil.www.cursor.com", allow)).toBe(false);
   });
 
-  it("refuses every present Origin when the configured list is empty (DEV-953)", () => {
+  it("refuses third-party Origins when the extra list is empty but keeps same-origin (DEV-953)", () => {
     expect(resolveConfiguredOrigins(undefined, undefined)).toEqual([]);
     expect(resolveConfiguredOrigins([], undefined)).toEqual([]);
     expect(resolveConfiguredOrigins(["https://app.example.com"], undefined))
@@ -91,6 +91,8 @@ describe("http-transport helpers", () => {
     expect(originAllowed("https://cursor.com", empty)).toBe(false);
     expect(originAllowed("https://www.cursor.com", empty)).toBe(false);
     expect(originAllowed("https://mcp.example.com", empty)).toBe(true);
+    expect(originAllowed(undefined, empty)).toBe(true);
+    expect(originAllowed("", empty)).toBe(true);
   });
 
   it("binds sessions to sub+clientId and never to an empty identity", () => {
