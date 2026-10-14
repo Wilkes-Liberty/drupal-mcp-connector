@@ -28,11 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GitHub; a SHA pin's full `# vX.Y.Z` comment must point at that commit
   (a floating `# v4` is not checked), and a reusable-workflow path must
   exist at the resolved commit. An unknown SHA (GitHub answers 422) is
-  reported as missing. Lookups retry on 5xx / 429 / network errors; a
-  lookup that still fails is reported as `ERROR` next to the other results
-  and never as missing. The required CI job runs it, so a reference that
-  would fail at "Set up job" fails on the pull request, not on the release
-  tag.
+  reported as missing. A line that cannot be a GitHub reference (no
+  `@ref`, or an owner, repository, path, or ref segment such as `..` that
+  would change the API route) is reported as `INVALID` and the rest of the
+  file is still checked. Lookups retry on 5xx / 429 / network errors and
+  honour `Retry-After`; a lookup that still fails is reported as `ERROR`
+  next to the other results and never as missing. The required CI job runs
+  it, so a reference that would fail at "Set up job" fails on the pull
+  request, not on the release tag.
 
 ## [5.0.0] - 2026-10-13
 
