@@ -183,6 +183,8 @@ describe("unauthenticated route allowlist", () => {
     expect(isUnauthenticatedRoute("GET", "/nope")).toBe(false);
     expect(isUnauthenticatedRoute("GET", "/debug")).toBe(false);
     expect(isUnauthenticatedRoute("GET", "/usage")).toBe(false);
+    expect(isUnauthenticatedRoute("GET", "/ready")).toBe(false);
+    expect(isUnauthenticatedRoute("GET", "/metrics")).toBe(false);
   });
 
   it("serves /health without a token and without tool data", async () => {
@@ -202,6 +204,8 @@ describe("unauthenticated route allowlist", () => {
       ["GET", "/nope"],
       ["GET", "/debug"],
       ["GET", "/usage"],
+      ["GET", "/ready"],
+      ["GET", "/metrics"],
       ["POST", "/health"],
       ["GET", "/mcp"],
       ["DELETE", "/mcp"],

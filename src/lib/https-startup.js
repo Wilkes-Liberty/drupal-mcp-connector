@@ -237,6 +237,7 @@ function createNodeServer({ onRequest, tls, allowHttp, exit, log }) {
  * @param {(msg: string) => void} [options.log]
  * @param {string} [options.listenLabel] Extra listen-line detail (tool/resource/prompt counts).
  * @param {string} [options.listenHost] Loopback-only override of the address used for `listen` (tests); any non-loopback value throws at construction.
+ * @param {?{beginRequest: Function, finishRequest: Function}} [options.metrics] Ops metrics registry (DEV-863).
  * @returns {Promise<{
  *   started: boolean,
  *   inboundMode: {mode: string, reason?: string},
@@ -275,6 +276,7 @@ export async function startHttpsTransport({
   log = (msg) => console.error(msg),
   listenLabel,
   listenHost,
+  metrics = null,
 } = {}) {
   const pickedOverrides = pickHandlerOverrides(handlerOverrides);
   // `listenHost` only narrows where the socket binds for tests; every
@@ -391,6 +393,7 @@ export async function startHttpsTransport({
     }),
     ...(auditWriter !== undefined ? { auditWriter } : {}),
     ...(clientKey ? { clientKey } : {}),
+    ...(metrics ? { metrics } : {}),
     ...handlerFns,
   }), {
     modernHandler,

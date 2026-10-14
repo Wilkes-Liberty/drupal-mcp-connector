@@ -19,7 +19,10 @@ import {
   markHttpAuditOriginRefused,
   createHttpAuditWriter,
   defaultHttpAuditSink,
+  httpAuditHostDenied,
+  httpAuditOriginDenied,
 } from "./http-audit.js";
+import { publicRequestMetricFields } from "./ops-metrics.js";
 import {
   LOOPBACK_HOSTS,
   MCP_PROTOCOL_VERSIONS,
@@ -367,6 +370,9 @@ export function createLegacySessionHandler({
  *   - `GET /health` — unauthenticated liveness probe (`{status: "ok"}`).
  *     No tool catalog or count (DEV-845).
  *   - `GET /.well-known/oauth-protected-resource[/…]` — RFC 9728 metadata.
+ *   - `GET /ready` and `GET /metrics` — not served here (DEV-863). They
+ *     exist only on the mesh-only ops listener. This handler keeps its
+ *     normal 401 (no identity) / 404 (after auth).
  *   - everything else — 401 without a resolved identity, 404 after auth; metered
  *     like /mcp so an unknown path is never a free introspection.
  *
@@ -429,6 +435,8 @@ export function createLegacySessionHandler({
  *   Injectable sessionless GET/DELETE 405 guard (eval mutants swap this).
  * @param {(body: unknown) => boolean} [deps.isJsonRpcBatchFn]
  *   Injectable JSON-RPC batch predicate (eval mutants swap this).
+ * @param {?{beginRequest: Function, finishRequest: Function}} [deps.metrics]
+ *   Optional ops metrics registry (DEV-863). Identity is never stored.
  * @returns {(req: import("http").IncomingMessage, res: import("http").ServerResponse) => Promise<void>}
  */
 export function createMcpRequestHandler({
@@ -458,6 +466,7 @@ export function createMcpRequestHandler({
   isUnauthenticatedRouteFn = isUnauthenticatedRoute,
   sessionlessMethodRefusedFn = sessionlessMethodRefused,
   isJsonRpcBatchFn = isJsonRpcBatch,
+  metrics = null,
 }) {
   if (!modernHandler || !legacyHandler) {
     throw new Error("modernHandler and legacyHandler must be configured together for dual-era routing");
@@ -642,7 +651,18 @@ export function createMcpRequestHandler({
   return async function handle(req, res) {
     if (writer) attachHttpAudit(req, res, writer);
     const path = requestPath(req);
+    metrics?.beginRequest();
+    try {
+      await dispatchPublic(req, res, path);
+    } finally {
+      metrics?.finishRequest(publicRequestMetricFields(req, res, {
+        originDenied: httpAuditOriginDenied(req),
+        hostDenied: httpAuditHostDenied(req),
+      }));
+    }
+  };
 
+  async function dispatchPublic(req, res, path) {
     if (isUnauthenticatedRouteFn(req.method, path)) {
       if (path === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" })
@@ -740,5 +760,5 @@ export function createMcpRequestHandler({
     }
 
     res.writeHead(404).end("Not found");
-  };
+  }
 }

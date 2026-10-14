@@ -37,6 +37,14 @@
  *                     a present empty value clears the configured list.
  *                     Default: host of auth.resource/audience, plus loopback
  *                     hostnames on a loopback bind.
+ *   MCP_OPS_LISTEN    Optional mesh-only ops listener <addr:port> (DEV-863).
+ *                     Disabled when unset. Loopback or Tailscale only
+ *                     (100.64.0.0/10, fd7a:115c:a1e0::/48). 0.0.0.0, ::,
+ *                     port 0, and any other public or non-mesh address
+ *                     are fatal. No auth on this socket; confirm a
+ *                     100.64/10 bind is Tailscale and restrict the port
+ *                     with Tailscale ACLs. Serves GET /ready and
+ *                     GET /metrics; the public listener does not.
  *
  * CLI subcommands (anything else starts the MCP server):
  *   wizard | init     Operator install wizard — see src/lib/wizard.js
@@ -52,6 +60,9 @@ import {
   isLoopbackBind,
 } from "./lib/http-auth.js";
 import { createStartupRateLimiters, installHttpsShutdown, startHttpsTransport } from "./lib/https-startup.js";
+import { createOpsMetrics } from "./lib/ops-metrics.js";
+import { resolveOpsListen } from "./lib/ops-bind.js";
+import { startOpsListener } from "./lib/ops-listener.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
 import { resolveTrustedProxies } from "./lib/client-address.js";
 import { assertHostedToolScopeTable } from "./lib/tool-scopes.js";
@@ -308,6 +319,16 @@ if (transport === "stdio") {
     );
   }
 
+  const opsListen = resolveOpsListen({ env: process.env, config });
+  if (opsListen.fatal) {
+    console.error(`[drupal-mcp-connector] FATAL: ${opsListen.reason}`);
+    process.exit(1);
+  }
+  const metrics = createOpsMetrics({
+    rateLimiter: limits.rateLimiter,
+    principalLimiter: limits.principalLimiter,
+  });
+
   const started = await startHttpsTransport({
     bindHost,
     port: tlsCfg.port,
@@ -322,7 +343,28 @@ if (transport === "stdio") {
     rateLimiter: limits.rateLimiter,
     principalLimiter: limits.principalLimiter,
     trustedProxies,
+    metrics,
   });
+
+  if (started?.started && opsListen.enabled) {
+    const ops = await startOpsListener({
+      resolved: opsListen,
+      metrics,
+      readiness: {
+        definitions: allDefinitions,
+        sites: listResolvableSiteConfigs(),
+        inboundCfg,
+        loopbackBind: isLoopbackBind(bindHost),
+      },
+    });
+    if (ops?.close) {
+      const publicClose = started.close;
+      started.close = async () => {
+        await ops.close();
+        await publicClose?.();
+      };
+    }
+  }
   installHttpsShutdown(started);
 
 } else {
