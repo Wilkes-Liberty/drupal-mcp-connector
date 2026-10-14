@@ -76,7 +76,6 @@ async function startOauthConnector() {
     allowLocalOperator: false,
     modernHandler: toNodeHandler(modern),
     legacyHandler: createLegacySessionHandler({ buildServer, mode: "serve" }),
-    toolCount: 1,
     allowedOrigins: resolveAllowedOrigins({ resource: AUDIENCE }),
   });
   const server = createServer((req, res) => { void handler(req, res); });

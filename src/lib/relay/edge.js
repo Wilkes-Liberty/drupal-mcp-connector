@@ -1538,7 +1538,6 @@ export async function startEdge({
       },
       mode: "reject",
     }),
-    toolCount: 0,
     rateLimiter,
     principalLimiter,
     trustedProxies,

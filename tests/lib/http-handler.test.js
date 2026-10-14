@@ -1,6 +1,10 @@
 import { createRateLimiter } from "../../src/lib/rate-limit.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createLegacySessionHandler, createMcpRequestHandler } from "../../src/lib/http-handler.js";
+import {
+  createLegacySessionHandler,
+  createMcpRequestHandler,
+  LEGACY_SESSION_CAP,
+} from "../../src/lib/http-handler.js";
 import { getRequestIdentity, LOCAL_OPERATOR } from "../../src/lib/principal.js";
 
 /** Minimal Node-like ServerResponse mock that records status/headers/body. */
@@ -73,7 +77,6 @@ describe("createMcpRequestHandler", () => {
       allowLocalOperator: true,
       modernHandler: vi.fn(),
       legacyHandler,
-      toolCount: 66,
       toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
       isLegacyRequestFn: async () => true,
     });
@@ -87,7 +90,6 @@ describe("createMcpRequestHandler", () => {
       checkAuth: () => false,
       modernHandler,
       legacyHandler,
-      toolCount: 66,
       toWebRequestFn,
       isLegacyRequestFn,
     });
@@ -108,7 +110,6 @@ describe("createMcpRequestHandler", () => {
       checkAuth: () => false,
       modernHandler: vi.fn(),
       legacyHandler,
-      toolCount: 66,
     });
     const res = mockRes();
     await h(req("GET", "/mcp"), res);
@@ -124,7 +125,6 @@ describe("createMcpRequestHandler", () => {
       checkAuth: () => false,
       modernHandler,
       legacyHandler,
-      toolCount: 66,
       toWebRequestFn,
       isLegacyRequestFn,
     });
@@ -163,7 +163,6 @@ describe("createMcpRequestHandler", () => {
       protectedResource: document,
       modernHandler: vi.fn(),
       legacyHandler,
-      toolCount: 66,
     });
     const res = mockRes();
     await h(req("GET", "/.well-known/oauth-protected-resource/mcp"), res);
@@ -187,7 +186,6 @@ describe("createMcpRequestHandler", () => {
       authenticate,
       modernHandler: vi.fn(),
       legacyHandler,
-      toolCount: 66,
     });
     const res = mockRes();
     await h(incoming, res);
@@ -210,7 +208,6 @@ describe("createMcpRequestHandler", () => {
       }),
       modernHandler: identityHandler,
       legacyHandler: vi.fn(),
-      toolCount: 66,
       toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
       isLegacyRequestFn: async () => false,
     });
@@ -236,7 +233,6 @@ describe("createMcpRequestHandler", () => {
       rateLimiter,
       modernHandler,
       legacyHandler: vi.fn(),
-      toolCount: 66,
       toWebRequestFn: vi.fn(),
     });
     const res = mockRes();
@@ -263,7 +259,6 @@ describe("createMcpRequestHandler", () => {
       rateLimiter: createRateLimiter({ limit: 1, windowMs: 60_000, now: () => 0 }),
       modernHandler: vi.fn(),
       legacyHandler: vi.fn(),
-      toolCount: 66,
       toWebRequestFn: vi.fn(),
     });
     const responses = Array.from({ length: 25 }, () => mockRes());
@@ -293,7 +288,6 @@ describe("createMcpRequestHandler", () => {
       rateLimiter,
       modernHandler: vi.fn(),
       legacyHandler: vi.fn(),
-      toolCount: 66,
       toWebRequestFn: vi.fn(),
     });
     const codes = [];
@@ -314,7 +308,6 @@ describe("createMcpRequestHandler", () => {
       principalLimiter,
       modernHandler: vi.fn(async (req, res) => { res.writeHead(200).end("ok"); }),
       legacyHandler: vi.fn(),
-      toolCount: 66,
       toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
       isLegacyRequestFn: async () => false,
     });
@@ -337,7 +330,6 @@ describe("createMcpRequestHandler", () => {
       principalLimiter,
       modernHandler: vi.fn(async (req, res) => { res.writeHead(200).end("ok"); }),
       legacyHandler: vi.fn(),
-      toolCount: 66,
       toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
       isLegacyRequestFn: async () => false,
     });
@@ -361,7 +353,6 @@ describe("createMcpRequestHandler", () => {
       rateLimiter,
       modernHandler: vi.fn(),
       legacyHandler: vi.fn(),
-      toolCount: 66,
       toWebRequestFn: vi.fn(),
     });
     for (const url of ["/bogus", "/mcp/extra", "http://evil.example/mcp"]) {
@@ -388,7 +379,6 @@ describe("createMcpRequestHandler", () => {
       rateLimiter,
       modernHandler: vi.fn(),
       legacyHandler: vi.fn(),
-      toolCount: 66,
       toWebRequestFn: vi.fn(),
     });
     for (const method of ["PUT", "OPTIONS", "PATCH"]) {
@@ -416,7 +406,6 @@ describe("createMcpRequestHandler", () => {
       }),
       modernHandler,
       legacyHandler,
-      toolCount: 66,
       toWebRequestFn,
     });
     const res = mockRes();
@@ -433,7 +422,6 @@ describe("createMcpRequestHandler", () => {
       authenticate: async () => { throw new Error("corrupt revocation"); },
       modernHandler,
       legacyHandler,
-      toolCount: 66,
     });
     const res = mockRes();
     await h(req("POST", "/mcp", { authorization: "Bearer x" }), res);
@@ -449,7 +437,6 @@ describe("createMcpRequestHandler", () => {
       allowLocalOperator: true,
       modernHandler: vi.fn(),
       legacyHandler,
-      toolCount: 66,
       rateLimiter,
       clientKey: () => "ip",
     });
@@ -467,7 +454,6 @@ describe("createMcpRequestHandler", () => {
       authenticate,
       modernHandler: vi.fn(),
       legacyHandler,
-      toolCount: 66,
       rateLimiter,
       clientKey: () => "ip",
     });
@@ -484,7 +470,6 @@ describe("createMcpRequestHandler", () => {
       allowLocalOperator: true,
       modernHandler: vi.fn(),
       legacyHandler,
-      toolCount: 66,
       rateLimiter,
       clientKey: () => "ip",
     });
@@ -507,7 +492,6 @@ describe("createMcpRequestHandler", () => {
       allowLocalOperator: true,
       modernHandler,
       legacyHandler,
-      toolCount: 66,
       toWebRequestFn,
       isLegacyRequestFn,
     });
@@ -531,7 +515,6 @@ describe("createMcpRequestHandler", () => {
       checkAuth: () => false,
       modernHandler,
       legacyHandler,
-      toolCount: 66,
       toWebRequestFn,
       isLegacyRequestFn,
     });
@@ -545,7 +528,6 @@ describe("createMcpRequestHandler", () => {
       allowLocalOperator: true,
       modernHandler,
       legacyHandler,
-      toolCount: 66,
       toWebRequestFn,
       isLegacyRequestFn,
     });
@@ -587,7 +569,6 @@ describe("createMcpRequestHandler", () => {
         allowLocalOperator: true,
         modernHandler,
         legacyHandler,
-        toolCount: 66,
         toWebRequestFn,
         isLegacyRequestFn,
         onError,
@@ -617,7 +598,6 @@ describe("createMcpRequestHandler", () => {
         allowLocalOperator: true,
         modernHandler: vi.fn(),
         legacyHandler,
-        toolCount: 66,
         onError,
       });
       const res = mockRes();
@@ -640,7 +620,6 @@ describe("createMcpRequestHandler", () => {
         allowLocalOperator: true,
         modernHandler,
         legacyHandler,
-        toolCount: 66,
         toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
         isLegacyRequestFn: async () => true,
         onError,
@@ -668,7 +647,6 @@ describe("createMcpRequestHandler", () => {
         allowLocalOperator: true,
         modernHandler,
         legacyHandler,
-        toolCount: 66,
         toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
         isLegacyRequestFn: async () => true,
       });
@@ -695,7 +673,6 @@ describe("createMcpRequestHandler", () => {
         allowLocalOperator: true,
         modernHandler,
         legacyHandler,
-        toolCount: 66,
         toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
         isLegacyRequestFn: async () => false,
       });
@@ -720,7 +697,6 @@ describe("createMcpRequestHandler", () => {
       expect(() => createMcpRequestHandler({
         checkAuth: () => true,
         allowLocalOperator: true,
-        toolCount: 66,
         ...handlers,
       })).toThrow(/modernHandler and legacyHandler must be configured together/);
     });
@@ -742,7 +718,6 @@ describe("createMcpRequestHandler", () => {
         allowLocalOperator: true,
         modernHandler: vi.fn(),
         legacyHandler: vi.fn(),
-        toolCount: 66,
         [name]: null,
       })).toThrow(new RegExp(`${name} must be a function`));
     });
@@ -753,7 +728,6 @@ describe("createMcpRequestHandler", () => {
         allowLocalOperator: true,
         modernHandler: vi.fn(),
         legacyHandler: vi.fn(),
-        toolCount: 66,
         [name]: true,
       })).toThrow(new RegExp(`${name} must be a function`));
     });
@@ -770,7 +744,6 @@ describe("createMcpRequestHandler", () => {
         allowLocalOperator: true,
         modernHandler,
         legacyHandler,
-        toolCount: 66,
         maxBodyBytes: 8,
       });
       const res = mockRes();
@@ -791,7 +764,6 @@ describe("createMcpRequestHandler", () => {
         allowLocalOperator: true,
         modernHandler,
         legacyHandler,
-        toolCount: 66,
         maxBodyBytes: 8,
       });
       const res = mockRes();
@@ -812,7 +784,6 @@ describe("createMcpRequestHandler", () => {
         allowLocalOperator: true,
         modernHandler,
         legacyHandler,
-        toolCount: 66,
       });
       const res = mockRes();
 
@@ -832,7 +803,6 @@ describe("createMcpRequestHandler", () => {
         allowLocalOperator: true,
         modernHandler: vi.fn(async (_req, res) => res.writeHead(200).end("modern")),
         legacyHandler: vi.fn(async (_req, res) => res.writeHead(200).end("legacy")),
-        toolCount: 66,
         toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
         isLegacyRequestFn: async () => false,
         allowedOrigins: ["https://app.example.com"],
@@ -847,7 +817,6 @@ describe("createMcpRequestHandler", () => {
         checkAuth: () => false,
         modernHandler,
         legacyHandler,
-        toolCount: 66,
         allowedOrigins: ["https://app.example.com"],
       });
       for (const method of ["GET", "DELETE"]) {
@@ -917,7 +886,6 @@ describe("createMcpRequestHandler", () => {
         checkAuth: () => false,
         modernHandler,
         legacyHandler: vi.fn(),
-        toolCount: 66,
         allowedHosts: ["mcp.example.com"],
         resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource/mcp",
       });
@@ -1031,25 +999,28 @@ describe("createLegacySessionHandler", () => {
     return { method, url: "/mcp", headers, mcpIdentity: identity };
   }
 
-  function setup(mode = "serve") {
+  function setup(mode = "serve", extras = {}) {
     const sessions = new Map();
     const server = { connect: vi.fn(async () => {}) };
     const buildServer = vi.fn(() => server);
-    let transport;
+    const transports = [];
+    let n = 0;
     const transportFactory = vi.fn((options) => {
-      transport = {
+      const id = `legacy-${++n}`;
+      const transport = {
         sessionId: undefined,
         close: vi.fn(async () => {
           transport.onclose?.();
         }),
         handleRequest: vi.fn(async (_req, res, body) => {
           if (body?.method === "initialize") {
-            transport.sessionId = "legacy-1";
-            options.onsessioninitialized("legacy-1");
+            transport.sessionId = id;
+            options.onsessioninitialized(id);
           }
           res.writeHead(200).end("legacy");
         }),
       };
+      transports.push(transport);
       return transport;
     });
     const handler = createLegacySessionHandler({
@@ -1057,8 +1028,17 @@ describe("createLegacySessionHandler", () => {
       sessions,
       mode,
       transportFactory,
+      ...extras,
     });
-    return { handler, sessions, server, buildServer, transportFactory, get transport() { return transport; } };
+    return {
+      handler,
+      sessions,
+      server,
+      buildServer,
+      transportFactory,
+      transports,
+      get transport() { return transports[transports.length - 1]; },
+    };
   }
 
   it("creates a session only for initialize and reuses it for later requests", async () => {
@@ -1071,6 +1051,7 @@ describe("createLegacySessionHandler", () => {
     expect(state.sessions.get("legacy-1")).toEqual({
       transport: state.transport,
       principalKey: "local-operator",
+      lastUsed: expect.any(Number),
     });
 
     const reused = mockRes();
@@ -1147,5 +1128,74 @@ describe("createLegacySessionHandler", () => {
     await state.handler(identReq("GET", { "mcp-session-id": "legacy-1" }), get);
     expect(get.statusCode).toBe(405);
     expect(state.transportFactory).not.toHaveBeenCalled();
+  });
+
+  it("defaults to the 128 session cap used by the server-tools cache", () => {
+    expect(LEGACY_SESSION_CAP).toBe(128);
+  });
+
+  it("throws at construction when maxSessions is not a positive integer", () => {
+    expect(() => createLegacySessionHandler({
+      buildServer: vi.fn(),
+      maxSessions: 0,
+    })).toThrow(/maxSessions must be a positive integer/);
+  });
+
+  it("evicts the least-recently-used session when the cap is reached", async () => {
+    let t = 0;
+    const state = setup("serve", { maxSessions: 2, idleMs: 60_000, now: () => ++t });
+    await state.handler(identReq("POST"), mockRes(), initialize);
+    await state.handler(identReq("POST"), mockRes(), initialize);
+    expect([...state.sessions.keys()]).toEqual(["legacy-1", "legacy-2"]);
+
+    await state.handler(identReq("POST"), mockRes(), initialize);
+    expect([...state.sessions.keys()]).toEqual(["legacy-2", "legacy-3"]);
+    expect(state.transports[0].close).toHaveBeenCalled();
+
+    const stale = mockRes();
+    await state.handler(identReq("POST", { "mcp-session-id": "legacy-1" }), stale, {
+      jsonrpc: "2.0", id: 9, method: "tools/list",
+    });
+    expect(stale.statusCode).toBe(404);
+  });
+
+  it("keeps a reused session when a later initialize hits the cap", async () => {
+    let t = 0;
+    const state = setup("serve", { maxSessions: 2, idleMs: 60_000, now: () => ++t });
+    await state.handler(identReq("POST"), mockRes(), initialize);
+    await state.handler(identReq("POST"), mockRes(), initialize);
+    await state.handler(identReq("POST", { "mcp-session-id": "legacy-1" }), mockRes(), {
+      jsonrpc: "2.0", id: 2, method: "tools/list",
+    });
+    await state.handler(identReq("POST"), mockRes(), initialize);
+    expect([...state.sessions.keys()]).toEqual(["legacy-1", "legacy-3"]);
+    expect(state.transports[1].close).toHaveBeenCalled();
+  });
+
+  it("evicts an idle session on the next request", async () => {
+    let t = 1_000;
+    const state = setup("serve", { maxSessions: 8, idleMs: 100, now: () => t });
+    await state.handler(identReq("POST"), mockRes(), initialize);
+    expect(state.sessions.has("legacy-1")).toBe(true);
+
+    t = 1_101;
+    const stale = mockRes();
+    await state.handler(identReq("POST", { "mcp-session-id": "legacy-1" }), stale, {
+      jsonrpc: "2.0", id: 2, method: "tools/list",
+    });
+    expect(stale.statusCode).toBe(404);
+    expect(state.sessions.has("legacy-1")).toBe(false);
+    expect(state.transports[0].close).toHaveBeenCalled();
+  });
+
+  it("close() terminates every leftover transport", async () => {
+    const state = setup();
+    await state.handler(identReq("POST"), mockRes(), initialize);
+    await state.handler(identReq("POST"), mockRes(), initialize);
+    expect(state.sessions.size).toBe(2);
+    await state.handler.close();
+    expect(state.sessions.size).toBe(0);
+    expect(state.transports[0].close).toHaveBeenCalled();
+    expect(state.transports[1].close).toHaveBeenCalled();
   });
 });
