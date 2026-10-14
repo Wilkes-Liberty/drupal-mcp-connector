@@ -39,6 +39,15 @@ jobs:
       - name: npm run check
         run: npm run check
 
+      # #464: a `uses:` ref that does not exist fails at "Set up job", and the
+      # release workflow is the first place some steps ever run. Resolve every
+      # action reference on the PR instead. Network-only; not part of
+      # `npm run check` so the release job never depends on the GitHub API.
+      - name: Resolve every workflow action reference
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run lint:actions
+
   # DEV-841: prove an rc cannot take npm/GHCR `latest`, and a final does.
   # Uses the same docker/metadata-action wiring as release.yml. Never publishes.
   release-channel:

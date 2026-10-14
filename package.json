@@ -59,6 +59,7 @@
     "install:commands": "node scripts/install-commands.js",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
+    "lint:actions": "node scripts/lint-actions.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:http": "node tests/evals/http/run-pack.js",

@@ -15,12 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--tag next`, are GitHub prereleases, and do not receive GHCR `:latest`
   / `:X` / `:X.Y`. A final `X.Y.Z` still takes `latest`. CI dry-runs both
   channels on every pull request (no publish).
-- **Release workflow pins an existing cosign-installer version.** The GHCR
-  image job referenced `sigstore/cosign-installer@v4`, a major tag that
+- **Release workflow pins an existing cosign-installer version (#464).** The
+  GHCR image job referenced `sigstore/cosign-installer@v4`, a major tag that
   upstream never published (only `v4.x.y` releases exist), so the v5.0.0
   tag published npm but failed before building the image. The step now pins
-  `v4.1.2`. The v5.0.0 image still has to be backfilled by running the
-  workflow's dispatch path against the existing tag once this lands.
+  the `v4.1.2` commit SHA with a version comment. The v5.0.0 image still has
+  to be backfilled by running the workflow's dispatch path against the
+  existing tag once this lands.
+- **CI resolves every workflow action reference on pull requests (#464).**
+  `npm run lint:actions` (`scripts/lint-actions.js`) reads each `uses:` in
+  `.github/workflows/*.yml` and checks the tag, branch, or commit exists on
+  GitHub; a SHA pin's `# vX.Y.Z` comment must point at that commit. The
+  required CI job runs it, so a reference that would fail at "Set up job"
+  fails on the pull request, not on the release tag.
 
 ## [5.0.0] - 2026-10-13
 
