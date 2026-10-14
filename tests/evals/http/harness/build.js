@@ -65,14 +65,13 @@ if (JSON.stringify(TOOL_DEFINITIONS.map((tool) => tool.name)) !== JSON.stringify
 function failOpenInboundAuthMode({
   bindHost,
   allowUnauth = false,
-  sharedToken = "",
   resourceServer = null,
 }) {
   const isLoopback = bindHost === "127.0.0.1" || bindHost === "::1" || bindHost === "localhost";
   const hasRs = Boolean(resourceServer?.issuer && resourceServer?.audience);
   if (hasRs) return { mode: "resource_server" };
   if (allowUnauth) return { mode: "unauthenticated" };
-  if (isLoopback) return sharedToken ? { mode: "shared_bearer" } : { mode: "unauthenticated" };
+  if (isLoopback) return { mode: "unauthenticated" };
   return { mode: "fatal", reason: "Network-facing HTTPS requires an inbound OAuth resource server." };
 }
 
@@ -342,7 +341,6 @@ export async function buildHarness({
     port: 0,
     allowHttp: true,
     allowUnauth: false,
-    sharedToken: "",
     inboundCfg,
     tls: null,
     buildServer,

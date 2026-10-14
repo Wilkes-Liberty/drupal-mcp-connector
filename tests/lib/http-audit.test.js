@@ -237,7 +237,6 @@ describe("createMcpRequestHandler audit finish hook", () => {
         checkAuth: () => false,
         modernHandler: vi.fn(),
         legacyHandler,
-        toolCount: 1,
         auditWriter: writer,
         ...overrides,
       }),

@@ -214,7 +214,7 @@ function createNodeServer({ onRequest, tls, allowHttp, exit, log }) {
  * @param {object} options.inboundCfg
  * @param {{certPath?: string, keyPath?: string}|null} [options.tls]
  * @param {Function} options.buildServer
- * @param {number} options.toolCount
+ * @param {number} [options.toolCount] Listen-line fallback when `listenLabel` is omitted.
  * @param {string} [options.legacyMode]
  * @param {?object} [options.rateLimiter] Per-address limiter (unauthenticated / failed-auth traffic).
  * @param {?object} [options.principalLimiter] Per-verified-principal limiter (DEV-860).
@@ -356,13 +356,14 @@ export async function startHttpsTransport({
     onerror: () => reportMcpTransportStage("modern-adapter"),
   }));
   const { sessionPrincipalKeyFn, ...handlerFns } = pickedOverrides;
-  const legacyHandler = wrapHandler(createLegacySessionHandler({
+  const legacySessionHandler = createLegacySessionHandler({
     buildServer,
     mode: legacyMode,
     // Pass every explicitly supplied value (including null) so the
     // handler's construction-time type check runs instead of the default.
     ...(sessionPrincipalKeyFn !== undefined ? { sessionPrincipalKeyFn } : {}),
-  }));
+  });
+  const legacyHandler = wrapHandler(legacySessionHandler);
 
   const requestHandler = wrapRequestHandler(createMcpRequestHandler({
     checkAuth,
@@ -372,7 +373,6 @@ export async function startHttpsTransport({
     allowLocalOperator,
     modernHandler,
     legacyHandler,
-    toolCount,
     rateLimiter,
     ...(principalLimiter !== undefined ? { principalLimiter } : {}),
     trustedProxies,
@@ -437,12 +437,47 @@ export async function startHttpsTransport({
     resourceMetadataUrl,
     close: async () => {
       await modernMcpHandler.close?.();
+      await legacySessionHandler.close?.();
       await new Promise((resolve) => {
         nodeServer.close(() => resolve());
         nodeServer.closeAllConnections?.();
       });
     },
   };
+}
+
+/**
+ * Register SIGTERM/SIGINT handlers that close the HTTPS transport: the
+ * modern handler, leftover 2025 session transports, and the Node server.
+ *
+ * @param {{close?: () => Promise<void>}|null|undefined} started
+ * @param {object} [hooks]
+ * @param {readonly string[]} [hooks.signals]
+ * @param {(signal: string, listener: Function) => void} [hooks.on]
+ * @param {(signal: string, listener: Function) => void} [hooks.off]
+ * @param {(code: number) => void} [hooks.exit]
+ * @returns {() => Promise<void>}
+ */
+export function installHttpsShutdown(started, {
+  signals = ["SIGTERM", "SIGINT"],
+  on = (signal, listener) => process.on(signal, listener),
+  off = (signal, listener) => process.off(signal, listener),
+  exit = (code) => process.exit(code),
+} = {}) {
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    for (const signal of signals) off(signal, shutdown);
+    try {
+      await started?.close?.();
+      exit(0);
+    } catch {
+      exit(1);
+    }
+  };
+  for (const signal of signals) on(signal, shutdown);
+  return shutdown;
 }
 
 /**

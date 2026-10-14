@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Hosted HTTP leftovers (nightly 2026-10-14).** Drop the unused
+  `toolCount` parameter on `createMcpRequestHandler` (`/health` is still
+  `{status: "ok"}` with no catalog). Bound the 2025 session map to 128
+  with idle eviction, matching the outbound server-tools cache. SIGTERM
+  and SIGINT close the modern handler, leftover 2025 transports, and the
+  listener. `MCP_TRANSPORT=http` is documented as an `https` alias
+  (removing it would break operators who already set it). The eval
+  harness no longer carries a dead `shared_bearer` inbound-mode arm.
+
 ### Fixed
 - **Image backfill works for tags cut before the release tooling.**
   A `workflow_dispatch` rebuild of `v5.0.0` failed at "Resolve image

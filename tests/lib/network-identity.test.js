@@ -59,7 +59,6 @@ function networkHandler(overrides = {}) {
     checkAuth: () => true,
     modernHandler: vi.fn(async (_req, res) => res.writeHead(200).end("modern")),
     legacyHandler: vi.fn(async (_req, res) => res.writeHead(200).end("legacy")),
-    toolCount: 66,
     toWebRequestFn: async () => new Request("http://127.0.0.1/mcp", { method: "POST" }),
     isLegacyRequestFn: async () => false,
     ...overrides,

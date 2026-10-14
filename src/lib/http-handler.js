@@ -37,12 +37,19 @@ import { LOCAL_OPERATOR, runWithIdentity } from "./principal.js";
  * Routes that may be reached without a resolved identity. Health is a mesh
  * liveness probe and must not expose tool data. RFC 9728 protected-resource
  * metadata must stay reachable so a client can discover how to authenticate.
- * Everything else fails closed with 401 (DEV-845).
+ * Everything else fails closed with 401 (DEV-845). Not exported: tests and
+ * evals go through {@link isUnauthenticatedRoute}.
  */
-export const UNAUTHENTICATED_ROUTES = Object.freeze([
+const UNAUTHENTICATED_ROUTES = Object.freeze([
   Object.freeze({ method: "GET", path: "/health" }),
   Object.freeze({ method: "GET", path: "/.well-known/oauth-protected-resource" }),
 ]);
+
+/** Same bound as the outbound server-tools session cache in server-tools.js. */
+export const LEGACY_SESSION_CAP = 128;
+
+/** Idle 2025 sessions are closed on the next request after this many ms. */
+export const LEGACY_SESSION_IDLE_MS = 30 * 60 * 1000;
 
 /** Single MCP endpoint path. Sessionless GET/DELETE are 405 after auth. */
 export const MCP_HTTP_PATH = "/mcp";
@@ -72,10 +79,17 @@ export function sessionlessMethodRefused(method, sessionId) {
  */
 export function isUnauthenticatedRoute(method, url) {
   const path = String(url || "").split("?")[0];
-  if (method !== "GET") return false;
-  if (path === "/health") return true;
-  return path === "/.well-known/oauth-protected-resource"
-    || path.startsWith("/.well-known/oauth-protected-resource/");
+  for (const route of UNAUTHENTICATED_ROUTES) {
+    if (route.method !== method) continue;
+    if (path === route.path) return true;
+    if (
+      route.path === "/.well-known/oauth-protected-resource"
+      && path.startsWith(`${route.path}/`)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function refuseUnresolvedIdentity(res, resourceMetadataUrl) {
@@ -170,6 +184,13 @@ async function readJsonBody(req, maxBodyBytes) {
 /**
  * Build the bounded 2025-era sessionful transport arm.
  *
+ * The map is capped at {@link LEGACY_SESSION_CAP} (128, the same bound as
+ * the outbound server-tools cache). Sessions idle longer than
+ * {@link LEGACY_SESSION_IDLE_MS} are closed on the next request. A new
+ * session that would exceed the cap closes the least-recently-used entry
+ * first (Map insertion order, refreshed on use). `handler.close()` closes
+ * every remaining transport.
+ *
  * @param {object} deps
  * @param {(ctx: {era: "legacy"}) => object|Promise<object>} deps.buildServer
  * @param {Map<string, object>} [deps.sessions]
@@ -177,6 +198,9 @@ async function readJsonBody(req, maxBodyBytes) {
  * @param {(options: object) => object} [deps.transportFactory]
  * @param {(identity: object|null|undefined) => ?string} [deps.sessionPrincipalKeyFn]
  *   Injectable principal binder (eval mutants swap this).
+ * @param {number} [deps.maxSessions=128] Hard cap (tests inject a smaller one).
+ * @param {number} [deps.idleMs] Idle TTL in ms (tests inject a shorter one).
+ * @param {() => number} [deps.now] Clock (tests inject a fake).
  * @returns {(req: import("http").IncomingMessage, res: import("http").ServerResponse, body?: unknown) => Promise<void>}
  */
 export function createLegacySessionHandler({
@@ -185,12 +209,18 @@ export function createLegacySessionHandler({
   mode = "serve",
   transportFactory = (options) => new NodeStreamableHTTPServerTransport(options),
   sessionPrincipalKeyFn = sessionPrincipalKey,
+  maxSessions = LEGACY_SESSION_CAP,
+  idleMs = LEGACY_SESSION_IDLE_MS,
+  now = Date.now,
 }) {
   if (mode !== "serve" && mode !== "reject") {
     throw new Error(`Invalid legacy MCP transport mode: "${mode}". Use "serve" or "reject".`);
   }
   if (typeof sessionPrincipalKeyFn !== "function") {
     throw new Error("sessionPrincipalKeyFn must be a function");
+  }
+  if (!Number.isInteger(maxSessions) || maxSessions < 1) {
+    throw new Error("maxSessions must be a positive integer");
   }
 
   function methodNotAllowed(res) {
@@ -208,14 +238,49 @@ export function createLegacySessionHandler({
     }
   }
 
+  /**
+   * Drop sessions whose last use is older than the idle TTL. Mirrors the
+   * server-tools cache: the map never holds abandoned ids forever.
+   */
+  async function evictIdle() {
+    if (!Number.isFinite(idleMs) || idleMs < 0) return;
+    const cutoff = now() - idleMs;
+    for (const [id, session] of [...sessions.entries()]) {
+      if ((session.lastUsed ?? 0) <= cutoff) {
+        await closeSession(session, id);
+      }
+    }
+  }
+
+  /**
+   * Evict the least-recently-used entry until there is room (server-tools.js
+   * drops `sessions.keys().next()` at 128).
+   */
+  async function evictForCapacity() {
+    while (sessions.size >= maxSessions) {
+      const oldestId = sessions.keys().next().value;
+      if (oldestId === undefined) break;
+      await closeSession(sessions.get(oldestId), oldestId);
+    }
+  }
+
+  function touch(sessionId, session) {
+    session.lastUsed = now();
+    sessions.delete(sessionId);
+    sessions.set(sessionId, session);
+  }
+
   async function openSession(identity) {
     const principalKey = sessionPrincipalKeyFn(identity);
     if (!principalKey) {
       throw new McpHttpClientError(403, "Session cannot be bound to this principal");
     }
+    await evictForCapacity();
     const transport = transportFactory({
       sessionIdGenerator: randomUUID,
-      onsessioninitialized: (id) => sessions.set(id, { transport, principalKey }),
+      onsessioninitialized: (id) => {
+        sessions.set(id, { transport, principalKey, lastUsed: now() });
+      },
     });
     transport.onclose = () => {
       if (transport.sessionId) sessions.delete(transport.sessionId);
@@ -225,7 +290,7 @@ export function createLegacySessionHandler({
     return transport;
   }
 
-  return async function handleLegacy(req, res, body) {
+  async function handleLegacy(req, res, body) {
     if (mode === "reject") {
       if (req.method === "GET" || req.method === "DELETE") {
         methodNotAllowed(res);
@@ -234,6 +299,8 @@ export function createLegacySessionHandler({
       res.writeHead(400).end("Legacy MCP transport is disabled");
       return;
     }
+
+    await evictIdle();
 
     const sessionId = req.headers["mcp-session-id"];
     const principalKey = sessionPrincipalKeyFn(req.mcpIdentity);
@@ -253,6 +320,7 @@ export function createLegacySessionHandler({
         if (!res.headersSent) res.writeHead(200).end();
         return;
       }
+      touch(sessionId, session);
       await session.transport.handleRequest(req, res, body);
       return;
     }
@@ -274,7 +342,15 @@ export function createLegacySessionHandler({
 
     const transport = await openSession(req.mcpIdentity);
     await transport.handleRequest(req, res, body);
+  }
+
+  handleLegacy.close = async () => {
+    for (const [id, session] of [...sessions.entries()]) {
+      await closeSession(session, id);
+    }
   };
+
+  return handleLegacy;
 }
 
 /**
@@ -311,8 +387,6 @@ export function createLegacySessionHandler({
  * @param {object|null} [deps.protectedResource] RFC 9728 metadata served unauthenticated.
  * @param {string} [deps.resourceMetadataUrl] RFC 9728 metadata URL included
  *   on every 401 challenge (DEV-877).
- * @param {number} [deps.toolCount] Ignored; retained so existing call sites
- *   keep compiling. `/health` no longer exposes a tool count.
  * @param {(req: object, res: object, body?: unknown) => Promise<void>} deps.modernHandler
  * @param {(req: object, res: object, body?: unknown) => Promise<void>} deps.legacyHandler
  * @param {?{check: (key: string) => {allowed: boolean, retryAfterSec: number}, peek?: (key: string) => {allowed: boolean, retryAfterSec: number}}} [deps.rateLimiter]
@@ -363,7 +437,6 @@ export function createMcpRequestHandler({
   allowLocalOperator = false,
   protectedResource = null,
   resourceMetadataUrl,
-  toolCount: _toolCount,
   modernHandler = null,
   legacyHandler = null,
   rateLimiter = null,

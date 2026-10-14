@@ -51,7 +51,6 @@ async function startServer({ onToolCall = () => {}, onBuild = () => {}, legacyMo
     allowLocalOperator: true,
     modernHandler: toNodeHandler(modernMcpHandler),
     legacyHandler: createLegacySessionHandler({ buildServer, mode: legacyMode }),
-    toolCount: 1,
   });
   const server = createServer((req, res) => { void handler(req, res); });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

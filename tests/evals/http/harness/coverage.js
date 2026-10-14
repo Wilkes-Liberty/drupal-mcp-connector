@@ -2,7 +2,7 @@
  * a-5 live coverage pin.
  *
  * Expected tools come from `allDefinitions` (the connector tool registry).
- * Expected routes come from the transport tables (`UNAUTHENTICATED_ROUTES`,
+ * Expected routes come from the transport tables (`isUnauthenticatedRoute()`,
  * `MCP_HTTP_METHODS` × `MCP_HTTP_PATH`, `EDGE_NORTHBOUND_AUX_ROUTES`).
  * Neither set is hand-copied here.
  *
@@ -18,7 +18,13 @@ import { httpHandler, relayEdge, tools } from "./connector.js";
 // Inventory the selected source tree (EVAL_HTTP_SRC), never the checkout,
 // so a route or registry mutation in the target cannot evade the pin.
 const { allDefinitions } = tools;
-const { MCP_HTTP_METHODS, MCP_HTTP_PATH, UNAUTHENTICATED_ROUTES } = httpHandler;
+const { MCP_HTTP_METHODS, MCP_HTTP_PATH, isUnauthenticatedRoute } = httpHandler;
+
+/** Public GET paths the coverage pin asks {@link isUnauthenticatedRoute} about. */
+const PUBLIC_GET_CANDIDATES = Object.freeze([
+  "/health",
+  "/.well-known/oauth-protected-resource",
+]);
 const { EDGE_NORTHBOUND_AUX_ROUTES } = relayEdge;
 
 /** Synthetic name used only by the Ta5-add-orphan mutant. Not a real tool. */
@@ -43,7 +49,9 @@ export function liveTools() {
  */
 export function liveRoutes() {
   const routes = [
-    ...UNAUTHENTICATED_ROUTES.map((route) => `${route.method} ${route.path}`),
+    ...PUBLIC_GET_CANDIDATES
+      .filter((path) => isUnauthenticatedRoute("GET", path))
+      .map((path) => `GET ${path}`),
     ...MCP_HTTP_METHODS.map((method) => `${method} ${MCP_HTTP_PATH}`),
     ...EDGE_NORTHBOUND_AUX_ROUTES.map((route) => `${route.method} ${route.path}`),
   ];

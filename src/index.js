@@ -6,9 +6,11 @@
  *   stdio (default)   Local subprocess mode for MCP clients
  *   https             Multi-client remote mode. HTTPS always; HTTP refused on
  *                     non-localhost unless MCP_ALLOW_HTTP=1 is explicitly set.
+ *   http              Alias of `https` (accepted since before 5.0.0). Same TLS
+ *                     rules — this is not a cleartext transport.
  *
  * Environment variables:
- *   MCP_TRANSPORT     "stdio" (default) | "https"
+ *   MCP_TRANSPORT     "stdio" (default) | "https" | "http" (https alias)
  *   MCP_PORT          Port for HTTPS mode (default: 3443)
  *   TLS_CERT_PATH     Path to TLS certificate (PEM)
  *   TLS_KEY_PATH      Path to TLS private key (PEM)
@@ -49,7 +51,7 @@ import {
   resolveInboundAuthConfig,
   isLoopbackBind,
 } from "./lib/http-auth.js";
-import { createStartupRateLimiters, startHttpsTransport } from "./lib/https-startup.js";
+import { createStartupRateLimiters, installHttpsShutdown, startHttpsTransport } from "./lib/https-startup.js";
 import { createConnectorServerFactory } from "./lib/mcp-server.js";
 import { resolveTrustedProxies } from "./lib/client-address.js";
 import { assertHostedToolScopeTable } from "./lib/tool-scopes.js";
@@ -306,7 +308,7 @@ if (transport === "stdio") {
     );
   }
 
-  await startHttpsTransport({
+  const started = await startHttpsTransport({
     bindHost,
     port: tlsCfg.port,
     allowHttp,
@@ -315,15 +317,15 @@ if (transport === "stdio") {
     inboundCfg,
     tls: hasTls ? { certPath: tlsCfg.certPath, keyPath: tlsCfg.keyPath } : null,
     buildServer: buildConnectorServer,
-    toolCount: allDefinitions.length,
     listenLabel: `${allDefinitions.length} tools · ${RESOURCES.length} resources · ${ALL_PROMPTS.length} prompts`,
     legacyMode: process.env.MCP_LEGACY_TRANSPORT || "serve",
     rateLimiter: limits.rateLimiter,
     principalLimiter: limits.principalLimiter,
     trustedProxies,
   });
+  installHttpsShutdown(started);
 
 } else {
-  console.error(`[drupal-mcp-connector] Unknown MCP_TRANSPORT: "${transport}". Use "stdio" or "https".`);
+  console.error(`[drupal-mcp-connector] Unknown MCP_TRANSPORT: "${transport}". Use "stdio", "https", or "http" (https alias).`);
   process.exit(1);
 }

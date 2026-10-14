@@ -1,8 +1,12 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { NON_LOOPBACK_UNAUTHENTICATED_REASON } from "../../src/lib/http-auth.js";
-import { createStartupRateLimiters, startHttpsTransport } from "../../src/lib/https-startup.js";
+import {
+  createStartupRateLimiters,
+  installHttpsShutdown,
+  startHttpsTransport,
+} from "../../src/lib/https-startup.js";
 import { createConnectorServerFactory } from "../../src/lib/mcp-server.js";
 
 const INDEX_PATH = fileURLToPath(new URL("../../src/index.js", import.meta.url));
@@ -293,6 +297,63 @@ describe("startHttpsTransport", () => {
     await expect(baseStartup({ handlerOverrides: { sessionPrincipalKeyFn: "nope" } }))
       .rejects.toThrow(/sessionPrincipalKeyFn must be a function/);
   });
+
+  it("close() closes leftover 2025 transports and stops the server", async () => {
+    let rawLegacy;
+    const result = await baseStartup({
+      wrapHandler: (handler) => {
+        if (typeof handler.close === "function") rawLegacy = handler;
+        return handler;
+      },
+    });
+    expect(result.started).toBe(true);
+    const closeSpy = vi.spyOn(rawLegacy, "close");
+    await result.close();
+    expect(closeSpy).toHaveBeenCalledOnce();
+    expect(result.server.listening).toBe(false);
+  });
+});
+
+describe("installHttpsShutdown", () => {
+  it("closes the transport then exits 0 on SIGTERM and ignores a second signal", async () => {
+    const listeners = {};
+    const closed = [];
+    const exits = [];
+    installHttpsShutdown(
+      { close: async () => { closed.push(true); } },
+      {
+        on: (signal, fn) => { listeners[signal] = fn; },
+        off: (signal, fn) => {
+          if (listeners[signal] === fn) delete listeners[signal];
+        },
+        exit: (code) => { exits.push(code); },
+      },
+    );
+    expect(Object.keys(listeners).sort()).toEqual(["SIGINT", "SIGTERM"]);
+    const shutdown = listeners.SIGTERM;
+    await shutdown();
+    expect(closed).toEqual([true]);
+    expect(exits).toEqual([0]);
+    expect(listeners).toEqual({});
+    await shutdown();
+    expect(closed).toEqual([true]);
+    expect(exits).toEqual([0]);
+  });
+
+  it("exits 1 when close() rejects", async () => {
+    const listeners = {};
+    const exits = [];
+    installHttpsShutdown(
+      { close: async () => { throw new Error("close failed"); } },
+      {
+        on: (signal, fn) => { listeners[signal] = fn; },
+        off: () => {},
+        exit: (code) => { exits.push(code); },
+      },
+    );
+    await listeners.SIGINT();
+    expect(exits).toEqual([1]);
+  });
 });
 
 describe("src/index.js production startup call", () => {
@@ -332,6 +393,14 @@ describe("src/index.js production startup call", () => {
     expect(callBlock).toMatch(/limits\.principalLimit/);
     expect(callBlock).toMatch(/limits\.windowSec/);
     expect(callBlock).not.toMatch(/MCP_RATE_LIMIT/);
+  });
+
+  it("registers graceful HTTPS shutdown and documents the http transport alias", () => {
+    const source = indexSource();
+    expect(source).toMatch(/installHttpsShutdown\(started\)/);
+    expect(source).toMatch(/"http" \(https alias\)/);
+    expect(startHttpsTransportCall(source)).not.toMatch(/toolCount/);
+    expect(source).toMatch(/Alias of `https`/);
   });
 });
 
