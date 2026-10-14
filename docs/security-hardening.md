@@ -132,6 +132,16 @@ listener.
 not expose a tool catalog. Missing a required scope is `403` with
 `error="insufficient_scope"`.
 
+`GET /ready` and `GET /metrics` are not served on the public listener
+(normal `401` or `404`). They exist only when `MCP_OPS_LISTEN` / `ops.listen`
+is set, on a second socket that may bind loopback or Tailscale
+(`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) only — `0.0.0.0`, `::`, and any
+other public or non-mesh address are fatal (DEV-863). `/ready` is `200`
+only when introspection (or inbound auth) is reachable and the hosted
+scope table plus allowlists are complete; otherwise `503` names the
+failing checks and never includes secrets. `/metrics` is Prometheus text
+with no principals, subjects, client ids, tokens, tenants, or IPs.
+
 The inbound access token is never forwarded to Drupal. Outbound Drupal
 credentials stay the per-site OAuth client or `apiTokenEnv`.
 

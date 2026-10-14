@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Mesh-only readiness and metrics listener (DEV-863).** Disabled by
+  default. Set `MCP_OPS_LISTEN=<addr:port>` (or `ops.listen`) to bind a
+  second socket that serves `GET /ready` and `GET /metrics`. The bind may
+  be loopback or a Tailscale address (`100.64.0.0/10`,
+  `fd7a:115c:a1e0::/48`) only; `0.0.0.0`, `::`, and any other public or
+  non-mesh address are fatal at startup. `/ready` checks introspection
+  reachability (bounded timeout) and config completeness (hosted scope
+  table and allowlists): 200 only when every check passes, otherwise 503
+  naming the failing checks and no secrets. `/metrics` is Prometheus text
+  for request counts by route and status, deny counts by reason, 401 /
+  403 / 429 counts, rate-limit buckets in use, and in-flight requests,
+  with no principals, subjects, client ids, tokens, tenants, or IPs. The
+  public listener does not serve these paths (normal 401 or 404).
+  `GET /health` is unchanged.
+
 ### Changed
 - **Hosted HTTP leftovers (nightly 2026-10-14).** Drop the unused
   `toolCount` parameter on `createMcpRequestHandler` (`/health` is still

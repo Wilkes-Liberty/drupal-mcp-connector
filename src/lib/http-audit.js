@@ -161,6 +161,26 @@ export function markHttpAuditHostRefused(req) {
 }
 
 /**
+ * Whether the handler marked this request as an Origin refusal (DEV-861).
+ *
+ * @param {import("http").IncomingMessage} req
+ * @returns {boolean}
+ */
+export function httpAuditOriginDenied(req) {
+  return Boolean(req && ORIGIN_REFUSED.has(req));
+}
+
+/**
+ * Whether the handler marked this request as a Host refusal (DEV-861).
+ *
+ * @param {import("http").IncomingMessage} req
+ * @returns {boolean}
+ */
+export function httpAuditHostDenied(req) {
+  return Boolean(req && HOST_REFUSED.has(req));
+}
+
+/**
  * Record the tenant a route resolved for this request so the row carries it
  * even when the identity object has no `tenant` field.
  *
