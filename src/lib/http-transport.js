@@ -51,9 +51,10 @@ export const CURSOR_WWW_BROWSER_ORIGIN = "https://www.cursor.com";
 /**
  * Documented Cursor browser origins for operators to copy into
  * `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS`. Not applied automatically —
- * an omitted or empty list refuses every present Origin (fail closed).
- * Grok Bot's distinct Origin is not verified; add it via config or env
- * once confirmed.
+ * an omitted or empty extra list refuses every present third-party Origin
+ * (fail closed). The origin of `auth.resource` / `auth.audience` is still
+ * auto-included (same-origin). Grok Bot's distinct Origin is not verified;
+ * add it via config or env once confirmed.
  *
  * @type {readonly string[]}
  */
@@ -101,11 +102,12 @@ export function parseOriginList(value) {
 /**
  * Resolve the configured Origin list before normalization (DEV-953).
  *
- * Fail closed: an omitted or empty config list is empty. A present
- * `envValue` (`MCP_ALLOWED_ORIGINS`) replaces config, including an empty
- * string. Values are not normalized here — {@link resolveAllowedOrigins}
- * does that. Matching is exact origin strings only; there is no wildcard
- * path and no implicit Cursor default.
+ * Fail closed for extra Origins: an omitted or empty config list is empty.
+ * A present `envValue` (`MCP_ALLOWED_ORIGINS`) replaces config, including
+ * an empty string. Values are not normalized here —
+ * {@link resolveAllowedOrigins} then adds the resource/audience origin.
+ * Matching is exact origin strings only; there is no wildcard path and no
+ * implicit Cursor default.
  *
  * @param {unknown} configured `auth.allowedOrigins` (array or string).
  * @param {unknown} [envValue] Raw `MCP_ALLOWED_ORIGINS` when the env key is present.
@@ -119,10 +121,11 @@ export function resolveConfiguredOrigins(configured, envValue) {
 }
 
 /**
- * Build the Origin allowlist. Env/config entries are normalized; the origin
- * of `resource` (or `audience`) is always included when it is an absolute
- * http(s) URL so a same-origin browser client works without extra config.
- * An empty configured list stays empty aside from that resource origin.
+ * Build the Origin allowlist. Env/config extra entries are normalized; the
+ * origin of `resource` (or `audience`) is always included when it is an
+ * absolute http(s) URL so a same-origin browser client works without extra
+ * config. An empty extra list therefore still allows that resource origin
+ * and refuses every other present Origin.
  *
  * @param {object} [options]
  * @param {unknown} [options.allowedOrigins]
@@ -146,8 +149,9 @@ export function resolveAllowedOrigins({
 }
 
 /**
- * DNS-rebinding guard. A missing Origin is allowed (non-browser clients such
- * as Cursor and Grok Bot typically omit it). A present Origin must be an
+ * DNS-rebinding / browser Origin guard. This is not authentication. A
+ * missing Origin is allowed by design so non-browser clients (desktop
+ * Cursor, Grok Bot, curl, CI) can connect. A present Origin must be an
  * exact allowlist entry after {@link normalizeOrigin} — `https://cursor.com`
  * does not match `http://cursor.com`, `https://www.cursor.com.evil.example`,
  * or `https://cursor.com.evil.example`.

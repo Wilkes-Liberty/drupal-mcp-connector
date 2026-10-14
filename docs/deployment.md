@@ -29,7 +29,7 @@ service, port, or token; see [mcp-clients.md](mcp-clients.md).
 | `MCP_BIND_HOST` | Restrict the listen interface (with TLS) |
 | `MCP_PORT` | Listen port (default 3443) |
 | `MCP_LEGACY_TRANSPORT` | `serve` (default) or `reject` for 2025-era HTTP clients |
-| `MCP_ALLOWED_ORIGINS` | Comma/space-separated exact Origin allowlist for Streamable HTTP DNS-rebinding protection (no wildcards). Omitted/empty config refuses every present Origin; a present empty value clears the list |
+| `MCP_ALLOWED_ORIGINS` | Comma/space-separated exact Origin allowlist for Streamable HTTP DNS-rebinding protection (no wildcards; not authentication). A missing `Origin` is allowed for non-browser clients. Omitted/empty extra list refuses every present third-party Origin; the origin of `auth.resource` / `auth.audience` is still auto-included (same-origin). A present empty value clears the extra list |
 
 Provide the Drupal connection via a mounted `config/config.json` or the
 single-site `DRUPAL_*` env vars. Keep all secrets out of config files and images

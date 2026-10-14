@@ -892,7 +892,7 @@ describe("createMcpRequestHandler", () => {
       expect(legacyHandler).not.toHaveBeenCalled();
     });
 
-    it("refuses every present Origin when the allowlist is empty (DEV-953)", async () => {
+    it("refuses every present Origin when the handler allowlist is empty (DEV-953)", async () => {
       const modernHandler = vi.fn();
       const legacyHandler = vi.fn();
       const h = authed({

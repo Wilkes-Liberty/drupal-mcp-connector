@@ -32,9 +32,13 @@
  *                     (default: empty — trust none)
  *   MCP_LEGACY_TRANSPORT "serve" (default) | "reject" for 2025-era clients
  *   MCP_ALLOWED_ORIGINS Comma/space-separated Origin allowlist (DNS-rebinding);
- *                     exact https origins only, no wildcards. Omitted/empty
- *                     config refuses every present Origin (DEV-953). A
- *                     present empty value clears the list.
+ *                     exact https origins only, no wildcards. Not
+ *                     authentication: a missing Origin is allowed for
+ *                     non-browser clients. Omitted/empty extra list refuses
+ *                     every present third-party Origin (DEV-953); the
+ *                     origin of auth.resource/audience is still included
+ *                     (same-origin). A present empty value clears the
+ *                     extra list.
  *   MCP_ALLOWED_HOSTS   Comma/space-separated Host allowlist (DEV-861);
  *                     a present empty value clears the configured list.
  *                     Default: host of auth.resource/audience, plus loopback
