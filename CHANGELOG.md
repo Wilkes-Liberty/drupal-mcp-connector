@@ -43,15 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   harness no longer carries a dead `shared_bearer` inbound-mode arm.
 
 ### Fixed
-- **Hosted Origin allowlist includes Cursor (DEV-953).** When
-  `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS` is omitted or empty, the
-  Streamable HTTP allowlist defaults to the exact origin `https://cursor.com`.
-  `OPTIONS` and `POST` `/mcp` with that Origin pass the Origin check; lookalikes
-  such as `https://cursor.com.evil.example` and `http://cursor.com` still
-  receive 403 (`bad_origin` on the audit row). Grok Bot's distinct browser
-  Origin is not verified here — add it via config or env once confirmed. A
-  present `MCP_ALLOWED_ORIGINS`, including empty, still replaces the list.
-  Missing identity is still 401 before dispatch.
+- **Hosted Origin allowlist is fail-closed and names both Cursor origins
+  (DEV-953).** `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS` is exact-match
+  only. An omitted or empty list refuses every present browser Origin.
+  `config/config.example.json` lists `https://cursor.com` and
+  `https://www.cursor.com` (Cursor's documented OAuth callback host).
+  Lookalikes such as `https://www.cursor.com.evil.example` and
+  `http://cursor.com` still receive 403 (`bad_origin` on the audit row).
+  Grok Bot's distinct browser Origin is not verified — add it via config or
+  env once confirmed. A present `MCP_ALLOWED_ORIGINS`, including empty, still
+  replaces the list. Missing identity is still 401 before dispatch.
 
 - **Introspection cannot be turned off from the environment (DEV-844).**
   The hosted resource-server guard no longer reads `VITEST` or

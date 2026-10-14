@@ -852,19 +852,20 @@ describe("createMcpRequestHandler", () => {
       expect(allowed.statusCode).toBe(200);
     });
 
-    it("refuses Cursor lookalikes and lets a listed origin pass preflight and POST (DEV-953)", async () => {
+    it("refuses Cursor lookalikes and lets listed origins pass preflight and POST (DEV-953)", async () => {
       const modernHandler = vi.fn(async (_req, res) => res.writeHead(200).end("modern"));
       const legacyHandler = vi.fn();
       const h = authed({
         modernHandler,
         legacyHandler,
-        allowedOrigins: ["https://cursor.com"],
+        allowedOrigins: ["https://cursor.com", "https://www.cursor.com"],
       });
       for (const origin of [
         "https://cursor.com.evil.example",
+        "https://www.cursor.com.evil.example",
         "http://cursor.com",
+        "http://www.cursor.com",
         "https://evil.cursor.com",
-        "https://www.cursor.com",
       ]) {
         const res = mockRes();
         await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { origin }), res);
@@ -874,16 +875,38 @@ describe("createMcpRequestHandler", () => {
         expect(legacyHandler).not.toHaveBeenCalled();
       }
 
-      const preflight = mockRes();
-      await h(req("OPTIONS", "/mcp", { origin: "https://cursor.com" }), preflight);
-      expect(preflight.statusCode).not.toBe(403);
+      for (const origin of ["https://cursor.com", "https://www.cursor.com"]) {
+        const preflight = mockRes();
+        await h(req("OPTIONS", "/mcp", { origin }), preflight);
+        expect(preflight.statusCode, origin).not.toBe(403);
+      }
       expect(modernHandler).not.toHaveBeenCalled();
       expect(legacyHandler).not.toHaveBeenCalled();
 
-      const posted = mockRes();
-      await h(bodyReq({ jsonrpc: "2.0", id: 2, method: "tools/list" }, { origin: "https://cursor.com" }), posted);
-      expect(posted.statusCode).toBe(200);
-      expect(modernHandler).toHaveBeenCalledTimes(1);
+      for (const origin of ["https://cursor.com", "https://www.cursor.com"]) {
+        const posted = mockRes();
+        await h(bodyReq({ jsonrpc: "2.0", id: 2, method: "tools/list" }, { origin }), posted);
+        expect(posted.statusCode, origin).toBe(200);
+      }
+      expect(modernHandler).toHaveBeenCalledTimes(2);
+      expect(legacyHandler).not.toHaveBeenCalled();
+    });
+
+    it("refuses every present Origin when the allowlist is empty (DEV-953)", async () => {
+      const modernHandler = vi.fn();
+      const legacyHandler = vi.fn();
+      const h = authed({
+        modernHandler,
+        legacyHandler,
+        allowedOrigins: [],
+      });
+      for (const origin of ["https://cursor.com", "https://www.cursor.com"]) {
+        const res = mockRes();
+        await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { origin }), res);
+        expect(res.statusCode, origin).toBe(403);
+        expect(JSON.parse(res.body).error.message, origin).toMatch(/origin/i);
+      }
+      expect(modernHandler).not.toHaveBeenCalled();
       expect(legacyHandler).not.toHaveBeenCalled();
     });
 

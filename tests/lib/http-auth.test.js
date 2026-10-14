@@ -319,7 +319,7 @@ describe("resolveInboundAuthConfig", () => {
     expect(resolved.issuer).toBe("https://other.example.com");
     expect(resolved.audience).toBe("https://mcp.example.com/mcp");
     expect(resolved.resource).toBe("https://mcp.example.com/mcp");
-    expect(resolved.allowedOrigins).toEqual(["https://cursor.com"]);
+    expect(resolved.allowedOrigins).toEqual([]);
   });
 
   it("reads allowedOrigins from config and prefers MCP_ALLOWED_ORIGINS", () => {
@@ -352,11 +352,11 @@ describe("resolveInboundAuthConfig", () => {
     expect(cleared.allowedOrigins).toEqual([]);
   });
 
-  it("defaults omitted or empty allowedOrigins to the Cursor origin (DEV-953)", () => {
+  it("pins omitted or empty allowedOrigins to an empty list (DEV-953)", () => {
     const omitted = resolveInboundAuthConfig({
       auth: { issuer: "https://idp.example.com", audience: "https://mcp.example.com/mcp" },
     }, {});
-    expect(omitted.allowedOrigins).toEqual(["https://cursor.com"]);
+    expect(omitted.allowedOrigins).toEqual([]);
 
     const empty = resolveInboundAuthConfig({
       auth: {
@@ -365,7 +365,7 @@ describe("resolveInboundAuthConfig", () => {
         allowedOrigins: [],
       },
     }, {});
-    expect(empty.allowedOrigins).toEqual(["https://cursor.com"]);
+    expect(empty.allowedOrigins).toEqual([]);
   });
 
   it("reads allowedHosts from config and prefers MCP_ALLOWED_HOSTS", () => {

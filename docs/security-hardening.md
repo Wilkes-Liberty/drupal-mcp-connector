@@ -185,14 +185,15 @@ export MCP_ALLOWED_ORIGINS="https://app.example.com"
 allowlist. Matching is exact (`https://host[:port]` after URL normalization);
 there are no wildcards. A missing `Origin` is allowed (desktop Cursor, Grok
 Bot, and other non-browser clients typically omit it). A present `Origin`
-that is not on the list is `403` (`bad_origin` on the audit row). When the
-config/env list is omitted or empty, the default is the verified Cursor
-browser origin `https://cursor.com` (DEV-953). Lookalikes such as
-`http://cursor.com` or `https://cursor.com.evil.example` stay refused. Grok
-Bot's distinct browser Origin is not verified in this connector — add that
-exact origin via config or env once confirmed. A present `MCP_ALLOWED_ORIGINS`,
-including empty, replaces the list. The origin of `auth.resource` /
-`auth.audience` is always included.
+that is not on the list is `403` (`bad_origin` on the audit row). An omitted
+or empty list refuses every present Origin (fail closed, DEV-953). The
+example config lists `https://cursor.com` and `https://www.cursor.com`
+(Cursor's documented OAuth callback host). Lookalikes such as
+`http://cursor.com` or `https://www.cursor.com.evil.example` stay refused.
+Grok Bot's distinct browser Origin is not verified — add that exact origin
+via config or env once confirmed. A present `MCP_ALLOWED_ORIGINS`, including
+empty, replaces the list. The origin of `auth.resource` / `auth.audience` is
+always included.
 
 `auth.allowedHosts` / `MCP_ALLOWED_HOSTS` is the Host allowlist (DEV-861).
 After a resolved identity, a missing or disallowed `Host` is `403`. The

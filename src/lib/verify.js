@@ -94,11 +94,16 @@ const RESERVED_HOSTS = new Set([
   // Drupal project itself, not the tenant deploying it.
   "www.drupal.org",
   "drupal.org",
+  // Documented Streamable HTTP browser clients (DEV-953). These are not a
+  // tenant deployment; the example Origin allowlist names them explicitly.
+  "cursor.com",
+  "www.cursor.com",
 ]);
 
 /**
  * Whether a hostname is safe to ship in an example: reserved for documentation,
- * loopback, or public project infrastructure.
+ * loopback, public project infrastructure, or a documented browser-client
+ * Origin (DEV-953).
  * @param {string} host Hostname, without scheme or port.
  * @returns {boolean}
  */

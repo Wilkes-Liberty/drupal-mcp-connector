@@ -33,7 +33,7 @@
  *   MCP_LEGACY_TRANSPORT "serve" (default) | "reject" for 2025-era clients
  *   MCP_ALLOWED_ORIGINS Comma/space-separated Origin allowlist (DNS-rebinding);
  *                     exact https origins only, no wildcards. Omitted/empty
- *                     config defaults to https://cursor.com (DEV-953). A
+ *                     config refuses every present Origin (DEV-953). A
  *                     present empty value clears the list.
  *   MCP_ALLOWED_HOSTS   Comma/space-separated Host allowlist (DEV-861);
  *                     a present empty value clears the configured list.

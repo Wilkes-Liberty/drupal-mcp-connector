@@ -1053,9 +1053,8 @@ export function resolveInboundAuthConfig(cfg = {}, env = process.env) {
       env.MCP_MAX_TOKEN_LIFETIME || auth.maxTokenLifetime || DEFAULT_MAX_TOKEN_LIFETIME,
     ),
     algorithms: normalizeTokenAlgorithms(env.MCP_TOKEN_ALGORITHMS || auth.algorithms),
-    // A present env value replaces the configured list, even when empty, so an
-    // operator can clear the default Cursor origin (DEV-953) from the environment.
-    // An omitted or empty config list uses DEFAULT_ALLOWED_ORIGINS.
+    // A present env value replaces the configured list, even when empty.
+    // An omitted or empty config list is empty (fail closed, DEV-953).
     allowedOrigins: resolveConfiguredOrigins(auth.allowedOrigins, env.MCP_ALLOWED_ORIGINS),
     allowedHosts: env.MCP_ALLOWED_HOSTS !== undefined
       ? String(env.MCP_ALLOWED_HOSTS).split(/[\s,]+/).filter(Boolean)

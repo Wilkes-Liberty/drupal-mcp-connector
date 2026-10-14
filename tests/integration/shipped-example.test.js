@@ -47,6 +47,17 @@ describe("config/config.example.json — the shipped secure default", () => {
     expect(hosts.filter((h) => !isNeutralHost(h))).toEqual([]);
   });
 
+  it("lists the exact Cursor browser origins and leaves Grok Bot as a TODO (DEV-953)", () => {
+    const example = loadExample();
+    expect(example.auth.allowedOrigins).toEqual([
+      "https://cursor.com",
+      "https://www.cursor.com",
+    ]);
+    const raw = readRepoFile("config/config.example.json");
+    expect(raw).toMatch(/TODO\(DEV-953\).*Grok Bot/);
+    expect(raw).not.toMatch(/https:\/\/www\.cursor\.com\.evil/);
+  });
+
   it("carries no deployment-specific identifier in any shipped operator script", () => {
     // The example, the launcher and the deploy unit are all published: a real
     // estate's hostnames, Keychain item names or consumer ids must not ride

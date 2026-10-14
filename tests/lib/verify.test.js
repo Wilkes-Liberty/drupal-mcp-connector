@@ -389,6 +389,13 @@ describe("verifyStatic — tenant neutrality", () => {
     config.sites.prod.audit = { linkCheckAllowedHosts: ["www.drupal.org"] };
     expect(statusOf(run(config), "tenant_neutrality")).toBe("pass");
   });
+
+  it("allows documented Cursor browser origins on the HTTP allowlist (DEV-953)", () => {
+    const config = secureConfig({
+      auth: { allowedOrigins: ["https://cursor.com", "https://www.cursor.com"] },
+    });
+    expect(statusOf(run(config), "tenant_neutrality")).toBe("pass");
+  });
 });
 
 describe("verifyStatic — reporting", () => {
