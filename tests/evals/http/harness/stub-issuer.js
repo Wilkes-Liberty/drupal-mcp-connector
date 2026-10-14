@@ -33,6 +33,8 @@ export async function createStubIssuer({
 } = {}) {
   const key = await generateSigningKey(alg);
   const requested = [];
+  const revoked = new Set();
+  let unavailable = false;
   const json = (body) => new Response(JSON.stringify(body), {
     status: 200,
     headers: { "content-type": "application/json" },
@@ -56,10 +58,12 @@ export async function createStubIssuer({
     requested.push(url);
     const method = String(init.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
     if (url === introspectionUrl && method === "POST") {
+      if (unavailable) throw new Error("Synthetic issuer unavailable");
       const raw = init.body != null
         ? String(init.body)
         : (input instanceof Request ? await input.text() : "");
       const token = new URLSearchParams(raw).get("token") || "";
+      if (revoked.has(token)) return json({ active: false });
       try {
         const claims = decodeJwt(token);
         return json({ active: true, ...claims });
@@ -90,5 +94,9 @@ export async function createStubIssuer({
     return jwt.sign(key.privateKey);
   }
 
-  return { issuer, audience, introspectionUrl, fetchFn, requested, mint };
+  return {
+    issuer, audience, introspectionUrl, fetchFn, requested, mint,
+    revoke: (token) => revoked.add(token),
+    setUnavailable: (value) => { unavailable = value; },
+  };
 }

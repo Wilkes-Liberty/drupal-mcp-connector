@@ -99,6 +99,26 @@ function baseStartup(overrides = {}) {
 }
 
 describe("startHttpsTransport", () => {
+  it.each([false, true])("refuses admission policy without an issuer even when allowUnauth=%s", async (allowUnauth) => {
+    for (const allowedPrincipals of [[], [{ clientId: "pilot", sub: "user" }]]) {
+      const exits = [];
+      const result = await baseStartup({
+        allowUnauth,
+        inboundCfg: { allowedPrincipals },
+        exit: (code, reason) => exits.push({ code, reason }),
+      });
+      try {
+        expect(result.started).toBe(false);
+        expect(result.server).toBeUndefined();
+        expect(exits).toHaveLength(1);
+        expect(exits[0].code).toBe(1);
+        expect(exits[0].reason).toContain("incomplete inbound OAuth resource server");
+      } finally {
+        await result.close?.();
+      }
+    }
+  });
+
   it("is fatal for a non-loopback bind with MCP_ALLOW_UNAUTHENTICATED and does not listen", async () => {
     const exits = [];
     const result = await startHttpsTransport({

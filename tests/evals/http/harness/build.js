@@ -218,6 +218,7 @@ function assertNoAmbientCredentials() {
  * @param {(req: object) => string} [options.clientKey] Optional rate-limit key.
  * @param {boolean} [options.edge] Also start a northbound edge for /usage and /assessor.
  * @param {(row: object) => void} [options.auditSink] Audit sink (default: throw).
+ * @param {Array<{clientId: string, sub: string}>} [options.allowedPrincipals] Optional admission policy.
  * @param {number} [options.principalRateLimit] Per-principal /mcp limit
  *   (default: fixture high water, so T8's address-only flood does not
  *   starve a later authenticated principal).
@@ -231,6 +232,7 @@ export async function buildHarness({
   clientKey,
   edge: withEdge = false,
   auditSink,
+  allowedPrincipals,
 } = {}) {
   assertNoAmbientCredentials();
   const swap = mutantSwap(mutant);
@@ -252,7 +254,7 @@ export async function buildHarness({
   const filterToolsByPrincipal = swap.filterToolsByPrincipal ?? principal.filterToolsByPrincipal;
   const networkToolScopeDenial = swap.networkToolScopeDenial ?? toolScopes.networkToolScopeDenial;
 
-  const inboundCfg = {
+  const inboundCfg = httpAuth.resolveInboundAuthConfig({ auth: {
     issuer: issuer.issuer,
     audience: issuer.audience,
     resource: issuer.audience,
@@ -261,7 +263,8 @@ export async function buildHarness({
     introspectionUrl: issuer.introspectionUrl,
     introspectionClientId: "eval-rs",
     introspectionClientSecret: "eval-rs-secret",
-  };
+    ...(allowedPrincipals !== undefined ? { allowedPrincipals } : {}),
+  } }, {});
 
   const surface = {
     serverInfo: { name: "eval-http-connector", version: "0" },

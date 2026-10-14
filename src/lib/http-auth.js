@@ -689,6 +689,8 @@ export async function introspectToken(token, {
  * @param {number} [options.clockTolerance]
  * @param {number} [options.maxTokenLifetime] Seconds; default {@link DEFAULT_MAX_TOKEN_LIFETIME}.
  * @param {string[]} [options.algorithms] JWS allowlist; default {@link DEFAULT_TOKEN_ALGORITHMS}.
+ * @param {Array<{clientId: string, sub: string}>} [options.allowedPrincipals] Exact
+ *   client/subject pairs within the configured issuer; an empty list denies all.
  * @param {boolean} [options.requireIntrospection] Network path (DEV-844): introspect
  *   every bearer, 503 on issuer outage, ignore the revocation file.
  * @returns {(authorizationHeader: unknown, requestHeaders?: object) => Promise<object>}
@@ -706,11 +708,13 @@ export function createResourceAuthenticator({
   maxTokenLifetime = DEFAULT_MAX_TOKEN_LIFETIME,
   algorithms = DEFAULT_TOKEN_ALGORITHMS,
   requireIntrospection = false,
+  allowedPrincipals,
 }) {
   const fail = (status, extra) => denyAuth(status, { resourceMetadata: resourceMetadataUrl, ...extra });
   const expectedIssuer = issuer ? normalizeIssuer(issuer) : "";
   const lifetimeCap = normalizeMaxTokenLifetime(maxTokenLifetime);
   const allowedAlgs = normalizeTokenAlgorithms(algorithms);
+  const admission = normalizeAllowedPrincipals(allowedPrincipals);
 
   async function claimsFromJwt(token) {
     if (verifyJwt) return verifyJwt(token);
@@ -814,8 +818,44 @@ export function createResourceAuthenticator({
         body: "Forbidden",
       });
     }
+    if (admission !== undefined) {
+      // Compare verified claims without coercion. If an issuer supplies both
+      // client claims, they must agree; headers and display names are irrelevant.
+      const clientId = claims.azp ?? claims.client_id;
+      const unambiguous = claims.azp === undefined || claims.azp === null
+        || claims.client_id === undefined || claims.client_id === null
+        || claims.azp === claims.client_id;
+      if (!unambiguous || typeof clientId !== "string" || typeof claims.sub !== "string"
+        || !admission.some((entry) => entry.clientId === clientId && entry.sub === claims.sub)) {
+        return fail(403, { errorDescription: "Principal is not admitted", body: "Forbidden" });
+      }
+    }
     return allowAuth(identity);
   };
+}
+
+/**
+ * Validate and snapshot an optional admission policy. Omission preserves the
+ * existing authentication contract; explicit [] denies every principal.
+ * @param {unknown} value
+ * @returns {ReadonlyArray<Readonly<{clientId: string, sub: string}>>|undefined}
+ */
+function normalizeAllowedPrincipals(value) {
+  if (value === undefined) return undefined;
+  const invalid = () => new Error("auth.allowedPrincipals must be an array of exact {clientId, sub} pairs");
+  if (!Array.isArray(value)) throw invalid();
+  const entries = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)
+      || Object.keys(entry).length !== 2
+      || !Object.hasOwn(entry, "clientId") || !Object.hasOwn(entry, "sub")) throw invalid();
+    for (const id of [entry.clientId, entry.sub]) {
+      if (typeof id !== "string" || !id || id.trim() !== id || id === "*"
+        || /[\u0000-\u001f\u007f]/u.test(id)) throw invalid();
+    }
+    entries.push(Object.freeze({ clientId: entry.clientId, sub: entry.sub }));
+  }
+  return Object.freeze(entries);
 }
 
 /**
@@ -877,7 +917,8 @@ function hasResourceServerIntent(resourceServer) {
     || rs.audience
     || rs.introspectionUrl
     || rs.introspectionClientId
-    || rs.introspectionClientSecret,
+    || rs.introspectionClientSecret
+    || rs.allowedPrincipals !== undefined,
   );
 }
 
@@ -997,6 +1038,7 @@ export function resolveInboundAuthConfig(cfg = {}, env = process.env) {
     audience,
     resource,
     requiredScopes: Array.isArray(auth.requiredScopes) ? auth.requiredScopes.map(String) : [],
+    allowedPrincipals: normalizeAllowedPrincipals(auth.allowedPrincipals),
     revocationFile: env.MCP_REVOCATION_FILE || auth.revocationFile || "",
     introspectionUrl: env.MCP_INTROSPECTION_URL || auth.introspectionUrl || "",
     introspectionClientIdEnv: auth.introspectionClientIdEnv || "",
@@ -1032,6 +1074,7 @@ export function resolveInboundAuthConfig(cfg = {}, env = process.env) {
  * }>}
  */
 export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
+  const allowedPrincipals = normalizeAllowedPrincipals(inboundCfg.allowedPrincipals);
   if (!inboundCfg.issuer || !inboundCfg.audience) {
     throw new Error("createInboundHttpsAuth requires issuer and audience");
   }
@@ -1090,6 +1133,7 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
     issuer,
     audience: inboundCfg.audience,
     requiredScopes: inboundCfg.requiredScopes,
+    allowedPrincipals,
     resourceMetadataUrl,
     jwks,
     introspect: requireIntrospection ? introspect : undefined,
