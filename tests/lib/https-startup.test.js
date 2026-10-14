@@ -122,6 +122,36 @@ describe("startHttpsTransport", () => {
     expect(exits).toEqual([{ code: 1, reason: NON_LOOPBACK_UNAUTHENTICATED_REASON }]);
   });
 
+  it("does not listen on loopback when issuer and audience lack introspection credentials", async () => {
+    const exits = [];
+    const result = await startHttpsTransport({
+      bindHost: "127.0.0.1",
+      port: 0,
+      allowHttp: true,
+      allowUnauth: false,
+      sharedToken: "",
+      inboundCfg: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.example.com/mcp",
+        introspectionUrl: "",
+        introspectionClientId: "",
+        introspectionClientSecret: "",
+      },
+      buildServer: dummyServer,
+      exit: (code, reason) => { exits.push({ code, reason }); },
+      log: () => {},
+    });
+    try {
+      expect(result.started).toBe(false);
+      expect(result.inboundMode.mode).toBe("fatal");
+      expect(result.inboundMode.reason).toContain("auth.introspectionUrl");
+      expect(exits).toEqual([{ code: 1, reason: result.inboundMode.reason }]);
+      expect(result.server).toBeUndefined();
+    } finally {
+      await result.close?.();
+    }
+  });
+
   it.each([
     ["checkAuth", () => true],
     ["authenticate", null],
