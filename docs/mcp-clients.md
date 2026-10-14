@@ -54,8 +54,9 @@ compatibility path. HTTP clients share one URL but not one state model: current
 requests are stateless; legacy clients keep a session bound to the authenticated
 principal. Operators can set `MCP_LEGACY_TRANSPORT=reject` once all registered
 clients are current. Browser clients that send `Origin` must be listed on
-`auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS`; desktop clients that omit
-`Origin` are unchanged. The `Host` header must match
+`auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS` (exact match, no wildcards).
+When that list is omitted or empty the default is `https://cursor.com`
+(DEV-953). Desktop clients that omit `Origin` are unchanged. The `Host` header must match
 `auth.allowedHosts` / `MCP_ALLOWED_HOSTS` (default: the host of
 `auth.resource` / `auth.audience`, plus loopback on a loopback bind).
 

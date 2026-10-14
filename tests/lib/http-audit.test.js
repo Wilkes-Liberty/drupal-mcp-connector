@@ -285,6 +285,56 @@ describe("createMcpRequestHandler audit finish hook", () => {
     expect(allowed.writer.rows[0].code).toBe("ok");
   });
 
+  it("audits Cursor lookalikes as bad_origin and listed origins as passing (DEV-953)", async () => {
+    const lookalikes = [
+      "https://cursor.com.evil.example",
+      "http://cursor.com",
+    ];
+    for (const origin of lookalikes) {
+      const refused = handler({
+        checkAuth: () => true,
+        allowLocalOperator: true,
+        allowedOrigins: ["https://cursor.com"],
+      });
+      const res = mockRes();
+      await refused.handle(req("POST", "/mcp", { origin }), res);
+      expect(res.statusCode, origin).toBe(403);
+      expect(refused.writer.rows).toHaveLength(1);
+      expect(refused.writer.rows[0].code, origin).toBe("bad_origin");
+      expect(refused.writer.rows[0].status, origin).toBe(403);
+    }
+
+    const listed = handler({
+      checkAuth: () => true,
+      allowLocalOperator: true,
+      allowedOrigins: ["https://cursor.com"],
+      modernHandler: vi.fn(async (_req, res) => res.writeHead(200).end("modern")),
+      legacyHandler: createLegacySessionHandler({
+        buildServer: async () => ({ connect: async () => {} }),
+        mode: "reject",
+      }),
+    });
+    const preflight = mockRes();
+    await listed.handle(req("OPTIONS", "/mcp", { origin: "https://cursor.com" }), preflight);
+    expect(preflight.statusCode).not.toBe(403);
+    expect(listed.writer.rows[0].code).not.toBe("bad_origin");
+
+    const posted = mockRes();
+    await listed.handle(req("POST", "/mcp", {
+      origin: "https://cursor.com",
+      "content-type": "application/json",
+    }), posted);
+    expect(posted.statusCode).not.toBe(403);
+    expect(listed.writer.rows.some((row) => row.code === "bad_origin")).toBe(false);
+
+    const missing = handler({ allowedOrigins: ["https://cursor.com"] });
+    const missingRes = mockRes();
+    await missing.handle(req("POST", "/mcp", { origin: "https://cursor.com" }), missingRes);
+    expect(missingRes.statusCode).toBe(401);
+    expect(missing.writer.rows[0].code).toBe("unauthenticated");
+    expect(missing.writer.rows[0].status).toBe(401);
+  });
+
   it("labels bad_origin only from the handler's own refusal", async () => {
     // A disallowed Origin on a route that never enforces Origin is not a refusal.
     const health = handler({ allowedOrigins: ["https://app.example"] });

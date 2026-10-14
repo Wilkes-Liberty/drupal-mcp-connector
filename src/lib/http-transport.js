@@ -37,6 +37,29 @@ export function isSupportedProtocolVersion(version) {
 }
 
 /**
+ * Exact Cursor browser Origin (DEV-953). Hosted Cursor and Grok Bot web
+ * clients send this on CORS preflight. Matching is the full origin string
+ * after {@link normalizeOrigin} — no wildcards, prefixes, or scheme swaps.
+ */
+export const CURSOR_BROWSER_ORIGIN = "https://cursor.com";
+
+/**
+ * Default Streamable HTTP Origin allowlist when config/env omit one.
+ *
+ * Only verified exact origins belong here. Grok Bot's distinct browser
+ * Origin is not published; add it via `auth.allowedOrigins` /
+ * `MCP_ALLOWED_ORIGINS` once confirmed. An explicit env value, including
+ * empty, replaces this list. The origin of `auth.resource` / `auth.audience`
+ * is still auto-included by {@link resolveAllowedOrigins}.
+ *
+ * @type {readonly string[]}
+ */
+export const DEFAULT_ALLOWED_ORIGINS = Object.freeze([
+  CURSOR_BROWSER_ORIGIN,
+  // TODO(DEV-953): exact Grok Bot browser Origin (https only, no wildcards)
+]);
+
+/**
  * Normalize a configured or header Origin to `https://host[:port]`.
  * Returns null when the value is missing or not an absolute URL.
  *
@@ -73,9 +96,32 @@ export function parseOriginList(value) {
 }
 
 /**
+ * Resolve the configured Origin list before normalization (DEV-953).
+ *
+ * A present `envValue` (`MCP_ALLOWED_ORIGINS`) replaces config, including
+ * an empty string so an operator can clear the default. An omitted or empty
+ * config list uses {@link DEFAULT_ALLOWED_ORIGINS}. Values are not
+ * normalized here — {@link resolveAllowedOrigins} does that. Matching is
+ * exact origin strings only; there is no wildcard path.
+ *
+ * @param {unknown} configured `auth.allowedOrigins` (array or string).
+ * @param {unknown} [envValue] Raw `MCP_ALLOWED_ORIGINS` when the env key is present.
+ * @returns {string[]}
+ */
+export function resolveConfiguredOrigins(configured, envValue) {
+  if (envValue !== undefined) {
+    return parseOriginList(envValue);
+  }
+  const listed = parseOriginList(configured);
+  return listed.length ? listed : [...DEFAULT_ALLOWED_ORIGINS];
+}
+
+/**
  * Build the Origin allowlist. Env/config entries are normalized; the origin
  * of `resource` (or `audience`) is always included when it is an absolute
  * http(s) URL so a same-origin browser client works without extra config.
+ * Browser-client defaults are applied by {@link resolveConfiguredOrigins},
+ * not here, so an explicit empty env list stays empty.
  *
  * @param {object} [options]
  * @param {unknown} [options.allowedOrigins]
@@ -100,8 +146,10 @@ export function resolveAllowedOrigins({
 
 /**
  * DNS-rebinding guard. A missing Origin is allowed (non-browser clients such
- * as Cursor and Grok Bot typically omit it). A present Origin must be on the
- * allowlist. The literal `null` origin is refused unless explicitly listed.
+ * as Cursor and Grok Bot typically omit it). A present Origin must be an
+ * exact allowlist entry after {@link normalizeOrigin} — `https://cursor.com`
+ * does not match `http://cursor.com` or `https://cursor.com.evil.example`.
+ * The literal `null` origin is refused unless explicitly listed.
  *
  * @param {unknown} originHeader
  * @param {readonly string[]} allowlist

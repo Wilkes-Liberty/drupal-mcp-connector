@@ -18,7 +18,10 @@ import {
   parseHostList,
   resolveAllowedHosts,
   resolveAllowedOrigins,
+  resolveConfiguredOrigins,
   sessionPrincipalKey,
+  CURSOR_BROWSER_ORIGIN,
+  DEFAULT_ALLOWED_ORIGINS,
 } from "../../src/lib/http-transport.js";
 
 describe("http-transport helpers", () => {
@@ -54,6 +57,32 @@ describe("http-transport helpers", () => {
     expect(originAllowed("null", allow)).toBe(false);
     expect(originAllowed("null", ["null"])).toBe(true);
     expect(originAllowed(":::bad", allow)).toBe(false);
+  });
+
+  it("matches Origins exactly and refuses Cursor lookalikes (DEV-953)", () => {
+    const allow = [...DEFAULT_ALLOWED_ORIGINS];
+    expect(DEFAULT_ALLOWED_ORIGINS).toEqual([CURSOR_BROWSER_ORIGIN]);
+    expect(originAllowed("https://cursor.com", allow)).toBe(true);
+    expect(originAllowed("https://Cursor.com", allow)).toBe(true);
+    expect(originAllowed("https://cursor.com/", allow)).toBe(true);
+    expect(originAllowed("http://cursor.com", allow)).toBe(false);
+    expect(originAllowed("https://cursor.com.evil.example", allow)).toBe(false);
+    expect(originAllowed("https://evil.cursor.com", allow)).toBe(false);
+    expect(originAllowed("https://www.cursor.com", allow)).toBe(false);
+  });
+
+  it("defaults an omitted Origin list and lets env replace it (DEV-953)", () => {
+    expect(resolveConfiguredOrigins(undefined, undefined)).toEqual([CURSOR_BROWSER_ORIGIN]);
+    expect(resolveConfiguredOrigins([], undefined)).toEqual([CURSOR_BROWSER_ORIGIN]);
+    expect(resolveConfiguredOrigins(["https://app.example.com"], undefined))
+      .toEqual(["https://app.example.com"]);
+    expect(resolveConfiguredOrigins(["https://app.example.com"], "https://cursor.com"))
+      .toEqual(["https://cursor.com"]);
+    expect(resolveConfiguredOrigins(["https://app.example.com"], "")).toEqual([]);
+    expect(resolveAllowedOrigins({
+      allowedOrigins: resolveConfiguredOrigins([], undefined),
+      resource: "https://mcp.example.com/mcp",
+    })).toEqual(["https://cursor.com", "https://mcp.example.com"]);
   });
 
   it("binds sessions to sub+clientId and never to an empty identity", () => {

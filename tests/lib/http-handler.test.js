@@ -852,6 +852,60 @@ describe("createMcpRequestHandler", () => {
       expect(allowed.statusCode).toBe(200);
     });
 
+    it("refuses Cursor lookalikes and lets a listed origin pass preflight and POST (DEV-953)", async () => {
+      const modernHandler = vi.fn(async (_req, res) => res.writeHead(200).end("modern"));
+      const legacyHandler = vi.fn();
+      const h = authed({
+        modernHandler,
+        legacyHandler,
+        allowedOrigins: ["https://cursor.com"],
+      });
+      for (const origin of [
+        "https://cursor.com.evil.example",
+        "http://cursor.com",
+        "https://evil.cursor.com",
+        "https://www.cursor.com",
+      ]) {
+        const res = mockRes();
+        await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { origin }), res);
+        expect(res.statusCode, origin).toBe(403);
+        expect(JSON.parse(res.body).error.message, origin).toMatch(/origin/i);
+        expect(modernHandler).not.toHaveBeenCalled();
+        expect(legacyHandler).not.toHaveBeenCalled();
+      }
+
+      const preflight = mockRes();
+      await h(req("OPTIONS", "/mcp", { origin: "https://cursor.com" }), preflight);
+      expect(preflight.statusCode).not.toBe(403);
+      expect(modernHandler).not.toHaveBeenCalled();
+      expect(legacyHandler).not.toHaveBeenCalled();
+
+      const posted = mockRes();
+      await h(bodyReq({ jsonrpc: "2.0", id: 2, method: "tools/list" }, { origin: "https://cursor.com" }), posted);
+      expect(posted.statusCode).toBe(200);
+      expect(modernHandler).toHaveBeenCalledTimes(1);
+      expect(legacyHandler).not.toHaveBeenCalled();
+    });
+
+    it("returns 401 for a missing identity before Origin or dispatch (DEV-953)", async () => {
+      const modernHandler = vi.fn();
+      const legacyHandler = vi.fn();
+      const h = createMcpRequestHandler({
+        checkAuth: () => false,
+        modernHandler,
+        legacyHandler,
+        allowedOrigins: ["https://cursor.com"],
+      });
+      for (const method of ["OPTIONS", "POST"]) {
+        const res = mockRes();
+        await h(req(method, "/mcp", { origin: "https://cursor.com" }), res);
+        expect(res.statusCode, method).toBe(401);
+        expect(res.headers["WWW-Authenticate"]).toMatch(/^Bearer\b/);
+      }
+      expect(modernHandler).not.toHaveBeenCalled();
+      expect(legacyHandler).not.toHaveBeenCalled();
+    });
+
     it("returns 403 for a Host that is not on the allowlist (DEV-861)", async () => {
       const modernHandler = vi.fn();
       const legacyHandler = vi.fn();
