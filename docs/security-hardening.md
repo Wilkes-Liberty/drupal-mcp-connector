@@ -161,8 +161,10 @@ requires the complete resource server (issuer, audience, and RFC 7662
 introspection) and names any missing setting. An incomplete loopback config
 is fatal and does not fall through to unauthenticated. A set `MCP_AUTH_TOKEN`
 is fatal at startup.
-**`MCP_ALLOW_UNAUTHENTICATED=1`** is loopback-only. A non-loopback bind with
-that flag is fatal at startup (DEV-845). There is no trusted-proxy exception
+**`MCP_ALLOW_UNAUTHENTICATED=1`** is loopback-only, and on loopback it does
+not override a partial resource server. Remove the resource-server settings
+to run unauthenticated. A non-loopback bind with that flag is fatal at
+startup (DEV-845). There is no trusted-proxy exception
 beyond loopback: network-facing HTTPS requires `auth.issuer` + `auth.audience`
 + RFC 7662 introspection.
 
