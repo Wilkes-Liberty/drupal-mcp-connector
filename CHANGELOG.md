@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Image backfill works for tags cut before the release tooling.**
+  A `workflow_dispatch` rebuild of `v5.0.0` failed at "Resolve image
+  coordinates" because the job ran `scripts/release-channel.js` from the
+  checked-out tag, which predates it. The image job now runs the channel
+  tool from the workflow's own commit, staged outside the build context.
 - **Prerelease tags publish to npm `next`, not `latest` (DEV-841).**
   `release.yml` derived no dist-tag, so a `vX.Y.Z-rc.N` (or any semver
   prerelease) would have taken npm `latest` or failed. The workflow now
