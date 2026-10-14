@@ -3,34 +3,13 @@
  *
  * Disabled unless `MCP_OPS_LISTEN` or `ops.listen` is set. Binds loopback
  * or Tailscale only. The public MCP listener never serves these paths.
+ * This listener has no authentication of its own.
  */
 
 import { createServer as createHttpServer } from "node:http";
 import { CLIENT_VERSION } from "./config.js";
-import { requestHasAuthorization } from "./http-audit.js";
 import { isOpsBindAllowed, opsBindRefusedReason, resolveOpsListen } from "./ops-bind.js";
-import { readyBody, runReadyChecks } from "./ops-ready.js";
-
-/**
- * Test-only guard (DEV-863). Production callers never flip this. When
- * `required` is false, the public handler may serve `/ready` and
- * `/metrics` — the leak used to prove the public-listener 404 test
- * can fail.
- *
- * @type {{required: boolean}}
- */
-export const OPS_PUBLIC_ROUTE_GUARD = { required: true };
-
-/**
- * Flip {@link OPS_PUBLIC_ROUTE_GUARD} for a red-run. Restore `true`
- * after the assertion; production code never calls this.
- *
- * @param {boolean} required
- * @returns {void}
- */
-export function setOpsPublicRouteGuard(required) {
-  OPS_PUBLIC_ROUTE_GUARD.required = Boolean(required);
-}
+import { createReadyChecker, readyBody } from "./ops-ready.js";
 
 /** Paths that exist only on the ops listener. */
 export const OPS_PATHS = Object.freeze(["/ready", "/metrics"]);
@@ -44,18 +23,6 @@ export const OPS_PATHS = Object.freeze(["/ready", "/metrics"]);
 export function isOpsPath(path) {
   const raw = String(path || "").split("?")[0];
   return raw === "/ready" || raw === "/metrics";
-}
-
-/**
- * Whether the public MCP handler must refuse to serve an ops path.
- * Always true in production. The test-only toggle is the red-run seam.
- *
- * @param {unknown} path
- * @returns {boolean}
- */
-export function publicListenerRefusesOpsPath(path) {
-  if (!isOpsPath(path)) return false;
-  return OPS_PUBLIC_ROUTE_GUARD.required;
 }
 
 /**
@@ -144,7 +111,7 @@ export async function startOpsListener({
     return { started: false, reason };
   }
 
-  const checkReady = async () => runReadyChecks(readiness);
+  const checkReady = createReadyChecker(readiness);
   const onRequest = createOpsRequestHandler({ metrics, checkReady });
   const server = createHttpServer((req, res) => {
     Promise.resolve(onRequest(req, res)).catch(() => {
@@ -186,27 +153,5 @@ export async function startOpsListener({
         server.closeAllConnections?.();
       });
     },
-  };
-}
-
-/**
- * Fields the public handler records on the metrics registry. Identity
- * is passed through only so a disabled leak-guard can fail the
- * no-identity test; production render drops it.
- *
- * @param {import("http").IncomingMessage} req
- * @param {import("http").ServerResponse} res
- * @param {object} [extra]
- * @returns {object}
- */
-export function publicRequestMetricFields(req, res, extra = {}) {
-  return {
-    path: requestPath(req.url),
-    status: res.statusCode || 0,
-    hasAuthorization: requestHasAuthorization(req),
-    identity: req.mcpIdentity || null,
-    address: req.socket?.remoteAddress,
-    authorization: req.headers?.authorization,
-    ...extra,
   };
 }

@@ -1,9 +1,9 @@
 /**
  * DEV-863: mesh-only ops listener. The public MCP handler keeps 401/404
- * for /ready and /metrics. Each guard can be flipped so the assertion
- * goes red.
+ * for /ready and /metrics, including path variants. Red evidence uses a
+ * test-only fixture handler, not a production toggle.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createMcpRequestHandler, isUnauthenticatedRoute } from "../../src/lib/http-handler.js";
@@ -13,15 +13,27 @@ import { createOpsMetrics } from "../../src/lib/ops-metrics.js";
 import {
   createOpsRequestHandler,
   isOpsPath,
-  OPS_PUBLIC_ROUTE_GUARD,
-  publicListenerRefusesOpsPath,
-  setOpsPublicRouteGuard,
   startOpsListener,
 } from "../../src/lib/ops-listener.js";
 import { TOOL_SCOPE_TABLE } from "../../src/lib/tool-scopes.js";
 
 const INDEX_PATH = fileURLToPath(new URL("../../src/index.js", import.meta.url));
 const SCOPED_DEFS = Object.keys(TOOL_SCOPE_TABLE).map((name) => ({ name }));
+
+const PUBLIC_OPS_VARIANTS = Object.freeze([
+  "/ready",
+  "/metrics",
+  "/ready/",
+  "/metrics/",
+  "/READY",
+  "/METRICS",
+  "/Ready",
+  "/%72eady",
+  "/%6detrics",
+  "/ready?x=1",
+  "/metrics?name=mcp_http_requests_total",
+  "/ready?sub=agent-secret-sub",
+]);
 
 function mockRes() {
   const response = {
@@ -73,32 +85,47 @@ function networkPublicHandler(overrides = {}) {
   });
 }
 
+/**
+ * @param {(req: object, res: object) => Promise<void>} handle
+ * @param {string} [path]
+ */
+async function assertPublicOpsNotServed(handle, path = "/ready") {
+  const unauthorized = mockRes();
+  await handle(req("GET", path), unauthorized);
+  expect([401, 404]).toContain(unauthorized.statusCode);
+  expect(unauthorized.statusCode).not.toBe(200);
+  expect(unauthorized.body).not.toContain("not_ready");
+  expect(unauthorized.body).not.toContain("mcp_http_requests_total");
+  expect(unauthorized.body).not.toMatch(/# TYPE /);
+}
+
 describe("ops paths", () => {
-  it("names only /ready and /metrics", () => {
+  it("names only exact /ready and /metrics", () => {
     expect(isOpsPath("/ready")).toBe(true);
     expect(isOpsPath("/metrics")).toBe(true);
     expect(isOpsPath("/ready?x=1")).toBe(true);
+    expect(isOpsPath("/ready/")).toBe(false);
+    expect(isOpsPath("/READY")).toBe(false);
+    expect(isOpsPath("/%72eady")).toBe(false);
     expect(isOpsPath("/health")).toBe(false);
     expect(isOpsPath("/mcp")).toBe(false);
     expect(isUnauthenticatedRoute("GET", "/ready")).toBe(false);
     expect(isUnauthenticatedRoute("GET", "/metrics")).toBe(false);
+    expect(isUnauthenticatedRoute("GET", "/ready/")).toBe(false);
+    expect(isUnauthenticatedRoute("GET", "/READY")).toBe(false);
   });
 });
 
 describe("public listener refuses /ready and /metrics (DEV-863)", () => {
-  afterEach(() => {
-    setOpsPublicRouteGuard(true);
-  });
-
   it("returns 401 without a token and 404 after auth, never readiness or prometheus", async () => {
     const closed = networkPublicHandler();
     for (const path of ["/ready", "/metrics"]) {
-      const unauthorized = mockRes();
-      await closed(req("GET", path), unauthorized);
-      expect({ path, status: unauthorized.statusCode }).toEqual({ path, status: 401 });
-      expect(unauthorized.body).not.toContain("not_ready");
-      expect(unauthorized.body).not.toContain("mcp_http_requests_total");
-      expect(unauthorized.body).not.toMatch(/# TYPE /);
+      await assertPublicOpsNotServed(closed, path);
+      expect((await (async () => {
+        const res = mockRes();
+        await closed(req("GET", path), res);
+        return res.statusCode;
+      })())).toBe(401);
     }
 
     const open = publicHandler();
@@ -108,6 +135,19 @@ describe("public listener refuses /ready and /metrics (DEV-863)", () => {
       expect({ path, status: allowed.statusCode }).toEqual({ path, status: 404 });
       expect(allowed.body).toBe("Not found");
       expect(allowed.body).not.toContain("mcp_http_requests_total");
+    }
+  });
+
+  it("returns 401 or 404 for trailing slash, case, encoding, and query variants", async () => {
+    const closed = networkPublicHandler();
+    const open = publicHandler();
+    for (const path of PUBLIC_OPS_VARIANTS) {
+      await assertPublicOpsNotServed(closed, path);
+      const allowed = mockRes();
+      await open(req("GET", path), allowed);
+      expect([401, 404]).toContain(allowed.statusCode);
+      expect(allowed.body).not.toContain("mcp_http_requests_total");
+      expect(allowed.body).not.toMatch(/# TYPE /);
     }
   });
 
@@ -138,7 +178,7 @@ describe("public listener refuses /ready and /metrics (DEV-863)", () => {
     });
     expect(result.started).toBe(true);
     try {
-      for (const path of ["/ready", "/metrics"]) {
+      for (const path of PUBLIC_OPS_VARIANTS) {
         const res = await fetch(new URL(path, result.url));
         expect([401, 404]).toContain(res.status);
         const text = await res.text();
@@ -154,20 +194,12 @@ describe("public listener refuses /ready and /metrics (DEV-863)", () => {
     }
   });
 
-  it("fails when the public-route guard is disabled (red evidence)", async () => {
-    expect(OPS_PUBLIC_ROUTE_GUARD.required).toBe(true);
-    expect(publicListenerRefusesOpsPath("/ready")).toBe(true);
-    setOpsPublicRouteGuard(false);
-    expect(publicListenerRefusesOpsPath("/ready")).toBe(false);
-    const handle = networkPublicHandler();
-    const ready = mockRes();
-    await handle(req("GET", "/ready"), ready);
-    expect(ready.statusCode).toBe(200);
-    expect(JSON.parse(ready.body)).toEqual({ status: "ok" });
-    const metrics = mockRes();
-    await handle(req("GET", "/metrics"), metrics);
-    expect(metrics.statusCode).toBe(200);
-    expect(metrics.body).toContain("# broken");
+  it("fails when a test-only fixture handler serves /ready (red evidence)", async () => {
+    const fixture = async (_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" })
+        .end(JSON.stringify({ status: "ok" }));
+    };
+    await expect(assertPublicOpsNotServed(fixture, "/ready")).rejects.toThrow();
   });
 });
 
@@ -236,5 +268,7 @@ describe("src/index.js wires the ops listener (DEV-863)", () => {
     expect(source).toMatch(/startOpsListener/);
     expect(source).toMatch(/createOpsMetrics/);
     expect(source).toMatch(/metrics,/);
+    expect(source).not.toMatch(/OPS_\w+_GUARD/);
+    expect(source).not.toMatch(/setOps/);
   });
 });

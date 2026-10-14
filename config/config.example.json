@@ -24,7 +24,7 @@
   },
 
   "ops": {
-    "_comment": "Optional mesh-only readiness/metrics listener (DEV-863). Disabled unless MCP_OPS_LISTEN or ops.listen is set to <addr:port>. Bind must be loopback or Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). 0.0.0.0, ::, and any other public or non-mesh address are fatal. Serves GET /ready and GET /metrics only; the public listener does not. GET /health stays on the public socket.",
+    "_comment": "Optional mesh-only readiness/metrics listener (DEV-863). Disabled unless MCP_OPS_LISTEN or ops.listen is set to <addr:port> with port 1-65535. Bind must be loopback or Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). 0.0.0.0, ::, port 0, and any other public or non-mesh address are fatal. The listener has no auth: 100.64.0.0/10 is also CGNAT, so confirm the address is Tailscale and restrict the port with Tailscale ACLs. Serves GET /ready and GET /metrics only; the public listener does not. GET /health stays on the public socket.",
     "listen": ""
   },
 

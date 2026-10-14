@@ -1,14 +1,13 @@
 /**
- * DEV-863: Prometheus samples never carry identity. The identity guard
- * can be flipped so this assertion goes red.
+ * DEV-863: Prometheus samples never carry identity. Red evidence uses a
+ * test-only fixture renderer, not a production toggle.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createRateLimiter } from "../../src/lib/rate-limit.js";
 import {
   createOpsMetrics,
   metricsRoute,
-  OPS_METRICS_IDENTITY_GUARD,
-  setOpsMetricsIdentityGuard,
+  publicRequestMetricFields,
 } from "../../src/lib/ops-metrics.js";
 
 const LEAK_SUB = "agent-secret-sub";
@@ -19,16 +18,17 @@ const LEAK_IP = "203.0.113.9";
 
 const IDENTITY_LABEL = /\{[^}]*(principal|sub|client_id|clientId|tenant|ip|token)=/;
 
-function recordLeakedRequest(metrics) {
-  metrics.beginRequest();
-  metrics.finishRequest({
-    path: "/mcp?access_token=tok_secret_value",
-    status: 401,
-    hasAuthorization: true,
-    identity: { sub: LEAK_SUB, clientId: LEAK_CLIENT, tenant: LEAK_TENANT },
-    address: LEAK_IP,
-    authorization: `Bearer ${LEAK_TOKEN}`,
-  });
+/**
+ * @param {string} text
+ */
+function assertNoIdentity(text) {
+  expect(text).not.toContain(LEAK_SUB);
+  expect(text).not.toContain(LEAK_CLIENT);
+  expect(text).not.toContain(LEAK_TENANT);
+  expect(text).not.toContain(LEAK_TOKEN);
+  expect(text).not.toContain(LEAK_IP);
+  expect(text).not.toMatch(IDENTITY_LABEL);
+  expect(text).not.toContain("mcp_debug_identity");
 }
 
 describe("metricsRoute", () => {
@@ -43,10 +43,6 @@ describe("metricsRoute", () => {
 });
 
 describe("no identity in metrics (DEV-863)", () => {
-  afterEach(() => {
-    setOpsMetricsIdentityGuard(true);
-  });
-
   it("counts route/status, denies, 401/403/429, buckets, and in-flight without identity", () => {
     const rateLimiter = createRateLimiter({ limit: 10, windowMs: 60_000 });
     rateLimiter.check("addr:203.0.113.9");
@@ -83,26 +79,35 @@ describe("no identity in metrics (DEV-863)", () => {
     expect(text).toMatch(/mcp_rate_limit_buckets 1/);
     expect(text).toContain("mcp_http_in_flight 0");
     expect(metrics.bucketsInUse()).toBe(1);
-
-    expect(text).not.toContain(LEAK_SUB);
-    expect(text).not.toContain(LEAK_CLIENT);
-    expect(text).not.toContain(LEAK_TENANT);
-    expect(text).not.toContain(LEAK_TOKEN);
-    expect(text).not.toContain(LEAK_IP);
-    expect(text).not.toMatch(IDENTITY_LABEL);
-    expect(text).not.toContain("mcp_debug_identity");
+    assertNoIdentity(text);
   });
 
-  it("fails when the identity guard is disabled (red evidence)", () => {
-    expect(OPS_METRICS_IDENTITY_GUARD.required).toBe(true);
-    const metrics = createOpsMetrics();
-    setOpsMetricsIdentityGuard(false);
-    recordLeakedRequest(metrics);
-    const text = metrics.render();
-    expect(text).toContain(LEAK_SUB);
-    expect(text).toContain(LEAK_CLIENT);
-    expect(text).toContain(LEAK_TENANT);
-    expect(text).toContain(LEAK_IP);
-    expect(text).toMatch(IDENTITY_LABEL);
+  it("publicRequestMetricFields never copies a bearer, identity, or address", () => {
+    const fields = publicRequestMetricFields({
+      url: "/mcp",
+      headers: { authorization: `Bearer ${LEAK_TOKEN}` },
+      mcpIdentity: { sub: LEAK_SUB, clientId: LEAK_CLIENT, tenant: LEAK_TENANT },
+      socket: { remoteAddress: LEAK_IP },
+    }, { statusCode: 401 }, {
+      originDenied: false,
+      hostDenied: false,
+      identity: { sub: LEAK_SUB },
+      authorization: `Bearer ${LEAK_TOKEN}`,
+    });
+    expect(fields).toEqual({
+      path: "/mcp",
+      status: 401,
+      hasAuthorization: true,
+      originDenied: false,
+      hostDenied: false,
+    });
+    expect(JSON.stringify(fields)).not.toContain(LEAK_TOKEN);
+    expect(JSON.stringify(fields)).not.toContain(LEAK_SUB);
+    expect(JSON.stringify(fields)).not.toContain(LEAK_IP);
+  });
+
+  it("fails when a test-only fixture renderer leaks identity (red evidence)", () => {
+    const leaked = `mcp_http_requests_total{sub="${LEAK_SUB}",client_id="${LEAK_CLIENT}",tenant="${LEAK_TENANT}",ip="${LEAK_IP}",token="${LEAK_TOKEN}"} 1\n`;
+    expect(() => assertNoIdentity(leaked)).toThrow();
   });
 });

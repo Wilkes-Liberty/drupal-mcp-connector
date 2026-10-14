@@ -2,39 +2,24 @@
  * Readiness checks for the mesh-only ops listener (DEV-863).
  *
  * `/ready` probes real dependencies: auth / introspection reachability
- * (bounded timeout) and config completeness (hosted scope table plus
- * entity / Host / Origin allowlists). The 503 body names failing checks
- * only — never URLs, tokens, or other secrets.
+ * (bounded timeout, 2xx + RFC 7662-shaped body) and config completeness
+ * (hosted scope table plus entity / Host / Origin allowlists). Results
+ * are cached for a few seconds and single-flighted so mesh peers cannot
+ * amplify traffic to the identity provider. The 503 body names failing
+ * checks only — never URLs, tokens, or other secrets.
  */
 
 import { assertHostedToolScopeTable } from "./tool-scopes.js";
 import { resolveSecurityConfig } from "./security.js";
 import { resolveAllowedHosts, resolveAllowedOrigins } from "./http-transport.js";
 
-/**
- * Test-only guard (DEV-863). Production callers never flip this. When
- * `required` is false, an unreachable introspection endpoint is treated
- * as ready — the pre-check behavior used to prove the 503 test can fail.
- *
- * @type {{required: boolean}}
- */
-export const OPS_READY_INTROSPECTION_GUARD = { required: true };
-
-/**
- * Flip {@link OPS_READY_INTROSPECTION_GUARD} for a red-run. Restore
- * `true` after the assertion; production code never calls this.
- *
- * @param {boolean} required
- * @returns {void}
- */
-export function setOpsReadyIntrospectionGuard(required) {
-  OPS_READY_INTROSPECTION_GUARD.required = Boolean(required);
-}
-
 /** Closed check names returned in a 503 body. */
 export const READY_CHECK_NAMES = Object.freeze(["introspection", "auth", "scope_table", "allowlists"]);
 
 const DEFAULT_READY_TIMEOUT_MS = 2000;
+
+/** How long a /ready probe result is reused (5–10s). */
+export const READY_PROBE_CACHE_MS = 8000;
 
 /**
  * Whether `value` is a well-formed entity allowlist (array of strings or null).
@@ -46,6 +31,35 @@ function allowlistFieldOk(value) {
   if (value === null) return true;
   if (!Array.isArray(value)) return false;
   return value.every((item) => typeof item === "string");
+}
+
+/**
+ * RFC 7662 introspection body: a JSON object with a boolean `active`.
+ *
+ * @param {unknown} body
+ * @returns {boolean}
+ */
+export function isIntrospectionBody(body) {
+  return Boolean(
+    body
+    && typeof body === "object"
+    && !Array.isArray(body)
+    && typeof body.active === "boolean",
+  );
+}
+
+/**
+ * Whether an introspection probe response counts as reachable.
+ * Only a 2xx status with a valid introspection-shaped body passes.
+ * 401, 404, and 5xx are not ready.
+ *
+ * @param {number} status
+ * @param {unknown} body
+ * @returns {boolean}
+ */
+export function introspectionProbeOk(status, body) {
+  if (!Number.isInteger(status) || status < 200 || status > 299) return false;
+  return isIntrospectionBody(body);
 }
 
 /**
@@ -102,9 +116,8 @@ export function checkAllowlists({
 }
 
 /**
- * Probe the introspection endpoint. Any HTTP response means reachable;
- * timeout, DNS, or connection errors fail the check. The URL and body
- * never leave this function.
+ * Probe the introspection endpoint. Reachable only on 2xx plus a valid
+ * RFC 7662 body. The URL and body never leave this function.
  *
  * @param {object} options
  * @param {string} options.url
@@ -117,19 +130,25 @@ export async function checkIntrospectionReachable({
   timeoutMs = DEFAULT_READY_TIMEOUT_MS,
   fetchFn = fetch,
 }) {
-  if (!OPS_READY_INTROSPECTION_GUARD.required) return true;
   if (typeof url !== "string" || !url) return false;
   const bound = Number.isInteger(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_READY_TIMEOUT_MS;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), bound);
   try {
-    await fetchFn(url, {
+    const res = await fetchFn(url, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: "token=readiness-probe",
       signal: ac.signal,
     });
-    return true;
+    const status = Number(res?.status);
+    let body;
+    try {
+      body = await res.json();
+    } catch {
+      return false;
+    }
+    return introspectionProbeOk(status, body);
   } catch {
     return false;
   } finally {
@@ -176,6 +195,41 @@ export async function runReadyChecks({
   if (!checkAllowlists({ sites, inboundCfg, loopbackBind })) failed.push("allowlists");
 
   return { ok: failed.length === 0, failed };
+}
+
+/**
+ * Single-flight + short-lived cache around {@link runReadyChecks}.
+ * Concurrent callers share one outbound probe; the result is reused for
+ * {@link READY_PROBE_CACHE_MS} (override with `cacheMs` in tests).
+ *
+ * @param {object} [options] Forwarded to {@link runReadyChecks}.
+ * @param {number} [options.cacheMs]
+ * @param {() => number} [options.now]
+ * @returns {() => Promise<{ok: boolean, failed: string[]}>}
+ */
+export function createReadyChecker(options = {}) {
+  const cacheMs = Number.isInteger(options.cacheMs) && options.cacheMs > 0
+    ? options.cacheMs
+    : READY_PROBE_CACHE_MS;
+  const now = typeof options.now === "function" ? options.now : () => Date.now();
+  let inflight = null;
+  /** @type {{result: {ok: boolean, failed: string[]}, expiresAt: number}|null} */
+  let cached = null;
+
+  return async function checkReady() {
+    const t = now();
+    if (cached && t < cached.expiresAt) return cached.result;
+    if (inflight) return inflight;
+    inflight = runReadyChecks(options)
+      .then((result) => {
+        cached = { result, expiresAt: now() + cacheMs };
+        return result;
+      })
+      .finally(() => {
+        inflight = null;
+      });
+    return inflight;
+  };
 }
 
 /**

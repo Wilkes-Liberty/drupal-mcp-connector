@@ -40,9 +40,11 @@
  *   MCP_OPS_LISTEN    Optional mesh-only ops listener <addr:port> (DEV-863).
  *                     Disabled when unset. Loopback or Tailscale only
  *                     (100.64.0.0/10, fd7a:115c:a1e0::/48). 0.0.0.0, ::,
- *                     and any other public or non-mesh address are fatal.
- *                     Serves GET /ready and GET /metrics; the public
- *                     listener does not.
+ *                     port 0, and any other public or non-mesh address
+ *                     are fatal. No auth on this socket; confirm a
+ *                     100.64/10 bind is Tailscale and restrict the port
+ *                     with Tailscale ACLs. Serves GET /ready and
+ *                     GET /metrics; the public listener does not.
  *
  * CLI subcommands (anything else starts the MCP server):
  *   wizard | init     Operator install wizard — see src/lib/wizard.js
@@ -344,9 +346,8 @@ if (transport === "stdio") {
     metrics,
   });
 
-  let ops;
   if (started?.started && opsListen.enabled) {
-    ops = await startOpsListener({
+    const ops = await startOpsListener({
       resolved: opsListen,
       metrics,
       readiness: {
@@ -356,13 +357,15 @@ if (transport === "stdio") {
         loopbackBind: isLoopbackBind(bindHost),
       },
     });
+    if (ops?.close) {
+      const publicClose = started.close;
+      started.close = async () => {
+        await ops.close();
+        await publicClose?.();
+      };
+    }
   }
-  installHttpsShutdown({
-    close: async () => {
-      await ops?.close?.();
-      await started?.close?.();
-    },
-  });
+  installHttpsShutdown(started);
 
 } else {
   console.error(`[drupal-mcp-connector] Unknown MCP_TRANSPORT: "${transport}". Use "stdio", "https", or "http" (https alias).`);

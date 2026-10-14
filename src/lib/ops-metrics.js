@@ -4,31 +4,10 @@
  * Closed label sets only: route (`/mcp`, `/health`, `/well-known`,
  * `/unknown`) and status, plus deny reason from the audit code list.
  * Counters never carry principals, subjects, client ids, tokens, tenants,
- * or IP addresses. A test-only guard can reintroduce those labels so the
- * leak assertion can go red.
+ * or IP addresses. Extra fields on `finishRequest` are ignored.
  */
 
-import { classifyHttpAuditCode } from "./http-audit.js";
-
-/**
- * Test-only guard (DEV-863). Production callers never flip this. When
- * `required` is false, render includes identity labels — the leak used
- * to prove the no-identity test can fail.
- *
- * @type {{required: boolean}}
- */
-export const OPS_METRICS_IDENTITY_GUARD = { required: true };
-
-/**
- * Flip {@link OPS_METRICS_IDENTITY_GUARD} for a red-run. Restore `true`
- * after the assertion; production code never calls this.
- *
- * @param {boolean} required
- * @returns {void}
- */
-export function setOpsMetricsIdentityGuard(required) {
-  OPS_METRICS_IDENTITY_GUARD.required = Boolean(required);
-}
+import { classifyHttpAuditCode, requestHasAuthorization } from "./http-audit.js";
 
 /** Closed route labels. Query strings and arbitrary paths never appear. */
 export const METRICS_ROUTES = Object.freeze(["/mcp", "/health", "/well-known", "/unknown"]);
@@ -48,6 +27,27 @@ export function metricsRoute(path) {
     return "/well-known";
   }
   return "/unknown";
+}
+
+/**
+ * Closed fields recorded for one public request. Never copies a bearer,
+ * identity, address, or header value.
+ *
+ * @param {import("http").IncomingMessage} req
+ * @param {import("http").ServerResponse} res
+ * @param {object} [marks]
+ * @param {boolean} [marks.originDenied]
+ * @param {boolean} [marks.hostDenied]
+ * @returns {{path: string, status: number, hasAuthorization: boolean, originDenied: boolean, hostDenied: boolean}}
+ */
+export function publicRequestMetricFields(req, res, marks = {}) {
+  return {
+    path: String(req?.url || "").split("?")[0],
+    status: res?.statusCode || 0,
+    hasAuthorization: requestHasAuthorization(req),
+    originDenied: Boolean(marks.originDenied),
+    hostDenied: Boolean(marks.hostDenied),
+  };
 }
 
 /**
@@ -86,8 +86,6 @@ export function createOpsMetrics({
   let forbidden = 0;
   let rateLimited = 0;
   let inFlight = 0;
-  /** @type {object|null} */
-  let leakedIdentity = null;
 
   function bucketsInUse() {
     const address = typeof rateLimiter?.size === "function" ? rateLimiter.size() : 0;
@@ -100,8 +98,8 @@ export function createOpsMetrics({
       inFlight += 1;
     },
     /**
-     * Record one finished request. Identity fields are accepted so a
-     * disabled guard can leak them; production render ignores them.
+     * Record one finished request. Only route, status, and deny marks
+     * are read. Identity, tokens, tenants, and addresses are ignored.
      *
      * @param {object} fields
      * @param {unknown} [fields.path]
@@ -109,9 +107,6 @@ export function createOpsMetrics({
      * @param {boolean} [fields.hasAuthorization]
      * @param {boolean} [fields.originDenied]
      * @param {boolean} [fields.hostDenied]
-     * @param {object|null} [fields.identity]
-     * @param {unknown} [fields.address]
-     * @param {unknown} [fields.authorization]
      */
     finishRequest(fields = {}) {
       inFlight = Math.max(0, inFlight - 1);
@@ -129,15 +124,6 @@ export function createOpsMetrics({
         hostDenied: Boolean(fields.hostDenied),
       });
       if (code !== "ok" && code !== "aborted") bump(denies, code);
-      if (!OPS_METRICS_IDENTITY_GUARD.required) {
-        leakedIdentity = {
-          sub: fields.identity?.sub,
-          clientId: fields.identity?.clientId,
-          tenant: fields.identity?.tenant,
-          ip: fields.address,
-          token: fields.authorization,
-        };
-      }
     },
     bucketsInUse,
     inFlight() {
@@ -152,7 +138,6 @@ export function createOpsMetrics({
         rateLimited,
         buckets: bucketsInUse(),
         inFlight,
-        leakedIdentity: OPS_METRICS_IDENTITY_GUARD.required ? null : leakedIdentity,
       });
     },
   };
@@ -197,11 +182,5 @@ export function renderPrometheus(snapshot) {
     "# TYPE mcp_http_in_flight gauge",
     `mcp_http_in_flight ${snapshot.inFlight}`,
   );
-  if (snapshot.leakedIdentity) {
-    const leak = snapshot.leakedIdentity;
-    lines.push(
-      `mcp_debug_identity{sub="${leak.sub ?? ""}",client_id="${leak.clientId ?? ""}",tenant="${leak.tenant ?? ""}",ip="${leak.ip ?? ""}",token="${leak.token ?? ""}"} 1`,
-    );
-  }
   return `${lines.join("\n")}\n`;
 }

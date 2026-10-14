@@ -135,12 +135,18 @@ not expose a tool catalog. Missing a required scope is `403` with
 `GET /ready` and `GET /metrics` are not served on the public listener
 (normal `401` or `404`). They exist only when `MCP_OPS_LISTEN` / `ops.listen`
 is set, on a second socket that may bind loopback or Tailscale
-(`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) only — `0.0.0.0`, `::`, and any
-other public or non-mesh address are fatal (DEV-863). `/ready` is `200`
-only when introspection (or inbound auth) is reachable and the hosted
-scope table plus allowlists are complete; otherwise `503` names the
-failing checks and never includes secrets. `/metrics` is Prometheus text
-with no principals, subjects, client ids, tokens, tenants, or IPs.
+(`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) only — `0.0.0.0`, `::`, port 0,
+and any other public or non-mesh address are fatal (DEV-863). **The ops
+listener has no authentication.** `100.64.0.0/10` is also carrier-grade
+NAT (CGNAT) space, not Tailscale-only: confirm the bind address is
+actually a Tailscale interface, and restrict the port with Tailscale
+ACLs so arbitrary tailnet peers cannot scrape `/ready` or `/metrics`.
+`/ready` is `200` only on a 2xx introspection response with an RFC 7662
+body (`active` boolean) plus a complete hosted scope table and
+allowlists; `401` / `404` / `5xx` are `503`. Probes are single-flighted
+and cached for a few seconds so mesh peers cannot amplify traffic to the
+identity provider. `/metrics` is Prometheus text with no principals,
+subjects, client ids, tokens, tenants, or IPs.
 
 The inbound access token is never forwarded to Drupal. Outbound Drupal
 credentials stay the per-site OAuth client or `apiTokenEnv`.

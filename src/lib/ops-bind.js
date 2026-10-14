@@ -4,32 +4,13 @@
  * `/ready` and `/metrics` are never served on the public MCP listener.
  * When `MCP_OPS_LISTEN` (or `ops.listen`) is set, the process may bind
  * that extra socket only to loopback or a Tailscale address. `0.0.0.0`,
- * `::`, and any other public or non-mesh address are fatal at startup.
+ * `::`, port 0, and any other public or non-mesh address are fatal at
+ * startup. There is no runtime switch that widens this set.
  */
 
 import { BlockList, isIP } from "node:net";
 import { isLoopbackBind } from "./http-auth.js";
 import { normalizeIp } from "./client-address.js";
-
-/**
- * Test-only guard (DEV-863). Production callers never flip this. When
- * `required` is false, a public / wildcard bind is admitted — the
- * pre-guard behavior used to prove the refusal test can fail.
- *
- * @type {{required: boolean}}
- */
-export const OPS_BIND_GUARD = { required: true };
-
-/**
- * Flip {@link OPS_BIND_GUARD} for a red-run. Restore `true` after the
- * assertion; production code never calls this.
- *
- * @param {boolean} required
- * @returns {void}
- */
-export function setOpsBindGuard(required) {
-  OPS_BIND_GUARD.required = Boolean(required);
-}
 
 /** Tailscale CGNAT (IPv4) and Tailscale ULA (IPv6). */
 const MESH_BIND_LIST = new BlockList();
@@ -42,7 +23,7 @@ MESH_BIND_LIST.addSubnet("fd7a:115c:a1e0::", 48, "ipv6");
  * Named startup refusal when the ops listen spec cannot be parsed.
  */
 export const OPS_LISTEN_PARSE_REASON =
-  "MCP_OPS_LISTEN must be <addr:port> (IPv6 as [addr]:port). Empty disables the ops listener.";
+  "MCP_OPS_LISTEN must be <addr:port> with port 1-65535 (IPv6 as [addr]:port). Empty disables the ops listener.";
 
 /**
  * Named startup refusal for a disallowed ops bind address.
@@ -59,6 +40,7 @@ export function opsBindRefusedReason(host) {
 
 /**
  * Whether `host` is an IP on the ops bind list (loopback or Tailscale).
+ * `normalizeIp` folds `::ffff:` so a mapped public address cannot sneak in.
  *
  * @param {string} host
  * @returns {boolean}
@@ -82,7 +64,6 @@ function meshIpAllowed(host) {
  * @returns {boolean}
  */
 export function isOpsBindAllowed(host) {
-  if (!OPS_BIND_GUARD.required) return true;
   if (typeof host !== "string" || !host.trim()) return false;
   const value = host.trim();
   if (isLoopbackBind(value)) return true;
@@ -91,7 +72,7 @@ export function isOpsBindAllowed(host) {
 
 /**
  * Parse `MCP_OPS_LISTEN` / `ops.listen`. Empty or unset is disabled.
- * A present but unparseable value is a fatal error (they tried to enable it).
+ * A present but unparseable value, or port 0, is a fatal error.
  *
  * @param {unknown} spec
  * @returns {{enabled: false, error?: string}|{enabled: true, host: string, port: number}}
@@ -121,7 +102,7 @@ export function parseOpsListen(spec) {
   }
 
   const port = Number(portStr);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return { enabled: false, error: OPS_LISTEN_PARSE_REASON };
   }
   if (!host) return { enabled: false, error: OPS_LISTEN_PARSE_REASON };

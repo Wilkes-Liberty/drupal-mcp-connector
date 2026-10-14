@@ -22,6 +22,7 @@ import {
   httpAuditHostDenied,
   httpAuditOriginDenied,
 } from "./http-audit.js";
+import { publicRequestMetricFields } from "./ops-metrics.js";
 import {
   LOOPBACK_HOSTS,
   MCP_PROTOCOL_VERSIONS,
@@ -34,7 +35,6 @@ import {
   sessionPrincipalKey,
 } from "./http-transport.js";
 import { LOCAL_OPERATOR, runWithIdentity } from "./principal.js";
-import { isOpsPath, publicListenerRefusesOpsPath, publicRequestMetricFields } from "./ops-listener.js";
 
 /**
  * Routes that may be reached without a resolved identity. Health is a mesh
@@ -436,8 +436,7 @@ export function createLegacySessionHandler({
  * @param {(body: unknown) => boolean} [deps.isJsonRpcBatchFn]
  *   Injectable JSON-RPC batch predicate (eval mutants swap this).
  * @param {?{beginRequest: Function, finishRequest: Function}} [deps.metrics]
- *   Optional ops metrics registry (DEV-863). Identity is never stored
- *   when the identity guard is on.
+ *   Optional ops metrics registry (DEV-863). Identity is never stored.
  * @returns {(req: import("http").IncomingMessage, res: import("http").ServerResponse) => Promise<void>}
  */
 export function createMcpRequestHandler({
@@ -664,18 +663,6 @@ export function createMcpRequestHandler({
   };
 
   async function dispatchPublic(req, res, path) {
-    if (isOpsPath(path) && !publicListenerRefusesOpsPath(path)) {
-      // Test-only fail-open (DEV-863): prove the public-listener test can go red.
-      if (path === "/ready") {
-        res.writeHead(200, { "Content-Type": "application/json" })
-          .end(JSON.stringify({ status: "ok" }));
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" })
-        .end("# broken\n");
-      return;
-    }
-
     if (isUnauthenticatedRouteFn(req.method, path)) {
       if (path === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" })
