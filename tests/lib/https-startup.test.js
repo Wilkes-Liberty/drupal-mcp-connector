@@ -91,7 +91,6 @@ function baseStartup(overrides = {}) {
     sharedToken: "",
     inboundCfg: { issuer: "", audience: "" },
     buildServer: dummyServer,
-    toolCount: 0,
     exit: (code, reason) => { throw new Error(`startup exited (${code}): ${reason}`); },
     log: () => {},
     ...overrides,
@@ -129,7 +128,6 @@ describe("startHttpsTransport", () => {
       sharedToken: "",
       inboundCfg: { issuer: "", audience: "" },
       buildServer: dummyServer,
-      toolCount: 0,
       listenHost: "127.0.0.1",
       exit: (code, reason) => { exits.push({ code, reason }); },
       log: () => {},
@@ -450,6 +448,8 @@ describe("src/index.js production startup call", () => {
     expect(source).toMatch(/installHttpsShutdown\(started\)/);
     expect(source).toMatch(/"http" \(https alias\)/);
     expect(startHttpsTransportCall(source)).not.toMatch(/toolCount/);
+    expect(readFileSync(new URL("../../src/lib/https-startup.js", import.meta.url), "utf8"))
+      .not.toMatch(/toolCount/);
     expect(source).toMatch(/Alias of `https`/);
   });
 });

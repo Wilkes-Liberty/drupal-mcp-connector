@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stays the bound `sub` or `clientId` and is omitted along with `actor` for
   a loopback local operator. Audit output still excludes token material (#472).
 
+### Changed
+
+- **Test-only relocation and leftover cleanup (nightly 2026-10-15).** Move the
+  loopback `createLocalPolicyEnforcement` stand-in out of `src/` into
+  `tests/` (the `policyEnforcement` hook on `createRelayAgent` stays). Drop
+  the leftover `toolCount` parameter on `startHttpsTransport` (callers
+  already pass `listenLabel`). `npm run lint` and `npm run syntax-check`
+  now cover `bin/` and `scripts/` as well as `src/`. Core Node imports use
+  the `node:` prefix. Delete unused `wizardUsage()` and the
+  `isReservedDocumentationHost` re-export from the operator wizard.
+
 ## [5.1.1] - 2026-10-15
 
 ### Fixed

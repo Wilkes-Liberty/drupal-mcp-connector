@@ -173,7 +173,6 @@ describe("public listener refuses /ready and /metrics (DEV-863)", () => {
       allowHttp: true,
       inboundCfg: { issuer: "", audience: "" },
       buildServer: dummyServer,
-      toolCount: 0,
       exit: (code, reason) => { throw new Error(`startup exited (${code}): ${reason}`); },
       log: () => {},
     });

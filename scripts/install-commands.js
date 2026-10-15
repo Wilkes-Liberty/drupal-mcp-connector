@@ -22,10 +22,11 @@
  * Run: `npm run install:commands -- [--home DIR] [--clients claude,grok,codex,agents] [--modules]`
  */
 
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from "fs";
-import { homedir } from "os";
-import { join, resolve } from "path";
-import { pathToFileURL } from "url";
+/* eslint-disable security/detect-non-literal-fs-filename -- writes operator --home client stubs; argv[1] is the invoked-script identity check */
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { allDefinitions } from "../src/tools/index.js";
 import {

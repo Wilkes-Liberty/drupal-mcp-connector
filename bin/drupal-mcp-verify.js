@@ -62,7 +62,7 @@ const USAGE = `drupal-mcp-connector verify
   --help            Show this message.
 `;
 
-/** Human-readable one-line-per-check report. */
+/** Operator-readable one-line-per-check report. */
 function report(evidence) {
   const mark = { pass: "PASS", fail: "FAIL", skipped: "SKIP", "n/a": "N/A " };
   const lines = [
@@ -93,6 +93,7 @@ async function main() {
   }
 
   const config = args.config
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- operator --config path
     ? JSON.parse(readFileSync(String(args.config), "utf8"))
     : loadConfig();
   const source = args.config ? String(args.config) : "config/config.json";

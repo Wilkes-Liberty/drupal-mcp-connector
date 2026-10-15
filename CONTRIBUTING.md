@@ -30,7 +30,7 @@ npm run lint                      # eslint — must be clean
 npm run lint:fix                  # auto-fix what eslint can
 npm run lint:actions              # resolve every .github/workflows uses: ref against GitHub (network)
 npm run audit                     # fail on high-severity dependency advisories
-npm run syntax-check              # node --check over src/**
+npm run syntax-check              # node --check over src/**, bin/**, scripts/**
 npm run check                     # lint + audit + syntax-check + test (CI and release quality gate)
 ```
 
