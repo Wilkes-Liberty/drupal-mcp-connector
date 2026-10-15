@@ -8,8 +8,8 @@
  * coerce values in ways that could hide injection attempts.
  */
 
-import { existsSync, realpathSync } from "fs";
-import { basename, resolve, sep } from "path";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, resolve, sep } from "node:path";
 import { SecurityError } from "./security.js";
 
 // ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@
  *     (the commits endpoint also sees the repository's fork network, so this
  *     proves existence, not that the commit is on a branch or tag). If the
  *     line carries a full `# vX.Y.Z` comment, that tag must point at the same
- *     commit, so the human-readable version cannot drift from the pin.
+ *     commit, so the version comment cannot drift from the pin.
  *     Major-only comments such as `# v4` are floating and are not checked;
  *   - any other ref must be a tag or a branch on that repository;
  *   - when the reference names a path (a reusable workflow or a nested
@@ -32,12 +32,15 @@
  * only when executed directly.
  */
 
+/* eslint-disable security/detect-non-literal-fs-filename -- reads .github/workflows from the repo root; argv[1] is the invoked-script identity check */
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const WORKFLOWS_DIR = ".github/workflows";
+// eslint-disable-next-line security/detect-unsafe-regex -- fixed workflow `uses:` line parser, not operator input
 const USES_LINE = /^\s*(?:-\s+)?uses:\s*["']?([^"'\s#]+)["']?\s*(?:#\s*(\S+))?/;
+// eslint-disable-next-line security/detect-unsafe-regex -- fixed owner/repo[/path]@ref parser, not operator input
 const REMOTE_SPEC = /^([^/@\s]+)\/([^/@\s]+)((?:\/[^@\s]+)?)@(\S+)$/;
 const NAME_SEGMENT = /^[A-Za-z0-9_.-]+$/;
 const COMMIT_SHA = /^[0-9a-f]{40}$/;

@@ -25,8 +25,9 @@
  * side effect runs only when executed directly.
  */
 
-import { mkdirSync, readdirSync, rmSync, writeFileSync, realpathSync } from "fs";
-import { pathToFileURL } from "url";
+/* eslint-disable security/detect-non-literal-fs-filename -- writes the in-repo .agents/commands tree; argv[1] is the invoked-script identity check */
+import { mkdirSync, readdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 import { allDefinitions } from "../src/tools/index.js";
 import {
@@ -83,7 +84,7 @@ export function moduleCommandFileName(def, parts) {
 
 /** Collapse to a single-line, double-quoted YAML scalar. */
 function yamlString(value) {
-  const clean = String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\s+/g, " ").trim();
+  const clean = String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"").replace(/\s+/g, " ").trim();
   return `"${clean}"`;
 }
 

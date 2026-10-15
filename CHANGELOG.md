@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Test-only relocation and leftover cleanup (nightly 2026-10-15).** Move the
+  loopback `createLocalPolicyEnforcement` stand-in out of `src/` into
+  `tests/` (the `policyEnforcement` hook on `createRelayAgent` stays). Drop
+  the leftover `toolCount` parameter on `startHttpsTransport` (callers
+  already pass `listenLabel`). `npm run lint` and `npm run syntax-check`
+  now cover `bin/` and `scripts/` as well as `src/`. Core Node imports use
+  the `node:` prefix. Delete unused `wizardUsage()` and the
+  `isReservedDocumentationHost` re-export from the operator wizard.
+
 ### Added
 
 - Hosted HTTP audit rows classify a request that never binds a verified

@@ -16,11 +16,11 @@ governed write tools. It is **not** a Drupal module.
 npm install
 npm test                 # vitest, once
 npm run test:watch
-npm run lint             # eslint src/
+npm run lint             # eslint src/ bin/ scripts/
 npm run lint:fix
 npm run eval:http        # HTTP transport eval pack (tests/evals/http, DEV-866); not part of check yet
 npm run audit            # fail on high-severity npm advisories
-npm run syntax-check     # node --check over src/**
+npm run syntax-check     # node --check over src/**, bin/**, scripts/**
 npm run check            # lint + audit + syntax-check + test (CI and release quality gate)
 npm run generate:commands  # regenerate slash stubs under .agents/commands/
 npm run install:commands   # copy stubs into ~/.claude/commands, ~/.grok/commands, and ~/.agents/skills/drupal-mcp/

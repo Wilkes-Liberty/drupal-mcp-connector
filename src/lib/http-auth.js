@@ -20,7 +20,7 @@
  *     `DEFAULT_INTROSPECTION_TIMEOUT_MS` (2s, configurable).
  */
 
-import { readFileSync, statSync, writeFileSync } from "fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { createRemoteJWKSet, customFetch, decodeProtectedHeader, jwtVerify } from "jose";
 import { resolveConfiguredOrigins } from "./http-transport.js";
 

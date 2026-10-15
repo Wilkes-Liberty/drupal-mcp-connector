@@ -10,7 +10,7 @@ import globals         from "globals";
 export default [
   // Apply to all JS source files
   {
-    files: ["src/**/*.js"],
+    files: ["src/**/*.js", "bin/**/*.js", "scripts/**/*.js"],
     languageOptions: {
       ecmaVersion:  2022,
       sourceType:   "module",
@@ -41,6 +41,7 @@ export default [
       // --- Node (eslint-plugin-n) --------------------------------------------
       "n/no-process-exit":           "off",   // we use process.exit intentionally
       "n/no-unsupported-features/es-syntax": "off",
+      "n/prefer-node-protocol":      "error",
 
       // --- General best practices -------------------------------------------
       "no-eval":                     "error",

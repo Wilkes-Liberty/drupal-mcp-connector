@@ -11,12 +11,13 @@
  * when executed directly.
  */
 
+/* eslint-disable security/detect-non-literal-fs-filename -- writes GITHUB_OUTPUT; argv[1] is the invoked-script identity check */
 import { appendFileSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /** Semver core + optional prerelease + optional build metadata. */
-const SEMVER =
-  /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;
+// eslint-disable-next-line security/detect-unsafe-regex -- fixed semver grammar, not operator input
+const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;
 
 /**
  * Classify a version string or `v*` tag.
