@@ -6,6 +6,7 @@
  */
 
 import { Server } from "@modelcontextprotocol/server";
+import { markHttpAuditToolOutcome } from "./http-audit.js";
 
 /**
  * Whether a listed resource URI (possibly templated) covers a requested URI.
@@ -51,8 +52,15 @@ export function createConnectorServerFactory({ serverInfo, tools, resources, pro
     }));
     server.setRequestHandler("tools/call", async (request, context) => {
       const { name, arguments: args } = request.params;
-      const result = await tools.call(name, args ?? {}, context);
-      return server.projectCallToolResult(result, toolDefinitions.get(name)?.outputSchema);
+      try {
+        const result = await tools.call(name, args ?? {}, context);
+        const projected = server.projectCallToolResult(result, toolDefinitions.get(name)?.outputSchema);
+        markHttpAuditToolOutcome(result?.isError === true ? "error" : "success");
+        return projected;
+      } catch (error) {
+        markHttpAuditToolOutcome("error");
+        throw error;
+      }
     });
 
     server.setRequestHandler("resources/list", async () => ({

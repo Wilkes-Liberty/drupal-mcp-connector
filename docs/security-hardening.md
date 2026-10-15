@@ -360,3 +360,23 @@ For a site where agents perform CRUD operations, the recommended posture is:
 5. **Drupal-side governance** — the Drupal module (allow/deny rules, audit log, content
    locks, rate limits) is the authoritative enforcement layer; the connector-side
    controls are a complementary defence-in-depth measure.
+
+
+### HTTP tool audit outcomes
+
+Each finished HTTP request still emits one audit row with its transport status
+and transport `code`. A dispatched tool call additionally carries `toolOutcome`:
+`success`, `error`, or `denied`. A tool refusal can legitimately have HTTP 200,
+so monitoring must inspect this outcome as well as the HTTP status.
+
+The connector marks `denied` when its authorization code handles a
+`SecurityError`; it does not classify message text from tools or backends.
+Other error results and thrown tool failures are `error`. For nested calls,
+denial takes precedence over error, which takes precedence over success. This
+records any authorization refusal during the invocation even if an outer tool
+handles the error. Requests that never dispatch a tool omit `toolOutcome`.
+
+The outcome is a closed enum stored in request-local context and sanitized
+alongside the verified principal and tenant. Tool names, arguments, results,
+error messages, headers and tokens are not added to the row. Logging failure
+does not change an authorization decision or enable a fallback credential.

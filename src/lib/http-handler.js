@@ -15,6 +15,7 @@ import { resolveClientAddress } from "./client-address.js";
 import { rateLimitAddressKey, rateLimitPrincipalKey, UNRESOLVED_PRINCIPAL_RATE_KEY } from "./rate-limit.js";
 import {
   attachHttpAudit,
+  runWithHttpAudit,
   markHttpAuditHostRefused,
   markHttpAuditOriginRefused,
   createHttpAuditWriter,
@@ -645,7 +646,7 @@ export function createMcpRequestHandler({
   }
 
   function dispatchWithIdentity(req, fn) {
-    return runWithIdentity(req.mcpIdentity, fn, { surface: "network" });
+    return runWithHttpAudit(req, () => runWithIdentity(req.mcpIdentity, fn, { surface: "network" }));
   }
 
   return async function handle(req, res) {

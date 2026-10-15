@@ -10,6 +10,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 /** Closed denial / outcome codes recorded on each hosted HTTP row. */
 export const HTTP_AUDIT_CODES = Object.freeze([
@@ -24,6 +25,31 @@ export const HTTP_AUDIT_CODES = Object.freeze([
 ]);
 
 const CODE_SET = new Set(HTTP_AUDIT_CODES);
+const TOOL_OUTCOMES = new Set(["success", "error", "denied"]);
+const TOOL_RESULTS = new WeakMap();
+const requestAuditStore = new AsyncLocalStorage();
+
+/** Run dispatch with a private request reference, never caller arguments.
+ * @param {object} req
+ * @param {Function} fn
+ * @returns {*}
+ */
+export function runWithHttpAudit(req, fn) {
+  return requestAuditStore.run(req, fn);
+}
+
+/** Record a server-derived outcome. A policy denial cannot be overwritten
+ * by an outer tool result; error likewise outranks success for nested calls.
+ * @param {"success"|"error"|"denied"} outcome
+ */
+export function markHttpAuditToolOutcome(outcome) {
+  const req = requestAuditStore.getStore();
+  if (!req || !TOOL_OUTCOMES.has(outcome)) return;
+  const previous = TOOL_RESULTS.get(req);
+  if (previous === "denied" || (previous === "error" && outcome === "success")) return;
+  TOOL_RESULTS.set(req, outcome);
+}
+
 
 const ATTACHED = new WeakSet();
 const WRITTEN = new WeakSet();
@@ -254,7 +280,7 @@ export function sanitizeHttpAuditRow(row, secrets = []) {
   const out = {};
   if (!row || typeof row !== "object") return out;
   const bag = new Map(Object.entries(row));
-  for (const key of ["timestamp", "route", "method", "status", "code", "requestId", "principal", "tenant"]) {
+  for (const key of ["timestamp", "route", "method", "status", "code", "requestId", "principal", "tenant", "toolOutcome"]) {
     if (!bag.has(key)) continue;
     const folded = key.toLowerCase().replace(/_/g, "");
     if (FORBIDDEN_ROW_KEYS.has(folded)) continue;
@@ -266,6 +292,7 @@ export function sanitizeHttpAuditRow(row, secrets = []) {
     else if (key === "requestId") out.requestId = bag.get(key);
     else if (key === "principal") out.principal = bag.get(key);
     else if (key === "tenant") out.tenant = bag.get(key);
+    else if (key === "toolOutcome" && TOOL_OUTCOMES.has(bag.get(key))) out.toolOutcome = bag.get(key);
   }
   if (!CODE_SET.has(out.code)) out.code = "forbidden";
   if (typeof out.status === "number") {
@@ -329,6 +356,8 @@ export function buildHttpAuditRow(req, res, {
     }),
     requestId: requestId || resolveRequestId(req),
   };
+  const toolOutcome = req && TOOL_RESULTS.get(req);
+  if (toolOutcome) row.toolOutcome = toolOutcome;
   const principal = identity?.sub || identity?.clientId;
   if (principal) row.principal = String(principal);
   const tenant = identity?.tenant || (req && TENANTS.get(req));
