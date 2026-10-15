@@ -4,8 +4,8 @@
  */
 
 import fetch from "node-fetch";
-import { createReadStream, statSync } from "fs";
-import { basename } from "path";
+import { createReadStream, statSync } from "node:fs";
+import { basename } from "node:path";
 import { authHeadersAsync, clientHeaders } from "./config.js";
 import { clearToken } from "./oauth.js";
 import {

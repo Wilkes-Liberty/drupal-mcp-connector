@@ -214,7 +214,6 @@ function createNodeServer({ onRequest, tls, allowHttp, exit, log }) {
  * @param {object} options.inboundCfg
  * @param {{certPath?: string, keyPath?: string}|null} [options.tls]
  * @param {Function} options.buildServer
- * @param {number} [options.toolCount] Listen-line fallback when `listenLabel` is omitted.
  * @param {string} [options.legacyMode]
  * @param {?object} [options.rateLimiter] Per-address limiter (unauthenticated / failed-auth traffic).
  * @param {?object} [options.principalLimiter] Per-verified-principal limiter (DEV-860).
@@ -257,7 +256,6 @@ export async function startHttpsTransport({
   inboundCfg,
   tls = null,
   buildServer,
-  toolCount,
   legacyMode = "serve",
   rateLimiter = null,
   principalLimiter,
@@ -428,8 +426,8 @@ export async function startHttpsTransport({
   const url = `${proto}://${urlHost}:${address.port}/mcp`;
   const logHost = String(bindHost).includes(":") ? `[${bindHost}]` : bindHost;
   log(
-    `[drupal-mcp-connector v${CLIENT_VERSION}] Listening on ${proto}://${logHost}:${address.port}/mcp\n` +
-    `  ${listenLabel || `${toolCount} tools`}`,
+    `[drupal-mcp-connector v${CLIENT_VERSION}] Listening on ${proto}://${logHost}:${address.port}/mcp` +
+    (listenLabel ? `\n  ${listenLabel}` : ""),
   );
 
   return {

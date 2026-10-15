@@ -7,8 +7,8 @@
  *   - All exported functions are pure — no side effects beyond the cache.
  */
 
-import { readFileSync }                  from "fs";
-import { resolve }                       from "path";
+import { readFileSync }                  from "node:fs";
+import { resolve }                       from "node:path";
 import { validateBaseUrl }               from "./validate.js";
 import { SecurityError }                 from "./security.js";
 import { getAccessToken }                from "./oauth.js";

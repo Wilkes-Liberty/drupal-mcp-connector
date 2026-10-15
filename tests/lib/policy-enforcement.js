@@ -1,15 +1,16 @@
 /**
- * Tenant-side local policy enforcement (#253).
+ * Test-only tenant-side local policy enforcement (#253).
  *
  * Loopback stand-in for mcp_sentinel `McpPolicyBundleRegistry`: mint / verify
- * / activate / simulate / revoke / rollback / emergency deny. The relay edge
- * never receives the signing key and never calls mint. A missing key cannot
- * mint, verify, or activate — emergency deny still arms a deny floor without
- * minting new authority.
+ * / activate / simulate / revoke / rollback / emergency deny. Not shipped in
+ * the connector; production keeps only the `policyEnforcement` hook on
+ * `createRelayAgent`. The relay edge never receives the signing key and
+ * never calls mint. A missing key cannot mint, verify, or activate —
+ * emergency deny still arms a deny floor without minting new authority.
  */
 
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { SEAL_PREFIX } from "./policy-promotion.js";
+import { SEAL_PREFIX } from "../../src/lib/policy-promotion.js";
 
 const POLICY_BUNDLE_VERSION = 1;
 

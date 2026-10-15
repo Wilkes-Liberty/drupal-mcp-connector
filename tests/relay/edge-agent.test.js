@@ -26,7 +26,7 @@ import {
   createChannelCredentialStore,
   startEdge,
 } from "../../src/lib/relay/edge.js";
-import { createLocalPolicyEnforcement } from "../../src/lib/policy-enforcement.js";
+import { createLocalPolicyEnforcement } from "../lib/policy-enforcement.js";
 import { createRelayAgent } from "../../src/lib/relay/agent.js";
 import { createNotary, generateNotaryKeys, verifyInclusion } from "../../src/lib/anchor.js";
 import { ABSENT, createEvidenceLedger, EXECUTION_IDS, exportAssessor } from "../../src/lib/evidence.js";

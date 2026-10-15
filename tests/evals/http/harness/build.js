@@ -347,7 +347,6 @@ export async function buildHarness({
     inboundCfg,
     tls: null,
     buildServer,
-    toolCount: TOOL_DEFINITIONS.length,
     legacyMode: "serve",
     rateLimiter: rateLimit.createRateLimiter({
       limit: rateLimitOpt ?? FIXTURE_RATE_LIMIT,

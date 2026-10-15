@@ -101,7 +101,6 @@ defineCase({
       tls: { certPath: tlsPair.cert, keyPath: tlsPair.key },
       listenHost: "127.0.0.1",
       buildServer: dummyServer,
-      toolCount: 0,
       resolveInboundAuthModeFn: h.mutant ? failOpenInboundAuthMode : httpAuth.resolveInboundAuthMode,
       exit: (code, reason) => { exits.push({ code, reason }); },
       log: () => {},

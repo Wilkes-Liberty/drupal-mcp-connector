@@ -397,7 +397,7 @@ export function writeClientConfigs(answers, configs, selected) {
 }
 
 /**
- * Human report: snippets, paths, checks, next fix.
+ * Operator report: snippets, paths, checks, next fix.
  * @param {{answers: object, configs: object, writes: object[], checks: object}} result
  * @param {string[]} selected
  * @returns {string}
@@ -452,14 +452,6 @@ export function formatWizardReport(result, selected) {
   lines.push("  (drupal_mcp_whoami → drupal_list_sites → unpublished drupal_list_nodes / dryRun create).");
   lines.push("Full client notes: docs/mcp-clients.md · verify: npm run verify");
   return lines.join("\n");
-}
-
-/**
- * @param {string[]} argv
- * @returns {string}
- */
-export function wizardUsage() {
-  return USAGE;
 }
 
 /**
@@ -848,8 +840,6 @@ function hostnameOf(url) {
     return url;
   }
 }
-
-export { isReservedDocumentationHost };
 
 /**
  * @param {string} raw

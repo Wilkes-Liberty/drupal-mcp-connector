@@ -22,9 +22,9 @@
 
 import { callBoundModuleTool, toolResultData } from "../lib/server-tools.js";
 import { Client }        from "ssh2";
-import { readFileSync }  from "fs";
-import { homedir }       from "os";
-import { join, resolve, normalize } from "path";
+import { readFileSync }  from "node:fs";
+import { homedir }       from "node:os";
+import { join, resolve, normalize } from "node:path";
 import { getSiteConfig } from "../lib/config.js";
 import {
   resolveSecurityConfig, assertNotReadOnly, assertDestructiveAllowed, assertModuleUninstallAllowed,
