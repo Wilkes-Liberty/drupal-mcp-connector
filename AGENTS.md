@@ -19,6 +19,8 @@ npm run test:watch
 npm run lint             # eslint src/ bin/ scripts/
 npm run lint:fix
 npm run eval:http        # HTTP transport eval pack (tests/evals/http, DEV-866); not part of check yet
+npm run eval:mutants     # source-mutant runner over the HTTP eval pack; not part of check yet
+npm run eval:http:staging  # same cases against a staging endpoint; skips when unset
 npm run audit            # fail on high-severity npm advisories
 npm run syntax-check     # node --check over src/**, bin/**, scripts/**
 npm run check            # lint + audit + syntax-check + test (CI and release quality gate)

@@ -20,6 +20,8 @@
  *      each have a covering case (Ta5). T1/T7 request labels stay pinned
  *      to manifest.requestLabels.
  * Rule 4 (scanner self-test first) arrives with X1s in increment 4.
+ * Increment 3 adds X1 (authn/authz before dispatch) and a separate
+ * source-mutant runner (`npm run eval:mutants`).
  * Also (R-A7): src/ must not mention the harness's own switches.
  *
  * Writes evals-http-report.json (override the path with EVAL_HTTP_REPORT).

@@ -1,8 +1,9 @@
 /**
  * The only door from the harness to connector code. Modules load from
- * `src/` by default; the runner may point `EVAL_HTTP_SRC` at a scratch copy of
- * `src/` (increment 2 applies mutant patches there). `src/` itself gains no
- * flag, variable, or branch: the override lives here, in `tests/`.
+ * `src/` by default; `npm run eval:mutants` points `EVAL_HTTP_SRC` at a
+ * scratch copy of `src/` after applying a declared source patch. `src/`
+ * itself gains no flag, variable, or branch: the override lives here, in
+ * `tests/`.
  */
 
 import { join, resolve } from "node:path";

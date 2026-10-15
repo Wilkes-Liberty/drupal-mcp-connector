@@ -65,7 +65,12 @@ import {
   resolveInboundAuthConfig,
   isLoopbackBind,
 } from "./lib/http-auth.js";
-import { createStartupRateLimiters, installHttpsShutdown, startHttpsTransport } from "./lib/https-startup.js";
+import {
+  buildProductionHttpsOptions,
+  createStartupRateLimiters,
+  installHttpsShutdown,
+  startHttpsTransport,
+} from "./lib/https-startup.js";
 import { createOpsMetrics } from "./lib/ops-metrics.js";
 import { resolveOpsListen } from "./lib/ops-bind.js";
 import { startOpsListener } from "./lib/ops-listener.js";
@@ -335,7 +340,7 @@ if (transport === "stdio") {
     principalLimiter: limits.principalLimiter,
   });
 
-  const started = await startHttpsTransport({
+  const started = await startHttpsTransport(buildProductionHttpsOptions({
     bindHost,
     port: tlsCfg.port,
     allowHttp,
@@ -350,7 +355,7 @@ if (transport === "stdio") {
     principalLimiter: limits.principalLimiter,
     trustedProxies,
     metrics,
-  });
+  }));
 
   if (started?.started && opsListen.enabled) {
     const ops = await startOpsListener({

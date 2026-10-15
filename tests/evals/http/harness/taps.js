@@ -2,8 +2,9 @@
  * Response tap and canary scanner. Records what the caller could see
  * (status, headers, body) and scans that transcript, not chosen fields.
  *
- * Increment 1 scans response headers and bodies only. SSE frames, captured
- * logs, and the scanner self-test (X1s) arrive with increment 4.
+ * Increment 1 scans response headers and bodies only. X1 (authn/authz
+ * before dispatch) is increment 3. SSE frames, captured logs, and the
+ * scanner self-test (X1s) arrive with increment 4.
  */
 
 /**

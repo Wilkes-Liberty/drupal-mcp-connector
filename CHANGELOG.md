@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **HTTP transport eval pack increment 3 (DEV-866).** `npm run eval:mutants`
+  copies `src/` and applies declared mutations at the auth-gate order, Origin
+  check, grant fall-through, scope table, and audit denial-code sites. Each
+  mutant must be killed by its pinned case for the pinned reason; a survivor
+  fails the run. A non-required CI job runs the runner. X1 is a live-inventory
+  scanner: every HTTP route and tool from `allDefinitions` and the transport
+  route tables reaches dispatch only after authn and authz. The production
+  "no eval hooks" pin is now an import of `buildProductionHttpsOptions`, not
+  a source-text grep. `npm run eval:http:staging` aims the same deny/allow
+  twins at a real staging endpoint (env-configured base URL and issuer,
+  read-only, no secrets in the repo) and skips cleanly when unset. New
+  synthetic cases cover wrong-audience, expired, insufficient-scope, and
+  non-member tokens. Production request handling is unchanged except that
+  `src/index.js` now passes `buildProductionHttpsOptions(...)` into
+  `startHttpsTransport` (same keys as before).
+
 ## [5.1.2] - 2026-10-15
 
 ### Added

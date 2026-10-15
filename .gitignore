@@ -54,5 +54,8 @@ docs/superpowers/
 # Playwright MCP throwaway page snapshots
 .playwright-mcp/
 
-# DEV-866 HTTP eval pack report (generated)
+# DEV-866 HTTP eval pack reports (generated)
 evals-http-report.json
+evals-mutants-report.json
+evals-http-staging-report.json
+.eval-mutant-*
