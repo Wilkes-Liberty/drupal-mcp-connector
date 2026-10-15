@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.2] - 2026-10-15
+
+### Added
+
+- Hosted HTTP audit rows classify a request that never binds a verified
+  identity. `actor` is `anonymous` when no `Authorization` header is
+  present and `unverified` when presented credentials do not verify,
+  including invalid, expired, revoked, and wrong-audience tokens. `principal`
+  stays the bound `sub` or `clientId` and is omitted along with `actor` for
+  a loopback local operator. Audit output still excludes token material (#472).
+
 ### Changed
 
 - **Test-only relocation and leftover cleanup (nightly 2026-10-15).** Move the
@@ -17,15 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now cover `bin/` and `scripts/` as well as `src/`. Core Node imports use
   the `node:` prefix. Delete unused `wizardUsage()` and the
   `isReservedDocumentationHost` re-export from the operator wizard.
-
-### Added
-
-- Hosted HTTP audit rows classify a request that never binds a verified
-  identity. `actor` is `anonymous` when no `Authorization` header is
-  present and `unverified` when presented credentials do not verify,
-  including invalid, expired, revoked, and wrong-audience tokens. `principal`
-  stays the bound `sub` or `clientId` and is omitted along with `actor` for
-  a loopback local operator. Audit output still excludes token material (#472).
 
 ## [5.1.1] - 2026-10-15
 
