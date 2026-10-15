@@ -6,7 +6,10 @@
  * changes the HTTP verdict (rows are emitted after the response is finished).
  *
  * Rows are a closed field set. Bearer tokens, Authorization, Cookie,
- * Proxy-Authorization, and raw bodies are never copied in.
+ * Proxy-Authorization, and raw bodies are never copied in. `principal` is
+ * copied only from an identity the handler already bound. A request with
+ * no bound identity carries `actor`: `anonymous` when no Authorization
+ * header is present, `unverified` when one is (#472).
  */
 
 import { randomUUID } from "node:crypto";
@@ -26,6 +29,8 @@ export const HTTP_AUDIT_CODES = Object.freeze([
 
 const CODE_SET = new Set(HTTP_AUDIT_CODES);
 const TOOL_OUTCOMES = new Set(["success", "error", "denied"]);
+/** Actor class for a request that never bound a verified identity (#472). */
+const AUDIT_ACTORS = new Set(["anonymous", "unverified"]);
 const TOOL_RESULTS = new WeakMap();
 const requestAuditStore = new AsyncLocalStorage();
 
@@ -280,7 +285,7 @@ export function sanitizeHttpAuditRow(row, secrets = []) {
   const out = {};
   if (!row || typeof row !== "object") return out;
   const bag = new Map(Object.entries(row));
-  for (const key of ["timestamp", "route", "method", "status", "code", "requestId", "principal", "tenant", "toolOutcome"]) {
+  for (const key of ["timestamp", "route", "method", "status", "code", "requestId", "actor", "principal", "tenant", "toolOutcome"]) {
     if (!bag.has(key)) continue;
     const folded = key.toLowerCase().replace(/_/g, "");
     if (FORBIDDEN_ROW_KEYS.has(folded)) continue;
@@ -290,6 +295,7 @@ export function sanitizeHttpAuditRow(row, secrets = []) {
     else if (key === "status") out.status = bag.get(key);
     else if (key === "code") out.code = bag.get(key);
     else if (key === "requestId") out.requestId = bag.get(key);
+    else if (key === "actor" && AUDIT_ACTORS.has(bag.get(key))) out.actor = bag.get(key);
     else if (key === "principal") out.principal = bag.get(key);
     else if (key === "tenant") out.tenant = bag.get(key);
     else if (key === "toolOutcome" && TOOL_OUTCOMES.has(bag.get(key))) out.toolOutcome = bag.get(key);
@@ -358,8 +364,12 @@ export function buildHttpAuditRow(req, res, {
   };
   const toolOutcome = req && TOOL_RESULTS.get(req);
   if (toolOutcome) row.toolOutcome = toolOutcome;
-  const principal = identity?.sub || identity?.clientId;
-  if (principal) row.principal = String(principal);
+  if (identity) {
+    const principal = identity.sub || identity.clientId;
+    if (principal) row.principal = String(principal);
+  } else {
+    row.actor = requestHasAuthorization(req) ? "unverified" : "anonymous";
+  }
   const tenant = identity?.tenant || (req && TENANTS.get(req));
   if (tenant) row.tenant = String(tenant);
   return sanitizeHttpAuditRow(row, secretsFrom(req));

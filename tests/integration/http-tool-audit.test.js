@@ -100,10 +100,13 @@ describe("authoritative tool outcomes on HTTP audit rows", () => {
       expect(matching).toHaveLength(1);
       expect(matching[0]).toMatchObject({ status: 200, code: "ok", toolOutcome: outcome,
         principal: alternate ? "second-user" : "verified-user", tenant: "verified-tenant" });
+      expect(matching[0].actor).toBeUndefined();
     }));
     expect(rows.length - startRows).toBe(cases.length);
     const denial = await post(url, { jsonrpc: "2.0", id: 90, method: "tools/list" }, { ...headers, authorization: "" });
     expect(denial.response.status).toBe(401);
+    expect(rows.at(-1)).toMatchObject({ code: "unauthenticated", actor: "anonymous" });
+    expect(rows.at(-1).principal).toBeUndefined();
     expect(rows.at(-1).toolOutcome).toBeUndefined();
     expect(JSON.stringify(rows)).not.toMatch(/synthetic-secret|private-cookie|private-argument|forged-tenant|Access denied|untrusted upstream/);
   });

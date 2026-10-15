@@ -111,7 +111,17 @@ defineCase({
 
     const okRow = h.auditRows.find((row) => row.requestId === "t8-ok");
     expectEqual(h, "principal recorded when known", typeof okRow?.principal, "string");
+    expectEqual(h, "verified success omits actor", okRow?.actor, undefined);
+    const originRow = h.auditRows.find((row) => row.requestId === "t8-bad-origin");
+    expectEqual(h, "post-auth denial keeps principal", typeof originRow?.principal, "string");
+    expectEqual(h, "post-auth denial omits actor", originRow?.actor, undefined);
     const missingRow = h.auditRows.find((row) => row.requestId === "t8-missing-token");
     expectEqual(h, "no principal on missing-token row", missingRow?.principal, undefined);
+    expectEqual(h, "missing token is anonymous", missingRow?.actor, "anonymous");
+    const sentinelRow = h.auditRows.find((row) => row.requestId === "t8-sentinel");
+    expectEqual(h, "invalid token is unverified", sentinelRow?.actor, "unverified");
+    expectEqual(h, "invalid token has no principal", sentinelRow?.principal, undefined);
+    const limitedRow = h.auditRows.find((row) => row.requestId === "t8-rate-limited");
+    expectEqual(h, "unauthenticated rate limit is anonymous", limitedRow?.actor, "anonymous");
   },
 });
