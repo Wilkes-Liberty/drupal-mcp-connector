@@ -371,10 +371,11 @@ so monitoring must inspect this outcome as well as the HTTP status.
 
 The connector marks `denied` when its authorization code handles a
 `SecurityError`; it does not classify message text from tools or backends.
-Other error results and thrown tool failures are `error`. For nested calls,
-denial takes precedence over error, which takes precedence over success. This
-records any authorization refusal during the invocation even if an outer tool
-handles the error. Requests that never dispatch a tool omit `toolOutcome`.
+The outer SDK tool-call result determines `success` or `error` for ordinary
+results and thrown failures. A marked authorization denial takes precedence
+over that result, including a nested refusal handled by an outer tool. An
+ordinary nested error handled successfully by the outer tool is not itself a
+request-level error. Requests that never dispatch a tool omit `toolOutcome`.
 
 The outcome is a closed enum stored in request-local context and sanitized
 alongside the verified principal and tenant. Tool names, arguments, results,
