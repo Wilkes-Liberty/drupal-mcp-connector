@@ -40,6 +40,76 @@ export const ALLOWED_HANDLER_OVERRIDE_KEYS = Object.freeze([
   "hostAllowedFn",
 ]);
 
+/**
+ * Eval/test seams `src/index.js` must not pass. Checked by importing
+ * {@link buildProductionHttpsOptions}, not by grepping the entry source.
+ */
+export const PRODUCTION_STARTUP_SEAM_KEYS = Object.freeze([
+  "fetchFn",
+  "auditWriter",
+  "handlerOverrides",
+  "wrapHandler",
+  "wrapRequestHandler",
+  "checkAuth",
+  "authenticate",
+  "allowLocalOperator",
+  "resolveInboundAuthModeFn",
+]);
+
+/**
+ * Seam keys present on a `startHttpsTransport` options object.
+ *
+ * @param {object|null|undefined} options
+ * @returns {string[]}
+ */
+export function usedProductionSeamKeys(options) {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    return [...PRODUCTION_STARTUP_SEAM_KEYS];
+  }
+  return PRODUCTION_STARTUP_SEAM_KEYS.filter((key) => Object.hasOwn(options, key));
+}
+
+/**
+ * HTTPS options the production entry passes. Import and inspect this
+ * instead of a source-text "no hooks" pin.
+ *
+ * @param {object} [args]
+ * @returns {object}
+ */
+export function buildProductionHttpsOptions({
+  bindHost,
+  port,
+  allowHttp,
+  allowUnauth,
+  sharedToken,
+  inboundCfg,
+  tls,
+  buildServer,
+  listenLabel,
+  legacyMode,
+  rateLimiter,
+  principalLimiter,
+  trustedProxies,
+  metrics,
+} = {}) {
+  return {
+    bindHost,
+    port,
+    allowHttp,
+    allowUnauth,
+    sharedToken,
+    inboundCfg,
+    tls,
+    buildServer,
+    listenLabel,
+    legacyMode,
+    rateLimiter,
+    principalLimiter,
+    trustedProxies,
+    metrics,
+  };
+}
+
 const FORBIDDEN_HANDLER_OVERRIDE_KEYS = Object.freeze([
   "checkAuth",
   "authenticate",

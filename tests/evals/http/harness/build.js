@@ -146,9 +146,11 @@ const MUTANTS = {
     },
   }),
   T1n: () => ({ resolveInboundAuthMode: failOpenInboundAuthMode }),
-  T2: () => ({
-    authenticate: async () => ({ ok: true, identity: { sub: "mutant", clientId: "client-a" } }),
-  }),
+  T2: acceptAnyAuth,
+  T2a: acceptAnyAuth,
+  T2e: acceptAnyAuth,
+  T2s: acceptAnyAuth,
+  T2m: acceptAnyAuth,
   T4: () => ({ resolveGrantedSites: allSitesGranted }),
   T4b: () => ({ resolveGrantedSites: fallThroughGrantedSites }),
   T7: () => ({
@@ -175,7 +177,19 @@ const MUTANTS = {
   }),
   // T18 (DEV-861): skip Host validation so a disallowed Host is served.
   T18: () => ({ hostAllowedFn: () => true }),
+  // X1: treat every route as public so authenticated shapes skip gateAuth.
+  "X1-public-all": () => ({ isUnauthenticatedRouteFn: () => true }),
+  // Applied inside the scanner (surface / production options), not here.
+  "X1-open-tools": () => ({}),
+  "X1-seams": () => ({}),
 };
+
+/** Shared deny-twin mutant: any bearer becomes a verified principal. */
+function acceptAnyAuth() {
+  return {
+    authenticate: async () => ({ ok: true, identity: { sub: "mutant", clientId: "client-a" } }),
+  };
+}
 
 /**
  * Inbound-mode resolver for T1n. The green run uses the real function; the

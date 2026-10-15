@@ -3,25 +3,16 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { NON_LOOPBACK_UNAUTHENTICATED_REASON } from "../../src/lib/http-auth.js";
 import {
+  buildProductionHttpsOptions,
   createStartupRateLimiters,
   installHttpsShutdown,
+  PRODUCTION_STARTUP_SEAM_KEYS,
   startHttpsTransport,
+  usedProductionSeamKeys,
 } from "../../src/lib/https-startup.js";
 import { createConnectorServerFactory } from "../../src/lib/mcp-server.js";
 
 const INDEX_PATH = fileURLToPath(new URL("../../src/index.js", import.meta.url));
-
-const PRODUCTION_STARTUP_HOOKS = Object.freeze([
-  "fetchFn",
-  "auditWriter",
-  "handlerOverrides",
-  "wrapHandler",
-  "wrapRequestHandler",
-  "checkAuth",
-  "authenticate",
-  "allowLocalOperator",
-  "resolveInboundAuthModeFn",
-]);
 
 const dummyServer = createConnectorServerFactory({
   serverInfo: { name: "https-startup-test", version: "0" },
@@ -34,52 +25,24 @@ function indexSource() {
   return readFileSync(INDEX_PATH, "utf8");
 }
 
-/**
- * The `startHttpsTransport({...})` argument list in a source string.
- *
- * @param {string} source
- * @returns {string}
- */
-function startHttpsTransportCall(source) {
-  const marker = "await startHttpsTransport({";
-  const start = source.indexOf(marker);
-  if (start < 0) throw new Error("src/index.js does not call startHttpsTransport");
-  let depth = 0;
-  const from = start + "await startHttpsTransport".length;
-  for (let i = from; i < source.length; i += 1) {
-    if (source[i] === "{") depth += 1;
-    else if (source[i] === "}") {
-      depth -= 1;
-      if (depth === 0) return source.slice(start, i + 1);
-    }
-  }
-  throw new Error("unclosed startHttpsTransport call");
-}
-
-/**
- * Eval-hook keys passed as properties on the production `startHttpsTransport` call.
- *
- * @param {string} source
- * @returns {string[]}
- */
-function productionStartupHookKeys(source) {
-  const call = startHttpsTransportCall(source);
-  // `key:` syntax, shorthand (`key,` / `key}`), and any spread, which could
-  // smuggle a seam in without naming it.
-  const found = PRODUCTION_STARTUP_HOOKS.filter((key) =>
-    new RegExp(`(^|[\\s{,])${key}\\s*[:,}]`).test(call));
-  if (/(^|[\s{,])\.\.\./.test(call)) found.push("...spread");
-  return found;
-}
-
-/**
- * @param {string} source
- */
-function assertProductionStartupHasNoEvalHooks(source) {
-  const found = productionStartupHookKeys(source);
-  if (found.length) {
-    throw new Error(`src/index.js passes eval hooks to startHttpsTransport: ${found.join(", ")}`);
-  }
+function productionHttpsArgs(overrides = {}) {
+  return {
+    bindHost: "127.0.0.1",
+    port: 0,
+    allowHttp: true,
+    allowUnauth: false,
+    sharedToken: "",
+    inboundCfg: { issuer: "", audience: "" },
+    tls: null,
+    buildServer: dummyServer,
+    listenLabel: "https-startup-test",
+    legacyMode: "serve",
+    rateLimiter: null,
+    principalLimiter: null,
+    trustedProxies: [],
+    metrics: null,
+    ...overrides,
+  };
 }
 
 function baseStartup(overrides = {}) {
@@ -404,32 +367,19 @@ describe("installHttpsShutdown", () => {
   });
 });
 
-describe("src/index.js production startup call", () => {
-  it("passes none of fetchFn, auditWriter, handlerOverrides, wrapHandler or wrapRequestHandler", () => {
-    assertProductionStartupHasNoEvalHooks(indexSource());
+describe("production HTTPS startup options", () => {
+  it("omits every eval seam (import pin, not source-text)", () => {
+    expect(usedProductionSeamKeys(buildProductionHttpsOptions(productionHttpsArgs()))).toEqual([]);
   });
 
-  it.each([
-    ["checkAuth: () => true", "checkAuth"],
-    ["authenticate: null", "authenticate"],
-    ["allowLocalOperator: true", "allowLocalOperator"],
-    ["resolveInboundAuthModeFn: () => ({ mode: \"unauthenticated\" })", "resolveInboundAuthModeFn"],
-    ["authenticate", "authenticate"],
-    ["allowLocalOperator", "allowLocalOperator"],
-    ["...evalHooks", "...spread"],
-  ])("fails when a mutant startHttpsTransport call injects %s", (injected, expected) => {
-    const anchor = "legacyMode: process.env.MCP_LEGACY_TRANSPORT || \"serve\",";
-    const mutated = indexSource().replace(anchor, `${anchor}\n    ${injected},`);
-    expect(mutated).not.toBe(indexSource());
-    expect(productionStartupHookKeys(mutated)).toContain(expected);
-    expect(() => assertProductionStartupHasNoEvalHooks(mutated)).toThrow(/passes eval hooks/);
+  it.each([...PRODUCTION_STARTUP_SEAM_KEYS])("detects injected seam %s", (key) => {
+    const options = { ...buildProductionHttpsOptions(productionHttpsArgs()), [key]: true };
+    expect(usedProductionSeamKeys(options)).toContain(key);
   });
 
-  it("fails when a mutant startHttpsTransport call passes fetchFn", () => {
-    const anchor = "legacyMode: process.env.MCP_LEGACY_TRANSPORT || \"serve\",";
-    const mutant = indexSource().replace(anchor, `${anchor}\n    fetchFn: fetch,`);
-    expect(mutant).not.toBe(indexSource());
-    expect(() => assertProductionStartupHasNoEvalHooks(mutant)).toThrow(/fetchFn/);
+  it("detects a runtime-spy smuggled seam", () => {
+    const smuggled = { ...buildProductionHttpsOptions(productionHttpsArgs()), ...{ checkAuth: () => true } };
+    expect(usedProductionSeamKeys(smuggled)).toEqual(["checkAuth"]);
   });
 
   it("logs createStartupRateLimiters values instead of recomputing MCP_RATE_LIMIT", () => {
@@ -447,7 +397,8 @@ describe("src/index.js production startup call", () => {
     const source = indexSource();
     expect(source).toMatch(/installHttpsShutdown\(started\)/);
     expect(source).toMatch(/"http" \(https alias\)/);
-    expect(startHttpsTransportCall(source)).not.toMatch(/toolCount/);
+    expect(source).toMatch(/buildProductionHttpsOptions\(/);
+    expect(source).not.toMatch(/toolCount/);
     expect(readFileSync(new URL("../../src/lib/https-startup.js", import.meta.url), "utf8"))
       .not.toMatch(/toolCount/);
     expect(source).toMatch(/Alias of `https`/);
