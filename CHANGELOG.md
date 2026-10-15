@@ -16,12 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stays the bound `sub` or `clientId` and is omitted along with `actor` for
   a loopback local operator. Audit output still excludes token material (#472).
 
+## [5.1.1] - 2026-10-15
+
 ### Fixed
 
 - HTTP audit rows now include a bounded tool outcome for successful calls,
   tool errors and server authorization denials, including denials returned as
   HTTP 200. Request-scoped state keeps concurrent outcomes separate without
-  recording tool arguments, results or credential material (DEV-949).
+  recording tool arguments, results or credential material.
 
 ## [5.1.0] - 2026-10-14
 
