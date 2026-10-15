@@ -1,4 +1,5 @@
 /** Module-owned schemas and behavior, exposed only by explicit local tool policy. */
+import { markHttpAuditToolOutcome } from "./http-audit.js";
 import { createHash } from "node:crypto";
 import Ajv from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -284,6 +285,7 @@ export function createModuleToolRegistry({ list = listServerTools, call = callSe
           return { content: [{ type: "text", text: JSON.stringify(structuredContent) }], structuredContent, isError: failed };
         }, invokeContext);
       } catch (error) {
+        if (error instanceof SecurityError) markHttpAuditToolOutcome("denied");
         const safe = error instanceof SecurityError || error instanceof GovernanceError || error instanceof DataFlowBudgetError;
         return toolError(safe ? error : new Error("Module tool unavailable or returned an invalid response. No fallback was attempted."));
       }

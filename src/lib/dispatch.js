@@ -8,6 +8,7 @@
  * this module is denial on every path, with no ungoverned fallback below it.
  */
 
+import { markHttpAuditToolOutcome } from "./http-audit.js";
 import { getSiteConfig, listSiteNames } from "./config.js";
 import { resolveSecurityConfig, assertNotReadOnly,
   assertDestructiveAllowed, assertGraphqlMutationAllowed,
@@ -239,6 +240,7 @@ export async function callTool(name, args, context = {}) {
       return { content: [{ type: "text", text: `Source governance unavailable: ${err.message}` }], isError: true };
     }
     if (err instanceof SecurityError) {
+      markHttpAuditToolOutcome("denied");
       return { content: [{ type: "text", text: `Access denied: ${err.message}` }], isError: true };
     }
     if (err instanceof BackendCapabilityError) {
