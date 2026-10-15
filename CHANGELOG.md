@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-10-15
+
 ### Added
 
-- **HTTP transport eval pack increment 3 (DEV-866).** `npm run eval:mutants`
+- **HTTP transport eval pack increment 3.** `npm run eval:mutants`
   copies `src/` and applies declared mutations at the auth-gate order, Origin
   check, grant fall-through, scope table, and audit denial-code sites. Each
   mutant must be killed by its pinned case for the pinned reason; a survivor
