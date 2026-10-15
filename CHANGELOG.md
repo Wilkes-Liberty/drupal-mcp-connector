@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Hosted HTTP audit rows classify a request that never binds a verified
+  identity. `actor` is `anonymous` when no `Authorization` header is
+  present and `unverified` when presented credentials do not verify,
+  including invalid, expired, revoked, and wrong-audience tokens. `principal`
+  stays the bound `sub` or `clientId` and is omitted along with `actor` for
+  a loopback local operator. Audit output still excludes token material (#472).
+
 ### Fixed
 
 - HTTP audit rows now include a bounded tool outcome for successful calls,

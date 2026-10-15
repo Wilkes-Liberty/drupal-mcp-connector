@@ -15,7 +15,9 @@ T16). T1n drives real startup (the shared function plus a spawn of
 is fatal (DEV-845). T4/T4b cover grant deny-by-default (DEV-848). T8 records
 exactly one audit row per hosted request on `/mcp`, `/usage`, and `/assessor`,
 including 401 / 429 / bad-Origin, with a throwing sink that still refuses
-(DEV-858 / #451).
+(DEV-858 / #451). A missing credential is `actor: anonymous`, a bad bearer
+is `actor: unverified`, and a verified success or post-auth denial keeps
+`principal` (#472).
 
 Everything is synthetic: keys are generated in memory, the token issuer is
 a stub that is **not Paladin**, and the upstream is a fake loopback server

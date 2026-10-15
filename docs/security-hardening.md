@@ -381,3 +381,26 @@ The outcome is a closed enum stored in request-local context and sanitized
 alongside the verified principal and tenant. Tool names, arguments, results,
 error messages, headers and tokens are not added to the row. Logging failure
 does not change an authorization decision or enable a fallback credential.
+
+### HTTP audit actor classification
+
+`principal` is copied only from an identity the handler has already bound:
+`sub`, or `clientId` when `sub` is absent. A bound loopback local operator
+has no OAuth principal, so that row omits both `principal` and `actor`.
+
+When no identity is bound, the row carries `actor` instead:
+
+| `actor` | When |
+| --- | --- |
+| `anonymous` | The request has no `Authorization` header. |
+| `unverified` | An `Authorization` header is present and verification did not bind an identity. This includes invalid, expired, revoked, and wrong-audience credentials, and an issuer that cannot be reached. |
+
+`actor` is omitted once an identity is bound. A denial after that bind
+(tool authorization, Host, or Origin) keeps `principal`. An auth-layer
+refusal that does not bind an identity, such as a missing scope, stays
+`unverified` and has no `principal`.
+
+The field is additive. Consumers that only read `principal` keep working.
+`actor` is a closed enum; any other value is dropped. Classification uses
+header presence and the bound identity. It does not decode tokens. Bearer
+tokens, cookies, and other credentials stay scrubbed from the row.

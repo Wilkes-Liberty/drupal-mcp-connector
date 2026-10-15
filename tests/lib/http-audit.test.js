@@ -84,6 +84,7 @@ describe("sanitizeHttpAuditRow", () => {
       body: "SECRET",
       headers: { authorization: "Bearer SECRET" },
       token: "SECRET",
+      actor: "Bearer SECRET",
       extra: "nope",
     });
     expect(row).toEqual({
@@ -153,6 +154,8 @@ describe("attachHttpAudit", () => {
     res.emit("close");
     expect(writer.rows).toHaveLength(1);
     expect(writer.rows[0].code).toBe("unauthenticated");
+    expect(writer.rows[0].actor).toBe("anonymous");
+    expect(writer.rows[0].principal).toBeUndefined();
   });
 
   it("includes principal only when the request already has an identity", () => {
@@ -166,6 +169,7 @@ describe("attachHttpAudit", () => {
     expect(writer.rows[0]).toMatchObject({
       code: "ok", principal: "user-1", tenant: "tenant-a",
     });
+    expect(writer.rows[0].actor).toBeUndefined();
   });
 
   it("does not record a disconnect before writeHead as ok", () => {
@@ -193,7 +197,9 @@ describe("buildHttpAuditRow", () => {
     expect(JSON.stringify(row)).not.toContain("leaked-token");
     expect(row).toMatchObject({
       route: "/mcp", method: "POST", status: 401, code: "invalid_token", requestId: "rid",
+      actor: "unverified",
     });
+    expect(row.principal).toBeUndefined();
   });
 
   it("does not label auxiliary routes bad_origin without a handler mark", () => {
@@ -250,6 +256,7 @@ describe("createMcpRequestHandler audit finish hook", () => {
     expect(missingRes.statusCode).toBe(401);
     expect(missing.writer.rows).toHaveLength(1);
     expect(missing.writer.rows[0].code).toBe("unauthenticated");
+    expect(missing.writer.rows[0].actor).toBe("anonymous");
 
     const limited = handler({
       rateLimiter: { check: () => ({ allowed: false, retryAfterSec: 1 }) },
@@ -268,6 +275,8 @@ describe("createMcpRequestHandler audit finish hook", () => {
     await origin.handle(req("POST", "/mcp", { origin: "https://evil.example" }), originRes);
     expect(originRes.statusCode).toBe(403);
     expect(origin.writer.rows[0].code).toBe("bad_origin");
+    expect(origin.writer.rows[0].actor).toBeUndefined();
+    expect(origin.writer.rows[0].principal).toBeUndefined();
 
     const allowed = handler({
       checkAuth: () => true,
