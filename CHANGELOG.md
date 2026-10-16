@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hosted `/mcp` Origin allowlist names the keystone#1539 public-client
+  Origins (DEV-953).** `config/config.example.json` now lists
+  `https://cursor.com`, `https://www.cursor.com`, `https://grok.com`, and
+  `https://console.x.ai` — the HTTPS origins of the pre-registered
+  `cursor-mcp` and `grok-bot` PKCE clients, plus the Origin the Cursor
+  browser sends. Matching stays exact (`https://host[:port]` after
+  normalization): no wildcards, no suffix match, no reflecting the request
+  Origin. Lookalikes such as `https://cursor.com.evil.test` and
+  `http://cursor.com` remain 403. An omitted or empty extra list still
+  refuses every present third-party Origin (fail closed). A missing
+  `Origin` header is unchanged. Operators copy the list into the hosted
+  `auth.allowedOrigins` or `MCP_ALLOWED_ORIGINS`; this repo does not
+  change a live deploy.
+
 ### Changed
 
 - **Single Sentinel draft HTTP client.** Canonical library/block drafts,

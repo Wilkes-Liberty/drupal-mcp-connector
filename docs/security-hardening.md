@@ -191,13 +191,14 @@ CI) can connect; missing identity is still `401` before dispatch. A present
 An omitted or empty extra list refuses every present third-party Origin
 (fail closed, DEV-953). The origin of `auth.resource` / `auth.audience` is
 still auto-included, so a same-origin browser of the MCP resource URL is
-allowed even when the extra list is empty. The example config lists
-`https://cursor.com` and `https://www.cursor.com` (Cursor's documented
-OAuth callback host). Lookalikes such as `http://cursor.com` or
-`https://www.cursor.com.evil.example` stay refused. Grok Bot's distinct
-browser Origin is not verified — add that exact origin via config or env
-once confirmed. A present `MCP_ALLOWED_ORIGINS`, including empty, replaces
-the extra list (the resource/audience origin is still added after that).
+allowed even when the extra list is empty. The example config lists the
+HTTPS Origins of the keystone#1539 `cursor-mcp` and `grok-bot` clients:
+`https://cursor.com`, `https://www.cursor.com`, `https://grok.com`, and
+`https://console.x.ai`. Matching is exact only — no wildcards, no suffix
+match, and the request Origin is never reflected. Lookalikes such as
+`http://cursor.com` or `https://cursor.com.evil.test` stay refused. A
+present `MCP_ALLOWED_ORIGINS`, including empty, replaces the extra list
+(the resource/audience origin is still added after that).
 
 `auth.allowedHosts` / `MCP_ALLOWED_HOSTS` is the Host allowlist (DEV-861).
 After a resolved identity, a missing or disallowed `Host` is `403`. The

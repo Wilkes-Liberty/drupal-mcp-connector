@@ -390,9 +390,16 @@ describe("verifyStatic — tenant neutrality", () => {
     expect(statusOf(run(config), "tenant_neutrality")).toBe("pass");
   });
 
-  it("allows documented Cursor browser origins on the HTTP allowlist (DEV-953)", () => {
+  it("allows documented Cursor and Grok Bot browser origins on the HTTP allowlist (DEV-953)", () => {
     const config = secureConfig({
-      auth: { allowedOrigins: ["https://cursor.com", "https://www.cursor.com"] },
+      auth: {
+        allowedOrigins: [
+          "https://cursor.com",
+          "https://www.cursor.com",
+          "https://grok.com",
+          "https://console.x.ai",
+        ],
+      },
     });
     expect(statusOf(run(config), "tenant_neutrality")).toBe("pass");
   });

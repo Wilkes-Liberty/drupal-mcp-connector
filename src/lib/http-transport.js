@@ -39,28 +39,57 @@ export function isSupportedProtocolVersion(version) {
 /**
  * Exact Cursor apex Origin (DEV-953). Matching is the full origin string
  * after {@link normalizeOrigin} — no wildcards, prefixes, or scheme swaps.
+ * This is the Origin the Cursor browser client sends on `/mcp`.
  */
 export const CURSOR_BROWSER_ORIGIN = "https://cursor.com";
 
 /**
- * Exact Cursor www Origin (DEV-953). Cursor's documented OAuth callback is
- * `https://www.cursor.com/agents/mcp/oauth/callback`.
+ * Exact Cursor www Origin (DEV-953). Matches the cursor-mcp redirect
+ * `https://www.cursor.com/agents/mcp/oauth/callback` in keystone#1539
+ * (`scripts/keycloak/setup-realm.sh`).
  */
 export const CURSOR_WWW_BROWSER_ORIGIN = "https://www.cursor.com";
 
 /**
+ * Exact Grok Bot browser Origin (DEV-953). Matches the grok-bot redirect
+ * `https://grok.com/connectors-oauth-exchange-code/` in keystone#1539.
+ */
+export const GROK_BOT_BROWSER_ORIGIN = "https://grok.com";
+
+/**
+ * Exact xAI console Origin (DEV-953). Matches the grok-bot redirect
+ * `https://console.x.ai/connectors-oauth-exchange-code/` in keystone#1539.
+ */
+export const GROK_BOT_CONSOLE_ORIGIN = "https://console.x.ai";
+
+/**
  * Documented Cursor browser origins for operators to copy into
- * `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS`. Not applied automatically —
- * an omitted or empty extra list refuses every present third-party Origin
- * (fail closed). The origin of `auth.resource` / `auth.audience` is still
- * auto-included (same-origin). Grok Bot's distinct Origin is not verified;
- * add it via config or env once confirmed.
+ * `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS`.
  *
  * @type {readonly string[]}
  */
 export const CURSOR_BROWSER_ORIGINS = Object.freeze([
   CURSOR_BROWSER_ORIGIN,
   CURSOR_WWW_BROWSER_ORIGIN,
+]);
+
+/**
+ * HTTPS Origins of the pre-registered public PKCE clients in keystone#1539
+ * (`cursor-mcp` and `grok-bot`), plus {@link CURSOR_BROWSER_ORIGIN}.
+ * Copy these into `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS`. Not applied
+ * automatically — an omitted or empty extra list refuses every present
+ * third-party Origin (fail closed). The origin of `auth.resource` /
+ * `auth.audience` is still auto-included (same-origin). Loopback
+ * `http://localhost:8787/callback` is a desktop redirect, not a hosted
+ * `/mcp` Origin.
+ *
+ * @type {readonly string[]}
+ */
+export const HOSTED_PUBLIC_CLIENT_ORIGINS = Object.freeze([
+  CURSOR_BROWSER_ORIGIN,
+  CURSOR_WWW_BROWSER_ORIGIN,
+  GROK_BOT_BROWSER_ORIGIN,
+  GROK_BOT_CONSOLE_ORIGIN,
 ]);
 
 /**
@@ -153,8 +182,9 @@ export function resolveAllowedOrigins({
  * missing Origin is allowed by design so non-browser clients (desktop
  * Cursor, Grok Bot, curl, CI) can connect. A present Origin must be an
  * exact allowlist entry after {@link normalizeOrigin} — `https://cursor.com`
- * does not match `http://cursor.com`, `https://www.cursor.com.evil.example`,
- * or `https://cursor.com.evil.example`.
+ * does not match `http://cursor.com`, `https://cursor.com.evil.test`,
+ * or `https://cursor.com.evil.example`. There is no suffix match and the
+ * request Origin is never reflected.
  * The literal `null` origin is refused unless explicitly listed.
  *
  * @param {unknown} originHeader

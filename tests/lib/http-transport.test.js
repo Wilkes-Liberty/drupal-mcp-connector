@@ -23,6 +23,9 @@ import {
   CURSOR_BROWSER_ORIGIN,
   CURSOR_WWW_BROWSER_ORIGIN,
   CURSOR_BROWSER_ORIGINS,
+  GROK_BOT_BROWSER_ORIGIN,
+  GROK_BOT_CONSOLE_ORIGIN,
+  HOSTED_PUBLIC_CLIENT_ORIGINS,
 } from "../../src/lib/http-transport.js";
 
 describe("http-transport helpers", () => {
@@ -75,6 +78,30 @@ describe("http-transport helpers", () => {
     expect(originAllowed("https://evil.www.cursor.com", allow)).toBe(false);
   });
 
+  it("allows the keystone#1539 public-client Origins and refuses lookalikes (DEV-953)", () => {
+    expect(GROK_BOT_BROWSER_ORIGIN).toBe("https://grok.com");
+    expect(GROK_BOT_CONSOLE_ORIGIN).toBe("https://console.x.ai");
+    expect(HOSTED_PUBLIC_CLIENT_ORIGINS).toEqual([
+      CURSOR_BROWSER_ORIGIN,
+      CURSOR_WWW_BROWSER_ORIGIN,
+      GROK_BOT_BROWSER_ORIGIN,
+      GROK_BOT_CONSOLE_ORIGIN,
+    ]);
+    const allow = [...HOSTED_PUBLIC_CLIENT_ORIGINS];
+    for (const origin of HOSTED_PUBLIC_CLIENT_ORIGINS) {
+      expect(originAllowed(origin, allow), origin).toBe(true);
+    }
+    expect(originAllowed("https://cursor.com.evil.test", allow)).toBe(false);
+    expect(originAllowed("https://grok.com.evil.test", allow)).toBe(false);
+    expect(originAllowed("https://console.x.ai.evil.test", allow)).toBe(false);
+    expect(originAllowed("http://cursor.com", allow)).toBe(false);
+    expect(originAllowed("http://grok.com", allow)).toBe(false);
+    expect(originAllowed("https://evil.grok.com", allow)).toBe(false);
+    expect(originAllowed("https://cursor.com.evil.example", allow)).toBe(false);
+    expect(originAllowed(undefined, allow)).toBe(true);
+    expect(originAllowed("", allow)).toBe(true);
+  });
+
   it("refuses third-party Origins when the extra list is empty but keeps same-origin (DEV-953)", () => {
     expect(resolveConfiguredOrigins(undefined, undefined)).toEqual([]);
     expect(resolveConfiguredOrigins([], undefined)).toEqual([]);
@@ -90,6 +117,8 @@ describe("http-transport helpers", () => {
     expect(empty).toEqual(["https://mcp.example.com"]);
     expect(originAllowed("https://cursor.com", empty)).toBe(false);
     expect(originAllowed("https://www.cursor.com", empty)).toBe(false);
+    expect(originAllowed("https://grok.com", empty)).toBe(false);
+    expect(originAllowed("https://console.x.ai", empty)).toBe(false);
     expect(originAllowed("https://mcp.example.com", empty)).toBe(true);
     expect(originAllowed(undefined, empty)).toBe(true);
     expect(originAllowed("", empty)).toBe(true);

@@ -47,15 +47,18 @@ describe("config/config.example.json — the shipped secure default", () => {
     expect(hosts.filter((h) => !isNeutralHost(h))).toEqual([]);
   });
 
-  it("lists the exact Cursor browser origins and leaves Grok Bot as a TODO (DEV-953)", () => {
+  it("lists the exact Cursor and Grok Bot browser origins from keystone#1539 (DEV-953)", () => {
     const example = loadExample();
     expect(example.auth.allowedOrigins).toEqual([
       "https://cursor.com",
       "https://www.cursor.com",
+      "https://grok.com",
+      "https://console.x.ai",
     ]);
     const raw = readRepoFile("config/config.example.json");
-    expect(raw).toMatch(/TODO\(DEV-953\).*Grok Bot/);
-    expect(raw).not.toMatch(/https:\/\/www\.cursor\.com\.evil/);
+    expect(raw).not.toMatch(/TODO\(DEV-953\)/);
+    expect(raw).not.toMatch(/https:\/\/cursor\.com\.evil/);
+    expect(example.auth.allowedOrigins.every((origin) => !origin.includes("*"))).toBe(true);
   });
 
   it("documents allowedPrincipals without shipping a live admission list", () => {

@@ -95,9 +95,12 @@ const RESERVED_HOSTS = new Set([
   "www.drupal.org",
   "drupal.org",
   // Documented Streamable HTTP browser clients (DEV-953). These are not a
-  // tenant deployment; the example Origin allowlist names them explicitly.
+  // tenant deployment; the example Origin allowlist names them explicitly
+  // from the keystone#1539 cursor-mcp and grok-bot redirect origins.
   "cursor.com",
   "www.cursor.com",
+  "grok.com",
+  "console.x.ai",
 ]);
 
 /**

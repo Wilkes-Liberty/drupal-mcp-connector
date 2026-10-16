@@ -35,9 +35,11 @@
     "resource": "https://mcp.example.com/mcp",
     "allowedOrigins": [
       "https://cursor.com",
-      "https://www.cursor.com"
+      "https://www.cursor.com",
+      "https://grok.com",
+      "https://console.x.ai"
     ],
-    "_allowedOriginsGrokBot": "TODO(DEV-953): add the exact Grok Bot browser Origin here (or via MCP_ALLOWED_ORIGINS) once verified. The operator does not know it. Do not guess. An omitted or empty extra list refuses every present third-party Origin; the origin of resource/audience is still allowed (same-origin).",
+    "_allowedOrigins": "DEV-953: exact HTTPS Origins of the pre-registered public PKCE clients in keystone#1539 (scripts/keycloak/setup-realm.sh). cursor-mcp redirects: https://www.cursor.com/agents/mcp/oauth/callback and http://localhost:8787/callback. grok-bot redirects: those same Cursor callbacks plus https://grok.com/connectors-oauth-exchange-code/ and https://console.x.ai/connectors-oauth-exchange-code/. https://cursor.com is the Origin the Cursor browser sends on /mcp. Loopback http://localhost:8787 is a desktop redirect, not a hosted /mcp Origin. Copy this list into the hosted config or MCP_ALLOWED_ORIGINS. Matching is exact only — no wildcards, no suffix match, no reflecting the request Origin. An omitted or empty extra list refuses every present third-party Origin; the origin of resource/audience is still allowed (same-origin).",
     "allowedHosts": [],
     "_allowedPrincipals": "Optional. Exact {clientId, sub} pairs within this issuer, for example [{\"clientId\":\"pilot-client\",\"sub\":\"pilot-user\"}]. Both values must match the verified token; azp and RFC 7662 client_id, when both present, must agree. A valid but unlisted identity is 403 before session creation or tool dispatch. Omit to keep normal authentication; an explicit empty array denies all authenticated access. Invalid entries, null, and wildcard-only identifiers prevent startup. The policy is snapshotted at startup: update the managed configuration and restart to change membership. Admission does not grant site access or tool scopes, and it does not bypass introspection, revocation, or session binding. Keep real membership identifiers in private deployment configuration.",
     "requiredScopes": ["mcp_read"],
