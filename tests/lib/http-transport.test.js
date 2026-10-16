@@ -126,14 +126,22 @@ describe("http-transport helpers", () => {
 
   it("binds sessions to sub+clientId and never to an empty identity", () => {
     expect(sessionPrincipalKey(LOCAL_OPERATOR)).toBe("local-operator");
-    expect(sessionPrincipalKey({ sub: "a", clientId: "c" })).toBe('["a","c"]');
-    // Structural encoding: a NUL inside a claim cannot alias another principal.
-    expect(sessionPrincipalKey({ sub: "a\0b", clientId: "c" }))
-      .not.toBe(sessionPrincipalKey({ sub: "a", clientId: "b\0c" }));
-    expect(sessionPrincipalKey({ sub: "a", clientId: "other" })).not.toBe(
-      sessionPrincipalKey({ sub: "a", clientId: "c" }),
-    );
-    expect(sessionPrincipalKey({ sub: "a" })).toBe('["a",""]');
+    expect(sessionPrincipalKey({
+      iss: "https://idp.example/realms/agents",
+      sub: "a",
+      azp: "c",
+    })).toBe("https://idp.example/realms/agents|a|c");
+    expect(sessionPrincipalKey({
+      iss: "https://idp.example/realms/agents",
+      sub: "a",
+      azp: "other",
+    })).not.toBe(sessionPrincipalKey({
+      iss: "https://idp.example/realms/agents",
+      sub: "a",
+      azp: "c",
+    }));
+    expect(sessionPrincipalKey({ sub: "a", clientId: "c" })).toBeNull();
+    expect(sessionPrincipalKey({ sub: "a" })).toBeNull();
     expect(sessionPrincipalKey({})).toBeNull();
     expect(sessionPrincipalKey(null)).toBeNull();
   });

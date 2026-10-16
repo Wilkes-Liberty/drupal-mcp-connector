@@ -1526,6 +1526,7 @@ export async function startEdge({
 
   const requestHandler = createMcpRequestHandler({
     authenticate,
+    ...(typeof inbound.introspect === "function" ? { introspect: inbound.introspect } : {}),
     protectedResource: inbound.protectedResource,
     resourceMetadataUrl: inbound.resourceMetadataUrl,
     auditWriter: hostedAudit,

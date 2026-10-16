@@ -15,6 +15,9 @@ import {
   northboundHeaders,
   sourceBudgetDenial,
 } from "./data-flow.js";
+import { getRequestAbortSignal } from "./principal.js";
+import { assertLiveTokenForGovernedWrite } from "./write-introspect.js";
+import { graphqlHasMutation } from "./security.js";
 import {
   assertUploadPathAllowed,
   sanitizeUploadFilename,
@@ -34,8 +37,16 @@ export const DRUPAL_FETCH_TIMEOUT_MS = 30_000;
  * @returns {Promise<object>} node-fetch Response.
  * @throws {Error} when the default timeout fires (`AbortError` remapped).
  */
+function requestAbortSignal(options = {}) {
+  const timeout = AbortSignal.timeout(DRUPAL_FETCH_TIMEOUT_MS);
+  const cancel = options.signal ?? getRequestAbortSignal();
+  if (!cancel) return timeout;
+  if (typeof AbortSignal.any === "function") return AbortSignal.any([timeout, cancel]);
+  return cancel;
+}
+
 async function timedDrupalFetch(url, options = {}) {
-  const signal = options.signal ?? AbortSignal.timeout(DRUPAL_FETCH_TIMEOUT_MS);
+  const signal = requestAbortSignal(options);
   try {
     return await fetch(url, { ...options, signal });
   } catch (err) {
@@ -44,6 +55,11 @@ async function timedDrupalFetch(url, options = {}) {
     }
     throw err;
   }
+}
+
+function isMutatingMethod(method) {
+  const verb = String(method || "GET").toUpperCase();
+  return verb === "POST" || verb === "PATCH" || verb === "PUT" || verb === "DELETE";
 }
 
 /**
@@ -119,6 +135,9 @@ function withStatus(error, status) {
  *   body and any HTML page are never included.
  */
 export async function drupalFetch(site, path, options = {}) {
+  if (isMutatingMethod(options.method)) {
+    await assertLiveTokenForGovernedWrite();
+  }
   const url = `${site.baseUrl}${path}`;
   const collection = isCollectionJsonApiPath(path);
   let paid = false;
@@ -177,6 +196,9 @@ export async function drupalFetch(site, path, options = {}) {
  *   The raw body and any HTML page are never included.
  */
 export async function drupalGraphqlFetch(site, body) {
+  if (typeof body?.query === "string" && graphqlHasMutation(body.query)) {
+    await assertLiveTokenForGovernedWrite();
+  }
   const endpoint = site.graphqlEndpoint || "/graphql";
   const url = `${site.baseUrl}${endpoint}`;
 
@@ -247,6 +269,7 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
   const url = `${site.baseUrl}/jsonapi/${encodeURIComponent(entityType)}/${encodeURIComponent(bundle)}/${encodeURIComponent(fieldName)}`;
 
   consumeBudgetIfEnforced("request");
+  await assertLiveTokenForGovernedWrite();
   const res = await timedDrupalFetch(url, {
     method: "POST",
     headers: {

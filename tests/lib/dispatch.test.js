@@ -204,6 +204,8 @@ describe("securityMiddleware inbound entitlement (#178)", () => {
   }];
   const reader = {
     sub: "reader",
+    iss: "https://idp.example/realms/agents",
+    azp: "content-agent",
     clientId: "content-agent",
     scopes: ["mcp_read"],
     sites: null,
@@ -289,6 +291,8 @@ describe("resolved target echo (#167)", () => {
     vi.mocked(fetch).mockResolvedValue(ready());
     const writer = {
       sub: "reader",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
       clientId: "content-agent",
       scopes: ["mcp_read", "mcp_write"],
       sites: null,
@@ -385,6 +389,8 @@ describe("resolved target echo (#167)", () => {
 describe("securityMiddleware northbound data-flow (#179)", () => {
   const reader = {
     sub: "alice",
+    iss: "https://idp.example/realms/agents",
+    azp: "content-agent",
     clientId: "content-agent",
     scopes: ["mcp_read"],
     sites: null,
@@ -415,7 +421,7 @@ describe("securityMiddleware northbound data-flow (#179)", () => {
     vi.mocked(getSiteConfig).mockReturnValue(tightGov);
     const handler = vi.fn(async () => {
       const flow = getDataFlowContext();
-      expect(flow.principalKey).toBe("alice:content-agent");
+      expect(flow.principalKey).toBe("https://idp.example/realms/agents|alice|content-agent");
       expect(flow.targetName).toBe("gov");
       expect(flow.enforce).toBe(true);
       expect(northboundHeaders()[HEADER_DECLARED_DESTINATION]).toBe("content-agent:gov");
@@ -490,7 +496,14 @@ describe("GraphQL mutations need mcp_write on the network path (DEV-862)", () =>
   const grants = { "content-agent": ["open"] };
 
   it("refuses a drupal_graphql mutation for a read-only principal before any upstream call", async () => {
-    const identity = { sub: "reader", clientId: "content-agent", scopes: ["mcp_read"] };
+    const identity = {
+      sub: "reader",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
+      clientId: "content-agent",
+      tenant: "tenant-a",
+      scopes: ["mcp_read"],
+    };
     const result = await runWithIdentity(
       identity,
       () => callTool("drupal_graphql", { site: "open", query: "mutation { ping }" }, {
@@ -504,7 +517,14 @@ describe("GraphQL mutations need mcp_write on the network path (DEV-862)", () =>
   });
 
   it("does not refuse the same principal's query, and lets mcp_write past the entitlement gate", async () => {
-    const reader = { sub: "reader", clientId: "content-agent", scopes: ["mcp_read"] };
+    const reader = {
+      sub: "reader",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
+      clientId: "content-agent",
+      tenant: "tenant-a",
+      scopes: ["mcp_read"],
+    };
     const query = await runWithIdentity(
       reader,
       () => callTool("drupal_graphql", { site: "open", query: "{ ping }" }, {
@@ -513,7 +533,14 @@ describe("GraphQL mutations need mcp_write on the network path (DEV-862)", () =>
       { surface: "network" },
     );
     expect(String(query.content?.[0]?.text ?? "")).not.toMatch(/Not entitled/);
-    const writer = { sub: "writer", clientId: "content-agent", scopes: ["mcp_read", "mcp_write"] };
+    const writer = {
+      sub: "writer",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
+      clientId: "content-agent",
+      tenant: "tenant-a",
+      scopes: ["mcp_read", "mcp_write"],
+    };
     const mutation = await runWithIdentity(
       writer,
       () => callTool("drupal_graphql", { site: "open", query: "mutation { ping }" }, {
@@ -531,7 +558,10 @@ describe("deny-by-default tool scope table on the network path (DEV-862)", () =>
     allHandlers.drupal_eval_unscoped = probe;
     const identity = {
       sub: "reader",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
       clientId: "content-agent",
+      tenant: "tenant-a",
       scopes: ["mcp_read"],
     };
     try {

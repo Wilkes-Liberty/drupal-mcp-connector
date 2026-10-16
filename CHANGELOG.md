@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Paladin principal freeze.** Hosted tool calls carry the verified
+  principal (`iss|sub|actor`) and tenant from the Paladin token only. The
+  connector never widens, rewrites, or invents those fields. A JS
+  `fromClaims` twin matches mcp_sentinel `McpPrincipalKey` against the
+  shared `tests/fixtures/principal-key-vectors.json` fixture. Session,
+  rate-limit, and data-flow budget keys use that twin (PR #455 follow-on).
+- **DEV-839 tenant ownership.** Network calls take tenant only from the
+  Paladin `tenant` claim. Headers and tool arguments are ignored. A
+  missing claim is the same generic deny as a missing principal.
+- **DEV-846 kill switch follow-on.** Before a governed write commits, the
+  connector re-introspects the bearer (RFC 7662). Inactive or killed
+  tokens abort with the generic deny; the response is not echoed. The 8s
+  `/ready` probe cache is not consulted on this path. A bounded in-flight
+  registry (cap 128, fail closed) cancels matching calls on kill or
+  revocation.
+
 ## [5.2.1] - 2026-10-17
 
 ### Fixed

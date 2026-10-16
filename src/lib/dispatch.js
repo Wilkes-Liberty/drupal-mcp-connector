@@ -15,17 +15,41 @@ import { resolveSecurityConfig, assertNotReadOnly,
   SecurityError } from "./security.js";
 import { toolError, toolResult } from "./errors.js";
 import { BackendCapabilityError, BackendResolutionError } from "./backends/errors.js";
-import { inferOperation } from "./operations.js";
+import { inferOperation, isWriteLikeCall } from "./operations.js";
+import {
+  assertFrozenPrincipal,
+  GENERIC_PRINCIPAL_REFUSAL,
+} from "./principal-context.js";
+import { assertLiveTokenForGovernedWrite } from "./write-introspect.js";
+import {
+  activeInFlightRegistry,
+  inFlightKeysFromIdentity,
+} from "./in-flight.js";
 import { ensureTextFormatContext, toolNeedsTextFormatContext } from "./text-format-context.js";
 import { assertSourceGovernance, GovernanceError } from "./governance.js";
 import {
   assertPrincipalEntitlement, callerTargetHints, DIAGNOSTIC_TOOLS,
-  getRequestIdentity, getRequestSurface, principalHasScope, resolveAuthoritativeTarget,
+  getRequestAuthSession, getRequestIdentity, getRequestPrincipalContext,
+  getRequestSurface, principalHasScope, resolveAuthoritativeTarget,
+  runWithIdentity,
 } from "./principal.js";
 import { networkToolScopeDenial } from "./tool-scopes.js";
 import { assertExplicitSiteForWrite, withResolvedTarget } from "./site-target.js";
 import { buildDataFlowContext, consumeBudgetIfEnforced, runWithDataFlow } from "./data-flow.js";
 import { allHandlers } from "../tools/index.js";
+
+/**
+ * Track this tool call so a kill can abort it. Local operator / unkeyed
+ * identities are not registered (nothing to cancel).
+ *
+ * @param {object|null} identity
+ * @returns {{end: () => void}}
+ */
+function beginToolFlight(identity) {
+  const keys = inFlightKeysFromIdentity(identity);
+  if (!keys) return { end() {} };
+  return activeInFlightRegistry().begin(keys);
+}
 
 /**
  * Resolve every configured site that CAN resolve, skipping the ones that
@@ -128,6 +152,18 @@ function extractEntityType(toolName, args) {
 export async function securityMiddleware(toolName, args, handler, context = {}) {
   const rawArgs = args ?? {};
   const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
+  const surface = context.surface !== undefined ? context.surface : getRequestSurface();
+  const sealed = assertFrozenPrincipal({
+    identity,
+    surface,
+    args: rawArgs,
+    headers: context.headers,
+    principalContext: context.principalContext ?? getRequestPrincipalContext(),
+  });
+  if (context && typeof context === "object") {
+    context.principalContext = sealed;
+  }
+  // Forward the verified principal unchanged. Never merge caller fields.
   let nextArgs = rawArgs;
 
   const resolved = resolveCallTarget(toolName, rawArgs, { ...context, identity });
@@ -200,8 +236,16 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
     if (!DIAGNOSTIC_TOOLS.has(toolName)) {
       consumeBudgetIfEnforced("chained_action");
     }
+    if (isWriteLikeCall(toolName, nextArgs)) {
+      await assertLiveTokenForGovernedWrite({ identity });
+    }
     return handler(nextArgs);
   });
+}
+
+function principalDenyEnvelope() {
+  markHttpAuditToolOutcome("denied");
+  return { content: [{ type: "text", text: `Access denied: ${GENERIC_PRINCIPAL_REFUSAL}` }], isError: true };
 }
 
 /**
@@ -216,40 +260,78 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
 export async function callTool(name, args, context = {}) {
   // eslint-disable-next-line security/detect-object-injection -- name is an MCP tool name from validated schema; allHandlers is a closed dispatch table built at startup
   const handler = allHandlers[name];
+  const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
+  let flight;
+  try {
+    flight = beginToolFlight(identity);
+  } catch (err) {
+    if (err instanceof SecurityError && err.message === GENERIC_PRINCIPAL_REFUSAL) {
+      return principalDenyEnvelope();
+    }
+    throw err;
+  }
+  const session = getRequestAuthSession();
+
+  const invoke = async () => {
+    try {
+      if (getRequestSurface() === "network" && getRequestIdentity() === null) {
+        throw new SecurityError("Unauthenticated network request.");
+      }
+      if (getRequestSurface() === "network") {
+        const denial = networkToolScopeDenial(name);
+        if (denial) throw new SecurityError(denial);
+      }
+      if (!handler) {
+        return toolError(new Error(
+          `Unknown tool "${name}". Call drupal_list_entity_types to discover available resources.`
+        ));
+      }
+      const ctx = {
+        ...context,
+        identity,
+        surface: context.surface !== undefined ? context.surface : getRequestSurface(),
+        principalContext: context.principalContext ?? session?.principalContext ?? null,
+        headers: context.headers,
+      };
+      const result = await securityMiddleware(name, args ?? {}, handler, ctx);
+      return toolResult(withResolvedTarget(result, ctx.resolvedTarget));
+    } catch (err) {
+      if (err?.name === "AbortError" || err?.message === GENERIC_PRINCIPAL_REFUSAL) {
+        return principalDenyEnvelope();
+      }
+      // Translate known error classes into clear, non-leaky isError responses;
+      // anything else falls through to toolError for a generic envelope.
+      if (err instanceof GovernanceError) {
+        return { content: [{ type: "text", text: `Source governance unavailable: ${err.message}` }], isError: true };
+      }
+      if (err instanceof SecurityError) {
+        if (err.message === GENERIC_PRINCIPAL_REFUSAL) return principalDenyEnvelope();
+        markHttpAuditToolOutcome("denied");
+        return { content: [{ type: "text", text: `Access denied: ${err.message}` }], isError: true };
+      }
+      if (err instanceof BackendCapabilityError) {
+        return { content: [{ type: "text", text: `Not supported by this site's backend: ${err.message}` }], isError: true };
+      }
+      if (err instanceof BackendResolutionError) {
+        return { content: [{ type: "text", text: `Backend resolution failed: ${err.message}` }], isError: true };
+      }
+      return toolError(err);
+    }
+  };
 
   try {
-    if (getRequestSurface() === "network" && getRequestIdentity() === null) {
-      throw new SecurityError("Unauthenticated network request.");
+    if (flight.signal) {
+      return await runWithIdentity(identity, invoke, {
+        surface: context.surface !== undefined ? context.surface : (session?.surface ?? null),
+        bearer: session?.bearer ?? null,
+        introspect: session?.introspect ?? null,
+        principalContext: context.principalContext ?? session?.principalContext ?? null,
+        abortSignal: flight.signal,
+      });
     }
-    if (getRequestSurface() === "network") {
-      const denial = networkToolScopeDenial(name);
-      if (denial) throw new SecurityError(denial);
-    }
-    if (!handler) {
-      return toolError(new Error(
-        `Unknown tool "${name}". Call drupal_list_entity_types to discover available resources.`
-      ));
-    }
-    const ctx = { ...context };
-    const result = await securityMiddleware(name, args ?? {}, handler, ctx);
-    return toolResult(withResolvedTarget(result, ctx.resolvedTarget));
-  } catch (err) {
-    // Translate known error classes into clear, non-leaky isError responses;
-    // anything else falls through to toolError for a generic envelope.
-    if (err instanceof GovernanceError) {
-      return { content: [{ type: "text", text: `Source governance unavailable: ${err.message}` }], isError: true };
-    }
-    if (err instanceof SecurityError) {
-      markHttpAuditToolOutcome("denied");
-      return { content: [{ type: "text", text: `Access denied: ${err.message}` }], isError: true };
-    }
-    if (err instanceof BackendCapabilityError) {
-      return { content: [{ type: "text", text: `Not supported by this site's backend: ${err.message}` }], isError: true };
-    }
-    if (err instanceof BackendResolutionError) {
-      return { content: [{ type: "text", text: `Backend resolution failed: ${err.message}` }], isError: true };
-    }
-    return toolError(err);
+    return await invoke();
+  } finally {
+    flight.end();
   }
 }
 

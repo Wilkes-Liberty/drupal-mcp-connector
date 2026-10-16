@@ -135,9 +135,27 @@ export function scopesFromClaim(scope) {
 }
 
 /**
- * Freeze a request identity from validated claims. Caller headers are not an input.
+ * Copy only the claims the shared principal-key formula reads. Values are
+ * not rewritten: an integer `sub` stays an integer so fromClaims fails
+ * closed instead of widening it to a string.
+ *
  * @param {object} claims
- * @returns {Readonly<{sub: ?string, iss: ?string, aud: string|string[]|null, scopes: readonly string[], sites: readonly string[]|null, exp: ?number, nbf: ?number, jti: ?string, clientId: ?string, actSub: ?string}>}
+ * @returns {Readonly<object>}
+ */
+function freezeKeyClaims(claims) {
+  const out = {};
+  for (const name of ["iss", "sub", "azp", "act"]) {
+    if (Object.hasOwn(claims, name)) out[name] = claims[name];
+  }
+  return Object.freeze(out);
+}
+
+/**
+ * Freeze a request identity from validated claims. Caller headers are not an input.
+ * Tenant is the Paladin `tenant` claim only (DEV-839): non-strings are dropped,
+ * never coerced. Principal key claims are stored raw on `keyClaims`.
+ * @param {object} claims
+ * @returns {Readonly<{sub: ?string, iss: ?string, aud: string|string[]|null, scopes: readonly string[], sites: readonly string[]|null, exp: ?number, nbf: ?number, jti: ?string, clientId: ?string, azp: ?string, actSub: ?string, tenant: ?string, keyClaims: object}>}
  */
 export function buildIdentity(claims) {
   const scopes = scopesFromClaim(claims.scope ?? claims.scp);
@@ -149,6 +167,10 @@ export function buildIdentity(claims) {
   } else if (typeof siteClaim === "string") {
     sites = Object.freeze(siteClaim.split(/[\s,]+/).filter(Boolean));
   }
+  const tenant = typeof claims.tenant === "string" && claims.tenant !== ""
+    ? claims.tenant
+    : null;
+  const azp = typeof claims.azp === "string" ? claims.azp : null;
   return Object.freeze({
     sub: claims.sub === undefined || claims.sub === null ? null : String(claims.sub),
     iss: claims.iss === undefined || claims.iss === null ? null : String(claims.iss),
@@ -164,10 +186,13 @@ export function buildIdentity(claims) {
       && (claims.client_id === undefined || claims.client_id === null)
       ? null
       : String(claims.azp ?? claims.client_id),
+    azp,
     actSub: (claims.act && typeof claims.act === "object" && !Array.isArray(claims.act)
       && typeof claims.act.sub === "string" && claims.act.sub.trim())
       ? claims.act.sub.trim()
       : null,
+    tenant,
+    keyClaims: freezeKeyClaims(claims),
   });
 }
 
@@ -1067,6 +1092,7 @@ export function resolveInboundAuthConfig(cfg = {}, env = process.env) {
  * @param {object} options
  * @returns {Promise<{
  *   authenticate: Function,
+ *   introspect?: (token: string) => Promise<object|null>,
  *   protectedResource: object,
  *   resourceMetadataUrl: string,
  *   revoke?: (jti: string) => {ok: true}|{ok: false, reason: string},
@@ -1144,6 +1170,7 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
 
   return {
     authenticate: (req) => check(req.headers.authorization, req.headers),
+    introspect,
     protectedResource: protectedResourceMetadata({
       resource,
       authorizationServers: [advertisedIssuer],

@@ -268,7 +268,12 @@ describe("callServerTool", () => {
       .mockResolvedValueOnce(initOk("sess-g")[1])
       .mockResolvedValueOnce(toolOk({ content: [] }));
     const flow = buildDataFlowContext({
-      identity: { sub: "alice", clientId: "content-agent" },
+      identity: {
+        sub: "alice",
+        iss: "https://idp.example/realms/agents",
+        azp: "content-agent",
+        clientId: "content-agent",
+      },
       target: { name: "production", source: "grant" },
       site: { security: { declaredCeiling: "internal" } },
       correlationId: "corr-st",

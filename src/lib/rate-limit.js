@@ -4,12 +4,15 @@
  * Opt-in: with a falsy/non-positive `limit` it's a no-op (always allows).
  * Counts are in-memory per process. Keys are caller-chosen: standalone `/mcp`
  * uses an address key for unauthenticated requests and a verified-principal
- * key (`sub` + `clientId` from the validated token) after auth (DEV-860).
+ * key (`iss|sub|actor` from the Paladin token, via the mcp_sentinel twin)
+ * after auth (DEV-860 / #455).
  * The map is hard-capped (`maxKeys`) so spraying principals or addresses
  * cannot grow limiter state without bound. Multi-replica deployments still
  * need a shared limiter at the reverse proxy — this process cannot see
  * sibling replicas.
  */
+
+import { fromIdentity } from "./principal-key.js";
 
 /** Non-loopback TLS default when `MCP_RATE_LIMIT` is unset (#141, DEV-860). */
 export const DEFAULT_HTTPS_RATE_LIMIT = 120;
@@ -207,8 +210,10 @@ export function createRateLimiter({
 }
 
 /**
- * Rate-limit key for a verified principal. Built only from identity fields
- * minted after token validation (`sub` + `clientId`). Never from a header.
+ * Rate-limit key for a verified principal. Built from the mcp_sentinel
+ * twin (`iss|sub|actor`) after token validation. Never from a header.
+ * `#455` previously used `sub`+`clientId`; that formula moved onto
+ * `fromIdentity`.
  *
  * @param {object|null|undefined} identity
  * @returns {?string}
@@ -216,14 +221,11 @@ export function createRateLimiter({
 export function rateLimitPrincipalKey(identity) {
   if (!identity || typeof identity !== "object") return null;
   if (identity.localOperator === true) return "principal:local-operator";
-  const sub = identity.sub === undefined || identity.sub === null ? "" : String(identity.sub);
-  const clientId = identity.clientId === undefined || identity.clientId === null
-    ? ""
-    : String(identity.clientId);
-  if (!sub && !clientId) return null;
-  // Structural encoding: a NUL inside a claim cannot make two principals
-  // share a bucket (`a\0b`/`c` vs `a`/`b\0c`). Same shape as the session key.
-  return `principal:${JSON.stringify([sub, clientId])}`;
+  try {
+    return `principal:${fromIdentity(identity).principalKey}`;
+  } catch {
+    return null;
+  }
 }
 
 /**

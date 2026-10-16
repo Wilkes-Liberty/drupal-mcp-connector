@@ -109,6 +109,10 @@ export function runWithIdentity(identity, fn, options = {}) {
   return identityStore.run({
     identity: identity ?? null,
     surface: options.surface ?? null,
+    bearer: typeof options.bearer === "string" ? options.bearer : null,
+    introspect: typeof options.introspect === "function" ? options.introspect : null,
+    principalContext: options.principalContext ?? null,
+    abortSignal: options.abortSignal ?? null,
   }, fn);
 }
 
@@ -128,6 +132,39 @@ export function getRequestIdentity() {
  */
 export function getRequestSurface() {
   return identityStore.getStore()?.surface ?? null;
+}
+
+/**
+ * Request-scoped auth session (identity, surface, bearer, introspect).
+ * The bearer is never logged.
+ *
+ * @returns {{
+ *   identity: object|null,
+ *   surface: "network"|null,
+ *   bearer: string|null,
+ *   introspect: Function|null,
+ *   principalContext: object|null,
+ *   abortSignal: AbortSignal|null,
+ * }|null}
+ */
+export function getRequestAuthSession() {
+  return identityStore.getStore() ?? null;
+}
+
+/**
+ * Frozen Paladin principal for this request, or null.
+ * @returns {object|null}
+ */
+export function getRequestPrincipalContext() {
+  return identityStore.getStore()?.principalContext ?? null;
+}
+
+/**
+ * Abort signal for the in-flight registry entry, if any.
+ * @returns {AbortSignal|null}
+ */
+export function getRequestAbortSignal() {
+  return identityStore.getStore()?.abortSignal ?? null;
 }
 
 /**
@@ -501,7 +538,7 @@ export function visibleSiteTargets(identity, resolvable, configuredNames, grants
       const site = byName.get(name);
       return site ? describeTarget(site, source) : { name, source };
     }),
-    tenants: tenantId ? [{ id: tenantId, source: "grant" }] : [],
+    tenants: tenantId ? [{ id: tenantId, source: "token" }] : [],
   };
 }
 

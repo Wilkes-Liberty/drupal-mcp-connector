@@ -66,7 +66,14 @@ beforeEach(() => {
   registry = createModuleToolRegistry();
 });
 
-const context = () => ({ sites: state.sites, identity: { scopes: ["module_access"], sites: [state.sites[0]._name] } });
+const context = () => ({ sites: state.sites, identity: {
+  iss: "https://idp.example/realms/agents",
+  sub: "module-operator",
+  azp: "module-agent",
+  clientId: "module-agent",
+  scopes: ["module_access"],
+  sites: [state.sites[0]._name],
+} });
 const invoke = async () => {
   const [definition] = await registry.list(context());
   return registry.call(definition.name, {

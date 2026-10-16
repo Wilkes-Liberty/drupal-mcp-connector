@@ -81,7 +81,12 @@ describe("drupalFetch oauth integration", () => {
 
 describe("drupalFetch northbound data-flow (#179)", () => {
   const flow = () => buildDataFlowContext({
-    identity: { sub: "alice", clientId: "content-agent" },
+    identity: {
+      sub: "alice",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
+      clientId: "content-agent",
+    },
     target: { name: "production", baseUrl: "https://x", source: "grant" },
     site: { security: { declaredCeiling: "internal" } },
     limits: { requests: 2, requestWindowSec: 60, pages: 1, pageWindowSec: 60, results: 2, bytes: 4096 },

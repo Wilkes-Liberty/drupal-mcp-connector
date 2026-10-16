@@ -463,7 +463,7 @@ describe("visibleSiteTargets", () => {
       ["production"],
       { "content-agent": ["production"] },
     );
-    expect(payload.tenants).toEqual([{ id: "tenant-a", source: "grant" }]);
+    expect(payload.tenants).toEqual([{ id: "tenant-a", source: "token" }]);
   });
 });
 

@@ -1,6 +1,6 @@
 # Integration Contract
 
-**Contract version: 1.1**
+**Contract version: 1.2**
 
 This document defines the contract between `drupal-mcp-connector` and an optional
 **Drupal-side governance layer**. The connector works against plain Drupal core
@@ -100,6 +100,22 @@ discovered or invoked; optional `auth.grants` (client id → site names) gate
 which configured targets that principal may address. Caller-supplied site or
 scope arguments never become that grant. The inbound token is still never
 forwarded to Drupal.
+
+The connector **proposes** a frozen Paladin principal; Drupal
+(mcp_sentinel) **disposes**. Each tool call forwards the verified
+principal from the token unchanged (`iss`, `sub`, current actor, tenant).
+The connector never widens, rewrites, or invents those fields.
+
+**Tenant (DEV-839).** Tenant is the Paladin `tenant` claim only. It is
+never taken from headers (`X-MCP-Tenant`, `X-Forwarded-Tenant`, …) or
+from tool arguments. A network call whose token omits tenant is refused
+with the generic sentence `A verified principal context is required.`
+
+**Kill / revocation (DEV-846).** Before a governed write commits, the
+connector re-introspects the bearer at the issuer (RFC 7662). An inactive
+or killed token is the same generic deny. The 8s `/ready` probe cache
+MUST NOT be consulted on that path. In-flight calls for the principal
+are cancelled. A killed principal MUST NOT produce a distinct signal.
 
 ## 4. Authorization & governance (server-authoritative)
 
@@ -211,6 +227,7 @@ connector functions without it.
 |------------------------|-----------------------------------------------------|----------|
 | ≥ 0.6 | ≥ 1.0 | 1.0 |
 | unreleased | ≥ 2.9.0 | 1.1 (declared ceiling/destination + principal-bound budgets) |
+| unreleased | ≥ 3.1.0 | 1.2 (Paladin principal freeze, tenant claim, live write introspect) |
 
 The connector does **not** depend on the governance module, and the governance
 module does **not** depend on this specific connector. They are released
