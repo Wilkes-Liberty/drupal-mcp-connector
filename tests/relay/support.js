@@ -40,6 +40,7 @@ export async function createIssuerFixture() {
   jwk.alg = "RS256";
   jwk.use = "sig";
   const revokedJti = new Set();
+  const killedTokens = new Set();
 
   const routes = new Map([
     [`${ISSUER}/.well-known/oauth-authorization-server`,
@@ -63,6 +64,12 @@ export async function createIssuerFixture() {
         claims = decodeJwt(token);
       } catch {
         return new Response(JSON.stringify({ active: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (killedTokens.has(token)) {
+        return new Response(JSON.stringify({ active: false, killed: true }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -117,6 +124,9 @@ export async function createIssuerFixture() {
     signToken,
     revokeJti(jti) {
       revokedJti.add(String(jti));
+    },
+    kill(token) {
+      killedTokens.add(String(token));
     },
   };
 }

@@ -39,6 +39,11 @@ jobs:
       - name: npm run check
         run: npm run check
 
+      - name: Principal-key vectors match mcp_sentinel
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run check:principal-vectors
+
       # #464: a `uses:` ref that does not exist fails at "Set up job", and the
       # release workflow is the first place some steps ever run. Resolve every
       # action reference on the PR instead. Network-only; not part of

@@ -23,6 +23,7 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { createRemoteJWKSet, customFetch, decodeProtectedHeader, jwtVerify } from "jose";
 import { resolveConfiguredOrigins } from "./http-transport.js";
+import { assertTestOnly } from "./test-only.js";
 
 /** Inbound IdP HTTP timeout (discovery / JWKS). Matches Drupal/Drush outbound HTTP. */
 export const INBOUND_IDP_TIMEOUT_MS = 30_000;
@@ -52,6 +53,7 @@ export const NETWORK_INTROSPECTION_GUARD = { required: true };
  * @returns {void}
  */
 export function setNetworkIntrospectionGuard(required) {
+  assertTestOnly("setNetworkIntrospectionGuard");
   NETWORK_INTROSPECTION_GUARD.required = Boolean(required);
 }
 

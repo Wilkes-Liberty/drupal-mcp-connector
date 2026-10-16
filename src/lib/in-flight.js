@@ -5,11 +5,18 @@
  * (DEV-846). The map is bounded; a full registry fails closed.
  */
 
-import { GENERIC_PRINCIPAL_REFUSAL, principalDenied } from "./principal-context.js";
+import { principalDenied } from "./principal-context.js";
 import { fromIdentity, PrincipalKeyError } from "./principal-key.js";
+import { assertTestOnly } from "./test-only.js";
 
 /** Hard cap on concurrent tracked calls. Mirrors the 2025 session bound. */
 export const IN_FLIGHT_MAX_ENTRIES = 128;
+
+/**
+ * Per-principal sub-cap. One principal cannot fill the process and deny
+ * every other tenant.
+ */
+export const IN_FLIGHT_MAX_PER_PRINCIPAL = 16;
 
 /**
  * In-process cap guard. Production leaves `enforced` true. Tests call
@@ -25,6 +32,7 @@ export const IN_FLIGHT_CAP_GUARD = { enforced: true };
  * @returns {void}
  */
 export function setInFlightCapGuard(enforced) {
+  assertTestOnly("setInFlightCapGuard");
   IN_FLIGHT_CAP_GUARD.enforced = Boolean(enforced);
 }
 
@@ -47,7 +55,7 @@ export function inFlightKeysFromIdentity(identity) {
 /**
  * Bounded in-flight registry. `begin` fails closed when the cap is hit.
  *
- * @param {{maxEntries?: number}} [options]
+ * @param {{maxEntries?: number, maxPerPrincipal?: number}} [options]
  * @returns {{
  *   begin: (keys: object, extra?: {signal?: AbortSignal}) => {id: string, signal: AbortSignal, end: () => void},
  *   cancel: (selector: {principalKey?: string, humanKey?: string, tenant?: string}) => number,
@@ -55,8 +63,14 @@ export function inFlightKeysFromIdentity(identity) {
  *   reset: () => void,
  * }}
  */
-export function createInFlightRegistry({ maxEntries = IN_FLIGHT_MAX_ENTRIES } = {}) {
+export function createInFlightRegistry({
+  maxEntries = IN_FLIGHT_MAX_ENTRIES,
+  maxPerPrincipal = IN_FLIGHT_MAX_PER_PRINCIPAL,
+} = {}) {
   const cap = Number.isInteger(maxEntries) && maxEntries > 0 ? maxEntries : IN_FLIGHT_MAX_ENTRIES;
+  const perPrincipal = Number.isInteger(maxPerPrincipal) && maxPerPrincipal > 0
+    ? maxPerPrincipal
+    : IN_FLIGHT_MAX_PER_PRINCIPAL;
   /** @type {Map<string, {controller: AbortController, principalKey: string, humanKey: string, tenant: string}>} */
   const entries = new Map();
   let seq = 0;
@@ -77,9 +91,16 @@ export function createInFlightRegistry({ maxEntries = IN_FLIGHT_MAX_ENTRIES } = 
      */
     begin(keys, extra = {}) {
       if (IN_FLIGHT_CAP_GUARD.enforced && entries.size >= cap) throw principalDenied();
+      const principalKey = typeof keys?.principalKey === "string" ? keys.principalKey : "";
+      if (IN_FLIGHT_CAP_GUARD.enforced && principalKey) {
+        let n = 0;
+        for (const row of entries.values()) {
+          if (row.principalKey === principalKey) n += 1;
+        }
+        if (n >= perPrincipal) throw principalDenied();
+      }
       const id = `if-${seq += 1}`;
       const controller = new AbortController();
-      const principalKey = typeof keys?.principalKey === "string" ? keys.principalKey : "";
       const humanKey = typeof keys?.humanKey === "string" ? keys.humanKey : "";
       const tenant = typeof keys?.tenant === "string" ? keys.tenant : "";
       const parent = extra.signal;
@@ -117,7 +138,7 @@ export function createInFlightRegistry({ maxEntries = IN_FLIGHT_MAX_ENTRIES } = 
           || (tenant && row.tenant === tenant);
         if (!match) continue;
         try {
-          row.controller.abort(GENERIC_PRINCIPAL_REFUSAL);
+          row.controller.abort(principalDenied());
         } catch {
           // Abort must still drop the row.
         }
@@ -133,7 +154,7 @@ export function createInFlightRegistry({ maxEntries = IN_FLIGHT_MAX_ENTRIES } = 
 
     reset() {
       for (const row of entries.values()) {
-        try { row.controller.abort(GENERIC_PRINCIPAL_REFUSAL); } catch { /* ignore */ }
+        try { row.controller.abort(principalDenied()); } catch { /* ignore */ }
       }
       entries.clear();
     },
@@ -158,6 +179,7 @@ let activeRegistry = defaultRegistry;
  * @returns {void}
  */
 export function setInFlightRegistry(registry) {
+  assertTestOnly("setInFlightRegistry");
   activeRegistry = registry || defaultRegistry;
 }
 

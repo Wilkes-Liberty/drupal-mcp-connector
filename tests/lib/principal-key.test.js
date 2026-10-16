@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   PRINCIPAL_KEY_ERRORS,
+  PRINCIPAL_KEY_VECTORS_EXTRA_FILE,
   PRINCIPAL_KEY_VECTORS_FILE,
   PrincipalKeyError,
   fromClaims,
@@ -21,8 +22,8 @@ import {
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
-function loadVectors() {
-  const raw = readFileSync(join(REPO_ROOT, PRINCIPAL_KEY_VECTORS_FILE), "utf8");
+function loadVectors(file = PRINCIPAL_KEY_VECTORS_FILE) {
+  const raw = readFileSync(join(REPO_ROOT, file), "utf8");
   const decoded = JSON.parse(raw);
   if (!Array.isArray(decoded)) throw new Error("Vector file must be a JSON array.");
   return decoded.filter((item) => item && typeof item === "object");
@@ -136,6 +137,45 @@ describe("principal-key vectors (mcp_sentinel twin)", () => {
       throw new Error("missing sub");
     } catch (err) {
       expect(err.reasonCode).toBe(PRINCIPAL_KEY_ERRORS.INVALID_PART);
+    }
+  });
+});
+
+describe("principal-key extra vectors", () => {
+  it.each(loadVectors(PRINCIPAL_KEY_VECTORS_EXTRA_FILE).map((vector) => [vector.name, vector]))(
+    "matches fromClaims for %s",
+    (_name, vector) => {
+      const expected = vector.expected;
+      if (expected.error) {
+        expect(() => fromClaims(vector.claims)).toThrow(PrincipalKeyError);
+        try {
+          fromClaims(vector.claims);
+        } catch (err) {
+          expect(err.reasonCode).toBe(expected.error);
+        }
+        return;
+      }
+      expect(fromClaims(vector.claims)).toEqual({
+        principalKey: expected.principalKey,
+        humanKey: expected.humanKey,
+      });
+    },
+  );
+
+  it("does not collide with the mcp_sentinel mirror", () => {
+    const mirror = new Set(loadVectors().map((vector) => vector.name));
+    const extra = loadVectors(PRINCIPAL_KEY_VECTORS_EXTRA_FILE);
+    expect(extra.map((vector) => vector.name)).toEqual(expect.arrayContaining([
+      "case-preserved-iss-sub-azp",
+      "leading-trailing-whitespace-sub",
+      "inner-whitespace-sub",
+      "bom-feff-in-sub",
+      "zwj-in-sub",
+      "next-line-u0085-only-sub",
+      "next-line-u0085-inner-sub",
+    ]));
+    for (const vector of extra) {
+      expect(mirror.has(vector.name)).toBe(false);
     }
   });
 });

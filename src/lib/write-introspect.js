@@ -12,6 +12,7 @@ import { activeInFlightRegistry, inFlightKeysFromIdentity } from "./in-flight.js
 import { READY_PROBE_CACHE_MS } from "./ops-ready.js";
 import { getRequestAuthSession, isLocalOperator } from "./principal.js";
 import { principalDenied } from "./principal-context.js";
+import { assertTestOnly } from "./test-only.js";
 
 /**
  * In-process write re-introspection guard. Production leaves `required`
@@ -27,6 +28,7 @@ export const WRITE_REINTROSPECT_GUARD = { required: true };
  * @returns {void}
  */
 export function setWriteReintrospectGuard(required) {
+  assertTestOnly("setWriteReintrospectGuard");
   WRITE_REINTROSPECT_GUARD.required = Boolean(required);
 }
 
@@ -60,6 +62,7 @@ export const WRITE_INTROSPECT_CACHE = { useReadyCache: false };
  * @returns {void}
  */
 export function setWriteIntrospectUsesReadyCache(useReadyCache) {
+  assertTestOnly("setWriteIntrospectUsesReadyCache");
   WRITE_INTROSPECT_CACHE.useReadyCache = Boolean(useReadyCache);
 }
 
@@ -78,6 +81,7 @@ export async function assertLiveTokenForGovernedWrite({
   bearer,
   introspect,
   identity,
+  surface: surfaceHint = null,
   readyCache = null,
 } = {}) {
   const session = getRequestAuthSession();
@@ -85,11 +89,18 @@ export async function assertLiveTokenForGovernedWrite({
   if (isLocalOperator(who)) return;
   if (!WRITE_REINTROSPECT_GUARD.required) return;
 
+  // Relay edge already live-checked this write. The Paladin bearer never
+  // crosses the tunnel, so the tenant agent cannot introspect again.
+  if (session?.tokenLive === true) return;
+
   const token = bearer ?? session?.bearer;
   const inspect = introspect ?? session?.introspect;
-  // Stdio and unit tests inject an identity with no inbound bearer.
-  // A live network call always has one; missing introspect then fails closed.
-  if (typeof token !== "string" || !token) return;
+  const surface = surfaceHint ?? session?.surface ?? null;
+  if (typeof token !== "string" || !token) {
+    // Only stdio (no network surface) may skip a missing bearer.
+    if (surface === "network") denyAndCancel(who);
+    return;
+  }
   if (typeof inspect !== "function") denyAndCancel(who);
 
   // The 8s ready cache is a reachability probe. Consulting it here would

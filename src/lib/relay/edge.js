@@ -86,6 +86,9 @@ import { createLegacySessionHandler, createMcpRequestHandler } from "../http-han
 import { resolveAllowedHosts, resolveAllowedOrigins } from "../http-transport.js";
 import { rateLimitAddressKey } from "../rate-limit.js";
 import { isWriteLikeCall } from "../operations.js";
+import { GENERIC_PRINCIPAL_REFUSAL } from "../principal-context.js";
+import { SecurityError } from "../security.js";
+import { assertLiveTokenForGovernedWrite } from "../write-introspect.js";
 import {
   eligiblePromotions,
   POLICY_DIGEST,
@@ -1196,6 +1199,54 @@ export async function startEdge({
       return;
     }
 
+    // Paladin bearer never crosses the tunnel. Re-introspect write-like
+    // calls here, then stamp tokenLive so the agent does not fail open.
+    let tokenLive = false;
+    if (isCall && toolName && isWriteLikeCall(toolName, args)) {
+      try {
+        await assertLiveTokenForGovernedWrite({ identity, surface: "network" });
+        tokenLive = true;
+      } catch (err) {
+        if (err instanceof SecurityError && err.message === GENERIC_PRINCIPAL_REFUSAL) {
+          const denied = meter({
+            phase: "decision",
+            decision: "deny",
+            reason: "not_entitled",
+            requestId: null,
+            tenant: selected.tenant,
+            principal,
+            principalKey,
+            method: body?.method ?? null,
+            tool: toolName,
+            policyDigest,
+            units: 1,
+            bytesIn,
+          });
+          remember({
+            tenant: selected.tenant,
+            sub: identity.sub,
+            clientId: identity.clientId,
+            delegator: mapped.delegator,
+            decisionId: denied?.decisionId ?? null,
+            receiptId: denied?.decisionId ?? null,
+            requestId: null,
+            policyDigest,
+            outcome: "denied",
+          });
+          jsonResponse(res, 200, {
+            jsonrpc: "2.0",
+            id: body?.id ?? null,
+            result: {
+              content: [{ type: "text", text: `Access denied: ${GENERIC_PRINCIPAL_REFUSAL}` }],
+              isError: true,
+            },
+          });
+          return;
+        }
+        throw err;
+      }
+    }
+
     const callerApproval = callerApprovalHint(args);
     let consumedApprovalId = null;
     if (approvalLedger && isCall && toolName && approvalRequired.has(toolName)) {
@@ -1251,14 +1302,14 @@ export async function startEdge({
       }
     }
 
-    const id = randomUUID();
-    const waited = broker.track(id, { owner: selected.session.agentId });
     const routedIdentity = identityWithGrant(identity, {
       tenant: selected.tenant,
       actor: mapped.actor,
       delegator: mapped.delegator,
       policy: boundPolicy.policy,
     });
+    const id = randomUUID();
+    const waited = broker.track(id, { owner: selected.session.agentId });
     const wrote = writeFrame(selected.session.socket, {
       type: "mcp-request",
       id,
@@ -1267,6 +1318,7 @@ export async function startEdge({
       headers: fanDownHeaders(req.headers),
       identity: routedIdentity,
       body: stripCallerHints(body),
+      ...(tokenLive ? { tokenLive: true } : {}),
       correlation: {
         requestId: id,
         tenant: selected.tenant,

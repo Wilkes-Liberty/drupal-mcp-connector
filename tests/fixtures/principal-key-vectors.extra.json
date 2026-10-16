@@ -1,0 +1,89 @@
+[
+  {
+    "name": "case-preserved-iss-sub-azp",
+    "doc": "Keys are not case-folded; iss/sub/azp are copied as-is.",
+    "claims": {
+      "iss": "https://IdP.Example/Realms/Agents",
+      "sub": "Human-1",
+      "azp": "Agent-Client"
+    },
+    "expected": {
+      "principalKey": "https://IdP.Example/Realms/Agents|Human-1|Agent-Client",
+      "humanKey": "https://IdP.Example/Realms/Agents|Human-1"
+    }
+  },
+  {
+    "name": "leading-trailing-whitespace-sub",
+    "doc": "Leading or trailing whitespace is not trimmed; it is a valid part.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": " human-1 ",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "principalKey": "https://idp.example/realms/agents| human-1 |agent-client",
+      "humanKey": "https://idp.example/realms/agents| human-1 "
+    }
+  },
+  {
+    "name": "inner-whitespace-sub",
+    "doc": "Inner whitespace in an otherwise valid part is kept.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human 1",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "principalKey": "https://idp.example/realms/agents|human 1|agent-client",
+      "humanKey": "https://idp.example/realms/agents|human 1"
+    }
+  },
+  {
+    "name": "bom-feff-in-sub",
+    "doc": "U+FEFF is \\p{C} and is invalid_part.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "a\ufeffb",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_part"
+    }
+  },
+  {
+    "name": "zwj-in-sub",
+    "doc": "U+200D ZWJ is \\p{C} and is invalid_part.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "a\u200db",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_part"
+    }
+  },
+  {
+    "name": "next-line-u0085-only-sub",
+    "doc": "A lone U+0085 (NEXT LINE) is invalid_part. JS \\s matches it; PHP PCRE UCP \\s may not; \\p{C} catches it on both sides.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "\u0085",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_part"
+    }
+  },
+  {
+    "name": "next-line-u0085-inner-sub",
+    "doc": "U+0085 inside an otherwise valid part is \\p{C} and is invalid_part.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "a\u0085b",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_part"
+    }
+  }
+]

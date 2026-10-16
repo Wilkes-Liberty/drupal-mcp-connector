@@ -15,7 +15,9 @@ import {
   northboundHeaders,
   sourceBudgetDenial,
 } from "./data-flow.js";
-import { getRequestAbortSignal } from "./principal.js";
+import { combineAbortSignals } from "./abort-signals.js";
+import { getRequestAbortSignal, getRequestSurface } from "./principal.js";
+import { GENERIC_PRINCIPAL_REFUSAL, principalDenied } from "./principal-context.js";
 import { assertLiveTokenForGovernedWrite } from "./write-introspect.js";
 import { graphqlHasMutation } from "./security.js";
 import {
@@ -37,20 +39,28 @@ export const DRUPAL_FETCH_TIMEOUT_MS = 30_000;
  * @returns {Promise<object>} node-fetch Response.
  * @throws {Error} when the default timeout fires (`AbortError` remapped).
  */
-function requestAbortSignal(options = {}) {
-  const timeout = AbortSignal.timeout(DRUPAL_FETCH_TIMEOUT_MS);
-  const cancel = options.signal ?? getRequestAbortSignal();
-  if (!cancel) return timeout;
-  if (typeof AbortSignal.any === "function") return AbortSignal.any([timeout, cancel]);
-  return cancel;
+function abortReason(signal, err) {
+  return signal?.reason ?? err?.cause ?? err;
+}
+
+function isPrincipalAbort(signal, err) {
+  const reason = abortReason(signal, err);
+  if (reason instanceof Error && reason.message === GENERIC_PRINCIPAL_REFUSAL) return true;
+  if (reason === GENERIC_PRINCIPAL_REFUSAL) return true;
+  if (err?.message === GENERIC_PRINCIPAL_REFUSAL) return true;
+  return false;
 }
 
 async function timedDrupalFetch(url, options = {}) {
-  const signal = requestAbortSignal(options);
+  const timeout = AbortSignal.timeout(DRUPAL_FETCH_TIMEOUT_MS);
+  const cancel = options.signal ?? getRequestAbortSignal();
+  const signal = combineAbortSignals(timeout, cancel) ?? timeout;
   try {
     return await fetch(url, { ...options, signal });
   } catch (err) {
-    if (err?.name === "AbortError" && !options.signal) {
+    if (isPrincipalAbort(signal, err)) throw principalDenied();
+    // Remap only the shared 30s timeout. A caller-owned abort stays AbortError.
+    if (timeout.aborted) {
       throw new Error(`Drupal request timed out after ${DRUPAL_FETCH_TIMEOUT_MS / 1000}s`);
     }
     throw err;
@@ -136,7 +146,7 @@ function withStatus(error, status) {
  */
 export async function drupalFetch(site, path, options = {}) {
   if (isMutatingMethod(options.method)) {
-    await assertLiveTokenForGovernedWrite();
+    await assertLiveTokenForGovernedWrite({ surface: getRequestSurface() });
   }
   const url = `${site.baseUrl}${path}`;
   const collection = isCollectionJsonApiPath(path);
@@ -197,7 +207,7 @@ export async function drupalFetch(site, path, options = {}) {
  */
 export async function drupalGraphqlFetch(site, body) {
   if (typeof body?.query === "string" && graphqlHasMutation(body.query)) {
-    await assertLiveTokenForGovernedWrite();
+    await assertLiveTokenForGovernedWrite({ surface: getRequestSurface() });
   }
   const endpoint = site.graphqlEndpoint || "/graphql";
   const url = `${site.baseUrl}${endpoint}`;
@@ -269,7 +279,7 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
   const url = `${site.baseUrl}/jsonapi/${encodeURIComponent(entityType)}/${encodeURIComponent(bundle)}/${encodeURIComponent(fieldName)}`;
 
   consumeBudgetIfEnforced("request");
-  await assertLiveTokenForGovernedWrite();
+  await assertLiveTokenForGovernedWrite({ surface: getRequestSurface() });
   const res = await timedDrupalFetch(url, {
     method: "POST",
     headers: {

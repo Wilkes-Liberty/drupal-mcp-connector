@@ -96,11 +96,7 @@ describe("createConnectorServerFactory", () => {
     expect(await client.callTool({ name: "drupal_test", arguments: {} })).toEqual({
       content: [{ type: "text", text: "ok" }],
     });
-    expect(current.tools.call).toHaveBeenCalledWith(
-      "drupal_test",
-      {},
-      expect.objectContaining({ mcpReq: expect.any(Object) })
-    );
+    expect(current.tools.call).toHaveBeenCalledWith("drupal_test", {});
 
     await client.close();
     await server.close();

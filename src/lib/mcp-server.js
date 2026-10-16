@@ -31,7 +31,7 @@ function resourceUriIsListed(listed, requested) {
  *
  * @param {object} surface
  * @param {{name: string, title?: string, version: string}} surface.serverInfo
- * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, call: (name: string, args: object, context: object) => Promise<object>}} surface.tools
+ * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, call: (name: string, args: object) => Promise<object>}} surface.tools
  *   `definitions` is the full static surface (schema projection); the optional
  *   `list` hook decides what is DISCOVERABLE per request (governance + entitlement).
  * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, read: (uri: string) => Promise<object>}} surface.resources
@@ -50,10 +50,10 @@ export function createConnectorServerFactory({ serverInfo, tools, resources, pro
     server.setRequestHandler("tools/list", async () => ({
       tools: tools.list ? await tools.list() : tools.definitions,
     }));
-    server.setRequestHandler("tools/call", async (request, context) => {
+    server.setRequestHandler("tools/call", async (request) => {
       const { name, arguments: args } = request.params;
       try {
-        const result = await tools.call(name, args ?? {}, context);
+        const result = await tools.call(name, args ?? {});
         const projected = server.projectCallToolResult(result, toolDefinitions.get(name)?.outputSchema);
         markHttpAuditToolOutcome(result?.isError === true ? "error" : "success");
         return projected;

@@ -9,6 +9,7 @@ import { callTool } from "../../src/lib/dispatch.js";
 import {
   IN_FLIGHT_CAP_GUARD,
   IN_FLIGHT_MAX_ENTRIES,
+  IN_FLIGHT_MAX_PER_PRINCIPAL,
   createInFlightRegistry,
   inFlightKeysFromIdentity,
   setInFlightCapGuard,
@@ -48,6 +49,8 @@ describe("in-flight registry", () => {
     expect(registry.size()).toBe(2);
     expect(registry.cancel({ principalKey: inFlightKeysFromIdentity(identity).principalKey })).toBe(1);
     expect(a.signal.aborted).toBe(true);
+    expect(a.signal.reason).toBeInstanceOf(SecurityError);
+    expect(a.signal.reason.message).toBe(GENERIC_PRINCIPAL_REFUSAL);
     expect(other.signal.aborted).toBe(false);
     expect(registry.cancel({ tenant: "tenant-b" })).toBe(1);
     expect(other.signal.aborted).toBe(true);
@@ -85,6 +88,25 @@ describe("in-flight registry", () => {
 
   it("defaults to a finite cap", () => {
     expect(IN_FLIGHT_MAX_ENTRIES).toBe(128);
+    expect(IN_FLIGHT_MAX_PER_PRINCIPAL).toBe(16);
+  });
+
+  it("fails closed at the per-principal cap without denying other principals", () => {
+    const registry = createInFlightRegistry({ maxEntries: 8, maxPerPrincipal: 1 });
+    registry.begin(inFlightKeysFromIdentity(identity));
+    expect(() => registry.begin(inFlightKeysFromIdentity(identity))).toThrow(GENERIC_PRINCIPAL_REFUSAL);
+    expect(() => registry.begin(inFlightKeysFromIdentity({
+      ...identity, sub: "human-2",
+    }))).not.toThrow();
+    expect(registry.size()).toBe(2);
+  });
+
+  it("admits past the per-principal cap when the bound is removed (red evidence)", () => {
+    setInFlightCapGuard(false);
+    const registry = createInFlightRegistry({ maxEntries: 8, maxPerPrincipal: 1 });
+    registry.begin(inFlightKeysFromIdentity(identity));
+    expect(() => registry.begin(inFlightKeysFromIdentity(identity))).not.toThrow();
+    expect(registry.size()).toBe(2);
   });
 
   it("returns a generic deny envelope from tools/call when the registry is full", async () => {

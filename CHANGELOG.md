@@ -22,8 +22,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connector re-introspects the bearer (RFC 7662). Inactive or killed
   tokens abort with the generic deny; the response is not echoed. The 8s
   `/ready` probe cache is not consulted on this path. A bounded in-flight
-  registry (cap 128, fail closed) cancels matching calls on kill or
-  revocation.
+  registry (global cap 128, 16 per principal, fail closed) cancels matching
+  calls in the same process when that process's write re-check denies.
+
+### Changed
+
+- **Breaking (hosted operators).** Network tokens without a Paladin string
+  `tenant` claim, or without `azp` / top-level `act.sub` for the actor part
+  of `iss|sub|actor`, are denied. Session, rate-limit, and data-flow budget
+  keys now use that formula, which resets existing hosted sessions and
+  buckets. Tokens that previously keyed on `client_id` must be reissued
+  with `azp` (or `act.sub`). Paladin tenant enforcement needs mcp_sentinel
+  ≥ 3.1.0; the kill switch needs ≥ 3.2.0.
+- **DEV-846 cancel-on-kill is same-process.** Matching in-flight writes are
+  aborted only in the process that re-introspects the bearer. Direct HTTPS
+  re-introspects in the connector process. The relay edge re-introspects
+  before fan-down and stamps `tokenLive` on the frame; the Paladin bearer
+  never crosses the tunnel, so the tenant agent does not re-introspect and
+  cannot cancel from a later kill. There is no Paladin kill subscription
+  or extra frame type. A network-origin call with no bearer is denied;
+  only stdio may skip the write re-check.
 
 ## [5.2.1] - 2026-10-17
 

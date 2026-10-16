@@ -25,6 +25,15 @@ export const PRINCIPAL_KEY_MAX_PART_LENGTH = 256;
 /** Path of the shared vector file, relative to the repo root. */
 export const PRINCIPAL_KEY_VECTORS_FILE = "tests/fixtures/principal-key-vectors.json";
 
+/** Companion vectors that are not in the mcp_sentinel mirror. */
+export const PRINCIPAL_KEY_VECTORS_EXTRA_FILE = "tests/fixtures/principal-key-vectors.extra.json";
+
+/** mcp_sentinel tag whose fixture this tree mirrors. CI diffs against this pin. */
+export const PRINCIPAL_KEY_VECTORS_SENTINEL_TAG = "3.2.0";
+
+/** Upstream path of the language-neutral fixture, relative to the Sentinel repo root. */
+export const PRINCIPAL_KEY_VECTORS_SENTINEL_PATH = "tests/fixtures/principal-key-vectors.json";
+
 export const PRINCIPAL_KEY_ERRORS = Object.freeze({
   MISSING_ISS: "missing_iss",
   MISSING_SUB: "missing_sub",

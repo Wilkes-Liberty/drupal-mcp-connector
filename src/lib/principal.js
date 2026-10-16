@@ -113,6 +113,7 @@ export function runWithIdentity(identity, fn, options = {}) {
     introspect: typeof options.introspect === "function" ? options.introspect : null,
     principalContext: options.principalContext ?? null,
     abortSignal: options.abortSignal ?? null,
+    tokenLive: options.tokenLive === true,
   }, fn);
 }
 
@@ -145,6 +146,7 @@ export function getRequestSurface() {
  *   introspect: Function|null,
  *   principalContext: object|null,
  *   abortSignal: AbortSignal|null,
+ *   tokenLive: boolean,
  * }|null}
  */
 export function getRequestAuthSession() {

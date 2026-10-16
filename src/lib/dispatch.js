@@ -38,17 +38,81 @@ import { assertExplicitSiteForWrite, withResolvedTarget } from "./site-target.js
 import { buildDataFlowContext, consumeBudgetIfEnforced, runWithDataFlow } from "./data-flow.js";
 import { allHandlers } from "../tools/index.js";
 
+/** Caller fields that may influence dispatch. SDK context is not on this list. */
+const DISPATCH_CONTEXT_KEYS = Object.freeze([
+  "identity", "sites", "grants", "defaultSite", "siteNames", "headers", "moduleTool", "surface",
+]);
+
+/**
+ * Copy only allowlisted dispatch fields. SDK `mcpReq` / `principalContext`
+ * never become principal authority.
+ *
+ * @param {object} [context]
+ * @returns {object}
+ */
+function pickDispatchContext(context = {}) {
+  const bag = new Map(Object.entries(context ?? {}));
+  return Object.fromEntries(
+    DISPATCH_CONTEXT_KEYS
+      .filter((key) => bag.has(key) && bag.get(key) !== undefined)
+      .map((key) => [key, bag.get(key)]),
+  );
+}
+
+/**
+ * ALS identity wins when a request session exists. Tests without a session
+ * may still pass `context.identity`.
+ *
+ * @param {object} [context]
+ * @returns {object|null}
+ */
+function resolveDispatchIdentity(context = {}) {
+  const session = getRequestAuthSession();
+  if (session) return session.identity;
+  if (Object.hasOwn(context, "identity")) return context.identity;
+  return getRequestIdentity();
+}
+
+/**
+ * @param {object} [context]
+ * @returns {"network"|null}
+ */
+function resolveDispatchSurface(context = {}) {
+  const session = getRequestAuthSession();
+  if (session?.surface) return session.surface;
+  if (Object.hasOwn(context, "surface")) return context.surface;
+  if (session) return session.surface;
+  return getRequestSurface();
+}
+
 /**
  * Track this tool call so a kill can abort it. Local operator / unkeyed
  * identities are not registered (nothing to cancel).
  *
  * @param {object|null} identity
- * @returns {{end: () => void}}
+ * @returns {{end: () => void, signal?: AbortSignal}}
  */
 function beginToolFlight(identity) {
   const keys = inFlightKeysFromIdentity(identity);
   if (!keys) return { end() {} };
   return activeInFlightRegistry().begin(keys);
+}
+
+/**
+ * True when the throw is the generic principal deny, including an abort
+ * whose reason is that deny.
+ *
+ * @param {*} err
+ * @returns {boolean}
+ */
+function isPrincipalDenial(err) {
+  if (!err) return false;
+  if (err instanceof SecurityError && err.message === GENERIC_PRINCIPAL_REFUSAL) return true;
+  if (err.message === GENERIC_PRINCIPAL_REFUSAL) return true;
+  const reason = err.cause ?? err.reason;
+  if (reason instanceof SecurityError && reason.message === GENERIC_PRINCIPAL_REFUSAL) return true;
+  if (reason === GENERIC_PRINCIPAL_REFUSAL) return true;
+  return false;
 }
 
 /**
@@ -88,7 +152,7 @@ function resolveCallTarget(toolName, rawArgs, context = {}) {
     return null;
   }
 
-  const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
+  const identity = resolveDispatchIdentity(context);
   if (identity) {
     if (context.moduleTool) {
       if (!principalHasScope(identity, context.moduleTool.scope)) {
@@ -151,14 +215,14 @@ function extractEntityType(toolName, args) {
  */
 export async function securityMiddleware(toolName, args, handler, context = {}) {
   const rawArgs = args ?? {};
-  const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
-  const surface = context.surface !== undefined ? context.surface : getRequestSurface();
+  const identity = resolveDispatchIdentity(context);
+  const surface = resolveDispatchSurface(context);
   const sealed = assertFrozenPrincipal({
     identity,
     surface,
     args: rawArgs,
     headers: context.headers,
-    principalContext: context.principalContext ?? getRequestPrincipalContext(),
+    principalContext: getRequestPrincipalContext(),
   });
   if (context && typeof context === "object") {
     context.principalContext = sealed;
@@ -237,7 +301,7 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
       consumeBudgetIfEnforced("chained_action");
     }
     if (isWriteLikeCall(toolName, nextArgs)) {
-      await assertLiveTokenForGovernedWrite({ identity });
+      await assertLiveTokenForGovernedWrite({ identity, surface });
     }
     return handler(nextArgs);
   });
@@ -260,12 +324,12 @@ function principalDenyEnvelope() {
 export async function callTool(name, args, context = {}) {
   // eslint-disable-next-line security/detect-object-injection -- name is an MCP tool name from validated schema; allHandlers is a closed dispatch table built at startup
   const handler = allHandlers[name];
-  const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
+  const identity = resolveDispatchIdentity(context);
   let flight;
   try {
     flight = beginToolFlight(identity);
   } catch (err) {
-    if (err instanceof SecurityError && err.message === GENERIC_PRINCIPAL_REFUSAL) {
+    if (isPrincipalDenial(err)) {
       return principalDenyEnvelope();
     }
     throw err;
@@ -286,17 +350,13 @@ export async function callTool(name, args, context = {}) {
           `Unknown tool "${name}". Call drupal_list_entity_types to discover available resources.`
         ));
       }
-      const ctx = {
-        ...context,
-        identity,
-        surface: context.surface !== undefined ? context.surface : getRequestSurface(),
-        principalContext: context.principalContext ?? session?.principalContext ?? null,
-        headers: context.headers,
-      };
+      const ctx = pickDispatchContext(context);
+      ctx.identity = identity;
+      ctx.surface = resolveDispatchSurface(context);
       const result = await securityMiddleware(name, args ?? {}, handler, ctx);
       return toolResult(withResolvedTarget(result, ctx.resolvedTarget));
     } catch (err) {
-      if (err?.name === "AbortError" || err?.message === GENERIC_PRINCIPAL_REFUSAL) {
+      if (isPrincipalDenial(err)) {
         return principalDenyEnvelope();
       }
       // Translate known error classes into clear, non-leaky isError responses;
@@ -305,7 +365,7 @@ export async function callTool(name, args, context = {}) {
         return { content: [{ type: "text", text: `Source governance unavailable: ${err.message}` }], isError: true };
       }
       if (err instanceof SecurityError) {
-        if (err.message === GENERIC_PRINCIPAL_REFUSAL) return principalDenyEnvelope();
+        if (isPrincipalDenial(err)) return principalDenyEnvelope();
         markHttpAuditToolOutcome("denied");
         return { content: [{ type: "text", text: `Access denied: ${err.message}` }], isError: true };
       }
@@ -322,11 +382,12 @@ export async function callTool(name, args, context = {}) {
   try {
     if (flight.signal) {
       return await runWithIdentity(identity, invoke, {
-        surface: context.surface !== undefined ? context.surface : (session?.surface ?? null),
+        surface: resolveDispatchSurface(context) ?? session?.surface ?? null,
         bearer: session?.bearer ?? null,
         introspect: session?.introspect ?? null,
-        principalContext: context.principalContext ?? session?.principalContext ?? null,
+        principalContext: session?.principalContext ?? null,
         abortSignal: flight.signal,
+        tokenLive: session?.tokenLive === true,
       });
     }
     return await invoke();

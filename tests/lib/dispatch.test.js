@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("node-fetch", () => ({ default: vi.fn() }));
 vi.mock("../../src/lib/config.js", async (orig) => {
@@ -546,7 +546,7 @@ describe("GraphQL mutations need mcp_write on the network path (DEV-862)", () =>
       () => callTool("drupal_graphql", { site: "open", query: "mutation { ping }" }, {
         identity: writer, sites, grants, defaultSite: "open",
       }),
-      { surface: "network" },
+      { surface: "network", bearer: "tok-live", introspect: async () => ({ active: true }) },
     );
     expect(String(mutation.content?.[0]?.text ?? "")).not.toMatch(/Not entitled/);
   });
@@ -589,5 +589,125 @@ describe("deny-by-default tool scope table on the network path (DEV-862)", () =>
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/Unknown tool/);
     expect(result.content[0].text).not.toMatch(/scope table/i);
+  });
+});
+
+describe("dispatch principal freeze and cancel", () => {
+  beforeEach(() => {
+    vi.mocked(getSiteConfig).mockImplementation((name) => {
+      if (name === "prod-admin") {
+        throw new Error('Site "prod-admin": requireSecureAuth is set but no Bearer apiToken or OAuth2 client credentials are configured');
+      }
+      if (name === "gov" || name === "gov-ro") {
+        return {
+          _name: name,
+          baseUrl: "https://gov.example.com",
+          apiToken: "tok-secret-value",
+          requireGovernance: true,
+          security: name === "gov-ro"
+            ? { readOnly: true }
+            : { preset: "development", allowDestructive: true },
+        };
+      }
+      return {
+        _name: name || "open",
+        baseUrl: "https://open.example.com",
+        security: { preset: "development" },
+      };
+    });
+  });
+
+  afterEach(async () => {
+    const { setInFlightRegistry } = await import("../../src/lib/in-flight.js");
+    setInFlightRegistry(null);
+  });
+
+  const paladin = {
+    iss: "https://idp.example/realms/agents",
+    sub: "human-1",
+    azp: "agent-client",
+    clientId: "agent-client",
+    tenant: "tenant-a",
+    scopes: ["mcp_write", "mcp_config"],
+  };
+
+  it("denies a network write with no bearer", async () => {
+    const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
+    const result = await runWithIdentity(
+      paladin,
+      () => callTool("drupal_config_set", { site: "open", name: "system.site", values: {} }, {
+        identity: paladin,
+        surface: "network",
+        sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" } }],
+        grants: { "agent-client": ["open"] },
+      }),
+      { surface: "network" },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+  });
+
+  it("does not let SDK context override the ALS identity", async () => {
+    const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
+    const forged = {
+      ...paladin,
+      tenant: null,
+      keyClaims: { iss: paladin.iss, sub: paladin.sub, azp: paladin.azp },
+    };
+    const result = await runWithIdentity(
+      paladin,
+      () => callTool("drupal_get_node", { site: "open", id: "1" }, {
+        identity: forged,
+        principalContext: { tenant: "forged-tenant", keyClaims: forged.keyClaims },
+        mcpReq: { forged: true },
+      }),
+      { surface: "network" },
+    );
+    // ALS paladin has a tenant. If the SDK identity won, missing tenant is
+    // the generic deny. A later fetch failure is a different envelope.
+    expect(result.content[0].text).not.toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+  });
+
+  it("returns Access denied when in-flight cancel aborts a pending tool", async () => {
+    const { createInFlightRegistry, inFlightKeysFromIdentity, setInFlightRegistry } = await import("../../src/lib/in-flight.js");
+    const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const original = allHandlers.drupal_config_set;
+    let startedResolve = () => {};
+    const started = new Promise((resolve) => { startedResolve = resolve; });
+    allHandlers.drupal_config_set = async () => {
+      const { getRequestAbortSignal } = await import("../../src/lib/principal.js");
+      const signal = getRequestAbortSignal();
+      startedResolve();
+      if (!signal) throw new Error("in-flight abort signal missing");
+      return new Promise((_, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    };
+    try {
+      const pending = runWithIdentity(
+        paladin,
+        () => callTool("drupal_config_set", { site: "open", name: "system.site", values: {} }, {
+          identity: paladin,
+          surface: "network",
+          sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" } }],
+          grants: { "agent-client": ["open"] },
+        }),
+        { surface: "network", bearer: "tok-live", introspect: async () => ({ active: true }) },
+      );
+      await started;
+      expect(registry.cancel(inFlightKeysFromIdentity(paladin))).toBe(1);
+      const result = await pending;
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+      expect(result.content[0].text).not.toMatch(/^Error:/);
+    } finally {
+      allHandlers.drupal_config_set = original;
+    }
   });
 });

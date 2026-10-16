@@ -131,6 +131,7 @@ export function createRelayAgent({
       });
       response = await runWithIdentity(frame.identity, () => handler.fetch(request), {
         surface: "network",
+        tokenLive: frame.tokenLive === true,
       });
     } catch {
       writeFrame(activeSocket, {

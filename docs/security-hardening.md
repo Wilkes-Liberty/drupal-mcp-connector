@@ -72,13 +72,22 @@ write-like MCP tools), the connector introspects the same bearer again.
 `active !== true` or Paladin `killed: true` aborts with
 `A verified principal context is required.` The 8s `/ready` probe cache
 is not consulted here, so a kill cannot hide behind that window. Matching
-in-flight calls are cancelled. The introspection body is never echoed.
+in-flight calls in **this process** are cancelled (global cap 128, 16 per
+principal). The introspection body is never echoed. A network-origin call
+with no bearer is denied; only stdio may skip. On the hosted relay the
+edge re-introspects before fan-down (the Paladin bearer never crosses the
+tunnel) and stamps `tokenLive` so the tenant agent does not fail open.
+Cancel-on-kill does not cross that process boundary, and there is no
+Paladin kill subscription.
 
 **Tenant comes from the token (DEV-839).** Network calls take tenant only
 from the Paladin `tenant` claim. `X-MCP-Tenant`, `X-Forwarded-Tenant`,
 and a `tenant` tool argument are not authority. A missing claim is the
 same generic deny. Session, rate-limit, and budget keys are
 `iss|sub|actor` from the mcp_sentinel twin, never `client_id`.
+**Breaking:** a hosted token with no `tenant` claim, or with only
+`client_id` and no `azp`/`act.sub`, is denied, and existing session and
+rate-limit buckets reset onto the new formula.
 
 The JSON revocation file (`{ "jti": [], "sub": [] }`) is not read on stdio.
 Stdio has no bearer authentication or revocation path. The file is also

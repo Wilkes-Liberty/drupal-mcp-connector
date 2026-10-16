@@ -8,6 +8,8 @@ import { buildIdentity } from "../../src/lib/http-auth.js";
 import {
   GENERIC_PRINCIPAL_REFUSAL,
   PRINCIPAL_CONTEXT_GUARD,
+  RESERVED_PRINCIPAL_ARG_KEYS,
+  SPOOFABLE_TENANT_HEADERS,
   assertFrozenPrincipal,
   freezePrincipalContext,
   setPrincipalContextGuard,
@@ -31,6 +33,13 @@ const identity = (over = {}) => ({
 });
 
 describe("freezePrincipalContext", () => {
+  it("documents spoofable tenant fields that never become authority", () => {
+    expect(RESERVED_PRINCIPAL_ARG_KEYS).toEqual(expect.arrayContaining(["tenant", "tenant_id", "tenantId"]));
+    expect(SPOOFABLE_TENANT_HEADERS).toEqual(expect.arrayContaining([
+      "x-mcp-tenant", "x-forwarded-tenant",
+    ]));
+  });
+
   it("copies verified Paladin fields and does not invent azp from client_id", () => {
     const ctx = freezePrincipalContext({
       iss: claims.iss,
@@ -96,6 +105,18 @@ describe("DEV-839 tenant claim (network)", () => {
     const who = identity({ tenant: null, keyClaims: { iss: claims.iss, sub: claims.sub, azp: claims.azp } });
     const ctx = assertFrozenPrincipal({ identity: who, surface: "network", args: {} });
     expect(ctx.tenant).toBe("");
+  });
+
+  it("rejects a principalContext that does not match identity", () => {
+    const who = identity();
+    expect(() => assertFrozenPrincipal({
+      identity: who,
+      surface: "network",
+      principalContext: freezePrincipalContext({
+        ...claims,
+        tenant: "forged-tenant",
+      }, { network: true }),
+    })).toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
   it("returns a generic deny from tools/call with no identity leakage", async () => {

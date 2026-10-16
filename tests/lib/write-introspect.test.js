@@ -129,4 +129,74 @@ describe("DEV-846 write re-introspect", () => {
     ), { surface: "network", bearer: "tok-live", introspect });
     expect(introspect).not.toHaveBeenCalled();
   });
+
+  it("denies when introspection throws, with no identity leakage", async () => {
+    const introspect = vi.fn(async () => {
+      throw new Error("issuer timeout for human-1");
+    });
+    try {
+      await runWithIdentity(identity, () => assertLiveTokenForGovernedWrite({
+        bearer: "tok-live",
+        introspect,
+        identity,
+      }), { surface: "network", bearer: "tok-live", introspect });
+      throw new Error("throwing introspector must deny");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SecurityError);
+      expect(err.message).toBe(GENERIC_PRINCIPAL_REFUSAL);
+      expect(err.message).not.toMatch(/human-1|timeout|tok-live/);
+    }
+  });
+
+  it("denies when introspection times out (AbortError)", async () => {
+    const introspect = vi.fn(async () => {
+      const err = new Error("The operation was aborted");
+      err.name = "AbortError";
+      throw err;
+    });
+    await expect(runWithIdentity(identity, () => assertLiveTokenForGovernedWrite({
+      bearer: "tok-live",
+      introspect,
+      identity,
+    }), { surface: "network", bearer: "tok-live", introspect })).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+  });
+
+  it("lets a throwing introspector through when the guard is removed (red evidence)", async () => {
+    setWriteReintrospectGuard(false);
+    const introspect = vi.fn(async () => {
+      throw new Error("issuer down");
+    });
+    await expect(assertLiveTokenForGovernedWrite({
+      bearer: "tok-live",
+      introspect,
+      identity,
+    })).resolves.toBeUndefined();
+    expect(introspect).not.toHaveBeenCalled();
+  });
+
+  it("denies a network-origin write with no bearer", async () => {
+    await expect(runWithIdentity(identity, () => assertLiveTokenForGovernedWrite({
+      identity,
+    }), { surface: "network" })).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+  });
+
+  it("admits a network write with no bearer when the guard is removed (red evidence)", async () => {
+    setWriteReintrospectGuard(false);
+    await expect(runWithIdentity(identity, () => assertLiveTokenForGovernedWrite({
+      identity,
+    }), { surface: "network" })).resolves.toBeUndefined();
+  });
+
+  it("skips a missing bearer on stdio", async () => {
+    await expect(assertLiveTokenForGovernedWrite({ identity })).resolves.toBeUndefined();
+  });
+
+  it("skips a second check when the relay edge stamped tokenLive", async () => {
+    const introspect = vi.fn(async () => ({ active: false, killed: true }));
+    await runWithIdentity(identity, () => assertLiveTokenForGovernedWrite({
+      identity,
+      introspect,
+    }), { surface: "network", tokenLive: true, introspect });
+    expect(introspect).not.toHaveBeenCalled();
+  });
 });

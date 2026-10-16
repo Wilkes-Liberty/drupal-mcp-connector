@@ -9,6 +9,7 @@
 
 import { fromClaims, keyClaimsFromIdentity } from "./principal-key.js";
 import { SecurityError } from "./security.js";
+import { assertTestOnly } from "./test-only.js";
 
 /**
  * Stdio (`null`) and the explicit loopback local-operator identity.
@@ -61,6 +62,7 @@ export const PRINCIPAL_CONTEXT_GUARD = { required: true };
  * @returns {void}
  */
 export function setPrincipalContextGuard(required) {
+  assertTestOnly("setPrincipalContextGuard");
   PRINCIPAL_CONTEXT_GUARD.required = Boolean(required);
 }
 
@@ -166,19 +168,6 @@ export function principalDenied() {
   return new SecurityError(GENERIC_PRINCIPAL_REFUSAL);
 }
 
-function looksLikeSpoofedTenant(args, headers) {
-  const map = new Map(Object.entries(args ?? {}));
-  for (const key of RESERVED_PRINCIPAL_ARG_KEYS) {
-    if (key === "tenant" || key === "tenant_id" || key === "tenantId") {
-      if (map.has(key)) return true;
-    }
-  }
-  const headerMap = new Map(
-    Object.entries(headers ?? {}).map(([name, value]) => [String(name).toLowerCase(), value]),
-  );
-  return SPOOFABLE_TENANT_HEADERS.some((name) => headerMap.has(name));
-}
-
 /**
  * Network JWT principals need a Paladin tenant claim and a composable
  * principal key. Arguments and headers never supply those fields.
@@ -195,15 +184,22 @@ function looksLikeSpoofedTenant(args, headers) {
 export function assertFrozenPrincipal({
   identity,
   surface = null,
-  args = {},
-  headers = {},
   principalContext = null,
 } = {}) {
   if (isLocal(identity)) return null;
   const network = surface === "network";
-  const ctx = principalContext ?? principalContextFromIdentity(identity, { network });
-  // Caller tenant hints and spoofable headers are never copied onto ctx.
-  void looksLikeSpoofedTenant(args, headers);
+  const ctx = principalContextFromIdentity(identity, { network });
+  if (principalContext) {
+    if (!ctx || principalContext.tenant !== ctx.tenant) throw principalDenied();
+    try {
+      const supplied = fromClaims(principalContext.keyClaims);
+      const expected = fromClaims(ctx.keyClaims);
+      if (supplied.principalKey !== expected.principalKey) throw principalDenied();
+    } catch (err) {
+      if (err instanceof SecurityError && err.message === GENERIC_PRINCIPAL_REFUSAL) throw err;
+      throw principalDenied();
+    }
+  }
   if (!network) return ctx;
   if (!PRINCIPAL_CONTEXT_GUARD.required) return ctx;
   if (!ctx) throw principalDenied();

@@ -29,6 +29,8 @@ import { authHeadersAsync, clientHeaders, CLIENT_NAME, CLIENT_VERSION } from "./
 import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial, getDataFlowContext } from "./data-flow.js";
 import { clearToken } from "./oauth.js";
 import { cleanErrorText, describeErrorBody } from "./error-body.js";
+import { combineAbortSignals } from "./abort-signals.js";
+import { getRequestAbortSignal } from "./principal.js";
 
 /** Calls a configured module binding through the registry, without fallback. */
 export async function callBoundModuleTool(site, binding, args, required) {
@@ -142,6 +144,19 @@ const MCP_PROTOCOL_VERSION = "2025-06-18";
 
 /** MCP server-tool POST timeout. Handshake, catalog, and tools/call share this. */
 export const SERVER_TOOL_TIMEOUT_MS = 15_000;
+
+/**
+ * Timeout plus the in-flight cancel signal so a kill aborts a governed
+ * server-tool POST. The 15s timeout is kept when `AbortSignal.any` is missing.
+ *
+ * @returns {AbortSignal}
+ */
+function serverToolAbortSignal() {
+  return combineAbortSignals(
+    AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
+    getRequestAbortSignal(),
+  ) ?? AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS);
+}
 
 /** Default MCP response body cap (bytes). Caller `maxBytes` overrides. */
 export const SERVER_TOOL_MAX_BYTES = 262_144;
@@ -345,7 +360,7 @@ async function initializeSession(site, endpoint, key) {
       headers: await baseHeaders(site, null),
       body: JSON.stringify(payload),
       size: SERVER_TOOL_MAX_BYTES,
-      signal: AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
+      signal: serverToolAbortSignal(),
     });
 
   let res = await post();
@@ -382,7 +397,7 @@ async function initializeSession(site, endpoint, key) {
       headers: await baseHeaders(site, sessionId),
       body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
       size: SERVER_TOOL_MAX_BYTES,
-      signal: AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
+      signal: serverToolAbortSignal(),
     });
   } catch {
     // Notification is advisory; proceed with the established session.
@@ -539,7 +554,7 @@ async function requestServerTool(site, method, params, options) {
       headers: await baseHeaders(site, sessionId),
       body: JSON.stringify(payload),
       size: options.maxBytes ?? SERVER_TOOL_MAX_BYTES,
-      signal: AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
+      signal: serverToolAbortSignal(),
     });
     const { body, rawText } = await readBody(res);
 
