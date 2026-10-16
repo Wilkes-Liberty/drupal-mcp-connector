@@ -204,15 +204,6 @@ function inferType(value) {
 }
 
 /**
- * Append one filter condition to a URLSearchParams in JSON:API syntax.
- * Equality uses the shorthand `filter[field]=value`; other operators use the
- * verbose `filter[c_field][condition][...]` form. `in` expands to indexed
- * value params; `isNull` omits the value entirely.
- * @param {URLSearchParams} params Params to mutate.
- * @param {{field: string, op?: string, value: *}} cond Filter condition.
- * @returns {void}
- */
-/**
  * Serialize a filter value to a DB-portable string. Booleans become "1"/"0":
  * Drupal stores `status` and other boolean fields in integer/smallint columns,
  * and PostgreSQL rejects the literals "true"/"false" there ("invalid input
@@ -227,6 +218,15 @@ function filterValue(value) {
   return String(value);
 }
 
+/**
+ * Append one filter condition to a URLSearchParams in JSON:API syntax.
+ * Equality uses the shorthand `filter[field]=value`; other operators use the
+ * verbose `filter[c_field][condition][...]` form. `in` expands to indexed
+ * value params; `isNull` omits the value entirely.
+ * @param {URLSearchParams} params Params to mutate.
+ * @param {{field: string, op?: string, value: *}} cond Filter condition.
+ * @returns {void}
+ */
 function applyFilter(params, { field, op = "eq", value }) {
   if (op === "eq") {
     params.append(`filter[${field}]`, filterValue(value));

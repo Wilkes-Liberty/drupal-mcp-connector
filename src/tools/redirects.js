@@ -36,9 +36,6 @@ import { resolveSecurityConfig, assertWriteAllowed } from "../lib/security.js";
 
 const REDIRECT_TYPE = "redirect";
 
-// Redirect status codes the Redirect module supports. 301/302 are the common
-// pair called for in the ticket; the rest are the other valid HTTP redirect
-// codes, accepted so the tool isn't needlessly restrictive. 301 is the default.
 const ALLOWED_STATUS_CODES = [301, 302, 303, 307, 308];
 
 // Drupal URI schemes a destination may already carry; anything else that is a

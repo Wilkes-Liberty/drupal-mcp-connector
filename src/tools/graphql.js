@@ -43,10 +43,7 @@ async function runGraphql({ site: siteName, query, variables = {}, operationName
   const json = await drupalGraphqlFetch(site, { query, variables, operationName });
 
   if (json.errors?.length) {
-    // The messages are untrusted text: cleaned and bounded, like the detail of
-    // a non-2xx response (#356). `data` is returned as received.
     if (!json.data) throw new Error(`GraphQL errors: ${describeGraphqlErrors(json.errors)}`);
-    // Partial result — return data AND surface errors as a warning
     return { data: json.data, warnings: cleanGraphqlErrors(json.errors).map((e) => e.message) };
   }
 

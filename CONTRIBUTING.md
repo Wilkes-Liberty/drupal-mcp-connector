@@ -117,9 +117,7 @@ docs: update getting-started for DDEV setup
   enforces this; a trivial PR that genuinely needs no entry can carry the
   `no-changelog` label to bypass it. (Dependabot PRs are exempt automatically.)
 - Update [docs/tools-reference.md](docs/tools-reference.md) if you add or change tools.
-- CI must pass before merge: `npm run check` (Node 20). (CodeQL also runs
-  and reports, but is not a required gate — it skips dependency-only PRs, so
-  requiring it would permanently block Dependabot.)
+- CI must pass before merge: `npm run check` (Node 20).
 - Any review conversations must be resolved before merging (a branch-protection
   requirement). Maintainer review is welcomed but not required to merge a
   green PR.

@@ -29,7 +29,7 @@ negotiateContractVersion("2.0"); // throws incompatible_contract_version
 
 | Connector | Adapter contract |
 |-----------|------------------|
-| ≥ 2.x (this change, unreleased) | 1.0 |
+| ≥ 2.9.0 | 1.0 |
 
 The contract is versioned independently of the npm package and of the
 integration-contract revision. Backward-compatible additions bump the minor

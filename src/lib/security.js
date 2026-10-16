@@ -257,12 +257,6 @@ const PRESETS = {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve a site's effective security config by layering explicit `security`
- * keys over the selected preset (explicit keys win; redacted-field lists merge).
- * @param {object} site Site config (reads site.security).
- * @returns {object} Effective security config used by the assert/redact helpers.
- */
-/**
  * Modules drupal_drush_module_disable refuses to uninstall, on every preset
  * (#346). Uninstalling one removes a control the connector relies on, and
  * Drupal drops the module's hook_schema tables on uninstall, so an audit log or
@@ -357,6 +351,12 @@ function resolveCoreExtensionOptIn(raw) {
 /** Default when `security.preset` is omitted — least privilege, not open mode (#140). */
 export const DEFAULT_SECURITY_PRESET = "production-strict";
 
+/**
+ * Resolve a site's effective security config by layering explicit `security`
+ * keys over the selected preset (explicit keys win; redacted-field lists merge).
+ * @param {object} site Site config (reads site.security).
+ * @returns {object} Effective security config used by the assert/redact helpers.
+ */
 export function resolveSecurityConfig(site) {
   const raw = site.security ?? {};
   // Explicit preset wins; bare {} / missing security → production-strict (#140).
@@ -786,12 +786,6 @@ export function graphqlHasMutation(query) {
 }
 
 /**
- * @param {object} secConfig Resolved security config.
- * @param {string} query GraphQL document text.
- * @returns {void} No-op for read-only (query) documents.
- * @throws {SecurityError} if the document is a mutation and writes/mutations are disabled.
- */
-/**
  * Gate GraphQL queries and schema introspection. Freeform GraphQL returns raw
  * data that does not pass through entity allowlists or field redaction (#142),
  * so it is off by default outside the development preset. Opt in with
@@ -812,6 +806,12 @@ export function assertGraphqlAllowed(secConfig, operationLabel = "graphql") {
   );
 }
 
+/**
+ * @param {object} secConfig Resolved security config.
+ * @param {string} query GraphQL document text.
+ * @returns {void} No-op for read-only (query) documents.
+ * @throws {SecurityError} if the document is a mutation and writes/mutations are disabled.
+ */
 export function assertGraphqlMutationAllowed(secConfig, query) {
   // Queries still require allowGraphql (#142); mutations require both flags.
   assertGraphqlAllowed(secConfig, "graphql mutation");
@@ -837,14 +837,12 @@ export function assertGraphqlMutationAllowed(secConfig, query) {
  * @throws {SecurityError} if the type is denied, or not in a configured allowlist.
  */
 export function assertEntityTypeAllowed(secConfig, entityType) {
-  // Check denylist first (takes priority over allowlist)
   if (secConfig.deniedEntityTypes.includes(entityType)) {
     throw new SecurityError(
       `Access to entity type "${entityType}" is denied by security config (deniedEntityTypes).`
     );
   }
 
-  // Check allowlist
   if (secConfig.allowedEntityTypes !== null) {
     if (!secConfig.allowedEntityTypes.includes(entityType)) {
       const allowed = secConfig.allowedEntityTypes.join(", ");

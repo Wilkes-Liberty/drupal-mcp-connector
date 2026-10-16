@@ -58,6 +58,15 @@ describe("config/config.example.json — the shipped secure default", () => {
     expect(raw).not.toMatch(/https:\/\/www\.cursor\.com\.evil/);
   });
 
+  it("documents allowedPrincipals without shipping a live admission list", () => {
+    const example = loadExample();
+    expect(example.auth.allowedPrincipals).toBeUndefined();
+    const raw = readRepoFile("config/config.example.json");
+    expect(raw).toMatch(/_allowedPrincipals/);
+    expect(raw).toMatch(/pilot-client/);
+    expect(raw).toMatch(/Sensitive types denied\. PII redacted/);
+  });
+
   it("carries no deployment-specific identifier in any shipped operator script", () => {
     // The example, the launcher and the deploy unit are all published: a real
     // estate's hostnames, Keychain item names or consumer ids must not ride

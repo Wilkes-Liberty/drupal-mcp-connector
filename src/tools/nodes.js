@@ -240,12 +240,6 @@ function pageOf({ limit = 20, offset = 0 }) {
 }
 
 /**
- * Fetch a single node by type + UUID, redacted per the site policy.
- *
- * @param {object} args - { site?, type, id }.
- * @returns {Promise<object|null>} The redacted node, or null if not found.
- */
-/**
  * Load pinned paragraph translations (or default-language pins) onto a host.
  * Per-component failures are recorded; they do not fail the host read.
  * @param {object} backend
@@ -289,6 +283,12 @@ async function withComponents(backend, sec, entity, langcode) {
   return { ...entity, components };
 }
 
+/**
+ * Fetch a single node by type + UUID, redacted per the site policy.
+ *
+ * @param {object} args - { site?, type, id, langcode?, resourceVersion?, includeComponents? }.
+ * @returns {Promise<object|null>} The redacted node, or null if not found.
+ */
 async function getNode({ site: siteName, type, id, langcode, resourceVersion, includeComponents = false }) {
   const site = getSiteConfig(siteName);
   const sec = resolveSecurityConfig(site);
