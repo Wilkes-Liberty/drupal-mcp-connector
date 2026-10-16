@@ -8,8 +8,8 @@
  * diffs canonical JSON against the tree. A drift, a fetch failure, or a
  * name collision with the extra file fails the job.
  *
- * Needs network. GITHUB_TOKEN / GH_TOKEN raises the rate limit for a
- * private Sentinel clone. Side effects run only when executed directly.
+ * Needs network. GITHUB_TOKEN / GH_TOKEN raises the GitHub rate limit.
+ * Side effects run only when executed directly.
  */
 
 /* eslint-disable security/detect-non-literal-fs-filename -- reads the repo's mirrored fixture and extra file from a caller-supplied root that tests pin to the workspace. */

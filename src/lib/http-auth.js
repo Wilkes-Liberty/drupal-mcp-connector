@@ -154,7 +154,7 @@ function freezeKeyClaims(claims) {
 
 /**
  * Freeze a request identity from validated claims. Caller headers are not an input.
- * Tenant is the Paladin `tenant` claim only (DEV-839): non-strings are dropped,
+ * Tenant is the token's `tenant` claim only (DEV-839): non-strings are dropped,
  * never coerced. Principal key claims are stored raw on `keyClaims`.
  * @param {object} claims
  * @returns {Readonly<{sub: ?string, iss: ?string, aud: string|string[]|null, scopes: readonly string[], sites: readonly string[]|null, exp: ?number, nbf: ?number, jti: ?string, clientId: ?string, azp: ?string, actSub: ?string, tenant: ?string, keyClaims: object}>}

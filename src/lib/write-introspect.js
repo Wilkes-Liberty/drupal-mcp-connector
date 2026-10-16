@@ -83,8 +83,8 @@ export function resetWriteReintrospectSkip() {
 
 /**
  * Whether a token introspection body admits a governed write.
- * `active` must be true. A Paladin `killed` flag is a deny. The body
- * is never returned to the caller.
+ * `active` must be true. An introspection `killed: true` flag is a deny.
+ * The body is never returned to the caller.
  *
  * @param {object|null|undefined} body
  * @returns {boolean}
@@ -137,7 +137,7 @@ export async function assertLiveTokenForGovernedWrite({
   const who = identity !== undefined ? identity : session?.identity;
   const surface = surfaceHint ?? session?.surface ?? null;
 
-  // Relay edge already live-checked this write. The Paladin bearer never
+  // Relay edge already live-checked this write. The inbound bearer never
   // crosses the tunnel, so the tenant agent cannot introspect again.
   if (session?.tokenLive === true) return;
 

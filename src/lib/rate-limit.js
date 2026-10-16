@@ -4,7 +4,7 @@
  * Opt-in: with a falsy/non-positive `limit` it's a no-op (always allows).
  * Counts are in-memory per process. Keys are caller-chosen: standalone `/mcp`
  * uses an address key for unauthenticated requests and a verified-principal
- * key (`iss|sub|actor` from the Paladin token, via the mcp_sentinel twin)
+ * key (`iss|sub|actor` from the access token, via the mcp_sentinel twin)
  * after auth (DEV-860 / #455).
  * The map is hard-capped (`maxKeys`) so spraying principals or addresses
  * cannot grow limiter state without bound. Multi-replica deployments still

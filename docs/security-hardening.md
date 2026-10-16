@@ -69,26 +69,25 @@ shorter timeout above. A stuck issuer fails closed.
 **Governed writes re-introspect (DEV-846).** Immediately before a write
 commits (JSON:API mutating methods, GraphQL mutations, uploads, and
 write-like MCP tools), the connector introspects the same bearer again.
-`active !== true` or Paladin `killed: true` aborts with
+`active !== true` or introspection `killed: true` aborts with
 `A verified principal context is required.` The 8s `/ready` probe cache
 is not consulted here, so a kill cannot hide behind that window. Matching
 in-flight calls in **this process** are cancelled (global cap 128, 16 per
 principal; the per-principal cap keys on the exact `iss|sub|actor`
 string, so a second `azp` is a second principal). The introspection body
 is never echoed. A network-origin call with no bearer is denied,
-including loopback `MCP_ALLOW_UNAUTHENTICATED`; only stdio may skip. On
-the hosted relay the edge re-introspects before fan-down (the Paladin
-bearer never crosses the
-tunnel) and stamps `tokenLive` so the tenant agent does not fail open.
-Cancel-on-kill does not cross that process boundary, and there is no
-Paladin kill subscription.
+including loopback `MCP_ALLOW_UNAUTHENTICATED`; only stdio may skip. When
+the relay edge is in use, it re-introspects before fan-down (the inbound
+bearer never crosses the tunnel) and stamps `tokenLive` so the tenant
+agent does not fail open. Cancel-on-kill does not cross that process
+boundary, and there is no kill-subscription frame.
 
 **Tenant comes from the token (DEV-839).** Network calls take tenant only
-from the Paladin `tenant` claim. `X-MCP-Tenant`, `X-Forwarded-Tenant`,
+from the token's `tenant` claim. `X-MCP-Tenant`, `X-Forwarded-Tenant`,
 and a `tenant` tool argument are not authority. A missing claim is the
 same generic deny. Session, rate-limit, and budget keys are
 `iss|sub|actor` from the mcp_sentinel twin, never `client_id`.
-**Breaking:** a hosted token with no `tenant` claim, or with only
+**Breaking:** a network token with no `tenant` claim, or with only
 `client_id` and no `azp`/`act.sub`, is denied, and existing session and
 rate-limit buckets reset onto the new formula.
 
@@ -200,7 +199,7 @@ validates `Origin` (DNS-rebinding), `MCP-Protocol-Version`, and `Accept`, then
 refuses JSON-RPC batches. POST bodies are bounded to 1 MiB, read once, and
 dispatched to exactly one era. Current 2026-07-28 requests are stateless;
 2025-era sessions are accepted by default, bound to the authenticated
-principal (`iss|sub|actor` from the Paladin token), and can be disabled with:
+principal (`iss|sub|actor` from the access token), and can be disabled with:
 
 ```sh
 export MCP_LEGACY_TRANSPORT=reject
@@ -265,7 +264,7 @@ The HTTPS transport throttles `/mcp` with a built-in fixed-window limiter
   shared 401 writer (`writeUnauthorized`, DEV-845 / DEV-877). A 429 body is
   only `Too Many Requests` and never includes tool data.
 - **Authenticated** requests are limited **per verified principal**
-  (`iss|sub|actor` from the Paladin token via the mcp_sentinel twin).
+  (`iss|sub|actor` from the access token via the mcp_sentinel twin).
   Caller-supplied identity headers (`X-MCP-Subject`, `X-Forwarded-User`,
   …) are never the key. `client_id` is never the actor.
 - **Non-loopback TLS bind:** defaults to **120 requests per 60s** for both

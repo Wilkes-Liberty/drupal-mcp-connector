@@ -622,7 +622,7 @@ describe("dispatch principal freeze and cancel", () => {
     setInFlightRegistry(null);
   });
 
-  const paladin = {
+  const principal = {
     iss: "https://idp.example/realms/agents",
     sub: "human-1",
     azp: "agent-client",
@@ -634,9 +634,9 @@ describe("dispatch principal freeze and cancel", () => {
   it("denies a network write with no bearer", async () => {
     const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
     const result = await runWithIdentity(
-      paladin,
+      principal,
       () => callTool("drupal_config_set", { site: "open", name: "system.site", values: {} }, {
-        identity: paladin,
+        identity: principal,
         surface: "network",
         sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" } }],
         grants: { "agent-client": ["open"] },
@@ -650,12 +650,12 @@ describe("dispatch principal freeze and cancel", () => {
   it("does not let SDK context override the ALS identity", async () => {
     const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
     const forged = {
-      ...paladin,
+      ...principal,
       tenant: null,
-      keyClaims: { iss: paladin.iss, sub: paladin.sub, azp: paladin.azp },
+      keyClaims: { iss: principal.iss, sub: principal.sub, azp: principal.azp },
     };
     const result = await runWithIdentity(
-      paladin,
+      principal,
       () => callTool("drupal_get_node", { site: "open", id: "1" }, {
         identity: forged,
         principalContext: { tenant: "forged-tenant", keyClaims: forged.keyClaims },
@@ -663,7 +663,7 @@ describe("dispatch principal freeze and cancel", () => {
       }),
       { surface: "network" },
     );
-    // ALS paladin has a tenant. If the SDK identity won, missing tenant is
+    // ALS principal has a tenant. If the SDK identity won, missing tenant is
     // the generic deny. A later fetch failure is a different envelope.
     expect(result.content[0].text).not.toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
   });
@@ -691,9 +691,9 @@ describe("dispatch principal freeze and cancel", () => {
     };
     try {
       const pending = runWithIdentity(
-        paladin,
+        principal,
         () => callTool("drupal_config_set", { site: "open", name: "system.site", values: {} }, {
-          identity: paladin,
+          identity: principal,
           surface: "network",
           sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" } }],
           grants: { "agent-client": ["open"] },
@@ -701,7 +701,7 @@ describe("dispatch principal freeze and cancel", () => {
         { surface: "network", bearer: "tok-live", introspect: async () => ({ active: true }) },
       );
       await started;
-      expect(registry.cancel(inFlightKeysFromIdentity(paladin))).toBe(1);
+      expect(registry.cancel(inFlightKeysFromIdentity(principal))).toBe(1);
       const result = await pending;
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);

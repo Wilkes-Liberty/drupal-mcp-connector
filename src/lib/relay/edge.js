@@ -1219,7 +1219,7 @@ export async function startEdge({
       return;
     }
 
-    // Paladin bearer never crosses the tunnel. Re-introspect write-like
+    // Inbound bearer never crosses the tunnel. Re-introspect write-like
     // calls here, then stamp tokenLive so the agent does not fail open.
     let tokenLive = false;
     if (EDGE_WRITE_REINTROSPECT.required && isCall && toolName && isWriteLikeCall(toolName, args)) {

@@ -95,7 +95,7 @@ function hangingFetch(_url, opts) {
   });
 }
 
-const paladin = {
+const principal = {
   iss: "https://idp.example/realms/agents",
   sub: "human-1",
   azp: "agent-client",
@@ -190,14 +190,14 @@ describe("callServerTool", () => {
   it("maps a kill abort on tools/call to the generic deny", async () => {
     const registry = createInFlightRegistry({ maxEntries: 8 });
     setInFlightRegistry(registry);
-    const keys = inFlightKeysFromIdentity(paladin);
+    const keys = inFlightKeysFromIdentity(principal);
     const flight = registry.begin(keys);
     const site = plainSite();
     vi.mocked(fetch)
       .mockResolvedValueOnce(initOk("sess-kill")[0])
       .mockResolvedValueOnce(initOk("sess-kill")[1])
       .mockImplementation(hangingFetch);
-    const pending = runWithIdentity(paladin, () => callServerTool(site, CONFIG_GET, {}), {
+    const pending = runWithIdentity(principal, () => callServerTool(site, CONFIG_GET, {}), {
       abortSignal: flight.signal,
     });
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -209,14 +209,14 @@ describe("callServerTool", () => {
     setPrincipalAbortRemapGuard(false);
     const registry = createInFlightRegistry({ maxEntries: 8 });
     setInFlightRegistry(registry);
-    const keys = inFlightKeysFromIdentity(paladin);
+    const keys = inFlightKeysFromIdentity(principal);
     const flight = registry.begin(keys);
     const site = plainSite();
     vi.mocked(fetch)
       .mockResolvedValueOnce(initOk("sess-kill-red")[0])
       .mockResolvedValueOnce(initOk("sess-kill-red")[1])
       .mockImplementation(hangingFetch);
-    const pending = runWithIdentity(paladin, () => callServerTool(site, CONFIG_GET, {}), {
+    const pending = runWithIdentity(principal, () => callServerTool(site, CONFIG_GET, {}), {
       abortSignal: flight.signal,
     });
     await new Promise((resolve) => setTimeout(resolve, 25));

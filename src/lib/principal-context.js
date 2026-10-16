@@ -1,5 +1,5 @@
 /**
- * Frozen principal + tenant context from a verified Paladin token.
+ * Frozen principal + tenant context from a verified access token.
  *
  * The connector proposes this context; Drupal (mcp_sentinel) disposes.
  * Fields come only from the validated token. The connector never widens,
@@ -67,7 +67,7 @@ export function setPrincipalContextGuard(required) {
 }
 
 /**
- * Tenant claim from verified Paladin claims only. Headers and arguments
+ * Tenant claim from verified token claims only. Headers and arguments
  * are not inputs. Non-string values are not coerced.
  *
  * @param {object|null|undefined} claims
@@ -114,7 +114,7 @@ export function freezeKeyClaims(claims) {
  * Freeze a principal context from verified token claims. Caller headers
  * and tool arguments are not inputs.
  *
- * @param {object} claims Validated Paladin / introspection claims.
+ * @param {object} claims Validated introspection claims.
  * @param {{network?: boolean}} [options]
  * @returns {Readonly<object>}
  */
@@ -219,7 +219,7 @@ export function throwIfPrincipalAbort(signal, err) {
 }
 
 /**
- * Network JWT principals need a Paladin tenant claim and a composable
+ * Network JWT principals need a string `tenant` claim and a composable
  * principal key. Arguments and headers never supply those fields.
  *
  * @param {object} params

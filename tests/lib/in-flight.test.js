@@ -31,7 +31,7 @@ describe("in-flight registry", () => {
     setInFlightRegistry(null);
   });
 
-  it("keys from the Paladin twin and never from a caller field", () => {
+  it("keys from the principal-key twin and never from a caller field", () => {
     expect(inFlightKeysFromIdentity(identity)).toEqual({
       principalKey: "https://idp.example/realms/agents|human-1|agent-client",
       humanKey: "https://idp.example/realms/agents|human-1",

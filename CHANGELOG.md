@@ -9,14 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Paladin principal freeze.** Hosted tool calls carry the verified
-  principal (`iss|sub|actor`) and tenant from the Paladin token only. The
+- **Principal freeze.** Network tool calls carry the verified
+  principal (`iss|sub|actor`) and tenant from the access token only. The
   connector never widens, rewrites, or invents those fields. A JS
   `fromClaims` twin matches mcp_sentinel `McpPrincipalKey` against the
   shared `tests/fixtures/principal-key-vectors.json` fixture. Session,
   rate-limit, and data-flow budget keys use that twin (PR #455 follow-on).
 - **DEV-839 tenant ownership.** Network calls take tenant only from the
-  Paladin `tenant` claim. Headers and tool arguments are ignored. A
+  token's `tenant` claim. Headers and tool arguments are ignored. A
   missing claim is the same generic deny as a missing principal.
 - **DEV-846 kill switch follow-on.** Before a governed write commits, the
   connector re-introspects the bearer (RFC 7662). Inactive or killed
@@ -27,23 +27,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking (hosted operators).** Network tokens without a Paladin string
+- **Breaking (network binds).** Network tokens without a string
   `tenant` claim, or without `azp` / top-level `act.sub` for the actor part
   of `iss|sub|actor`, are denied. Session, rate-limit, and data-flow budget
-  keys now use that formula, which resets existing hosted sessions and
+  keys now use that formula, which resets existing network sessions and
   buckets. Tokens that previously keyed on `client_id` must be reissued
-  with `azp` (or `act.sub`). Paladin tenant enforcement needs mcp_sentinel
-  ≥ 3.1.0; the kill switch needs ≥ 3.2.0.
+  with `azp` (or `act.sub`). Tenant enforcement on the reference governance
+  module needs mcp_sentinel ≥ 3.1.0; the kill switch needs ≥ 3.2.0.
 - **DEV-846 cancel-on-kill is same-process.** Matching in-flight writes are
   aborted only in the process that re-introspects the bearer. Direct HTTPS
-  re-introspects in the connector process. The relay edge re-introspects
-  before fan-down and stamps `tokenLive` on the frame; the Paladin bearer
-  never crosses the tunnel, so the tenant agent does not re-introspect and
-  cannot cancel from a later kill. There is no Paladin kill subscription
-  or extra frame type. A network-origin call with no bearer is denied,
-  including loopback `MCP_ALLOW_UNAUTHENTICATED`; only stdio may skip the
-  write re-check. A kill abort on a governed Drupal server-tool POST is
-  the same generic deny (node-fetch drops `signal.reason`).
+  re-introspects in the connector process. When the relay edge is in use,
+  it re-introspects before fan-down and stamps `tokenLive` on the frame;
+  the inbound bearer never crosses the tunnel, so the tenant agent does
+  not re-introspect and cannot cancel from a later kill. There is no
+  kill-subscription frame or extra frame type. A network-origin call with
+  no bearer is denied, including loopback `MCP_ALLOW_UNAUTHENTICATED`; only
+  stdio may skip the write re-check. A kill abort on a governed Drupal
+  server-tool POST is the same generic deny (node-fetch drops
+  `signal.reason`).
 
 ## [5.2.1] - 2026-10-17
 

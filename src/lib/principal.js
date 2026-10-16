@@ -154,7 +154,7 @@ export function getRequestAuthSession() {
 }
 
 /**
- * Frozen Paladin principal for this request, or null.
+ * Frozen principal for this request, or null.
  * @returns {object|null}
  */
 export function getRequestPrincipalContext() {

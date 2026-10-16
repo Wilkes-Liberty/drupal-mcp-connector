@@ -1,5 +1,5 @@
 /**
- * Frozen Paladin principal + tenant (DEV-839). Deny tests include a red
+ * Frozen principal + tenant (DEV-839). Deny tests include a red
  * run with the guard removed so they can fail.
  */
 
@@ -40,7 +40,7 @@ describe("freezePrincipalContext", () => {
     ]));
   });
 
-  it("copies verified Paladin fields and does not invent azp from client_id", () => {
+  it("copies verified token fields and does not invent azp from client_id", () => {
     const ctx = freezePrincipalContext({
       iss: claims.iss,
       sub: claims.sub,
@@ -87,7 +87,7 @@ describe("DEV-839 tenant claim (network)", () => {
     })).toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
-  it("ignores args and headers when the Paladin tenant claim is present", () => {
+  it("ignores args and headers when the token tenant claim is present", () => {
     const who = identity();
     const ctx = assertFrozenPrincipal({
       identity: who,

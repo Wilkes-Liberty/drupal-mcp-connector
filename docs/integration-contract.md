@@ -101,12 +101,12 @@ which configured targets that principal may address. Caller-supplied site or
 scope arguments never become that grant. The inbound token is still never
 forwarded to Drupal.
 
-The connector **proposes** a frozen Paladin principal; Drupal
+The connector **proposes** a frozen principal; Drupal
 (mcp_sentinel) **disposes**. Each tool call forwards the verified
 principal from the token unchanged (`iss`, `sub`, current actor, tenant).
 The connector never widens, rewrites, or invents those fields.
 
-**Tenant (DEV-839).** Tenant is the Paladin `tenant` claim only. It is
+**Tenant (DEV-839).** Tenant is the token's `tenant` claim only. It is
 never taken from headers (`X-MCP-Tenant`, `X-Forwarded-Tenant`, …) or
 from tool arguments. A network call whose token omits tenant is refused
 with the generic sentence `A verified principal context is required.`
@@ -227,7 +227,7 @@ connector functions without it.
 |------------------------|-----------------------------------------------------|----------|
 | ≥ 0.6 | ≥ 1.0 | 1.0 |
 | unreleased | ≥ 2.9.0 | 1.1 (declared ceiling/destination + principal-bound budgets) |
-| unreleased | ≥ 3.1.0 | 1.2 (Paladin principal freeze, tenant claim, live write introspect) |
+| unreleased | ≥ 3.1.0 | 1.2 (principal freeze, tenant claim, live write introspect) |
 
 The connector does **not** depend on the governance module, and the governance
 module does **not** depend on this specific connector. They are released

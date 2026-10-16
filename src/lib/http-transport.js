@@ -362,7 +362,7 @@ export function hostAllowed(hostHeader, allowlist) {
 }
 
 /**
- * Stable principal key for binding a 2025-era session. Same Paladin
+ * Stable principal key for binding a 2025-era session. Same access-token
  * `iss|sub|actor` (the mcp_sentinel twin) is the same principal (token
  * refresh). A local-operator identity shares one loopback key.
  * Unidentifiable identities return null so a session cannot be minted
