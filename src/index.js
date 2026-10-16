@@ -32,13 +32,15 @@
  *                     (default: empty — trust none)
  *   MCP_LEGACY_TRANSPORT "serve" (default) | "reject" for 2025-era clients
  *   MCP_ALLOWED_ORIGINS Comma/space-separated Origin allowlist (DNS-rebinding);
- *                     exact https origins only, no wildcards. Not
- *                     authentication: a missing Origin is allowed for
- *                     non-browser clients. Omitted/empty extra list refuses
- *                     every present third-party Origin (DEV-953); the
- *                     origin of auth.resource/audience is still included
- *                     (same-origin). A present empty value clears the
- *                     extra list.
+ *                     exact https origins only, no wildcards or suffix
+ *                     match. Not authentication: a missing Origin is
+ *                     allowed for non-browser clients. Omitted/empty extra
+ *                     list refuses every present third-party Origin
+ *                     (DEV-953); the origin of auth.resource/audience is
+ *                     still included (same-origin). A present empty value
+ *                     clears the extra list. Hosted Cursor / Grok Bot
+ *                     clients: https://cursor.com, https://www.cursor.com,
+ *                     https://grok.com, https://console.x.ai.
  *   MCP_ALLOWED_HOSTS   Comma/space-separated Host allowlist (DEV-861);
  *                     a present empty value clears the configured list.
  *                     Default: host of auth.resource/audience, plus loopback

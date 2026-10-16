@@ -60,7 +60,9 @@ authenticate. A request with no `Origin` is allowed by design for
 non-browser clients. An omitted or empty extra list refuses every present
 third-party Origin. The origin of `auth.resource` / `auth.audience` is
 still auto-included (same-origin browser of the MCP URL). The example
-config lists `https://cursor.com` and `https://www.cursor.com` (DEV-953).
+config lists `https://cursor.com`, `https://www.cursor.com`, `https://grok.com`,
+and `https://console.x.ai` (DEV-953; HTTPS origins of the keystone#1539
+`cursor-mcp` and `grok-bot` clients, plus the Cursor browser Origin).
 The `Host` header must match `auth.allowedHosts` / `MCP_ALLOWED_HOSTS`
 (default: the host of `auth.resource` / `auth.audience`, plus loopback on
 a loopback bind).

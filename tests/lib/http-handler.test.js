@@ -892,6 +892,42 @@ describe("createMcpRequestHandler", () => {
       expect(legacyHandler).not.toHaveBeenCalled();
     });
 
+    it("allows listed Cursor and Grok Bot Origins and 403s lookalikes (DEV-953)", async () => {
+      const modernHandler = vi.fn(async (_req, res) => res.writeHead(200).end("modern"));
+      const legacyHandler = vi.fn();
+      const listed = [
+        "https://cursor.com",
+        "https://www.cursor.com",
+        "https://grok.com",
+        "https://console.x.ai",
+      ];
+      const h = authed({
+        modernHandler,
+        legacyHandler,
+        allowedOrigins: listed,
+      });
+      for (const origin of listed) {
+        const posted = mockRes();
+        await h(bodyReq({ jsonrpc: "2.0", id: 2, method: "tools/list" }, { origin }), posted);
+        expect(posted.statusCode, origin).toBe(200);
+      }
+      expect(modernHandler).toHaveBeenCalledTimes(listed.length);
+
+      for (const origin of [
+        "https://cursor.com.evil.test",
+        "http://cursor.com",
+        "https://grok.com.evil.test",
+        "http://grok.com",
+        "https://console.x.ai.evil.test",
+      ]) {
+        const res = mockRes();
+        await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { origin }), res);
+        expect(res.statusCode, origin).toBe(403);
+        expect(JSON.parse(res.body).error.message, origin).toMatch(/origin/i);
+      }
+      expect(legacyHandler).not.toHaveBeenCalled();
+    });
+
     it("refuses every present Origin when the handler allowlist is empty (DEV-953)", async () => {
       const modernHandler = vi.fn();
       const legacyHandler = vi.fn();
@@ -900,7 +936,12 @@ describe("createMcpRequestHandler", () => {
         legacyHandler,
         allowedOrigins: [],
       });
-      for (const origin of ["https://cursor.com", "https://www.cursor.com"]) {
+      for (const origin of [
+        "https://cursor.com",
+        "https://www.cursor.com",
+        "https://grok.com",
+        "https://console.x.ai",
+      ]) {
         const res = mockRes();
         await h(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { origin }), res);
         expect(res.statusCode, origin).toBe(403);
