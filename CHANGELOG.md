@@ -40,8 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before fan-down and stamps `tokenLive` on the frame; the Paladin bearer
   never crosses the tunnel, so the tenant agent does not re-introspect and
   cannot cancel from a later kill. There is no Paladin kill subscription
-  or extra frame type. A network-origin call with no bearer is denied;
-  only stdio may skip the write re-check.
+  or extra frame type. A network-origin call with no bearer is denied,
+  including loopback `MCP_ALLOW_UNAUTHENTICATED`; only stdio may skip the
+  write re-check. A kill abort on a governed Drupal server-tool POST is
+  the same generic deny (node-fetch drops `signal.reason`).
 
 ## [5.2.1] - 2026-10-17
 

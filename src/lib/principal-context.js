@@ -169,6 +169,56 @@ export function principalDenied() {
 }
 
 /**
+ * Remap a node-fetch AbortError whose parent signal was a principal
+ * deny. node-fetch 3 drops `signal.reason` on the rejection.
+ * Production leaves `enabled` true. Tests call
+ * {@link setPrincipalAbortRemapGuard} for a red run of one branch.
+ */
+export const PRINCIPAL_ABORT_REMAP = { enabled: true };
+
+/**
+ * Flip {@link PRINCIPAL_ABORT_REMAP} for a red-run. Restore `true`
+ * after the assertion; production code never calls this.
+ *
+ * @param {boolean} enabled
+ * @returns {void}
+ */
+export function setPrincipalAbortRemapGuard(enabled) {
+  assertTestOnly("setPrincipalAbortRemapGuard");
+  PRINCIPAL_ABORT_REMAP.enabled = Boolean(enabled);
+}
+
+/**
+ * True when an aborted fetch is a principal deny, including when
+ * node-fetch replaced the rejection with a bare AbortError.
+ *
+ * @param {AbortSignal|null|undefined} signal
+ * @param {*} err
+ * @returns {boolean}
+ */
+export function isPrincipalAbort(signal, err) {
+  const reason = signal?.reason ?? err?.cause ?? err;
+  if (reason instanceof Error && reason.message === GENERIC_PRINCIPAL_REFUSAL) return true;
+  if (reason === GENERIC_PRINCIPAL_REFUSAL) return true;
+  if (err?.message === GENERIC_PRINCIPAL_REFUSAL) return true;
+  return false;
+}
+
+/**
+ * Re-throw {@link principalDenied} when `err` is a kill abort.
+ *
+ * @param {AbortSignal|null|undefined} signal
+ * @param {*} err
+ * @returns {void}
+ * @throws {SecurityError}
+ */
+export function throwIfPrincipalAbort(signal, err) {
+  if (PRINCIPAL_ABORT_REMAP.enabled && isPrincipalAbort(signal, err)) {
+    throw principalDenied();
+  }
+}
+
+/**
  * Network JWT principals need a Paladin tenant claim and a composable
  * principal key. Arguments and headers never supply those fields.
  *
@@ -201,13 +251,15 @@ export function assertFrozenPrincipal({
     }
   }
   if (!network) return ctx;
-  if (!PRINCIPAL_CONTEXT_GUARD.required) return ctx;
   if (!ctx) throw principalDenied();
   try {
     fromClaims(ctx.keyClaims);
   } catch {
     throw principalDenied();
   }
-  if (ctx.tenant === "") throw principalDenied();
+  if (ctx.tenant === "") {
+    if (!PRINCIPAL_CONTEXT_GUARD.required) return ctx;
+    throw principalDenied();
+  }
   return ctx;
 }

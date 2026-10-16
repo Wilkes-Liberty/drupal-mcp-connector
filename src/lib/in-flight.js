@@ -19,21 +19,32 @@ export const IN_FLIGHT_MAX_ENTRIES = 128;
 export const IN_FLIGHT_MAX_PER_PRINCIPAL = 16;
 
 /**
- * In-process cap guard. Production leaves `enforced` true. Tests call
- * {@link setInFlightCapGuard} for a red run that admits past the bound.
+ * In-process cap guards. Production leaves both true. Tests call
+ * {@link setInFlightCapGuard} for a red run of one bound.
  */
-export const IN_FLIGHT_CAP_GUARD = { enforced: true };
+export const IN_FLIGHT_CAP_GUARD = { global: true, perPrincipal: true };
 
 /**
  * Flip {@link IN_FLIGHT_CAP_GUARD} for a red-run. Restore `true` after
  * the assertion; production code never calls this.
  *
  * @param {boolean} enforced
+ * @param {"all"|"global"|"perPrincipal"} [which]
  * @returns {void}
  */
-export function setInFlightCapGuard(enforced) {
+export function setInFlightCapGuard(enforced, which = "all") {
   assertTestOnly("setInFlightCapGuard");
-  IN_FLIGHT_CAP_GUARD.enforced = Boolean(enforced);
+  const on = Boolean(enforced);
+  if (which === "global") {
+    IN_FLIGHT_CAP_GUARD.global = on;
+    return;
+  }
+  if (which === "perPrincipal") {
+    IN_FLIGHT_CAP_GUARD.perPrincipal = on;
+    return;
+  }
+  IN_FLIGHT_CAP_GUARD.global = on;
+  IN_FLIGHT_CAP_GUARD.perPrincipal = on;
 }
 
 /**
@@ -90,9 +101,9 @@ export function createInFlightRegistry({
      * @returns {{id: string, signal: AbortSignal, end: () => void}}
      */
     begin(keys, extra = {}) {
-      if (IN_FLIGHT_CAP_GUARD.enforced && entries.size >= cap) throw principalDenied();
+      if (IN_FLIGHT_CAP_GUARD.global && entries.size >= cap) throw principalDenied();
       const principalKey = typeof keys?.principalKey === "string" ? keys.principalKey : "";
-      if (IN_FLIGHT_CAP_GUARD.enforced && principalKey) {
+      if (IN_FLIGHT_CAP_GUARD.perPrincipal && principalKey) {
         let n = 0;
         for (const row of entries.values()) {
           if (row.principalKey === principalKey) n += 1;

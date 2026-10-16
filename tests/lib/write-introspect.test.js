@@ -7,14 +7,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { READY_PROBE_CACHE_MS } from "../../src/lib/ops-ready.js";
 import {
-  WRITE_REINTROSPECT_GUARD,
+  WRITE_REINTROSPECT_SKIP,
   assertLiveTokenForGovernedWrite,
   introspectionAllowsWrite,
+  resetWriteReintrospectSkip,
   setWriteIntrospectUsesReadyCache,
   setWriteReintrospectGuard,
+  setWriteReintrospectSkip,
 } from "../../src/lib/write-introspect.js";
 import { GENERIC_PRINCIPAL_REFUSAL } from "../../src/lib/principal-context.js";
-import { runWithIdentity } from "../../src/lib/principal.js";
+import { LOCAL_OPERATOR, runWithIdentity } from "../../src/lib/principal.js";
 import { SecurityError } from "../../src/lib/security.js";
 import { createInFlightRegistry, setInFlightRegistry } from "../../src/lib/in-flight.js";
 import { drupalFetch } from "../../src/lib/drupal-fetch.js";
@@ -44,6 +46,7 @@ describe("DEV-846 write re-introspect", () => {
   afterEach(() => {
     setWriteReintrospectGuard(true);
     setWriteIntrospectUsesReadyCache(false);
+    resetWriteReintrospectSkip();
     setInFlightRegistry(null);
   });
 
@@ -77,16 +80,19 @@ describe("DEV-846 write re-introspect", () => {
     expect(introspect).toHaveBeenCalledTimes(1);
   });
 
-  it("lets a kill through when the guard is removed (red evidence)", async () => {
-    setWriteReintrospectGuard(false);
-    expect(WRITE_REINTROSPECT_GUARD.required).toBe(false);
+  it("lets a kill through when the inactive/killed skip is on (red evidence)", async () => {
+    setWriteReintrospectSkip("inactiveOrKilled", true);
+    expect(WRITE_REINTROSPECT_SKIP.inactiveOrKilled).toBe(true);
     const introspect = vi.fn(async () => ({ active: false, killed: true }));
-    await expect(assertLiveTokenForGovernedWrite({
+    await expect(runWithIdentity(identity, () => assertLiveTokenForGovernedWrite({
       bearer: "tok-live",
       introspect,
       identity,
-    })).resolves.toBeUndefined();
-    expect(introspect).not.toHaveBeenCalled();
+    }), { surface: "network", bearer: "tok-live", introspect })).resolves.toBeUndefined();
+    expect(introspect).toHaveBeenCalledTimes(1);
+    await expect(runWithIdentity(identity, () => assertLiveTokenForGovernedWrite({
+      identity,
+    }), { surface: "network" })).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
   it("masks a kill when the 8s ready cache is consulted (red evidence)", async () => {
@@ -161,17 +167,24 @@ describe("DEV-846 write re-introspect", () => {
     }), { surface: "network", bearer: "tok-live", introspect })).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
-  it("lets a throwing introspector through when the guard is removed (red evidence)", async () => {
-    setWriteReintrospectGuard(false);
+  it("lets a throwing introspector through when the throw/timeout skip is on (red evidence)", async () => {
+    setWriteReintrospectSkip("throwOrTimeout", true);
+    expect(WRITE_REINTROSPECT_SKIP.throwOrTimeout).toBe(true);
     const introspect = vi.fn(async () => {
       throw new Error("issuer down");
     });
-    await expect(assertLiveTokenForGovernedWrite({
+    await expect(runWithIdentity(identity, () => assertLiveTokenForGovernedWrite({
       bearer: "tok-live",
       introspect,
       identity,
-    })).resolves.toBeUndefined();
-    expect(introspect).not.toHaveBeenCalled();
+    }), { surface: "network", bearer: "tok-live", introspect })).resolves.toBeUndefined();
+    expect(introspect).toHaveBeenCalledTimes(1);
+    const killed = vi.fn(async () => ({ active: false, killed: true }));
+    await expect(runWithIdentity(identity, () => assertLiveTokenForGovernedWrite({
+      bearer: "tok-live",
+      introspect: killed,
+      identity,
+    }), { surface: "network", bearer: "tok-live", introspect: killed })).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
   it("denies a network-origin write with no bearer", async () => {
@@ -180,11 +193,25 @@ describe("DEV-846 write re-introspect", () => {
     }), { surface: "network" })).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
-  it("admits a network write with no bearer when the guard is removed (red evidence)", async () => {
-    setWriteReintrospectGuard(false);
+  it("admits a network write with no bearer when the missing-bearer skip is on (red evidence)", async () => {
+    setWriteReintrospectSkip("missingBearer", true);
+    expect(WRITE_REINTROSPECT_SKIP.missingBearer).toBe(true);
     await expect(runWithIdentity(identity, () => assertLiveTokenForGovernedWrite({
       identity,
     }), { surface: "network" })).resolves.toBeUndefined();
+    const introspect = vi.fn(async () => ({ active: false, killed: true }));
+    await expect(runWithIdentity(identity, () => assertLiveTokenForGovernedWrite({
+      bearer: "tok-live",
+      introspect,
+      identity,
+    }), { surface: "network", bearer: "tok-live", introspect })).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+  });
+
+  it("denies a loopback unauthenticated network write with no bearer", async () => {
+    await expect(assertLiveTokenForGovernedWrite({
+      identity: LOCAL_OPERATOR,
+      surface: "network",
+    })).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
   it("skips a missing bearer on stdio", async () => {

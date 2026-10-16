@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("node-fetch", () => ({ default: vi.fn() }));
 import fetch from "node-fetch";
@@ -24,6 +24,16 @@ import {
   resetDataFlowBudgets,
   runWithDataFlow,
 } from "../../src/lib/data-flow.js";
+import {
+  createInFlightRegistry,
+  inFlightKeysFromIdentity,
+  setInFlightRegistry,
+} from "../../src/lib/in-flight.js";
+import {
+  GENERIC_PRINCIPAL_REFUSAL,
+  setPrincipalAbortRemapGuard,
+} from "../../src/lib/principal-context.js";
+import { runWithIdentity } from "../../src/lib/principal.js";
 
 // Unique site name per test keeps the module-scope session cache from leaking
 // between cases (callServerTool caches the Mcp-Session-Id by site._name).
@@ -85,7 +95,19 @@ function hangingFetch(_url, opts) {
   });
 }
 
+const paladin = {
+  iss: "https://idp.example/realms/agents",
+  sub: "human-1",
+  azp: "agent-client",
+  tenant: "tenant-a",
+  scopes: ["mcp_write"],
+};
+
 beforeEach(() => { vi.mocked(fetch).mockReset(); resetDataFlowBudgets(); });
+afterEach(() => {
+  setPrincipalAbortRemapGuard(true);
+  setInFlightRegistry(null);
+});
 
 describe("callServerTool", () => {
   it("keeps the private Drupal bridge sessionful and pinned to MCP 2025-06-18", async () => {
@@ -163,6 +185,43 @@ describe("callServerTool", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it("maps a kill abort on tools/call to the generic deny", async () => {
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const keys = inFlightKeysFromIdentity(paladin);
+    const flight = registry.begin(keys);
+    const site = plainSite();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk("sess-kill")[0])
+      .mockResolvedValueOnce(initOk("sess-kill")[1])
+      .mockImplementation(hangingFetch);
+    const pending = runWithIdentity(paladin, () => callServerTool(site, CONFIG_GET, {}), {
+      abortSignal: flight.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(registry.cancel(keys)).toBe(1);
+    await expect(pending).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+  });
+
+  it("lets a kill abort stay AbortError when remap is off (red evidence)", async () => {
+    setPrincipalAbortRemapGuard(false);
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const keys = inFlightKeysFromIdentity(paladin);
+    const flight = registry.begin(keys);
+    const site = plainSite();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk("sess-kill-red")[0])
+      .mockResolvedValueOnce(initOk("sess-kill-red")[1])
+      .mockImplementation(hangingFetch);
+    const pending = runWithIdentity(paladin, () => callServerTool(site, CONFIG_GET, {}), {
+      abortSignal: flight.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(registry.cancel(keys)).toBe(1);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("reuses a cached session across calls (one initialize)", async () => {

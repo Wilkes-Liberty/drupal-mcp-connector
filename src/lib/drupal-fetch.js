@@ -17,7 +17,7 @@ import {
 } from "./data-flow.js";
 import { combineAbortSignals } from "./abort-signals.js";
 import { getRequestAbortSignal, getRequestSurface } from "./principal.js";
-import { GENERIC_PRINCIPAL_REFUSAL, principalDenied } from "./principal-context.js";
+import { throwIfPrincipalAbort } from "./principal-context.js";
 import { assertLiveTokenForGovernedWrite } from "./write-introspect.js";
 import { graphqlHasMutation } from "./security.js";
 import {
@@ -33,32 +33,23 @@ const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
 export const DRUPAL_FETCH_TIMEOUT_MS = 30_000;
 
 /**
- * node-fetch with the shared abort timeout. A caller `signal` wins.
+ * node-fetch with the shared abort timeout. The caller signal, the
+ * in-flight kill signal, and the 30s timeout are combined; none replaces
+ * another.
  * @param {string} url Fully-qualified request URL.
  * @param {object} [options] node-fetch options (method, body, headers, signal).
  * @returns {Promise<object>} node-fetch Response.
  * @throws {Error} when the default timeout fires (`AbortError` remapped).
  */
-function abortReason(signal, err) {
-  return signal?.reason ?? err?.cause ?? err;
-}
-
-function isPrincipalAbort(signal, err) {
-  const reason = abortReason(signal, err);
-  if (reason instanceof Error && reason.message === GENERIC_PRINCIPAL_REFUSAL) return true;
-  if (reason === GENERIC_PRINCIPAL_REFUSAL) return true;
-  if (err?.message === GENERIC_PRINCIPAL_REFUSAL) return true;
-  return false;
-}
-
 async function timedDrupalFetch(url, options = {}) {
   const timeout = AbortSignal.timeout(DRUPAL_FETCH_TIMEOUT_MS);
-  const cancel = options.signal ?? getRequestAbortSignal();
-  const signal = combineAbortSignals(timeout, cancel) ?? timeout;
+  const cancel = getRequestAbortSignal();
+  const caller = options.signal;
+  const signal = combineAbortSignals(timeout, cancel, caller) ?? timeout;
   try {
     return await fetch(url, { ...options, signal });
   } catch (err) {
-    if (isPrincipalAbort(signal, err)) throw principalDenied();
+    throwIfPrincipalAbort(signal, err);
     // Remap only the shared 30s timeout. A caller-owned abort stays AbortError.
     if (timeout.aborted) {
       throw new Error(`Drupal request timed out after ${DRUPAL_FETCH_TIMEOUT_MS / 1000}s`);

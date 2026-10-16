@@ -21,6 +21,16 @@ import { assertTestOnly } from "./test-only.js";
 export const WRITE_REINTROSPECT_GUARD = { required: true };
 
 /**
+ * Per-branch skips for red companions. Production leaves every flag
+ * false. Each red test flips only the branch it covers.
+ */
+export const WRITE_REINTROSPECT_SKIP = {
+  missingBearer: false,
+  throwOrTimeout: false,
+  inactiveOrKilled: false,
+};
+
+/**
  * Flip {@link WRITE_REINTROSPECT_GUARD} for a red-run. Restore `true`
  * after the assertion; production code never calls this.
  *
@@ -30,6 +40,45 @@ export const WRITE_REINTROSPECT_GUARD = { required: true };
 export function setWriteReintrospectGuard(required) {
   assertTestOnly("setWriteReintrospectGuard");
   WRITE_REINTROSPECT_GUARD.required = Boolean(required);
+}
+
+/**
+ * Flip one {@link WRITE_REINTROSPECT_SKIP} branch. Restore `false`
+ * after the assertion; production code never calls this.
+ *
+ * @param {"missingBearer"|"throwOrTimeout"|"inactiveOrKilled"} branch
+ * @param {boolean} skip
+ * @returns {void}
+ */
+export function setWriteReintrospectSkip(branch, skip) {
+  assertTestOnly("setWriteReintrospectSkip");
+  const on = Boolean(skip);
+  switch (branch) {
+    case "missingBearer":
+      WRITE_REINTROSPECT_SKIP.missingBearer = on;
+      return;
+    case "throwOrTimeout":
+      WRITE_REINTROSPECT_SKIP.throwOrTimeout = on;
+      return;
+    case "inactiveOrKilled":
+      WRITE_REINTROSPECT_SKIP.inactiveOrKilled = on;
+      return;
+    default:
+      throw new Error(`Unknown write-reintrospect skip branch "${branch}".`);
+  }
+}
+
+/**
+ * Restore every {@link WRITE_REINTROSPECT_SKIP} flag. Production never
+ * calls this.
+ *
+ * @returns {void}
+ */
+export function resetWriteReintrospectSkip() {
+  assertTestOnly("resetWriteReintrospectSkip");
+  WRITE_REINTROSPECT_SKIP.missingBearer = false;
+  WRITE_REINTROSPECT_SKIP.throwOrTimeout = false;
+  WRITE_REINTROSPECT_SKIP.inactiveOrKilled = false;
 }
 
 /**
@@ -86,21 +135,26 @@ export async function assertLiveTokenForGovernedWrite({
 } = {}) {
   const session = getRequestAuthSession();
   const who = identity !== undefined ? identity : session?.identity;
-  if (isLocalOperator(who)) return;
-  if (!WRITE_REINTROSPECT_GUARD.required) return;
+  const surface = surfaceHint ?? session?.surface ?? null;
 
   // Relay edge already live-checked this write. The Paladin bearer never
   // crosses the tunnel, so the tenant agent cannot introspect again.
   if (session?.tokenLive === true) return;
 
   const token = bearer ?? session?.bearer;
-  const inspect = introspect ?? session?.introspect;
-  const surface = surfaceHint ?? session?.surface ?? null;
   if (typeof token !== "string" || !token) {
-    // Only stdio (no network surface) may skip a missing bearer.
-    if (surface === "network") denyAndCancel(who);
+    // Network-origin missing bearer is denied even for the loopback
+    // unauthenticated local operator. Only stdio may skip.
+    if (surface === "network" && !WRITE_REINTROSPECT_SKIP.missingBearer) {
+      denyAndCancel(who);
+    }
     return;
   }
+
+  if (isLocalOperator(who)) return;
+  if (!WRITE_REINTROSPECT_GUARD.required) return;
+
+  const inspect = introspect ?? session?.introspect;
   if (typeof inspect !== "function") denyAndCancel(who);
 
   // The 8s ready cache is a reachability probe. Consulting it here would
@@ -114,9 +168,12 @@ export async function assertLiveTokenForGovernedWrite({
   try {
     body = await inspect(token);
   } catch {
-    denyAndCancel(who);
+    if (!WRITE_REINTROSPECT_SKIP.throwOrTimeout) denyAndCancel(who);
+    return;
   }
-  if (!introspectionAllowsWrite(body)) denyAndCancel(who);
+  if (!introspectionAllowsWrite(body)) {
+    if (!WRITE_REINTROSPECT_SKIP.inactiveOrKilled) denyAndCancel(who);
+  }
 }
 
 function denyAndCancel(identity) {

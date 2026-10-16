@@ -88,6 +88,7 @@ import { rateLimitAddressKey } from "../rate-limit.js";
 import { isWriteLikeCall } from "../operations.js";
 import { GENERIC_PRINCIPAL_REFUSAL } from "../principal-context.js";
 import { SecurityError } from "../security.js";
+import { assertTestOnly } from "../test-only.js";
 import { assertLiveTokenForGovernedWrite } from "../write-introspect.js";
 import {
   eligiblePromotions,
@@ -112,6 +113,25 @@ import {
 
 /** Northbound protocol pin. Stateless; no session ids in either direction. */
 export const EDGE_MCP_PROTOCOL = "2026-07-28";
+
+/**
+ * Edge write re-introspect before fan-down. Production leaves `required`
+ * true. Tests call {@link setEdgeWriteReintrospectGuard} for a red run
+ * of that branch only.
+ */
+export const EDGE_WRITE_REINTROSPECT = { required: true };
+
+/**
+ * Flip {@link EDGE_WRITE_REINTROSPECT} for a red-run. Restore `true`
+ * after the assertion; production code never calls this.
+ *
+ * @param {boolean} required
+ * @returns {void}
+ */
+export function setEdgeWriteReintrospectGuard(required) {
+  assertTestOnly("setEdgeWriteReintrospectGuard");
+  EDGE_WRITE_REINTROSPECT.required = Boolean(required);
+}
 
 /**
  * Extra northbound routes the edge serves beside `/mcp`. Each is
@@ -1202,7 +1222,7 @@ export async function startEdge({
     // Paladin bearer never crosses the tunnel. Re-introspect write-like
     // calls here, then stamp tokenLive so the agent does not fail open.
     let tokenLive = false;
-    if (isCall && toolName && isWriteLikeCall(toolName, args)) {
+    if (EDGE_WRITE_REINTROSPECT.required && isCall && toolName && isWriteLikeCall(toolName, args)) {
       try {
         await assertLiveTokenForGovernedWrite({ identity, surface: "network" });
         tokenLive = true;

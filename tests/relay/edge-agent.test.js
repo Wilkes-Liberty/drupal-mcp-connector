@@ -24,6 +24,7 @@ import {
   EDGE_REVOCATION_BOUND,
   EdgeStartupError,
   createChannelCredentialStore,
+  setEdgeWriteReintrospectGuard,
   startEdge,
 } from "../../src/lib/relay/edge.js";
 import { createLocalPolicyEnforcement } from "../lib/policy-enforcement.js";
@@ -1461,6 +1462,10 @@ describe("principal actor mapping (#247)", () => {
 });
 
 describe("DEV-846 relay write re-introspect", () => {
+  afterEach(() => {
+    setEdgeWriteReintrospectGuard(true);
+  });
+
   it("does not forward a write when the second introspection is a kill", async () => {
     let introspects = 0;
     const fetchFn = async (input, init) => {
@@ -1492,6 +1497,35 @@ describe("DEV-846 relay write re-introspect", () => {
     await settle();
     expect(rawA.frames.filter((frame) => frame.type === "mcp-request")).toEqual([]);
     expect(introspects).toBeGreaterThanOrEqual(2);
+  });
+
+  it("forwards a killed write when the edge re-check is skipped (red evidence)", async () => {
+    setEdgeWriteReintrospectGuard(false);
+    let introspects = 0;
+    const fetchFn = async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const method = String(init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+      if (url.split("?")[0].endsWith("/introspect") && method === "POST") {
+        introspects += 1;
+        if (introspects >= 2) {
+          return new Response(JSON.stringify({ active: false, killed: true, sub: "northbound-agent" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      return issuer.fetchFn(input, init);
+    };
+    const harness = await startTwoTenantHarness({ tenantGrants: TENANT_GRANTS, fetchFn });
+    const rawA = await connectRawAgent({ port: harness.edge.agentPort, token: harness.tokenA });
+    const jwtA = await issuer.signToken({ clientId: "client-a" });
+    const res = await modernCall(harness.edge.northboundUrl, jwtA, {
+      name: "drupal_create_node",
+      args: { site: "tenant-alpha" },
+    });
+    expect(res.status).toBe(200);
+    await settle();
+    expect(rawA.frames.filter((frame) => frame.type === "mcp-request").length).toBeGreaterThan(0);
   });
 
   it("does not stamp tokenLive on a read", async () => {

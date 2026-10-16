@@ -73,9 +73,12 @@ write-like MCP tools), the connector introspects the same bearer again.
 `A verified principal context is required.` The 8s `/ready` probe cache
 is not consulted here, so a kill cannot hide behind that window. Matching
 in-flight calls in **this process** are cancelled (global cap 128, 16 per
-principal). The introspection body is never echoed. A network-origin call
-with no bearer is denied; only stdio may skip. On the hosted relay the
-edge re-introspects before fan-down (the Paladin bearer never crosses the
+principal; the per-principal cap keys on the exact `iss|sub|actor`
+string, so a second `azp` is a second principal). The introspection body
+is never echoed. A network-origin call with no bearer is denied,
+including loopback `MCP_ALLOW_UNAUTHENTICATED`; only stdio may skip. On
+the hosted relay the edge re-introspects before fan-down (the Paladin
+bearer never crosses the
 tunnel) and stamps `tokenLive` so the tenant agent does not fail open.
 Cancel-on-kill does not cross that process boundary, and there is no
 Paladin kill subscription.

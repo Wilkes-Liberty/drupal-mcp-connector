@@ -40,4 +40,16 @@ describe("combineAbortSignals", () => {
       AbortSignal.any = original;
     }
   });
+
+  it("combines a caller signal with the kill signal so neither replaces the other", () => {
+    const timeout = AbortSignal.timeout(30_000);
+    const kill = new AbortController();
+    const caller = new AbortController();
+    const combined = combineAbortSignals(timeout, kill.signal, caller.signal);
+    kill.abort("killed");
+    expect(combined.aborted).toBe(true);
+    expect(combined.reason).toBe("killed");
+    expect(caller.signal.aborted).toBe(false);
+    expect(timeout.aborted).toBe(false);
+  });
 });

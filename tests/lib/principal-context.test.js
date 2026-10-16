@@ -105,6 +105,11 @@ describe("DEV-839 tenant claim (network)", () => {
     const who = identity({ tenant: null, keyClaims: { iss: claims.iss, sub: claims.sub, azp: claims.azp } });
     const ctx = assertFrozenPrincipal({ identity: who, surface: "network", args: {} });
     expect(ctx.tenant).toBe("");
+    const broken = identity({
+      tenant: "tenant-a",
+      keyClaims: { iss: "", sub: claims.sub, azp: claims.azp },
+    });
+    expect(() => assertFrozenPrincipal({ identity: broken, surface: "network" })).toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
   it("rejects a principalContext that does not match identity", () => {

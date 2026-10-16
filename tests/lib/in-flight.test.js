@@ -68,15 +68,17 @@ describe("in-flight registry", () => {
     }))).toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
-  it("admits past the cap when the bound is removed (red evidence)", () => {
-    setInFlightCapGuard(false);
-    expect(IN_FLIGHT_CAP_GUARD.enforced).toBe(false);
-    const registry = createInFlightRegistry({ maxEntries: 1 });
+  it("admits past the global cap when that bound is removed (red evidence)", () => {
+    setInFlightCapGuard(false, "global");
+    expect(IN_FLIGHT_CAP_GUARD.global).toBe(false);
+    expect(IN_FLIGHT_CAP_GUARD.perPrincipal).toBe(true);
+    const registry = createInFlightRegistry({ maxEntries: 1, maxPerPrincipal: 1 });
     registry.begin(inFlightKeysFromIdentity(identity));
     expect(() => registry.begin(inFlightKeysFromIdentity({
       ...identity, sub: "human-2",
     }))).not.toThrow();
     expect(registry.size()).toBe(2);
+    expect(() => registry.begin(inFlightKeysFromIdentity(identity))).toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
   it("does not cancel the world on an empty selector", () => {
@@ -101,12 +103,17 @@ describe("in-flight registry", () => {
     expect(registry.size()).toBe(2);
   });
 
-  it("admits past the per-principal cap when the bound is removed (red evidence)", () => {
-    setInFlightCapGuard(false);
-    const registry = createInFlightRegistry({ maxEntries: 8, maxPerPrincipal: 1 });
+  it("admits past the per-principal cap when that bound is removed (red evidence)", () => {
+    setInFlightCapGuard(false, "perPrincipal");
+    expect(IN_FLIGHT_CAP_GUARD.perPrincipal).toBe(false);
+    expect(IN_FLIGHT_CAP_GUARD.global).toBe(true);
+    const registry = createInFlightRegistry({ maxEntries: 2, maxPerPrincipal: 1 });
     registry.begin(inFlightKeysFromIdentity(identity));
     expect(() => registry.begin(inFlightKeysFromIdentity(identity))).not.toThrow();
     expect(registry.size()).toBe(2);
+    expect(() => registry.begin(inFlightKeysFromIdentity({
+      ...identity, sub: "human-2",
+    }))).toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
   it("returns a generic deny envelope from tools/call when the registry is full", async () => {

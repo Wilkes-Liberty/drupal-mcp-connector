@@ -66,4 +66,34 @@ describe("kill-cancel through a real fetch", () => {
       server.close();
     }
   });
+
+  it("keeps the kill signal when a caller signal is also supplied", async () => {
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const keys = inFlightKeysFromIdentity(identity);
+    const flight = registry.begin(keys);
+    const caller = new AbortController();
+    const server = createServer(() => {
+      // Never respond: the kill signal must win over the caller signal.
+    });
+    const port = await listen(server);
+    try {
+      const pending = runWithIdentity(identity, () => drupalFetch(
+        { _name: "t", baseUrl: `http://127.0.0.1:${port}` },
+        "/jsonapi/node/article",
+        { method: "POST", body: "{}", signal: caller.signal },
+      ), {
+        surface: "network",
+        bearer: "tok-live",
+        introspect: async () => ({ active: true }),
+        abortSignal: flight.signal,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(registry.cancel(keys)).toBe(1);
+      await expect(pending).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+      expect(caller.signal.aborted).toBe(false);
+    } finally {
+      server.close();
+    }
+  });
 });
