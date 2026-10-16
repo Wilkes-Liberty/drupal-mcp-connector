@@ -182,8 +182,11 @@ function requireParagraphRevisionId(draftRevision) {
  * @returns {string}
  */
 function draftResource(backend, entityType, bundle, id) {
-  if (entityType !== "node" && entityType !== "paragraph" && entityType !== "media") {
-    throw new Error("Governed draft translation is implemented for nodes, paragraphs, and media.");
+  if (entityType !== "node" && entityType !== "paragraph" && entityType !== "media"
+    && entityType !== "paragraphs_library_item" && entityType !== "block_content") {
+    throw new Error(
+      "Governed draft is implemented for nodes, paragraphs, media, library items, and custom blocks."
+    );
   }
   if (!supportsSentinelDraft(backend)) {
     throw new Error("This backend does not support governed draft continuation.");
@@ -194,6 +197,8 @@ function draftResource(backend, entityType, bundle, id) {
 /**
  * One Sentinel HTTP request. Node/media vs paragraph differ only in the
  * If-Match value and optional `X-MCP-Draft-State` — callers build those.
+ * Optional `body` is the JSON:API document; optional `meta` is merged onto it.
+ * Callers must not copy the missing-endpoint English sentence.
  * @param {object} backend
  * @param {object} spec
  * @param {string} spec.entityType
@@ -202,17 +207,28 @@ function draftResource(backend, entityType, bundle, id) {
  * @param {string} spec.suffix Path after the entity UUID (`mcp-draft`,
  *   `mcp-draft/translations`, `mcp-translations`).
  * @param {object} [spec.options] Passed to JSON:API `rawQuery`.
- * @param {string} spec.missingMessage Absence rewrite for Drupal 404/405.
+ * @param {object|string} [spec.body] JSON:API document, or a JSON string.
+ * @param {object} [spec.meta] Merged onto the document as `meta`.
+ * @param {string} [spec.missingMessage] Absence rewrite for Drupal 404/405.
  * @returns {Promise<*>}
  */
-async function sentinelDraftRequest(backend, {
-  entityType, bundle, id, suffix, options, missingMessage,
+export async function sentinelDraftRequest(backend, {
+  entityType, bundle, id, suffix, options, missingMessage = MISSING_DRAFT_ENDPOINT,
+  meta, body,
 }) {
   const base = draftResource(backend, entityType, bundle, id);
+  let nextOptions = options;
+  if (body !== undefined || meta !== undefined) {
+    const document = body !== undefined
+      ? (typeof body === "string" ? JSON.parse(body) : { ...body })
+      : (typeof options?.body === "string" ? JSON.parse(options.body) : {});
+    if (meta !== undefined) document.meta = meta;
+    nextOptions = { ...options, body: JSON.stringify(document) };
+  }
   try {
     return await backend.rawQuery({
       path: `${base}/${suffix}`,
-      options,
+      options: nextOptions,
     });
   } catch (error) {
     throw missingEndpointError(error, missingMessage);
@@ -228,7 +244,7 @@ async function sentinelDraftRequest(backend, {
  * @returns {Promise<object>} Preflight metadata or the written canonical entity.
  */
 export async function writeDraft(backend, input, preflight = false) {
-  const { entityType, bundle, id, attributes = {}, relationships, draftRevision, langcode } = input;
+  const { entityType, bundle, id, attributes = {}, relationships, draftRevision, langcode, meta, body } = input;
   if (entityType === "paragraph") {
     return writeParagraphDraft(backend, input, preflight);
   }
@@ -244,7 +260,9 @@ export async function writeDraft(backend, input, preflight = false) {
   if (targetLang) headers["X-MCP-Draft-Langcode"] = targetLang;
   const result = await sentinelDraftRequest(backend, {
     entityType, bundle, id, suffix: "mcp-draft", missingMessage: MISSING_DRAFT_ENDPOINT,
-    options: { method: "PATCH", headers, body: JSON.stringify({ data }) },
+    options: { method: "PATCH", headers },
+    body: body !== undefined ? body : { data },
+    ...(meta !== undefined ? { meta } : {}),
   });
   if (preflight) {
     if (result?.meta?.draft_preflight !== true
@@ -635,7 +653,7 @@ export async function readDraftTranslation(backend, input) {
  * @returns {Promise<object>}
  */
 async function writeParagraphDraft(backend, input, preflight = false) {
-  const { entityType, bundle, id, attributes = {}, relationships, draftRevision } = input;
+  const { entityType, bundle, id, attributes = {}, relationships, draftRevision, meta, body } = input;
   const langcode = assertDraftLangcode(input.langcode);
   const revisionId = requireParagraphRevisionId(draftRevision);
   const draftState = input.draftState;
@@ -654,8 +672,9 @@ async function writeParagraphDraft(backend, input, preflight = false) {
         "X-MCP-Draft-Langcode": langcode,
         "X-MCP-Draft-State": draftState,
       },
-      body: JSON.stringify({ data }),
     },
+    body: body !== undefined ? body : { data },
+    ...(meta !== undefined ? { meta } : {}),
   });
   if (preflight) {
     if (result?.meta?.draft_preflight !== true

@@ -16,7 +16,10 @@
  * resumeParentId stays on the client sequence: those paragraphs already exist.
  */
 
-import { readNodeDraftInventory, readTranslationInventory, isMissingTranslationEndpoint, createTranslationDraft } from "./sentinel-draft.js";
+import {
+  readNodeDraftInventory, readTranslationInventory, isMissingTranslationEndpoint,
+  createTranslationDraft, sentinelDraftRequest, isMissingDraftEndpoint,
+} from "./sentinel-draft.js";
 import { entityRevisionId } from "./write-revision.js";
 import { embedParagraphRef, paragraphRevisionId } from "./err-relationships.js";
 import { httpStatusOf } from "./error-status.js";
@@ -259,6 +262,7 @@ export async function draftNestedComponents(backend, input, { dryRun = false, as
   try {
     await confirmHostPreflight(backend, request);
   } catch (err) {
+    if (isMissingDraftEndpoint(err)) throw err;
     const confirmed = await confirmLanded(backend, spec, live, nextPins);
     if (confirmed.ok) return finished(spec, live, confirmed.workingVid, draftParent, prepared, !working);
     throw recoveryError(confirmed, messageOf(err), prepared);
@@ -267,6 +271,7 @@ export async function draftNestedComponents(backend, input, { dryRun = false, as
   try {
     result = await hostDraftRequest(backend, { ...request, preflight: false });
   } catch (err) {
+    if (isMissingDraftEndpoint(err)) throw err;
     const confirmed = await confirmLanded(backend, spec, live, nextPins);
     if (confirmed.ok) return finished(spec, live, confirmed.workingVid, draftParent, prepared, !working);
     throw recoveryError(confirmed, messageOf(err), prepared);
@@ -316,6 +321,7 @@ async function writeAtomicNestedReplacement(backend, {
   try {
     await confirmAtomicPreflight(backend, request);
   } catch (err) {
+    if (isMissingDraftEndpoint(err)) throw err;
     throw noWriteError(err);
   }
   if (dryRun) {
@@ -337,6 +343,7 @@ async function writeAtomicNestedReplacement(backend, {
   try {
     result = await atomicDraftRequest(backend, { ...request, preflight: false });
   } catch (err) {
+    if (isMissingDraftEndpoint(err)) throw err;
     const confirmed = await confirmAtomicLanded(backend, spec, live, working, publishedPins, slot, childPins);
     if (confirmed.ok) return atomicFinished(spec, live, confirmed, !working);
     throw atomicFailure(confirmed, messageOf(err));
@@ -373,8 +380,8 @@ function atomicChild(child) {
  * @returns {Promise<object>}
  */
 function atomicDraftRequest(backend, { entityType, bundle, id, data, meta, live, working, langcode, preflight }) {
-  return backend.rawQuery({
-    path: `${backend.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}/mcp-draft`,
+  return sentinelDraftRequest(backend, {
+    entityType, bundle, id, suffix: "mcp-draft",
     options: {
       method: "PATCH",
       headers: {
@@ -382,8 +389,9 @@ function atomicDraftRequest(backend, { entityType, bundle, id, data, meta, live,
         "X-MCP-Draft-Preflight": preflight ? "1" : "0",
         "X-MCP-Draft-Langcode": langcode,
       },
-      body: JSON.stringify({ data, meta }),
     },
+    body: { data },
+    ...(meta !== undefined ? { meta } : {}),
   });
 }
 
@@ -837,8 +845,8 @@ async function createParagraph(backend, child, prepared, assertParagraphCreate, 
  * @returns {Promise<object>}
  */
 function hostDraftRequest(backend, { entityType, bundle, id, data, live, working, langcode, preflight }) {
-  return backend.rawQuery({
-    path: `${backend.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}/mcp-draft`,
+  return sentinelDraftRequest(backend, {
+    entityType, bundle, id, suffix: "mcp-draft",
     options: {
       method: "PATCH",
       headers: {
@@ -846,8 +854,8 @@ function hostDraftRequest(backend, { entityType, bundle, id, data, live, working
         "X-MCP-Draft-Preflight": preflight ? "1" : "0",
         "X-MCP-Draft-Langcode": langcode,
       },
-      body: JSON.stringify({ data }),
     },
+    body: { data },
   });
 }
 

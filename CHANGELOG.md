@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Single Sentinel draft HTTP client.** Canonical library/block drafts,
+  component drafts, and nested host/atomic drafts send `/mcp-draft` through
+  `sentinelDraftRequest` (optional `meta` / `body` on that helper and on
+  `writeDraft`). A Drupal 404 or 405 is rewritten with the same
+  missing-endpoint sentence on every path. `If-Match` and `X-MCP-Draft-*`
+  headers are unchanged.
+
+### Fixed
+
+- Example config documents `auth.allowedPrincipals` and describes the
+  `auditor` preset as denying sensitive types with PII redaction. The
+  deployment pre-exposure checklist includes that admission list.
+  CONTRIBUTING no longer claims CodeQL runs in CI. The adapter-contract
+  matrix drops the stale "unreleased" note.
+
 ## [5.2.0] - 2026-10-15
 
 ### Added

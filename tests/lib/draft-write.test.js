@@ -62,6 +62,22 @@ describe("governed draft continuation", () => {
     await writeDraft(b, { ...input, langcode: "es" }, true);
     expect(b.rawQuery.mock.calls[0][0].options.headers["X-MCP-Draft-Langcode"]).toBe("es");
   });
+  it("includes optional meta next to data on the draft document", async () => {
+    const b = backend({ meta: { draft_preflight: true, live: "10", working: "11" } });
+    await writeDraft(b, { ...input, meta: { mcp_components: [{ id: "hero" }] } }, true);
+    expect(JSON.parse(b.rawQuery.mock.calls[0][0].options.body)).toEqual({
+      data: expect.objectContaining({
+        type: "node--page", id: input.id, attributes: input.attributes, relationships: input.relationships,
+      }),
+      meta: { mcp_components: [{ id: "hero" }] },
+    });
+  });
+  it("sends an optional body document", async () => {
+    const body = { data: { type: "node--page", id: input.id, attributes: { title: "Override" } } };
+    const b = backend({ data: { id: input.id, type: "node--page" } });
+    await writeDraft(b, { ...input, body });
+    expect(JSON.parse(b.rawQuery.mock.calls[0][0].options.body)).toEqual(body);
+  });
 
   it("PATCHes media drafts on /mcp-draft with the live:working pair (#296)", async () => {
     const b = backend({ data: { id: "media-uuid", type: "media--image" } });

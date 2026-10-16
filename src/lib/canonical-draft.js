@@ -37,7 +37,7 @@ import { entityRevisionId } from "./write-revision.js";
 import { httpStatusOf } from "./error-status.js";
 import { paragraphPinsFromEntity } from "./err-relationships.js";
 import { entityLooksModerated } from "./moderation-default.js";
-import { supportsSentinelDraft } from "./sentinel-draft.js";
+import { supportsSentinelDraft, sentinelDraftRequest, isMissingDraftEndpoint } from "./sentinel-draft.js";
 import { OPEN_DRAFT_OPERATION } from "./component-draft.js";
 
 /** Entity types that stay on the canonical PATCH unless open_draft is advertised. */
@@ -386,8 +386,8 @@ function governedCanonicalDraftRequest(backend, {
   if (relationships && typeof relationships === "object" && Object.keys(relationships).length) {
     data.relationships = relationships;
   }
-  return backend.rawQuery({
-    path: `${backend.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}/mcp-draft`,
+  return sentinelDraftRequest(backend, {
+    entityType, bundle, id, suffix: "mcp-draft",
     options: {
       method: "PATCH",
       headers: {
@@ -395,8 +395,8 @@ function governedCanonicalDraftRequest(backend, {
         "X-MCP-Draft-Preflight": preflight ? "1" : "0",
         "X-MCP-Draft-Langcode": langcode,
       },
-      body: JSON.stringify({ data }),
     },
+    body: { data },
   });
 }
 
@@ -453,6 +453,7 @@ async function writeGovernedCanonicalDraft(backend, input, before, governed) {
       preflight: false,
     });
   } catch (err) {
+    if (isMissingDraftEndpoint(err)) throw err;
     if (isDefinitiveClientError(err)) {
       const unchanged = await publishedStateUnchanged(backend, ref, before);
       if (unchanged === true) {

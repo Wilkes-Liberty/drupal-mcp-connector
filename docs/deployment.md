@@ -113,6 +113,7 @@ to the client vendor's documented egress range where you can.
 
 - [ ] TLS configured (`TLS_CERT_PATH`/`TLS_KEY_PATH`) — never plain HTTP off localhost.
 - [ ] Inbound resource server configured (`auth.issuer` + `auth.audience` + RFC 7662 introspection); `MCP_AUTH_TOKEN` is unset (removed in 4.0.0).
+- [ ] If restricting authenticated access, set `auth.allowedPrincipals` to exact `{clientId, sub}` pairs before exposure; omit to keep normal authentication; `[]` denies all. Real identifiers stay in private configuration.
 - [ ] Authorization server mints access tokens with `exp` and `iat` inside `auth.maxTokenLifetime` (default 3600s) using an algorithm on `auth.algorithms`.
 - [ ] `MCP_BIND_HOST` and/or proxy IP allow-list restrict who can reach `/mcp`.
 - [ ] `MCP_RATE_LIMIT` enabled (or rate limiting at the proxy).

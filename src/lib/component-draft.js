@@ -13,7 +13,7 @@
  * write; a direct paragraph PATCH would change the live page.
  */
 
-import { readNodeDraftInventory, assertDraftLangcode } from "./sentinel-draft.js";
+import { readNodeDraftInventory, assertDraftLangcode, sentinelDraftRequest } from "./sentinel-draft.js";
 import { entityRevisionId } from "./write-revision.js";
 import { paragraphPinsFromEntity } from "./err-relationships.js";
 import { applyParagraphTextFormats } from "./field-definition.js";
@@ -87,8 +87,8 @@ function capabilityError(operation) {
  * @returns {Promise<object>}
  */
 function draftRequest(backend, { entityType, bundle, id, data, components, live, working, langcode, preflight }) {
-  return backend.rawQuery({
-    path: `${backend.resourcePath(entityType, bundle)}/${encodeURIComponent(id)}/mcp-draft`,
+  return sentinelDraftRequest(backend, {
+    entityType, bundle, id, suffix: "mcp-draft",
     options: {
       method: "PATCH",
       headers: {
@@ -96,8 +96,9 @@ function draftRequest(backend, { entityType, bundle, id, data, components, live,
         "X-MCP-Draft-Preflight": preflight ? "1" : "0",
         "X-MCP-Draft-Langcode": langcode,
       },
-      body: JSON.stringify({ data, meta: { mcp_components: components } }),
     },
+    body: { data },
+    meta: { mcp_components: components },
   });
 }
 
