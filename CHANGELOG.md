@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Drush SSH exec quotes argv.** The remote command is `shell-quote` of
+  `vendor/bin/drush --root <drupalRoot> …`, not a concatenated
+  `cd … && …` string.
 - **Hosted `/mcp` Origin allowlist names the keystone#1539 public-client
   Origins (DEV-953, #489).** `config/config.example.json` now lists
   `https://cursor.com`, `https://www.cursor.com`, `https://grok.com`, and

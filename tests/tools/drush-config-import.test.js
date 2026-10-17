@@ -9,7 +9,12 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const state = vi.hoisted(() => ({ commands: [], replies: {}, site: null }));
+const { state, remoteHasSubcommand } = vi.hoisted(() => {
+  function remoteHasSubcommand(command, name) {
+    return command.includes(`'${name}'`) || command.includes(name.replace(/:/g, "\\:"));
+  }
+  return { state: { commands: [], replies: {}, site: null }, remoteHasSubcommand };
+});
 
 vi.mock("../../src/lib/config.js", () => ({
   getSiteConfig: vi.fn(() => state.site),
@@ -26,7 +31,7 @@ vi.mock("ssh2", () => {
 
     runRemote = (remoteCommand, cb) => {
       state.commands.push(remoteCommand);
-      const key = Object.keys(state.replies).find((name) => remoteCommand.includes(`'${name}'`));
+      const key = Object.keys(state.replies).find((name) => remoteHasSubcommand(remoteCommand, name));
       const reply = { stdout: "", stderr: "", exitCode: 0, ...(key ? state.replies[key] : {}) };
       const stream = {
         stderr: { on: (ev, h) => { if (ev === "data" && reply.stderr) queueMicrotask(() => h(Buffer.from(reply.stderr))); } },
@@ -59,7 +64,7 @@ function site(security = {}, drushSsh = {}) {
 
 const runImport = () => handlers.drupal_drush_config_import({ site: "dev" });
 const status = (rows) => ({ stdout: JSON.stringify(rows) });
-const ran = (subcommand) => state.commands.filter((command) => command.includes(`'${subcommand}'`)).length;
+const ran = (subcommand) => state.commands.filter((command) => remoteHasSubcommand(command, subcommand)).length;
 
 beforeEach(() => {
   state.commands = [];
@@ -75,8 +80,9 @@ describe("drupal_drush_config_import core.extension guard (#349)", () => {
     });
     await expect(runImport()).resolves.toEqual({ success: true, message: "Configuration imported from sync directory." });
     expect(state.commands).toHaveLength(2);
-    expect(state.commands[0]).toContain("'config:status' '--format=json'");
-    expect(state.commands[1]).toContain("'config:import'");
+    expect(remoteHasSubcommand(state.commands[0], "config:status")).toBe(true);
+    expect(state.commands[0]).toMatch(/--format\\?=json/);
+    expect(remoteHasSubcommand(state.commands[1], "config:import")).toBe(true);
   });
 
   it("imports when Drush reports no differences", async () => {
@@ -160,7 +166,7 @@ describe("drupal_drush_config_import core.extension guard (#349)", () => {
     state.site = site({ allowCoreExtensionChange: true }, { allowedCommands: ["config:import"] });
     await expect(runImport()).resolves.toEqual({ success: true, message: "Configuration imported from sync directory." });
     expect(state.commands).toHaveLength(1);
-    expect(state.commands[0]).toContain("'config:import'");
+    expect(remoteHasSubcommand(state.commands[0], "config:import")).toBe(true);
   });
 
   it("treats a malformed opt-in as not opted in, and says so when it refuses", async () => {

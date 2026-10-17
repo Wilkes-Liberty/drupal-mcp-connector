@@ -91,7 +91,8 @@ describe("drupal_drush_module_disable protected modules (#346)", () => {
     const out = await disable("devel");
     expect(out).toEqual({ success: true, message: "Module \"devel\" uninstalled." });
     expect(state.commands).toHaveLength(1);
-    expect(state.commands[0]).toContain("'pm:uninstall' 'devel'");
+    expect(state.commands[0]).toMatch(/pm\\?:uninstall/);
+    expect(state.commands[0]).toMatch(/\bdevel\b/);
   });
 
   it("refuses a module the operator added with security.protectedModules", async () => {
