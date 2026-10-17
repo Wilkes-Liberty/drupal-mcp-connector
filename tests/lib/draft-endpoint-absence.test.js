@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { writeDraft, isMissingDraftEndpoint } from "../../src/lib/sentinel-draft.js";
+import { writeDraft, isMissingDraftEndpoint, readOptionalDraftInventory } from "../../src/lib/sentinel-draft.js";
 import { writeComponentDraft } from "../../src/lib/component-draft.js";
 import { draftNestedComponents } from "../../src/lib/nested-draft.js";
 import { preflightGovernedCanonicalDraft } from "../../src/lib/canonical-draft.js";
@@ -225,5 +225,25 @@ describe("missing /mcp-draft endpoint rewrite", () => {
   ]))("%s rewrites Drupal %s identically", async (_name, status, run) => {
     const err = await run(status).catch((error) => error);
     expectIdenticalRewrite(err);
+  });
+});
+
+describe("optional inventory GET is not a missing-draft rewrite", () => {
+  it.each([404, 405])("treats Drupal %s on /mcp-translations as absence", async (status) => {
+    const b = jsonapiBackend(async ({ path }) => {
+      expect(path).toMatch(/\/mcp-translations$/);
+      throw Object.assign(
+        new Error(`Drupal ${status} on GET ${path}`),
+        { status },
+      );
+    });
+    await expect(readOptionalDraftInventory(b, {
+      entityType: "paragraphs_library_item",
+      bundle: "paragraphs_library_item",
+      id: LIBRARY_ID,
+    })).resolves.toBeNull();
+    expect(b.rawQuery).toHaveBeenCalledOnce();
+    const err = await b.rawQuery.mock.results[0].value.catch((error) => error);
+    expect(isMissingDraftEndpoint(err)).toBe(false);
   });
 });

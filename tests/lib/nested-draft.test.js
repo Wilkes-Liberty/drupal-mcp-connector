@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { draftNestedComponents, NESTED_DRAFT_PARTIAL_CODE } from "../../src/lib/nested-draft.js";
+import { draftPatchHeaders } from "../../src/lib/sentinel-draft.js";
 
 const NODE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const PARENT = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -193,6 +194,9 @@ describe("draftNestedComponents", () => {
     expect(parentCall.relationships.field_items.data[1].meta.target_revision_id).toBe(71);
     const drafts = callsEnding(b, "/mcp-draft").filter((call) => !call.path.endsWith("/translations"));
     expect(drafts).toHaveLength(2);
+    expect(drafts[1].options.headers).toEqual(draftPatchHeaders({
+      live: "10", working: "", langcode: "en", preflight: false,
+    }));
     expect(drafts[1].options.headers["If-Match"]).toBe('"10"');
     expect(drafts[1].options.headers["X-MCP-Draft-Preflight"]).toBe("0");
     const body = JSON.parse(drafts[1].options.body);
@@ -400,6 +404,9 @@ describe("draftNestedComponents", () => {
     expect(b.createEntity).not.toHaveBeenCalled();
     const drafts = callsEnding(b, "/mcp-draft").filter((call) => !call.path.endsWith("/translations"));
     expect(drafts).toHaveLength(2);
+    expect(drafts[1].options.headers).toEqual(draftPatchHeaders({
+      live: "10", working: "11", langcode: "en", preflight: false,
+    }));
     expect(drafts[1].options.headers["If-Match"]).toBe('"10:11"');
     expect(result.draftParentId).toBe(NEW_PARENT);
   });
@@ -612,6 +619,12 @@ describe("draftNestedComponents", () => {
     expect(b.createEntity).not.toHaveBeenCalled();
     const drafts = callsEnding(b, "/mcp-draft").filter((call) => !call.path.endsWith("/translations"));
     expect(drafts).toHaveLength(2);
+    expect(drafts[0].options.headers).toEqual(draftPatchHeaders({
+      live: "10", working: "", langcode: "en", preflight: true,
+    }));
+    expect(drafts[1].options.headers).toEqual(draftPatchHeaders({
+      live: "10", working: "", langcode: "en", preflight: false,
+    }));
     expect(drafts[0].options.headers["X-MCP-Draft-Preflight"]).toBe("1");
     expect(drafts[1].options.headers["X-MCP-Draft-Preflight"]).toBe("0");
     expect(drafts[1].options.headers["If-Match"]).toBe('"10"');

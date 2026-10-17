@@ -236,6 +236,21 @@ export async function sentinelDraftRequest(backend, {
 }
 
 /**
+ * Headers for a Sentinel draft PATCH. If-Match is `"live:working"` when a
+ * working copy exists, otherwise `"live"`. Langcode is omitted when absent.
+ * @param {{live: string, working?: string, langcode?: ?string, preflight?: boolean}} spec
+ * @returns {Record<string, string>}
+ */
+export function draftPatchHeaders({ live, working, langcode, preflight }) {
+  const headers = {
+    "If-Match": working ? `"${live}:${working}"` : `"${live}"`,
+    "X-MCP-Draft-Preflight": preflight ? "1" : "0",
+  };
+  if (langcode) headers["X-MCP-Draft-Langcode"] = langcode;
+  return headers;
+}
+
+/**
  * Validate or continue a draft, using the same payload and revision precondition.
  * No canonical fallback: an absent endpoint or refused precondition stops work.
  * @param {object} backend JSON:API backend.
@@ -251,13 +266,9 @@ export async function writeDraft(backend, input, preflight = false) {
   const { live, working } = requireWorkingPair(draftRevision);
   const data = { type: `${entityType}--${bundle}`, id, attributes };
   if (relationships) data.relationships = relationships;
-  const headers = {
-    "If-Match": `"${live}:${working}"`,
-    "X-MCP-Draft-Preflight": preflight ? "1" : "0",
-  };
   const requestedLang = langcode ?? draftRevision?.langcode;
   const targetLang = requestedLang ? assertDraftLangcode(requestedLang) : null;
-  if (targetLang) headers["X-MCP-Draft-Langcode"] = targetLang;
+  const headers = draftPatchHeaders({ live, working, langcode: targetLang, preflight });
   const result = await sentinelDraftRequest(backend, {
     entityType, bundle, id, suffix: "mcp-draft", missingMessage: MISSING_DRAFT_ENDPOINT,
     options: { method: "PATCH", headers },
@@ -488,6 +499,34 @@ export async function readTranslationInventory(backend, { entityType, bundle, id
     throw new Error("The site did not return a translation inventory.");
   }
   return result.meta;
+}
+
+/**
+ * Type-agnostic optional inventory GET. A Drupal 404 or 405 is absence
+ * (the missing translation-endpoint sentence, not the missing-draft
+ * sentence). Permission, transport, and other failures are not absence.
+ * @param {object} backend
+ * @param {{entityType: string, bundle: string, id: string, revisionId?: string|number}} ref
+ * @returns {Promise<object|null>} Inventory `meta`, or `null` when the endpoint is unsupported.
+ */
+export async function readOptionalDraftInventory(backend, { entityType, bundle, id, revisionId }) {
+  if (!supportsSentinelDraft(backend)) return null;
+  const headers = {};
+  if (revisionId !== undefined && revisionId !== null && revisionId !== "") {
+    headers["If-Match"] = `"${requireParagraphRevisionId({ revisionId })}"`;
+  }
+  let result;
+  try {
+    result = await sentinelDraftRequest(backend, {
+      entityType, bundle, id, suffix: "mcp-translations",
+      missingMessage: MISSING_TRANSLATION_ENDPOINT,
+      options: Object.keys(headers).length ? { method: "GET", headers } : undefined,
+    });
+  } catch (error) {
+    if (isMissingTranslationEndpoint(error)) return null;
+    throw error;
+  }
+  return result?.meta;
 }
 
 /**

@@ -8,6 +8,8 @@ import {
   isUnpublishedWorkingDraft,
   isCarriedPublishedLanguage,
   inferDefaultDraftLangcode,
+  draftPatchHeaders,
+  readOptionalDraftInventory,
 } from "../../src/lib/sentinel-draft.js";
 
 const input = {
@@ -28,6 +30,7 @@ describe("governed draft continuation", () => {
     await writeDraft(b, input, true);
     const [{ path, options }] = b.rawQuery.mock.calls[0];
     expect(path).toBe("/jsonapi/node/page/example-uuid/mcp-draft");
+    expect(options.headers).toEqual(draftPatchHeaders({ live: "10", working: "11", preflight: true }));
     expect(options.headers).toEqual({ "If-Match": '"10:11"', "X-MCP-Draft-Preflight": "1" });
     expect(JSON.parse(options.body).data).toMatchObject({ attributes: input.attributes, relationships: input.relationships });
   });
@@ -91,8 +94,30 @@ describe("governed draft continuation", () => {
     const [{ path, options }] = b.rawQuery.mock.calls[0];
     expect(path).toBe("/jsonapi/media/image/media-uuid/mcp-draft");
     expect(options.method).toBe("PATCH");
+    expect(options.headers).toEqual(draftPatchHeaders({
+      live: "40", working: "41", langcode: "es", preflight: false,
+    }));
     expect(options.headers["If-Match"]).toBe('"40:41"');
     expect(options.headers["X-MCP-Draft-Langcode"]).toBe("es");
+  });
+});
+
+describe("draftPatchHeaders", () => {
+  it("keeps If-Match and X-MCP-Draft-* names and values byte-identical", () => {
+    expect(draftPatchHeaders({ live: "10", working: "11", preflight: true })).toEqual({
+      "If-Match": '"10:11"',
+      "X-MCP-Draft-Preflight": "1",
+    });
+    expect(draftPatchHeaders({ live: "10", working: "", langcode: "en", preflight: false })).toEqual({
+      "If-Match": '"10"',
+      "X-MCP-Draft-Preflight": "0",
+      "X-MCP-Draft-Langcode": "en",
+    });
+    expect(draftPatchHeaders({ live: "20", working: "21", langcode: "en", preflight: true })).toEqual({
+      "If-Match": '"20:21"',
+      "X-MCP-Draft-Preflight": "1",
+      "X-MCP-Draft-Langcode": "en",
+    });
   });
 });
 
@@ -280,6 +305,63 @@ describe("resolveNodeTranslationPair fail-closed inventory", () => {
       entityType: "node", bundle: "page", id: "example-uuid", existing,
     })).rejects.toThrow(/did not return a translation inventory/);
     expect(b.getEntity).not.toHaveBeenCalled();
+  });
+});
+
+describe("readOptionalDraftInventory", () => {
+  const ref = { entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id: "lib-1" };
+
+  it("returns inventory meta for library items through the Sentinel client", async () => {
+    const meta = { live: { vid: "20" }, operations: ["open_draft"], defaultLangcode: "en" };
+    const b = backend({ meta });
+    b.resourcePath = (entityType, bundle) => `/jsonapi/${entityType}/${bundle}`;
+    await expect(readOptionalDraftInventory(b, ref)).resolves.toEqual(meta);
+    expect(b.rawQuery.mock.calls[0][0].path).toBe(
+      "/jsonapi/paragraphs_library_item/paragraphs_library_item/lib-1/mcp-translations",
+    );
+  });
+
+  it("treats Drupal 404 and 405 as absence without the missing-draft sentence", async () => {
+    for (const status of [404, 405]) {
+      const b = backend();
+      b.resourcePath = (entityType, bundle) => `/jsonapi/${entityType}/${bundle}`;
+      b.rawQuery.mockRejectedValue(Object.assign(
+        new Error(`Drupal ${status} on GET /jsonapi/paragraphs_library_item/x/mcp-translations`),
+        { status },
+      ));
+      await expect(readOptionalDraftInventory(b, ref)).resolves.toBeNull();
+    }
+  });
+
+  it("does not rewrite a canonical inventory 404 as the missing-draft English sentence", async () => {
+    const b = backend();
+    b.resourcePath = (entityType, bundle) => `/jsonapi/${entityType}/${bundle}`;
+    const original = Object.assign(
+      new Error("Drupal 404 on GET /jsonapi/paragraphs_library_item/x/mcp-translations"),
+      { status: 404 },
+    );
+    b.rawQuery.mockRejectedValue(original);
+    const out = await readOptionalDraftInventory(b, ref);
+    expect(out).toBeNull();
+    expect(isMissingDraftEndpoint(original)).toBe(false);
+  });
+
+  it("rethrows a permission failure instead of treating it as absence", async () => {
+    const b = backend();
+    b.resourcePath = (entityType, bundle) => `/jsonapi/${entityType}/${bundle}`;
+    b.rawQuery.mockRejectedValue(new Error(
+      "Drupal 403 on GET /jsonapi/paragraphs_library_item/x/mcp-translations",
+    ));
+    await expect(readOptionalDraftInventory(b, ref)).rejects.toThrow(/403/);
+  });
+
+  it("rethrows a 5xx instead of treating it as absence", async () => {
+    const b = backend();
+    b.resourcePath = (entityType, bundle) => `/jsonapi/${entityType}/${bundle}`;
+    b.rawQuery.mockRejectedValue(new Error(
+      "Drupal 500 on GET /jsonapi/paragraphs_library_item/x/mcp-translations",
+    ));
+    await expect(readOptionalDraftInventory(b, ref)).rejects.toThrow(/500/);
   });
 });
 
