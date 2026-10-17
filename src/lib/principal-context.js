@@ -219,6 +219,24 @@ export function throwIfPrincipalAbort(signal, err) {
 }
 
 /**
+ * Run `work` and remap a kill abort (including a node-fetch body
+ * AbortError that dropped `signal.reason`) to {@link principalDenied}.
+ *
+ * @template T
+ * @param {AbortSignal|null|undefined} signal
+ * @param {() => Promise<T>} work
+ * @returns {Promise<T>}
+ */
+export async function mapPrincipalAbort(signal, work) {
+  try {
+    return await work();
+  } catch (err) {
+    throwIfPrincipalAbort(signal, err);
+    throw err;
+  }
+}
+
+/**
  * Network JWT principals need a string `tenant` claim and a composable
  * principal key. Arguments and headers never supply those fields.
  *

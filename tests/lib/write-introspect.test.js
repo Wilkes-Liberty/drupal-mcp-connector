@@ -214,6 +214,34 @@ describe("DEV-846 write re-introspect", () => {
     })).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
   });
 
+  it("denies a loopback unauthenticated network write even with a stray bearer", async () => {
+    const introspect = vi.fn(async () => ({ active: true }));
+    await expect(assertLiveTokenForGovernedWrite({
+      identity: LOCAL_OPERATOR,
+      surface: "network",
+      bearer: "stray-bearer",
+      introspect,
+    })).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+    expect(introspect).not.toHaveBeenCalled();
+  });
+
+  it("admits a loopback stray-bearer write when the network-local-operator skip is on (red evidence)", async () => {
+    setWriteReintrospectSkip("networkLocalOperator", true);
+    expect(WRITE_REINTROSPECT_SKIP.networkLocalOperator).toBe(true);
+    const introspect = vi.fn(async () => ({ active: true }));
+    await expect(assertLiveTokenForGovernedWrite({
+      identity: LOCAL_OPERATOR,
+      surface: "network",
+      bearer: "stray-bearer",
+      introspect,
+    })).resolves.toBeUndefined();
+    expect(introspect).not.toHaveBeenCalled();
+    await expect(assertLiveTokenForGovernedWrite({
+      identity: LOCAL_OPERATOR,
+      surface: "network",
+    })).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+  });
+
   it("skips a missing bearer on stdio", async () => {
     await expect(assertLiveTokenForGovernedWrite({ identity })).resolves.toBeUndefined();
   });

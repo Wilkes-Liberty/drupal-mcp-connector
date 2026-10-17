@@ -619,7 +619,9 @@ describe("dispatch principal freeze and cancel", () => {
 
   afterEach(async () => {
     const { setInFlightRegistry } = await import("../../src/lib/in-flight.js");
+    const { setPrincipalAbortRemapGuard } = await import("../../src/lib/principal-context.js");
     setInFlightRegistry(null);
+    setPrincipalAbortRemapGuard(true);
   });
 
   const principal = {
@@ -708,6 +710,161 @@ describe("dispatch principal freeze and cancel", () => {
       expect(result.content[0].text).not.toMatch(/^Error:/);
     } finally {
       allHandlers.drupal_config_set = original;
+    }
+  });
+
+  it("returns Access denied when a kill aborts during the server-tool body read", async () => {
+    const { createInFlightRegistry, inFlightKeysFromIdentity, setInFlightRegistry } = await import("../../src/lib/in-flight.js");
+    const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
+    const { runWithHttpAudit, buildHttpAuditRow } = await import("../../src/lib/http-audit.js");
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    vi.mocked(getSiteConfig).mockImplementation(() => ({
+      _name: "open",
+      baseUrl: "https://open.example.com",
+      security: { preset: "development" },
+      serverTools: { url: "/mcp" },
+    }));
+    let enteredBody = () => {};
+    const inBody = new Promise((resolve) => { enteredBody = resolve; });
+    vi.mocked(fetch).mockImplementation(async (_url, opts) => {
+      const method = JSON.parse(String(opts?.body || "{}")).method;
+      const headers = {
+        get: (h) => {
+          const key = String(h).toLowerCase();
+          if (key === "mcp-session-id") return "sess-dispatch-body";
+          if (key === "content-type") return method === "tools/call" ? "text/event-stream" : "application/json";
+          return null;
+        },
+      };
+      if (method === "initialize") {
+        return {
+          ok: true, status: 200, headers,
+          text: async () => JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", capabilities: {} } }),
+        };
+      }
+      if (method === "notifications/initialized") {
+        return { ok: true, status: 202, headers, text: async () => "" };
+      }
+      if (method === "tools/list") {
+        return {
+          ok: true, status: 200, headers,
+          text: async () => JSON.stringify({
+            jsonrpc: "2.0", id: 2,
+            result: { tools: [{ name: "tool_api__mcp_sentinel_config_set" }] },
+          }),
+        };
+      }
+      return {
+        ok: true, status: 200, headers,
+        text: async () => {
+          enteredBody();
+          const err = new Error("The operation was aborted");
+          err.name = "AbortError";
+          if (opts?.signal?.aborted) throw err;
+          return new Promise((_, reject) => {
+            opts?.signal?.addEventListener("abort", () => reject(err), { once: true });
+          });
+        },
+      };
+    });
+    const req = { url: "/mcp", method: "POST", headers: {} };
+    const pending = runWithHttpAudit(req, () => runWithIdentity(
+      principal,
+      () => callTool("drupal_config_set", { site: "open", name: "system.site", values: { name: "x" } }, {
+        identity: principal,
+        surface: "network",
+        sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" }, serverTools: { url: "/mcp" } }],
+        grants: { "agent-client": ["open"] },
+      }),
+      { surface: "network", bearer: "tok-live", introspect: async () => ({ active: true }) },
+    ));
+    await inBody;
+    expect(registry.cancel(inFlightKeysFromIdentity(principal))).toBe(1);
+    const result = await pending;
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+    expect(result.content[0].text).not.toMatch(/^Error:/);
+    expect(buildHttpAuditRow(req, { statusCode: 200 }).toolOutcome).toBe("denied");
+  });
+
+  it("lets a server-tool body-read kill stay a tool error when remap is off (red evidence)", async () => {
+    const { createInFlightRegistry, inFlightKeysFromIdentity, setInFlightRegistry } = await import("../../src/lib/in-flight.js");
+    const { GENERIC_PRINCIPAL_REFUSAL, setPrincipalAbortRemapGuard } = await import("../../src/lib/principal-context.js");
+    const { runWithHttpAudit, buildHttpAuditRow } = await import("../../src/lib/http-audit.js");
+    setPrincipalAbortRemapGuard(false);
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    vi.mocked(getSiteConfig).mockImplementation(() => ({
+      _name: "open",
+      baseUrl: "https://open.example.com",
+      security: { preset: "development" },
+      serverTools: { url: "/mcp" },
+    }));
+    let enteredBody = () => {};
+    const inBody = new Promise((resolve) => { enteredBody = resolve; });
+    vi.mocked(fetch).mockImplementation(async (_url, opts) => {
+      const method = JSON.parse(String(opts?.body || "{}")).method;
+      const headers = {
+        get: (h) => {
+          const key = String(h).toLowerCase();
+          if (key === "mcp-session-id") return "sess-dispatch-body-red";
+          if (key === "content-type") return "application/json";
+          return null;
+        },
+      };
+      if (method === "initialize") {
+        return {
+          ok: true, status: 200, headers,
+          text: async () => JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", capabilities: {} } }),
+        };
+      }
+      if (method === "notifications/initialized") {
+        return { ok: true, status: 202, headers, text: async () => "" };
+      }
+      if (method === "tools/list") {
+        return {
+          ok: true, status: 200, headers,
+          text: async () => JSON.stringify({
+            jsonrpc: "2.0", id: 2,
+            result: { tools: [{ name: "tool_api__mcp_sentinel_config_set" }] },
+          }),
+        };
+      }
+      return {
+        ok: true, status: 200, headers,
+        text: async () => {
+          enteredBody();
+          const err = new Error("The operation was aborted");
+          err.name = "AbortError";
+          if (opts?.signal?.aborted) throw err;
+          return new Promise((_, reject) => {
+            opts?.signal?.addEventListener("abort", () => reject(err), { once: true });
+          });
+        },
+      };
+    });
+    const req = { url: "/mcp", method: "POST", headers: {} };
+    try {
+      const pending = runWithHttpAudit(req, () => runWithIdentity(
+        principal,
+        () => callTool("drupal_config_set", { site: "open", name: "system.site", values: { name: "x" } }, {
+          identity: principal,
+          surface: "network",
+          sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" }, serverTools: { url: "/mcp" } }],
+          grants: { "agent-client": ["open"] },
+        }),
+        { surface: "network", bearer: "tok-live", introspect: async () => ({ active: true }) },
+      ));
+      await inBody;
+      expect(registry.cancel(inFlightKeysFromIdentity(principal))).toBe(1);
+      const result = await pending;
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).not.toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+      expect(result.content[0].text).toMatch(/^Error: The operation was aborted/);
+      expect(buildHttpAuditRow(req, { statusCode: 200 }).toolOutcome).not.toBe("denied");
+    } finally {
+      setPrincipalAbortRemapGuard(true);
     }
   });
 });

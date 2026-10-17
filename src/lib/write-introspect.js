@@ -28,6 +28,7 @@ export const WRITE_REINTROSPECT_SKIP = {
   missingBearer: false,
   throwOrTimeout: false,
   inactiveOrKilled: false,
+  networkLocalOperator: false,
 };
 
 /**
@@ -46,7 +47,7 @@ export function setWriteReintrospectGuard(required) {
  * Flip one {@link WRITE_REINTROSPECT_SKIP} branch. Restore `false`
  * after the assertion; production code never calls this.
  *
- * @param {"missingBearer"|"throwOrTimeout"|"inactiveOrKilled"} branch
+ * @param {"missingBearer"|"throwOrTimeout"|"inactiveOrKilled"|"networkLocalOperator"} branch
  * @param {boolean} skip
  * @returns {void}
  */
@@ -62,6 +63,9 @@ export function setWriteReintrospectSkip(branch, skip) {
       return;
     case "inactiveOrKilled":
       WRITE_REINTROSPECT_SKIP.inactiveOrKilled = on;
+      return;
+    case "networkLocalOperator":
+      WRITE_REINTROSPECT_SKIP.networkLocalOperator = on;
       return;
     default:
       throw new Error(`Unknown write-reintrospect skip branch "${branch}".`);
@@ -79,6 +83,7 @@ export function resetWriteReintrospectSkip() {
   WRITE_REINTROSPECT_SKIP.missingBearer = false;
   WRITE_REINTROSPECT_SKIP.throwOrTimeout = false;
   WRITE_REINTROSPECT_SKIP.inactiveOrKilled = false;
+  WRITE_REINTROSPECT_SKIP.networkLocalOperator = false;
 }
 
 /**
@@ -140,6 +145,15 @@ export async function assertLiveTokenForGovernedWrite({
   // Relay edge already live-checked this write. The inbound bearer never
   // crosses the tunnel, so the tenant agent cannot introspect again.
   if (session?.tokenLive === true) return;
+
+  // Loopback unauthenticated HTTP still stamps LOCAL_OPERATOR and may
+  // forward a stray Authorization bearer. Network local-operator writes
+  // never skip; only stdio may. Deny before the token check so that
+  // header cannot skip introspection.
+  if (surface === "network" && isLocalOperator(who)
+    && !WRITE_REINTROSPECT_SKIP.networkLocalOperator) {
+    denyAndCancel(who);
+  }
 
   const token = bearer ?? session?.bearer;
   if (typeof token !== "string" || !token) {

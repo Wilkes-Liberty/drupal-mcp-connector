@@ -42,17 +42,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not re-introspect and cannot cancel from a later kill. There is no
   kill-subscription frame or extra frame type. A network-origin call with
   no bearer is denied, including loopback `MCP_ALLOW_UNAUTHENTICATED`; only
-  stdio may skip the write re-check. A kill abort on a governed Drupal
-  server-tool POST is the same generic deny (node-fetch drops
-  `signal.reason`).
-
-## [5.2.1] - 2026-10-17
+  stdio may skip the write re-check. A stray `Authorization: Bearer` on
+  loopback unauthenticated HTTP does not skip that write re-check. A kill
+  abort on a governed Drupal server-tool POST, including during the
+  response body read after headers, is the same generic deny (node-fetch
+  drops `signal.reason`).
 
 ### Fixed
 
 - **Drush SSH exec quotes argv.** The remote command is `shell-quote` of
   `vendor/bin/drush --root <drupalRoot> …`, not a concatenated
   `cd … && …` string.
+
+## [5.2.1] - 2026-10-17
+
+### Fixed
+
 - **Hosted `/mcp` Origin allowlist names the keystone#1539 public-client
   Origins (DEV-953, #489).** `config/config.example.json` now lists
   `https://cursor.com`, `https://www.cursor.com`, `https://grok.com`, and

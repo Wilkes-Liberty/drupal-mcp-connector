@@ -67,6 +67,39 @@ describe("kill-cancel through a real fetch", () => {
     }
   });
 
+  it("maps a kill during the JSON:API body read to the generic deny", async () => {
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const keys = inFlightKeysFromIdentity(identity);
+    const flight = registry.begin(keys);
+    let headersSent = () => {};
+    const headers = new Promise((resolve) => { headersSent = resolve; });
+    const server = createServer((_req, res) => {
+      res.writeHead(201, { "Content-Type": "application/vnd.api+json" });
+      headersSent();
+      // Headers only: the body stream stays open until the kill aborts it.
+    });
+    const port = await listen(server);
+    try {
+      const pending = runWithIdentity(identity, () => drupalFetch(
+        { _name: "t", baseUrl: `http://127.0.0.1:${port}` },
+        "/jsonapi/node/article",
+        { method: "POST", body: "{}" },
+      ), {
+        surface: "network",
+        bearer: "tok-live",
+        introspect: async () => ({ active: true }),
+        abortSignal: flight.signal,
+      });
+      await headers;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(registry.cancel(keys)).toBe(1);
+      await expect(pending).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+    } finally {
+      server.close();
+    }
+  });
+
   it("keeps the kill signal when a caller signal is also supplied", async () => {
     const registry = createInFlightRegistry({ maxEntries: 8 });
     setInFlightRegistry(registry);

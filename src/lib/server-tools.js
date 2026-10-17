@@ -30,7 +30,7 @@ import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial, getData
 import { clearToken } from "./oauth.js";
 import { cleanErrorText, describeErrorBody } from "./error-body.js";
 import { combineAbortSignals } from "./abort-signals.js";
-import { GENERIC_PRINCIPAL_REFUSAL, throwIfPrincipalAbort } from "./principal-context.js";
+import { GENERIC_PRINCIPAL_REFUSAL, mapPrincipalAbort, throwIfPrincipalAbort } from "./principal-context.js";
 import { getRequestAbortSignal } from "./principal.js";
 
 /** Calls a configured module binding through the registry, without fallback. */
@@ -167,10 +167,15 @@ function serverToolAbortSignal() {
  * @param {object} init fetch init without `signal`.
  * @returns {Promise<object>} node-fetch Response.
  */
+/** Fetch abort signal for a Response, so a kill during the body read remaps. */
+const serverToolAbortByResponse = new WeakMap();
+
 async function fetchServerTool(endpoint, init) {
   const signal = serverToolAbortSignal();
   try {
-    return await fetch(endpoint, { ...init, signal });
+    const res = await fetch(endpoint, { ...init, signal });
+    serverToolAbortByResponse.set(res, signal);
+    return res;
   } catch (err) {
     throwIfPrincipalAbort(signal, err);
     throw err;
@@ -245,7 +250,8 @@ async function baseHeaders(site, sessionId) {
  *   (null for empty/unparseable bodies, e.g. a notification's 202) plus the raw text.
  */
 async function readBody(res) {
-  const rawText = await res.text();
+  const signal = serverToolAbortByResponse.get(res) ?? getRequestAbortSignal();
+  const rawText = await mapPrincipalAbort(signal, () => res.text());
   if (!rawText) return { body: null, rawText };
 
   const contentType = res.headers.get("content-type") || "";

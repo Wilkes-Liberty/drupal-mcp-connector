@@ -17,7 +17,7 @@ import {
 } from "./data-flow.js";
 import { combineAbortSignals } from "./abort-signals.js";
 import { getRequestAbortSignal, getRequestSurface } from "./principal.js";
-import { throwIfPrincipalAbort } from "./principal-context.js";
+import { mapPrincipalAbort, throwIfPrincipalAbort } from "./principal-context.js";
 import { assertLiveTokenForGovernedWrite } from "./write-introspect.js";
 import { graphqlHasMutation } from "./security.js";
 import {
@@ -41,13 +41,18 @@ export const DRUPAL_FETCH_TIMEOUT_MS = 30_000;
  * @returns {Promise<object>} node-fetch Response.
  * @throws {Error} when the default timeout fires (`AbortError` remapped).
  */
+/** Fetch abort signal for a Response, so a kill during the body read remaps. */
+const drupalFetchAbortByResponse = new WeakMap();
+
 async function timedDrupalFetch(url, options = {}) {
   const timeout = AbortSignal.timeout(DRUPAL_FETCH_TIMEOUT_MS);
   const cancel = getRequestAbortSignal();
   const caller = options.signal;
   const signal = combineAbortSignals(timeout, cancel, caller) ?? timeout;
   try {
-    return await fetch(url, { ...options, signal });
+    const res = await fetch(url, { ...options, signal });
+    drupalFetchAbortByResponse.set(res, signal);
+    return res;
   } catch (err) {
     throwIfPrincipalAbort(signal, err);
     // Remap only the shared 30s timeout. A caller-owned abort stays AbortError.
@@ -70,16 +75,19 @@ function isMutatingMethod(method) {
  * @returns {Promise<{json: object|null, text: string}>}
  */
 async function readOkBody(res) {
-  if (typeof res.text === "function") {
-    const text = await res.text();
-    if (!text) return { json: null, text: "" };
-    try {
-      return { json: JSON.parse(text), text };
-    } catch {
-      return { json: null, text };
+  const signal = drupalFetchAbortByResponse.get(res) ?? getRequestAbortSignal();
+  return mapPrincipalAbort(signal, async () => {
+    if (typeof res.text === "function") {
+      const text = await res.text();
+      if (!text) return { json: null, text: "" };
+      try {
+        return { json: JSON.parse(text), text };
+      } catch {
+        return { json: null, text };
+      }
     }
-  }
-  return { json: await res.json(), text: "" };
+    return { json: await res.json(), text: "" };
+  });
 }
 
 /**
@@ -100,8 +108,10 @@ async function readOkBody(res) {
 async function failedResponseError(res, prefix, options) {
   let body;
   try {
-    body = await res.text();
-  } catch {
+    const signal = drupalFetchAbortByResponse.get(res) ?? getRequestAbortSignal();
+    body = await mapPrincipalAbort(signal, () => res.text());
+  } catch (err) {
+    throwIfPrincipalAbort(drupalFetchAbortByResponse.get(res) ?? getRequestAbortSignal(), err);
     return withStatus(new Error(`${prefix} (response body could not be read)`), res.status);
   }
   const mapped = sourceBudgetDenial(body);
