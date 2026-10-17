@@ -867,4 +867,61 @@ describe("dispatch principal freeze and cancel", () => {
       setPrincipalAbortRemapGuard(true);
     }
   });
+
+  it("returns Access denied when a kill aborts during a JSON:API write body read", async () => {
+    const { createInFlightRegistry, inFlightKeysFromIdentity, setInFlightRegistry } = await import("../../src/lib/in-flight.js");
+    const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
+    const { runWithHttpAudit, buildHttpAuditRow } = await import("../../src/lib/http-audit.js");
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    vi.mocked(getSiteConfig).mockImplementation(() => ({
+      _name: "open",
+      baseUrl: "https://open.example.com",
+      security: { preset: "development" },
+    }));
+    let enteredBody = () => {};
+    const inBody = new Promise((resolve) => { enteredBody = resolve; });
+    vi.mocked(fetch).mockImplementation(async (_url, opts) => {
+      const method = String(opts?.method || "GET").toUpperCase();
+      if (method === "GET" || method === "HEAD") {
+        return {
+          ok: true, status: 200,
+          headers: { get: () => "application/vnd.api+json" },
+          text: async () => JSON.stringify({ data: [] }),
+          json: async () => ({ data: [] }),
+        };
+      }
+      return {
+        ok: true, status: 201,
+        headers: { get: () => "application/vnd.api+json" },
+        text: async () => {
+          enteredBody();
+          const err = new Error("The operation was aborted");
+          err.name = "AbortError";
+          if (opts?.signal?.aborted) throw err;
+          return new Promise((_, reject) => {
+            opts?.signal?.addEventListener("abort", () => reject(err), { once: true });
+          });
+        },
+      };
+    });
+    const req = { url: "/mcp", method: "POST", headers: {} };
+    const pending = runWithHttpAudit(req, () => runWithIdentity(
+      principal,
+      () => callTool("drupal_create_node", { site: "open", type: "article", title: "T" }, {
+        identity: principal,
+        surface: "network",
+        sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" } }],
+        grants: { "agent-client": ["open"] },
+      }),
+      { surface: "network", bearer: "tok-live", introspect: async () => ({ active: true }) },
+    ));
+    await inBody;
+    expect(registry.cancel(inFlightKeysFromIdentity(principal))).toBe(1);
+    const result = await pending;
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+    expect(result.content[0].text).not.toMatch(/^Error:/);
+    expect(buildHttpAuditRow(req, { statusCode: 200 }).toolOutcome).toBe("denied");
+  });
 });

@@ -32,6 +32,9 @@ const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
 /** Default northbound Drupal HTTP timeout in milliseconds. Matches `sshDrush`. */
 export const DRUPAL_FETCH_TIMEOUT_MS = 30_000;
 
+/** Fetch abort signal for a Response, so a kill during the body read remaps. */
+const drupalFetchAbortByResponse = new WeakMap();
+
 /**
  * node-fetch with the shared abort timeout. The caller signal, the
  * in-flight kill signal, and the 30s timeout are combined; none replaces
@@ -41,9 +44,6 @@ export const DRUPAL_FETCH_TIMEOUT_MS = 30_000;
  * @returns {Promise<object>} node-fetch Response.
  * @throws {Error} when the default timeout fires (`AbortError` remapped).
  */
-/** Fetch abort signal for a Response, so a kill during the body read remaps. */
-const drupalFetchAbortByResponse = new WeakMap();
-
 async function timedDrupalFetch(url, options = {}) {
   const timeout = AbortSignal.timeout(DRUPAL_FETCH_TIMEOUT_MS);
   const cancel = getRequestAbortSignal();
@@ -112,6 +112,7 @@ async function failedResponseError(res, prefix, options) {
     body = await mapPrincipalAbort(signal, () => res.text());
   } catch (err) {
     throwIfPrincipalAbort(drupalFetchAbortByResponse.get(res) ?? getRequestAbortSignal(), err);
+    if (err?.name === "AbortError") throw err;
     return withStatus(new Error(`${prefix} (response body could not be read)`), res.status);
   }
   const mapped = sourceBudgetDenial(body);
@@ -301,5 +302,7 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
     throw await failedResponseError(res, `File upload failed ${res.status}`);
   }
 
-  return res.json();
+  const { json, text } = await readOkBody(res);
+  accountNorthboundBody(json, text);
+  return json;
 }

@@ -191,7 +191,10 @@ not override a partial resource server. Remove the resource-server settings
 to run unauthenticated. A non-loopback bind with that flag is fatal at
 startup (DEV-845). There is no trusted-proxy exception
 beyond loopback: network-facing HTTPS requires `auth.issuer` + `auth.audience`
-+ RFC 7662 introspection.
++ RFC 7662 introspection. Loopback unauthenticated mode cannot make
+write-like calls. The write re-check denies the local-operator identity on
+the network surface, with or without an `Authorization` header. Only stdio
+may skip that check.
 
 For `/mcp`, rate limiting and bearer authentication run before any request body
 is parsed, converted, or classified. After a resolved identity, the handler

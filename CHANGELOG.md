@@ -42,11 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not re-introspect and cannot cancel from a later kill. There is no
   kill-subscription frame or extra frame type. A network-origin call with
   no bearer is denied, including loopback `MCP_ALLOW_UNAUTHENTICATED`; only
-  stdio may skip the write re-check. A stray `Authorization: Bearer` on
-  loopback unauthenticated HTTP does not skip that write re-check. A kill
-  abort on a governed Drupal server-tool POST, including during the
-  response body read after headers, is the same generic deny (node-fetch
-  drops `signal.reason`).
+  stdio may skip the write re-check. Loopback unauthenticated HTTP cannot
+  make write-like calls, with or without an `Authorization` header. A stray
+  `Authorization: Bearer` on that mode does not skip the write re-check. A
+  kill abort on a governed Drupal POST (server-tool, JSON:API, GraphQL, or
+  upload), including during the response body read after headers, is the
+  same generic deny (node-fetch drops `signal.reason`).
 
 ### Fixed
 

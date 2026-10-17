@@ -159,6 +159,9 @@ function serverToolAbortSignal() {
   ) ?? AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS);
 }
 
+/** Fetch abort signal for a Response, so a kill during the body read remaps. */
+const serverToolAbortByResponse = new WeakMap();
+
 /**
  * node-fetch wrapper that maps a kill abort to the generic deny.
  * node-fetch 3 drops `signal.reason` on AbortError.
@@ -167,9 +170,6 @@ function serverToolAbortSignal() {
  * @param {object} init fetch init without `signal`.
  * @returns {Promise<object>} node-fetch Response.
  */
-/** Fetch abort signal for a Response, so a kill during the body read remaps. */
-const serverToolAbortByResponse = new WeakMap();
-
 async function fetchServerTool(endpoint, init) {
   const signal = serverToolAbortSignal();
   try {
