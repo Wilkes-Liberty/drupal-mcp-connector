@@ -17,7 +17,7 @@ import {
 } from "./data-flow.js";
 import { combineAbortSignals } from "./abort-signals.js";
 import { getRequestAbortSignal, getRequestSurface } from "./principal.js";
-import { throwIfPrincipalAbort } from "./principal-context.js";
+import { mapPrincipalAbort, throwIfPrincipalAbort } from "./principal-context.js";
 import { assertLiveTokenForGovernedWrite } from "./write-introspect.js";
 import { graphqlHasMutation } from "./security.js";
 import {
@@ -75,17 +75,19 @@ function isMutatingMethod(method) {
  * @returns {Promise<{json: object|null, text: string}>}
  */
 async function readOkBody(res) {
-  // Weakened for a red CI run: 2xx body-read AbortError is not remapped.
-  if (typeof res.text === "function") {
-    const text = await res.text();
-    if (!text) return { json: null, text: "" };
-    try {
-      return { json: JSON.parse(text), text };
-    } catch {
-      return { json: null, text };
+  const signal = drupalFetchAbortByResponse.get(res) ?? getRequestAbortSignal();
+  return mapPrincipalAbort(signal, async () => {
+    if (typeof res.text === "function") {
+      const text = await res.text();
+      if (!text) return { json: null, text: "" };
+      try {
+        return { json: JSON.parse(text), text };
+      } catch {
+        return { json: null, text };
+      }
     }
-  }
-  return { json: await res.json(), text: "" };
+    return { json: await res.json(), text: "" };
+  });
 }
 
 /**
@@ -106,9 +108,10 @@ async function readOkBody(res) {
 async function failedResponseError(res, prefix, options) {
   let body;
   try {
-    // Weakened for a red CI run: non-2xx body-read AbortError is not remapped.
-    body = await res.text();
+    const signal = drupalFetchAbortByResponse.get(res) ?? getRequestAbortSignal();
+    body = await mapPrincipalAbort(signal, () => res.text());
   } catch (err) {
+    throwIfPrincipalAbort(drupalFetchAbortByResponse.get(res) ?? getRequestAbortSignal(), err);
     if (err?.name === "AbortError") throw err;
     return withStatus(new Error(`${prefix} (response body could not be read)`), res.status);
   }
