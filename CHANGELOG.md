@@ -75,6 +75,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Hosted MCP URLs in operator docs (DEV-983 / DEV-817).** README and
+  `docs/mcp-clients.md` list `https://mcp.wilkesliberty.com/mcp` and
+  `https://mcp.staging.wilkesliberty.com/mcp`, the RFC 9728 discovery
+  URL `/.well-known/oauth-protected-resource`, and the OAuth path per
+  client (`cursor-mcp` for Cursor, `grok-bot` for Grok Bot, `mcp_read`
+  only). stdio remains the default local path. `--preset public-https`
+  stays gated for operator-run HTTPS. Connector HTTP transport already
+  serves unauthenticated `GET /health`; no transport change in this
+  release.
+
 - **Single Sentinel draft HTTP client.** Canonical library/block drafts,
   component drafts, and nested host/atomic drafts send `/mcp-draft` through
   `sentinelDraftRequest` (optional `meta` / `body` on that helper and on

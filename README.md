@@ -230,12 +230,27 @@ fix (exit non-zero on fail; `--json` is secret-free).
 |--------|-----------|--------|
 | **Local stdio** (`--preset local-stdio`) | `https://drupal.ddev.site` | Client launches this connector as a subprocess. Drupal must be reachable from this machine. |
 | **Tailscale VPN** (`--preset tailscale`) | `https://drupal.<tailnet>.ts.net` | VPN-required. The MCP client host must be on the same tailnet. Not a public internet path. |
-| **Public HTTPS** (`--preset public-https`) | `https://mcp.example.com/mcp` | **Gated / later.** Operator-run `MCP_TRANSPORT=https` + TLS + inbound OAuth. There is **no** hosted Wilkes & Liberty SaaS MCP URL. |
+| **Public HTTPS** (`--preset public-https`) | `https://mcp.example.com/mcp` | **Gated / later.** Operator-run `MCP_TRANSPORT=https` + TLS + inbound OAuth. Not required to use the Wilkes & Liberty hosted endpoints below. |
 
-**Remote HTTPS is Tailscale / local-VPN only.** This package does not ship a
-public SaaS remote endpoint. stdio is the default: the client launches the
-connector on your machine and inherits VPN/Tailscale/localhost reachability to
-Drupal. See **[docs/mcp-clients.md](docs/mcp-clients.md)**.
+### Hosted endpoints
+
+Wilkes & Liberty operates Streamable HTTP endpoints (DEV-817):
+
+| Environment | MCP URL | Protected-resource discovery (RFC 9728) |
+|-------------|---------|-----------------------------------------|
+| Production | `https://mcp.wilkesliberty.com/mcp` | `https://mcp.wilkesliberty.com/.well-known/oauth-protected-resource` |
+| Staging | `https://mcp.staging.wilkesliberty.com/mcp` | `https://mcp.staging.wilkesliberty.com/.well-known/oauth-protected-resource` |
+
+Both advertise `scopes_supported: ["mcp_read"]`. `/mcp` is an OAuth protected resource (no token → 401). Discovery is unauthenticated. The resource-specific path `/.well-known/oauth-protected-resource/mcp` is also served.
+
+OAuth path per client (`mcp_read` only):
+
+- **Cursor** — public PKCE client `cursor-mcp`. Register the MCP URL; Cursor completes authorization-code + PKCE against that client.
+- **Grok Bot** — `grok-bot` client / gated anonymous registration (keystone#1541). Register the same MCP URL as a remote MCP server.
+
+Hosted `/mcp` Origin allowlist (DEV-953): `https://cursor.com`, `https://www.cursor.com`, `https://grok.com`, `https://console.x.ai`. Copy into `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS`. Matching is exact.
+
+**stdio is still the default local path:** the client launches the connector on your machine and inherits VPN/Tailscale/localhost reachability to Drupal. See **[docs/mcp-clients.md](docs/mcp-clients.md)**.
 
 `requireGovernance: true` remains the listing default for a later marketplace
 entry — this repo does not submit listings. If the client only shows
@@ -244,7 +259,8 @@ entry — this repo does not submit listings. If the client only shows
 ### Cursor plugin (stdio)
 
 Local skeleton only (`.cursor-plugin/plugin.json` + root `mcp.json`): the client
-launches `npx -y drupal-mcp-connector` on this machine. No hosted URL.
+launches `npx -y drupal-mcp-connector` on this machine. The plugin does not
+ship a remote `url`.
 
 ```bash
 npx -y drupal-mcp-connector init --preset local-stdio
