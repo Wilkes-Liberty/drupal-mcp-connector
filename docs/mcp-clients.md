@@ -29,15 +29,15 @@ npx -y drupal-mcp-connector init
 ```
 
 Prints Cursor + Claude Code `mcpServers` snippets (and writes them only with
-`--write`). Remote HTTPS here means a connector **you** already host on a
-private network (Tailscale / local VPN) — not a public hosted SaaS URL.
+`--write`). `--preset public-https` stays gated (operator-run TLS). For the
+Wilkes & Liberty hosted URLs, see [§ Hosted endpoints](#hosted-endpoints).
 
 ```bash
 npx -y drupal-mcp-connector doctor          # one failing gate + next fix
 npx -y drupal-mcp-connector init --preset local-stdio
 npx -y drupal-mcp-connector init --preset tailscale --host https://drupal.tailnet.ts.net
 npx -y drupal-mcp-connector init --preset public-https --yes --json
-# public-https is gated/later — snippet shape only; no hosted SaaS endpoint
+# public-https is gated/later — operator-run snippet shape; W&L hosted URLs are below
 ```
 
 | Preset | Example | Constraint |
@@ -45,6 +45,26 @@ npx -y drupal-mcp-connector init --preset public-https --yes --json
 | Local stdio | `https://drupal.ddev.site` | Client subprocess; Drupal on this machine/LAN |
 | Tailscale VPN | `https://drupal.<tailnet>.ts.net` | VPN-required; not public internet |
 | Public HTTPS | `https://mcp.example.com/mcp` | Gated/later; operator-run TLS + inbound OAuth |
+
+### Hosted endpoints
+
+Wilkes & Liberty operates Streamable HTTP endpoints (DEV-817):
+
+| Environment | MCP URL | Protected-resource discovery (RFC 9728) |
+|-------------|---------|-----------------------------------------|
+| Production | `https://mcp.wilkesliberty.com/mcp` | `https://mcp.wilkesliberty.com/.well-known/oauth-protected-resource` |
+| Staging | `https://mcp.staging.wilkesliberty.com/mcp` | `https://mcp.staging.wilkesliberty.com/.well-known/oauth-protected-resource` |
+
+Both advertise `scopes_supported: ["mcp_read"]`. `/mcp` is an OAuth protected resource (no token → 401). Discovery is unauthenticated. The resource-specific path `/.well-known/oauth-protected-resource/mcp` is also served.
+
+OAuth path per client (`mcp_read` only):
+
+- **Cursor** — public PKCE client `cursor-mcp`. Register the MCP URL (`url` in `.cursor/mcp.json` or `~/.cursor/mcp.json`); Cursor completes authorization-code + PKCE against that client.
+- **Grok Bot** — `grok-bot` client / gated anonymous registration (keystone#1541). Register the same MCP URL as a remote MCP server (`grok mcp add … --url … --type http`, or the Grok API `server_url`).
+
+Hosted `/mcp` Origin allowlist (DEV-953): `https://cursor.com`, `https://www.cursor.com`, `https://grok.com`, `https://console.x.ai`. Copy into `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS`. Matching is exact.
+
+stdio remains the default local path. A connector you host on Tailscale / local VPN is unchanged.
 
 Regardless of client, a Drupal-side governance module (e.g.
 [MCP Sentinel](integration-contract.md)) remains the authoritative policy.
@@ -155,19 +175,24 @@ Project file `.cursor/mcp.json`, or user file `~/.cursor/mcp.json`:
 }
 ```
 
-Remote HTTPS (Tailscale / local VPN — not a public SaaS URL):
+Remote HTTPS — Wilkes & Liberty hosted (DEV-817), or a connector you host
+(Tailscale / local VPN):
 
 ```json
 {
   "mcpServers": {
     "drupal": {
-      "url": "https://mcp.example.ts.net:3443/mcp"
+      "url": "https://mcp.wilkesliberty.com/mcp"
     }
   }
 }
 ```
 
-`npx drupal-mcp-connector init` prints both shapes.
+Cursor uses the `cursor-mcp` public PKCE client (`mcp_read` only). Staging:
+`https://mcp.staging.wilkesliberty.com/mcp`. Discovery:
+`https://mcp.wilkesliberty.com/.well-known/oauth-protected-resource`
+(see [§ Hosted endpoints](#hosted-endpoints)). `npx drupal-mcp-connector init`
+prints the stdio shape as well.
 
 ---
 
@@ -195,7 +220,7 @@ grok mcp remove drupal    # remove it
 `grok mcp doctor` is the quickest verification — it should report
 `✓ handshake OK` and `✓ N tools discovered`. Because Grok Build runs locally, it
 reaches Drupal over whatever network the host is on (VPN/Tailscale/localhost).
-For a remote endpoint instead: `grok mcp add drupal --url https://mcp.example.com/mcp --type http`.
+For a remote endpoint instead: `grok mcp add drupal --url https://mcp.wilkesliberty.com/mcp --type http` (Grok Bot uses the `grok-bot` client; see [§ Hosted endpoints](#hosted-endpoints)).
 
 When this repo is the project, Grok loads `.agents/commands/` as `/drupal-*`.
 From any other directory, `npm run install:commands` copies the same stubs into
@@ -204,8 +229,8 @@ From any other directory, `npm run install:commands` copies the same stubs into
 ### Grok API — Remote MCP Tools (remote HTTP)
 
 The hosted Grok models (incl. `grok-build-0.1`) accept remote MCP servers declared
-in the request `tools` array. Run the connector's [HTTPS transport](#remote-http-transport)
-and reference its URL:
+in the request `tools` array. Point `server_url` at a [hosted endpoint](#hosted-endpoints)
+or at a connector you run via [HTTPS transport](#remote-http-transport):
 
 ```jsonc
 // xAI chat/completions request (shape; see docs.x.ai → Remote MCP Tools for exact fields)
@@ -215,7 +240,7 @@ and reference its URL:
     {
       "type": "mcp",
       "server_label": "drupal",
-      "server_url": "https://mcp.example.com/mcp",
+      "server_url": "https://mcp.wilkesliberty.com/mcp",
       "authorization": "Bearer <access token issued by auth.issuer>"
     }
   ]
