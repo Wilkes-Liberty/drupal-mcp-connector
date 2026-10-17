@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { state, remoteHasSubcommand } = vi.hoisted(() => {
   function remoteHasSubcommand(command, name) {
-    return command.includes(`'${name}'`) || command.includes(name.replace(/:/g, "\\:"));
+    return command.includes(`'${name}'`) || command.includes(name.split(":").join("\\:"));
   }
   return { state: { commands: [], replies: {}, site: null }, remoteHasSubcommand };
 });
