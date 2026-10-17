@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.1] - 2026-10-17
+
 ### Fixed
 
 - **Hosted `/mcp` Origin allowlist names the keystone#1539 public-client
-  Origins (DEV-953).** `config/config.example.json` now lists
+  Origins (DEV-953, #489).** `config/config.example.json` now lists
   `https://cursor.com`, `https://www.cursor.com`, `https://grok.com`, and
   `https://console.x.ai` — the HTTPS origins of the pre-registered
   `cursor-mcp` and `grok-bot` PKCE clients, plus the Origin the Cursor
