@@ -325,7 +325,13 @@ describe("createMcpRequestHandler", () => {
     const rateLimiter = createRateLimiter({ limit: 1, windowMs: 60_000, now: () => 0 });
     const principalLimiter = createRateLimiter({ limit: 100, windowMs: 60_000, now: () => 0 });
     const h = createMcpRequestHandler({
-      authenticate: async () => ({ ok: true, identity: { sub: "agent-1", clientId: "c", scopes: ["mcp_read"] } }),
+      authenticate: async () => ({ ok: true, identity: {
+        iss: "https://idp.example/realms/agents",
+        sub: "agent-1",
+        azp: "c",
+        clientId: "c",
+        scopes: ["mcp_read"],
+      } }),
       rateLimiter,
       principalLimiter,
       modernHandler: vi.fn(async (req, res) => { res.writeHead(200).end("ok"); }),
@@ -341,7 +347,9 @@ describe("createMcpRequestHandler", () => {
     // Three verified requests, one-per-window address limit: the address
     // bucket was never charged; the principal bucket was.
     expect(rateLimiter.peek("addr:127.0.0.1").allowed).toBe(true);
-    expect(principalLimiter.peek('principal:["agent-1","c"]').remaining).toBe(97);
+    expect(principalLimiter.peek(
+      "principal:https://idp.example/realms/agents|agent-1|c",
+    ).remaining).toBe(97);
   });
 
   it("meters a bearer on an unknown path before authentication so it is never a free introspection", async () => {
@@ -1100,8 +1108,18 @@ describe("createLegacySessionHandler", () => {
     })).toThrow(/sessionPrincipalKeyFn must be a function/);
   });
 
-  const principalA = Object.freeze({ sub: "agent-a", clientId: "client-a" });
-  const principalB = Object.freeze({ sub: "agent-b", clientId: "client-b" });
+  const principalA = Object.freeze({
+    iss: "https://idp.example/realms/agents",
+    sub: "agent-a",
+    azp: "client-a",
+    clientId: "client-a",
+  });
+  const principalB = Object.freeze({
+    iss: "https://idp.example/realms/agents",
+    sub: "agent-b",
+    azp: "client-b",
+    clientId: "client-b",
+  });
   const initialize = {
     jsonrpc: "2.0",
     id: 1,

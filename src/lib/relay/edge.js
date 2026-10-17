@@ -86,6 +86,10 @@ import { createLegacySessionHandler, createMcpRequestHandler } from "../http-han
 import { resolveAllowedHosts, resolveAllowedOrigins } from "../http-transport.js";
 import { rateLimitAddressKey } from "../rate-limit.js";
 import { isWriteLikeCall } from "../operations.js";
+import { GENERIC_PRINCIPAL_REFUSAL } from "../principal-context.js";
+import { SecurityError } from "../security.js";
+import { assertTestOnly } from "../test-only.js";
+import { assertLiveTokenForGovernedWrite } from "../write-introspect.js";
 import {
   eligiblePromotions,
   POLICY_DIGEST,
@@ -109,6 +113,25 @@ import {
 
 /** Northbound protocol pin. Stateless; no session ids in either direction. */
 export const EDGE_MCP_PROTOCOL = "2026-07-28";
+
+/**
+ * Edge write re-introspect before fan-down. Production leaves `required`
+ * true. Tests call {@link setEdgeWriteReintrospectGuard} for a red run
+ * of that branch only.
+ */
+export const EDGE_WRITE_REINTROSPECT = { required: true };
+
+/**
+ * Flip {@link EDGE_WRITE_REINTROSPECT} for a red-run. Restore `true`
+ * after the assertion; production code never calls this.
+ *
+ * @param {boolean} required
+ * @returns {void}
+ */
+export function setEdgeWriteReintrospectGuard(required) {
+  assertTestOnly("setEdgeWriteReintrospectGuard");
+  EDGE_WRITE_REINTROSPECT.required = Boolean(required);
+}
 
 /**
  * Extra northbound routes the edge serves beside `/mcp`. Each is
@@ -1196,6 +1219,54 @@ export async function startEdge({
       return;
     }
 
+    // Inbound bearer never crosses the tunnel. Re-introspect write-like
+    // calls here, then stamp tokenLive so the agent does not fail open.
+    let tokenLive = false;
+    if (EDGE_WRITE_REINTROSPECT.required && isCall && toolName && isWriteLikeCall(toolName, args)) {
+      try {
+        await assertLiveTokenForGovernedWrite({ identity, surface: "network" });
+        tokenLive = true;
+      } catch (err) {
+        if (err instanceof SecurityError && err.message === GENERIC_PRINCIPAL_REFUSAL) {
+          const denied = meter({
+            phase: "decision",
+            decision: "deny",
+            reason: "not_entitled",
+            requestId: null,
+            tenant: selected.tenant,
+            principal,
+            principalKey,
+            method: body?.method ?? null,
+            tool: toolName,
+            policyDigest,
+            units: 1,
+            bytesIn,
+          });
+          remember({
+            tenant: selected.tenant,
+            sub: identity.sub,
+            clientId: identity.clientId,
+            delegator: mapped.delegator,
+            decisionId: denied?.decisionId ?? null,
+            receiptId: denied?.decisionId ?? null,
+            requestId: null,
+            policyDigest,
+            outcome: "denied",
+          });
+          jsonResponse(res, 200, {
+            jsonrpc: "2.0",
+            id: body?.id ?? null,
+            result: {
+              content: [{ type: "text", text: `Access denied: ${GENERIC_PRINCIPAL_REFUSAL}` }],
+              isError: true,
+            },
+          });
+          return;
+        }
+        throw err;
+      }
+    }
+
     const callerApproval = callerApprovalHint(args);
     let consumedApprovalId = null;
     if (approvalLedger && isCall && toolName && approvalRequired.has(toolName)) {
@@ -1251,14 +1322,14 @@ export async function startEdge({
       }
     }
 
-    const id = randomUUID();
-    const waited = broker.track(id, { owner: selected.session.agentId });
     const routedIdentity = identityWithGrant(identity, {
       tenant: selected.tenant,
       actor: mapped.actor,
       delegator: mapped.delegator,
       policy: boundPolicy.policy,
     });
+    const id = randomUUID();
+    const waited = broker.track(id, { owner: selected.session.agentId });
     const wrote = writeFrame(selected.session.socket, {
       type: "mcp-request",
       id,
@@ -1267,6 +1338,7 @@ export async function startEdge({
       headers: fanDownHeaders(req.headers),
       identity: routedIdentity,
       body: stripCallerHints(body),
+      ...(tokenLive ? { tokenLive: true } : {}),
       correlation: {
         requestId: id,
         tenant: selected.tenant,
@@ -1526,6 +1598,7 @@ export async function startEdge({
 
   const requestHandler = createMcpRequestHandler({
     authenticate,
+    ...(typeof inbound.introspect === "function" ? { introspect: inbound.introspect } : {}),
     protectedResource: inbound.protectedResource,
     resourceMetadataUrl: inbound.resourceMetadataUrl,
     auditWriter: hostedAudit,

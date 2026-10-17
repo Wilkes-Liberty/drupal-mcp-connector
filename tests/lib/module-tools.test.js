@@ -39,7 +39,14 @@ beforeEach(() => {
   call = vi.fn(async (_site, _name, args) => ({ content: [], structuredContent: args }));
   registry = createModuleToolRegistry({ list, call });
 });
-const context = () => ({ sites: state.sites, identity: { scopes: ["module_access"], sites: ["stage"] } });
+const context = () => ({ sites: state.sites, identity: {
+  iss: "https://idp.example/realms/agents",
+  sub: "module-operator",
+  azp: "module-agent",
+  clientId: "module-agent",
+  scopes: ["module_access"],
+  sites: ["stage"],
+} });
 const parameters = (definition, args = { id: 1 }) => ({
   catalogRevision: definition.inputSchema.properties.catalogRevision.const, arguments: args,
 });

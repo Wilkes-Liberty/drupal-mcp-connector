@@ -114,7 +114,7 @@ describe("governed raw SQL", () => {
       query: "SELECT nid, title FROM node_field_data",
     });
 
-    expect(state.lastCommand).toContain("mcp-sentinel:sql-query");
+    expect(state.lastCommand).toMatch(/mcp-sentinel\\?:sql-query/);
     expect(state.lastCommand).not.toMatch(/\bsql:query\b/);
     expect(out.rows).toHaveLength(1);
   });

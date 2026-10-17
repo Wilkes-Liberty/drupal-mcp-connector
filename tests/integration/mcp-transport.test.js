@@ -139,12 +139,9 @@ describe("MCP transport integration", () => {
     expect(traffic.some((request) => request.body?.method === "server/discover")).toBe(true);
     expect(traffic.every((request) => request.headers["mcp-session-id"] === undefined)).toBe(true);
     expect(traffic.every((request) => request.responseHeaders["mcp-session-id"] === undefined)).toBe(true);
-    expect(toolContexts).toHaveLength(1);
-    expect(toolContexts[0].mcpReq.envelope).toMatchObject({
-      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-      "io.modelcontextprotocol/clientInfo": { name: "modern-client", version: "1.0.0" },
-      "io.modelcontextprotocol/clientCapabilities": { roots: {} },
-    });
+    // tools/call is two-arg; SDK request context must not become principal.
+    expect(toolContexts).toEqual([undefined]);
+    expect(client.getNegotiatedProtocolVersion()).toBe("2026-07-28");
   });
 
   it("preserves the existing sessionful 2025 HTTP contract", async () => {

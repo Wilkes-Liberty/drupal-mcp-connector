@@ -29,6 +29,9 @@ import { authHeadersAsync, clientHeaders, CLIENT_NAME, CLIENT_VERSION } from "./
 import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial, getDataFlowContext } from "./data-flow.js";
 import { clearToken } from "./oauth.js";
 import { cleanErrorText, describeErrorBody } from "./error-body.js";
+import { combineAbortSignals } from "./abort-signals.js";
+import { GENERIC_PRINCIPAL_REFUSAL, mapPrincipalAbort, throwIfPrincipalAbort } from "./principal-context.js";
+import { getRequestAbortSignal } from "./principal.js";
 
 /** Calls a configured module binding through the registry, without fallback. */
 export async function callBoundModuleTool(site, binding, args, required) {
@@ -143,6 +146,42 @@ const MCP_PROTOCOL_VERSION = "2025-06-18";
 /** MCP server-tool POST timeout. Handshake, catalog, and tools/call share this. */
 export const SERVER_TOOL_TIMEOUT_MS = 15_000;
 
+/**
+ * Timeout plus the in-flight cancel signal so a kill aborts a governed
+ * server-tool POST. The 15s timeout is kept when `AbortSignal.any` is missing.
+ *
+ * @returns {AbortSignal}
+ */
+function serverToolAbortSignal() {
+  return combineAbortSignals(
+    AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
+    getRequestAbortSignal(),
+  ) ?? AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS);
+}
+
+/** Fetch abort signal for a Response, so a kill during the body read remaps. */
+const serverToolAbortByResponse = new WeakMap();
+
+/**
+ * node-fetch wrapper that maps a kill abort to the generic deny.
+ * node-fetch 3 drops `signal.reason` on AbortError.
+ *
+ * @param {string} endpoint Fully-qualified MCP URL.
+ * @param {object} init fetch init without `signal`.
+ * @returns {Promise<object>} node-fetch Response.
+ */
+async function fetchServerTool(endpoint, init) {
+  const signal = serverToolAbortSignal();
+  try {
+    const res = await fetch(endpoint, { ...init, signal });
+    serverToolAbortByResponse.set(res, signal);
+    return res;
+  } catch (err) {
+    throwIfPrincipalAbort(signal, err);
+    throw err;
+  }
+}
+
 /** Default MCP response body cap (bytes). Caller `maxBytes` overrides. */
 export const SERVER_TOOL_MAX_BYTES = 262_144;
 
@@ -211,7 +250,8 @@ async function baseHeaders(site, sessionId) {
  *   (null for empty/unparseable bodies, e.g. a notification's 202) plus the raw text.
  */
 async function readBody(res) {
-  const rawText = await res.text();
+  const signal = serverToolAbortByResponse.get(res) ?? getRequestAbortSignal();
+  const rawText = await mapPrincipalAbort(signal, () => res.text());
   if (!rawText) return { body: null, rawText };
 
   const contentType = res.headers.get("content-type") || "";
@@ -340,12 +380,11 @@ async function initializeSession(site, endpoint, key) {
   };
 
   const post = async () =>
-    fetch(endpoint, {
+    fetchServerTool(endpoint, {
       method: "POST",
       headers: await baseHeaders(site, null),
       body: JSON.stringify(payload),
       size: SERVER_TOOL_MAX_BYTES,
-      signal: AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
     });
 
   let res = await post();
@@ -377,14 +416,14 @@ async function initializeSession(site, endpoint, key) {
   // Best-effort: the server may not require notifications/initialized, and a
   // non-2xx here must not fail the call. Errors are swallowed deliberately.
   try {
-    await fetch(endpoint, {
+    await fetchServerTool(endpoint, {
       method: "POST",
       headers: await baseHeaders(site, sessionId),
       body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
       size: SERVER_TOOL_MAX_BYTES,
-      signal: AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.message === GENERIC_PRINCIPAL_REFUSAL) throw err;
     // Notification is advisory; proceed with the established session.
   }
 
@@ -534,12 +573,11 @@ async function requestServerTool(site, method, params, options) {
   while (true) {
     consumeBudgetIfEnforced("request", 1, { retry: paid });
     paid = true;
-    const res = await fetch(endpoint, {
+    const res = await fetchServerTool(endpoint, {
       method: "POST",
       headers: await baseHeaders(site, sessionId),
       body: JSON.stringify(payload),
       size: options.maxBytes ?? SERVER_TOOL_MAX_BYTES,
-      signal: AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
     });
     const { body, rawText } = await readBody(res);
 

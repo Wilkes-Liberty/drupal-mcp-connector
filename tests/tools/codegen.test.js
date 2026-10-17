@@ -68,7 +68,7 @@ describe("drupal_codegen_*", () => {
 
   it("inspect calls graphql-compose-codegen:inspect and returns stdout", async () => {
     const out = await handlers.drupal_codegen_inspect({ site: "dev" });
-    expect(lastCommand).toContain("graphql-compose-codegen:inspect");
+    expect(lastCommand).toMatch(/graphql-compose-codegen\\?:inspect/);
     expect(lastCommand).not.toContain("output-dir");
     expect(out.output).toBe("scaffold");
     expect(out.wroteFiles).toBe(false);
@@ -76,12 +76,12 @@ describe("drupal_codegen_*", () => {
 
   it("diff calls graphql-compose-codegen:diff", async () => {
     await handlers.drupal_codegen_diff({ site: "dev" });
-    expect(lastCommand).toContain("graphql-compose-codegen:diff");
+    expect(lastCommand).toMatch(/graphql-compose-codegen\\?:diff/);
   });
 
   it("generate is always --dry-run and never --output-dir", async () => {
     const out = await handlers.drupal_codegen_generate({ site: "dev" });
-    expect(lastCommand).toContain("graphql-compose-codegen:generate");
+    expect(lastCommand).toMatch(/graphql-compose-codegen\\?:generate/);
     expect(lastCommand).toContain("--dry-run");
     expect(lastCommand).not.toContain("output-dir");
     expect(out.wroteFiles).toBe(false);
@@ -93,8 +93,8 @@ describe("drupal_codegen_*", () => {
       bundles: ["article", "page"],
       skipFields: ["field_components"],
     });
-    expect(lastCommand).toContain("--bundles=article,page");
-    expect(lastCommand).toContain("--skip-fields=field_components");
+    expect(lastCommand).toMatch(/--bundles\\?=article\\?,page/);
+    expect(lastCommand).toMatch(/--skip-fields\\?=field_components/);
   });
 
   it("rejects an invalid bundle machine name", async () => {

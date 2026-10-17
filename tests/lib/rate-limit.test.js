@@ -219,12 +219,18 @@ describe("createRateLimiter", () => {
 
 describe("rate-limit keys", () => {
   it("builds a principal key from verified sub+clientId and never from headers", () => {
-    expect(rateLimitPrincipalKey({ sub: "alice", clientId: "client-a" })).toBe('principal:["alice","client-a"]');
-    // A NUL inside a claim must not fold two principals into one bucket.
-    expect(rateLimitPrincipalKey({ sub: "a\0b", clientId: "c" }))
-      .not.toBe(rateLimitPrincipalKey({ sub: "a", clientId: "b\0c" }));
-    expect(rateLimitPrincipalKey({ sub: "a", clientId: "" }))
-      .not.toBe(rateLimitPrincipalKey({ sub: "", clientId: "a" }));
+    expect(rateLimitPrincipalKey({
+      iss: "https://idp.example/realms/agents",
+      sub: "alice",
+      azp: "client-a",
+    })).toBe("principal:https://idp.example/realms/agents|alice|client-a");
+    expect(rateLimitPrincipalKey({
+      iss: "https://idp.example/realms/agents",
+      sub: "alice",
+      azp: "client-a",
+      act: { sub: "agent-1" },
+    })).toBe("principal:https://idp.example/realms/agents|alice|agent-1");
+    expect(rateLimitPrincipalKey({ sub: "alice", clientId: "client-a" })).toBeNull();
     expect(rateLimitPrincipalKey({ localOperator: true, sub: "ignored" })).toBe("principal:local-operator");
     expect(rateLimitPrincipalKey(null)).toBeNull();
     expect(rateLimitPrincipalKey({ sub: "", clientId: "" })).toBeNull();

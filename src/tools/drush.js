@@ -25,12 +25,13 @@ import { Client }        from "ssh2";
 import { readFileSync }  from "node:fs";
 import { homedir }       from "node:os";
 import { join, resolve, normalize } from "node:path";
+import shellQuote from "shell-quote";
 import { getSiteConfig } from "../lib/config.js";
 import {
   resolveSecurityConfig, assertNotReadOnly, assertDestructiveAllowed, assertModuleUninstallAllowed,
   assertCoreExtensionChangeAllowed, isCoreExtensionConfig, SecurityError,
 } from "../lib/security.js";
-import { validateMachineName, validateSqlQuery, sanitizeSshArg } from "../lib/validate.js";
+import { validateMachineName, validateSqlQuery } from "../lib/validate.js";
 
 // ---------------------------------------------------------------------------
 // SSH configuration helpers
@@ -125,8 +126,8 @@ function resolveKeyPath(rawPath) {
  * @param {number}   timeoutMs  - max execution time
  * @returns {Promise<string>}   - stdout trimmed
  *
- * Security: args are individually shell-escaped via sanitizeSshArg().
- * No raw user input is ever interpolated directly into the command string.
+ * Security: the remote command is a quoted argv (`shell-quote`), not a
+ * concatenated `cd … && …` string. `--root` selects the Drupal tree.
  *
  * Exported so the audit tool groups can reuse the hardened bridge for their
  * drush fallback paths (e.g. config:status, pm:list, watchdog:show) without
@@ -146,13 +147,11 @@ export function sshDrush(site, drushArgs, timeoutMs = 30000, { confirm = "yes" }
     throw new Error("drushSsh.drupalRoot must be an absolute path.");
   }
 
-  // Build the command: cd to Drupal root, then run vendor drush with escaped args
-  const escapedArgs = drushArgs.map(sanitizeSshArg).join(" ");
-  const drushBin    = `${drupalRoot}/vendor/bin/drush`;
-  // Every prompt is answered for the non-interactive session: yes by default,
-  // no when the caller must not let Drush widen the operation (#346).
-  const answer      = confirm === "no" ? "--no" : "--yes";
-  const command     = `cd ${sanitizeSshArg(drupalRoot)} && ${drushBin} ${escapedArgs} ${answer}`;
+  // Quoted argv only. `--root` replaces `cd … &&`, so no shell operators
+  // are interpolated. `quote` is the CodeQL-modeled sanitizer for this sink.
+  const drushBin = `${drupalRoot}/vendor/bin/drush`;
+  const answer = confirm === "no" ? "--no" : "--yes";
+  const remoteArgv = [drushBin, "--root", drupalRoot, ...drushArgs, answer];
 
   console.error(`[drush-bridge] ${site._name}: drush ${redactSecretArgs(drushArgs)}`);
 
@@ -176,7 +175,7 @@ export function sshDrush(site, drushArgs, timeoutMs = 30000, { confirm = "yes" }
     );
 
     conn.on("ready", () => {
-      conn.exec(command, (err, stream) => {
+      conn.exec(shellQuote.quote(remoteArgv), (err, stream) => {
         if (err) { settle(reject, err); return; }
 
         stream.on("data",        (chunk) => { stdout += chunk.toString("utf8"); });

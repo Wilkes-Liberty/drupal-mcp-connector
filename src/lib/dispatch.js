@@ -15,17 +15,105 @@ import { resolveSecurityConfig, assertNotReadOnly,
   SecurityError } from "./security.js";
 import { toolError, toolResult } from "./errors.js";
 import { BackendCapabilityError, BackendResolutionError } from "./backends/errors.js";
-import { inferOperation } from "./operations.js";
+import { inferOperation, isWriteLikeCall } from "./operations.js";
+import {
+  assertFrozenPrincipal,
+  GENERIC_PRINCIPAL_REFUSAL,
+} from "./principal-context.js";
+import { assertLiveTokenForGovernedWrite } from "./write-introspect.js";
+import {
+  activeInFlightRegistry,
+  inFlightKeysFromIdentity,
+} from "./in-flight.js";
 import { ensureTextFormatContext, toolNeedsTextFormatContext } from "./text-format-context.js";
 import { assertSourceGovernance, GovernanceError } from "./governance.js";
 import {
   assertPrincipalEntitlement, callerTargetHints, DIAGNOSTIC_TOOLS,
-  getRequestIdentity, getRequestSurface, principalHasScope, resolveAuthoritativeTarget,
+  getRequestAuthSession, getRequestIdentity, getRequestPrincipalContext,
+  getRequestSurface, principalHasScope, resolveAuthoritativeTarget,
+  runWithIdentity,
 } from "./principal.js";
 import { networkToolScopeDenial } from "./tool-scopes.js";
 import { assertExplicitSiteForWrite, withResolvedTarget } from "./site-target.js";
 import { buildDataFlowContext, consumeBudgetIfEnforced, runWithDataFlow } from "./data-flow.js";
 import { allHandlers } from "../tools/index.js";
+
+/** Caller fields that may influence dispatch. SDK context is not on this list. */
+const DISPATCH_CONTEXT_KEYS = Object.freeze([
+  "identity", "sites", "grants", "defaultSite", "siteNames", "headers", "moduleTool", "surface",
+]);
+
+/**
+ * Copy only allowlisted dispatch fields. SDK `mcpReq` / `principalContext`
+ * never become principal authority.
+ *
+ * @param {object} [context]
+ * @returns {object}
+ */
+function pickDispatchContext(context = {}) {
+  const bag = new Map(Object.entries(context ?? {}));
+  return Object.fromEntries(
+    DISPATCH_CONTEXT_KEYS
+      .filter((key) => bag.has(key) && bag.get(key) !== undefined)
+      .map((key) => [key, bag.get(key)]),
+  );
+}
+
+/**
+ * ALS identity wins when a request session exists. Tests without a session
+ * may still pass `context.identity`.
+ *
+ * @param {object} [context]
+ * @returns {object|null}
+ */
+function resolveDispatchIdentity(context = {}) {
+  const session = getRequestAuthSession();
+  if (session) return session.identity;
+  if (Object.hasOwn(context, "identity")) return context.identity;
+  return getRequestIdentity();
+}
+
+/**
+ * @param {object} [context]
+ * @returns {"network"|null}
+ */
+function resolveDispatchSurface(context = {}) {
+  const session = getRequestAuthSession();
+  if (session?.surface) return session.surface;
+  if (Object.hasOwn(context, "surface")) return context.surface;
+  if (session) return session.surface;
+  return getRequestSurface();
+}
+
+/**
+ * Track this tool call so a kill can abort it. Local operator / unkeyed
+ * identities are not registered (nothing to cancel).
+ *
+ * @param {object|null} identity
+ * @returns {{end: () => void, signal?: AbortSignal}}
+ */
+function beginToolFlight(identity) {
+  const keys = inFlightKeysFromIdentity(identity);
+  if (!keys) return { end() {} };
+  return activeInFlightRegistry().begin(keys);
+}
+
+/**
+ * True when the throw is the generic principal deny, including an abort
+ * whose reason is that deny.
+ *
+ * @param {*} err
+ * @returns {boolean}
+ */
+function isPrincipalDenial(err) {
+  if (!err) return false;
+  if (err instanceof SecurityError && err.message === GENERIC_PRINCIPAL_REFUSAL) return true;
+  if (err.message === GENERIC_PRINCIPAL_REFUSAL) return true;
+  const reason = err.cause ?? err.reason;
+  if (reason instanceof SecurityError && reason.message === GENERIC_PRINCIPAL_REFUSAL) return true;
+  if (reason === GENERIC_PRINCIPAL_REFUSAL) return true;
+  return false;
+}
 
 /**
  * Resolve every configured site that CAN resolve, skipping the ones that
@@ -64,7 +152,7 @@ function resolveCallTarget(toolName, rawArgs, context = {}) {
     return null;
   }
 
-  const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
+  const identity = resolveDispatchIdentity(context);
   if (identity) {
     if (context.moduleTool) {
       if (!principalHasScope(identity, context.moduleTool.scope)) {
@@ -127,7 +215,19 @@ function extractEntityType(toolName, args) {
  */
 export async function securityMiddleware(toolName, args, handler, context = {}) {
   const rawArgs = args ?? {};
-  const identity = context.identity !== undefined ? context.identity : getRequestIdentity();
+  const identity = resolveDispatchIdentity(context);
+  const surface = resolveDispatchSurface(context);
+  const sealed = assertFrozenPrincipal({
+    identity,
+    surface,
+    args: rawArgs,
+    headers: context.headers,
+    principalContext: getRequestPrincipalContext(),
+  });
+  if (context && typeof context === "object") {
+    context.principalContext = sealed;
+  }
+  // Forward the verified principal unchanged. Never merge caller fields.
   let nextArgs = rawArgs;
 
   const resolved = resolveCallTarget(toolName, rawArgs, { ...context, identity });
@@ -200,8 +300,16 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
     if (!DIAGNOSTIC_TOOLS.has(toolName)) {
       consumeBudgetIfEnforced("chained_action");
     }
+    if (isWriteLikeCall(toolName, nextArgs)) {
+      await assertLiveTokenForGovernedWrite({ identity, surface });
+    }
     return handler(nextArgs);
   });
+}
+
+function principalDenyEnvelope() {
+  markHttpAuditToolOutcome("denied");
+  return { content: [{ type: "text", text: `Access denied: ${GENERIC_PRINCIPAL_REFUSAL}` }], isError: true };
 }
 
 /**
@@ -216,40 +324,75 @@ export async function securityMiddleware(toolName, args, handler, context = {}) 
 export async function callTool(name, args, context = {}) {
   // eslint-disable-next-line security/detect-object-injection -- name is an MCP tool name from validated schema; allHandlers is a closed dispatch table built at startup
   const handler = allHandlers[name];
+  const identity = resolveDispatchIdentity(context);
+  let flight;
+  try {
+    flight = beginToolFlight(identity);
+  } catch (err) {
+    if (isPrincipalDenial(err)) {
+      return principalDenyEnvelope();
+    }
+    throw err;
+  }
+  const session = getRequestAuthSession();
+
+  const invoke = async () => {
+    try {
+      if (getRequestSurface() === "network" && getRequestIdentity() === null) {
+        throw new SecurityError("Unauthenticated network request.");
+      }
+      if (getRequestSurface() === "network") {
+        const denial = networkToolScopeDenial(name);
+        if (denial) throw new SecurityError(denial);
+      }
+      if (!handler) {
+        return toolError(new Error(
+          `Unknown tool "${name}". Call drupal_list_entity_types to discover available resources.`
+        ));
+      }
+      const ctx = pickDispatchContext(context);
+      ctx.identity = identity;
+      ctx.surface = resolveDispatchSurface(context);
+      const result = await securityMiddleware(name, args ?? {}, handler, ctx);
+      return toolResult(withResolvedTarget(result, ctx.resolvedTarget));
+    } catch (err) {
+      if (isPrincipalDenial(err)) {
+        return principalDenyEnvelope();
+      }
+      // Translate known error classes into clear, non-leaky isError responses;
+      // anything else falls through to toolError for a generic envelope.
+      if (err instanceof GovernanceError) {
+        return { content: [{ type: "text", text: `Source governance unavailable: ${err.message}` }], isError: true };
+      }
+      if (err instanceof SecurityError) {
+        if (isPrincipalDenial(err)) return principalDenyEnvelope();
+        markHttpAuditToolOutcome("denied");
+        return { content: [{ type: "text", text: `Access denied: ${err.message}` }], isError: true };
+      }
+      if (err instanceof BackendCapabilityError) {
+        return { content: [{ type: "text", text: `Not supported by this site's backend: ${err.message}` }], isError: true };
+      }
+      if (err instanceof BackendResolutionError) {
+        return { content: [{ type: "text", text: `Backend resolution failed: ${err.message}` }], isError: true };
+      }
+      return toolError(err);
+    }
+  };
 
   try {
-    if (getRequestSurface() === "network" && getRequestIdentity() === null) {
-      throw new SecurityError("Unauthenticated network request.");
+    if (flight.signal) {
+      return await runWithIdentity(identity, invoke, {
+        surface: resolveDispatchSurface(context) ?? session?.surface ?? null,
+        bearer: session?.bearer ?? null,
+        introspect: session?.introspect ?? null,
+        principalContext: session?.principalContext ?? null,
+        abortSignal: flight.signal,
+        tokenLive: session?.tokenLive === true,
+      });
     }
-    if (getRequestSurface() === "network") {
-      const denial = networkToolScopeDenial(name);
-      if (denial) throw new SecurityError(denial);
-    }
-    if (!handler) {
-      return toolError(new Error(
-        `Unknown tool "${name}". Call drupal_list_entity_types to discover available resources.`
-      ));
-    }
-    const ctx = { ...context };
-    const result = await securityMiddleware(name, args ?? {}, handler, ctx);
-    return toolResult(withResolvedTarget(result, ctx.resolvedTarget));
-  } catch (err) {
-    // Translate known error classes into clear, non-leaky isError responses;
-    // anything else falls through to toolError for a generic envelope.
-    if (err instanceof GovernanceError) {
-      return { content: [{ type: "text", text: `Source governance unavailable: ${err.message}` }], isError: true };
-    }
-    if (err instanceof SecurityError) {
-      markHttpAuditToolOutcome("denied");
-      return { content: [{ type: "text", text: `Access denied: ${err.message}` }], isError: true };
-    }
-    if (err instanceof BackendCapabilityError) {
-      return { content: [{ type: "text", text: `Not supported by this site's backend: ${err.message}` }], isError: true };
-    }
-    if (err instanceof BackendResolutionError) {
-      return { content: [{ type: "text", text: `Backend resolution failed: ${err.message}` }], isError: true };
-    }
-    return toolError(err);
+    return await invoke();
+  } finally {
+    flight.end();
   }
 }
 

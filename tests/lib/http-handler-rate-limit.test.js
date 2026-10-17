@@ -64,8 +64,22 @@ function handler(overrides = {}) {
 }
 
 function identityFor(token) {
-  if (token === "alice") return { sub: "alice", clientId: "client-a" };
-  if (token === "bob") return { sub: "bob", clientId: "client-b" };
+  if (token === "alice") {
+    return {
+      iss: "https://idp.example/realms/agents",
+      sub: "alice",
+      azp: "client-a",
+      clientId: "client-a",
+    };
+  }
+  if (token === "bob") {
+    return {
+      iss: "https://idp.example/realms/agents",
+      sub: "bob",
+      azp: "client-b",
+      clientId: "client-b",
+    };
+  }
   return null;
 }
 
