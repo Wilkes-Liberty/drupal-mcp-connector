@@ -30,6 +30,7 @@ import {
   RevisionIdentityError,
   UnsupportedDraftContinuationError,
 } from "../../src/lib/canonical-draft.js";
+import { isMissingDraftEndpoint, draftPatchHeaders } from "../../src/lib/sentinel-draft.js";
 
 const WC_400 = new Error(
   "Drupal 400 on PATCH /jsonapi/node/solution/n1: Updating a resource object " +
@@ -938,8 +939,52 @@ describe("revision identity (#420)", () => {
     expect(out.governedDraft).toBeUndefined();
     const queries = backend.rawQuery.mock.calls.map(([call]) => call);
     expect(queries).toHaveLength(1);
-    expect(queries[0].path).toMatch(/\/mcp-translations$/);
+    expect(queries[0].path).toBe(
+      "/jsonapi/paragraphs_library_item/paragraphs_library_item/lib-1/mcp-translations",
+    );
     expect(queries.some((call) => String(call.path).includes("mcp-draft"))).toBe(false);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+    expect(isMissingDraftEndpoint(new Error("Drupal 404 inventory unavailable"))).toBe(false);
+  });
+
+  it("treats a missing library inventory as absence, not the missing-draft sentence", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => (
+        resourceVersion ? { ...published } : published
+      )),
+      rawQuery: vi.fn(async ({ path }) => {
+        throw Object.assign(
+          new Error(`Drupal 404 on GET ${path}`),
+          { status: 404 },
+        );
+      }),
+    });
+    const out = await resolveWorkingCopyPatchTarget(backend, {
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id: "lib-1",
+      existing: published,
+    });
+    expect(out.governedDraft).toBeUndefined();
+    expect(out.liveVid).toBe(20);
+    expect(backend.rawQuery.mock.calls[0][0].path).toMatch(/\/mcp-translations$/);
+    expect(backend.updateEntity).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when library inventory is denied", async () => {
+    const backend = backendStub({
+      getEntity: vi.fn(async ({ resourceVersion }) => (
+        resourceVersion ? { ...published } : published
+      )),
+      rawQuery: vi.fn(async ({ path }) => {
+        throw new Error(`Drupal 403 on GET ${path}`);
+      }),
+    });
+    const err = await resolveWorkingCopyPatchTarget(backend, {
+      entityType: "paragraphs_library_item", bundle: "paragraphs_library_item", id: "lib-1",
+      existing: published,
+    }).catch((error) => error);
+    expect(err).toBeInstanceOf(RevisionIdentityError);
+    expect(err.message).toMatch(/reading the draft inventory was denied/);
+    expect(isMissingDraftEndpoint(err)).toBe(false);
     expect(backend.updateEntity).not.toHaveBeenCalled();
   });
 
@@ -987,6 +1032,9 @@ describe("revision identity (#420)", () => {
           };
         }
         expect(String(path)).toMatch(/\/mcp-draft$/);
+        expect(options.headers).toEqual(draftPatchHeaders({
+          live: "20", working: "21", langcode: "en", preflight: true,
+        }));
         expect(options.headers["If-Match"]).toBe('"20:21"');
         expect(options.headers["X-MCP-Draft-Preflight"]).toBe("1");
         expect(options.headers["X-MCP-Draft-Langcode"]).toBe("en");
