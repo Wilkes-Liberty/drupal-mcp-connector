@@ -37,7 +37,10 @@ import { entityRevisionId } from "./write-revision.js";
 import { httpStatusOf } from "./error-status.js";
 import { paragraphPinsFromEntity } from "./err-relationships.js";
 import { entityLooksModerated } from "./moderation-default.js";
-import { supportsSentinelDraft, sentinelDraftRequest, isMissingDraftEndpoint } from "./sentinel-draft.js";
+import {
+  supportsSentinelDraft, sentinelDraftRequest, isMissingDraftEndpoint,
+  readOptionalDraftInventory, draftPatchHeaders,
+} from "./sentinel-draft.js";
 import { OPEN_DRAFT_OPERATION } from "./component-draft.js";
 
 /** Entity types that stay on the canonical PATCH unless open_draft is advertised. */
@@ -295,21 +298,17 @@ async function readCanonicalDraftInventory(backend, ref) {
   if (typeof backend.rawQuery !== "function" || typeof backend.resourcePath !== "function") {
     throw new RevisionIdentityError(ref.entityType, "the backend cannot read the draft inventory");
   }
-  let result;
+  let inventory;
   try {
-    result = await backend.rawQuery({
-      path: `${backend.resourcePath(ref.entityType, ref.bundle)}/${encodeURIComponent(ref.id)}/mcp-translations`,
-      options: { method: "GET" },
-    });
+    inventory = await readOptionalDraftInventory(backend, ref);
   } catch (error) {
     const status = httpStatusOf(error);
-    if (status === 404 || status === 405) return null;
     const detail = status === 401 || status === 403
       ? "reading the draft inventory was denied"
       : "the draft inventory could not be read";
     throw new RevisionIdentityError(ref.entityType, detail);
   }
-  const inventory = result?.meta;
+  if (inventory === null) return null;
   if (!inventory || typeof inventory !== "object" || !validVid(inventory.live?.vid)
     || (inventory.working && !validVid(inventory.working.vid))) {
     throw new RevisionIdentityError(ref.entityType, "the draft inventory omitted a revision id");
@@ -390,11 +389,7 @@ function governedCanonicalDraftRequest(backend, {
     entityType, bundle, id, suffix: "mcp-draft",
     options: {
       method: "PATCH",
-      headers: {
-        "If-Match": working ? `"${live}:${working}"` : `"${live}"`,
-        "X-MCP-Draft-Preflight": preflight ? "1" : "0",
-        "X-MCP-Draft-Langcode": langcode,
-      },
+      headers: draftPatchHeaders({ live, working, langcode, preflight }),
     },
     body: { data },
   });

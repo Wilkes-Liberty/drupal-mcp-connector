@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Canonical inventory GET uses the Sentinel draft client.** Library and
+  custom-block reads of `/mcp-translations` go through
+  `readOptionalDraftInventory` (a Drupal 404 or 405 is still absence, not
+  the missing `/mcp-draft` sentence). Draft PATCH `If-Match` and
+  `X-MCP-Draft-*` headers are built by shared `draftPatchHeaders`.
+
 ## [5.2.1] - 2026-10-17
 
 ### Fixed

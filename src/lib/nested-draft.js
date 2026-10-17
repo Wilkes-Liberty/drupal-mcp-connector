@@ -19,6 +19,7 @@
 import {
   readNodeDraftInventory, readTranslationInventory, isMissingTranslationEndpoint,
   createTranslationDraft, sentinelDraftRequest, isMissingDraftEndpoint,
+  draftPatchHeaders,
 } from "./sentinel-draft.js";
 import { entityRevisionId } from "./write-revision.js";
 import { embedParagraphRef, paragraphRevisionId } from "./err-relationships.js";
@@ -384,11 +385,7 @@ function atomicDraftRequest(backend, { entityType, bundle, id, data, meta, live,
     entityType, bundle, id, suffix: "mcp-draft",
     options: {
       method: "PATCH",
-      headers: {
-        "If-Match": working ? `"${live}:${working}"` : `"${live}"`,
-        "X-MCP-Draft-Preflight": preflight ? "1" : "0",
-        "X-MCP-Draft-Langcode": langcode,
-      },
+      headers: draftPatchHeaders({ live, working, langcode, preflight }),
     },
     body: { data },
     ...(meta !== undefined ? { meta } : {}),
@@ -849,11 +846,7 @@ function hostDraftRequest(backend, { entityType, bundle, id, data, live, working
     entityType, bundle, id, suffix: "mcp-draft",
     options: {
       method: "PATCH",
-      headers: {
-        "If-Match": working ? `"${live}:${working}"` : `"${live}"`,
-        "X-MCP-Draft-Preflight": preflight ? "1" : "0",
-        "X-MCP-Draft-Langcode": langcode,
-      },
+      headers: draftPatchHeaders({ live, working, langcode, preflight }),
     },
     body: { data },
   });
