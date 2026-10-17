@@ -9,6 +9,8 @@
  * validation.
  */
 
+import { fromIdentity } from "./principal-key.js";
+
 /** Current Streamable HTTP / core protocol revision this connector targets. */
 export const MCP_PROTOCOL_VERSION_CURRENT = "2026-07-28";
 
@@ -360,10 +362,12 @@ export function hostAllowed(hostHeader, allowlist) {
 }
 
 /**
- * Stable principal key for binding a 2025-era session. Same `sub` +
- * `clientId` is the same principal (token refresh). A local-operator
- * identity shares one loopback key. Unidentifiable identities return
- * null so a session cannot be minted or reused.
+ * Stable principal key for binding a 2025-era session. Same access-token
+ * `iss|sub|actor` (the mcp_sentinel twin) is the same principal (token
+ * refresh). A local-operator identity shares one loopback key.
+ * Unidentifiable identities return null so a session cannot be minted
+ * or reused. `#455` previously keyed on `sub`+`clientId`; that formula
+ * lives on the `fromIdentity` twin now.
  *
  * @param {object|null|undefined} identity
  * @returns {?string}
@@ -371,11 +375,11 @@ export function hostAllowed(hostHeader, allowlist) {
 export function sessionPrincipalKey(identity) {
   if (!identity) return null;
   if (identity.localOperator === true) return "local-operator";
-  const sub = identity.sub === undefined || identity.sub === null ? "" : String(identity.sub);
-  const clientId = identity.clientId === undefined || identity.clientId === null ? "" : String(identity.clientId);
-  if (!sub && !clientId) return null;
-  // Structural encoding so a NUL inside a claim cannot collide two principals.
-  return JSON.stringify([sub, clientId]);
+  try {
+    return fromIdentity(identity).principalKey;
+  } catch {
+    return null;
+  }
 }
 
 /**

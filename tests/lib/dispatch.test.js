@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("node-fetch", () => ({ default: vi.fn() }));
 vi.mock("../../src/lib/config.js", async (orig) => {
@@ -204,6 +204,8 @@ describe("securityMiddleware inbound entitlement (#178)", () => {
   }];
   const reader = {
     sub: "reader",
+    iss: "https://idp.example/realms/agents",
+    azp: "content-agent",
     clientId: "content-agent",
     scopes: ["mcp_read"],
     sites: null,
@@ -289,6 +291,8 @@ describe("resolved target echo (#167)", () => {
     vi.mocked(fetch).mockResolvedValue(ready());
     const writer = {
       sub: "reader",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
       clientId: "content-agent",
       scopes: ["mcp_read", "mcp_write"],
       sites: null,
@@ -385,6 +389,8 @@ describe("resolved target echo (#167)", () => {
 describe("securityMiddleware northbound data-flow (#179)", () => {
   const reader = {
     sub: "alice",
+    iss: "https://idp.example/realms/agents",
+    azp: "content-agent",
     clientId: "content-agent",
     scopes: ["mcp_read"],
     sites: null,
@@ -415,7 +421,7 @@ describe("securityMiddleware northbound data-flow (#179)", () => {
     vi.mocked(getSiteConfig).mockReturnValue(tightGov);
     const handler = vi.fn(async () => {
       const flow = getDataFlowContext();
-      expect(flow.principalKey).toBe("alice:content-agent");
+      expect(flow.principalKey).toBe("https://idp.example/realms/agents|alice|content-agent");
       expect(flow.targetName).toBe("gov");
       expect(flow.enforce).toBe(true);
       expect(northboundHeaders()[HEADER_DECLARED_DESTINATION]).toBe("content-agent:gov");
@@ -490,7 +496,14 @@ describe("GraphQL mutations need mcp_write on the network path (DEV-862)", () =>
   const grants = { "content-agent": ["open"] };
 
   it("refuses a drupal_graphql mutation for a read-only principal before any upstream call", async () => {
-    const identity = { sub: "reader", clientId: "content-agent", scopes: ["mcp_read"] };
+    const identity = {
+      sub: "reader",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
+      clientId: "content-agent",
+      tenant: "tenant-a",
+      scopes: ["mcp_read"],
+    };
     const result = await runWithIdentity(
       identity,
       () => callTool("drupal_graphql", { site: "open", query: "mutation { ping }" }, {
@@ -504,7 +517,14 @@ describe("GraphQL mutations need mcp_write on the network path (DEV-862)", () =>
   });
 
   it("does not refuse the same principal's query, and lets mcp_write past the entitlement gate", async () => {
-    const reader = { sub: "reader", clientId: "content-agent", scopes: ["mcp_read"] };
+    const reader = {
+      sub: "reader",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
+      clientId: "content-agent",
+      tenant: "tenant-a",
+      scopes: ["mcp_read"],
+    };
     const query = await runWithIdentity(
       reader,
       () => callTool("drupal_graphql", { site: "open", query: "{ ping }" }, {
@@ -513,13 +533,20 @@ describe("GraphQL mutations need mcp_write on the network path (DEV-862)", () =>
       { surface: "network" },
     );
     expect(String(query.content?.[0]?.text ?? "")).not.toMatch(/Not entitled/);
-    const writer = { sub: "writer", clientId: "content-agent", scopes: ["mcp_read", "mcp_write"] };
+    const writer = {
+      sub: "writer",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
+      clientId: "content-agent",
+      tenant: "tenant-a",
+      scopes: ["mcp_read", "mcp_write"],
+    };
     const mutation = await runWithIdentity(
       writer,
       () => callTool("drupal_graphql", { site: "open", query: "mutation { ping }" }, {
         identity: writer, sites, grants, defaultSite: "open",
       }),
-      { surface: "network" },
+      { surface: "network", bearer: "tok-live", introspect: async () => ({ active: true }) },
     );
     expect(String(mutation.content?.[0]?.text ?? "")).not.toMatch(/Not entitled/);
   });
@@ -531,7 +558,10 @@ describe("deny-by-default tool scope table on the network path (DEV-862)", () =>
     allHandlers.drupal_eval_unscoped = probe;
     const identity = {
       sub: "reader",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
       clientId: "content-agent",
+      tenant: "tenant-a",
       scopes: ["mcp_read"],
     };
     try {
@@ -559,5 +589,339 @@ describe("deny-by-default tool scope table on the network path (DEV-862)", () =>
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/Unknown tool/);
     expect(result.content[0].text).not.toMatch(/scope table/i);
+  });
+});
+
+describe("dispatch principal freeze and cancel", () => {
+  beforeEach(() => {
+    vi.mocked(getSiteConfig).mockImplementation((name) => {
+      if (name === "prod-admin") {
+        throw new Error('Site "prod-admin": requireSecureAuth is set but no Bearer apiToken or OAuth2 client credentials are configured');
+      }
+      if (name === "gov" || name === "gov-ro") {
+        return {
+          _name: name,
+          baseUrl: "https://gov.example.com",
+          apiToken: "tok-secret-value",
+          requireGovernance: true,
+          security: name === "gov-ro"
+            ? { readOnly: true }
+            : { preset: "development", allowDestructive: true },
+        };
+      }
+      return {
+        _name: name || "open",
+        baseUrl: "https://open.example.com",
+        security: { preset: "development" },
+      };
+    });
+  });
+
+  afterEach(async () => {
+    const { setInFlightRegistry } = await import("../../src/lib/in-flight.js");
+    const { setPrincipalAbortRemapGuard } = await import("../../src/lib/principal-context.js");
+    setInFlightRegistry(null);
+    setPrincipalAbortRemapGuard(true);
+  });
+
+  const principal = {
+    iss: "https://idp.example/realms/agents",
+    sub: "human-1",
+    azp: "agent-client",
+    clientId: "agent-client",
+    tenant: "tenant-a",
+    scopes: ["mcp_write", "mcp_config"],
+  };
+
+  it("denies a network write with no bearer", async () => {
+    const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
+    const result = await runWithIdentity(
+      principal,
+      () => callTool("drupal_config_set", { site: "open", name: "system.site", values: {} }, {
+        identity: principal,
+        surface: "network",
+        sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" } }],
+        grants: { "agent-client": ["open"] },
+      }),
+      { surface: "network" },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+  });
+
+  it("does not let SDK context override the ALS identity", async () => {
+    const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
+    const forged = {
+      ...principal,
+      tenant: null,
+      keyClaims: { iss: principal.iss, sub: principal.sub, azp: principal.azp },
+    };
+    const result = await runWithIdentity(
+      principal,
+      () => callTool("drupal_get_node", { site: "open", id: "1" }, {
+        identity: forged,
+        principalContext: { tenant: "forged-tenant", keyClaims: forged.keyClaims },
+        mcpReq: { forged: true },
+      }),
+      { surface: "network" },
+    );
+    // ALS principal has a tenant. If the SDK identity won, missing tenant is
+    // the generic deny. A later fetch failure is a different envelope.
+    expect(result.content[0].text).not.toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+  });
+
+  it("returns Access denied when in-flight cancel aborts a pending tool", async () => {
+    const { createInFlightRegistry, inFlightKeysFromIdentity, setInFlightRegistry } = await import("../../src/lib/in-flight.js");
+    const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const original = allHandlers.drupal_config_set;
+    let startedResolve = () => {};
+    const started = new Promise((resolve) => { startedResolve = resolve; });
+    allHandlers.drupal_config_set = async () => {
+      const { getRequestAbortSignal } = await import("../../src/lib/principal.js");
+      const signal = getRequestAbortSignal();
+      startedResolve();
+      if (!signal) throw new Error("in-flight abort signal missing");
+      return new Promise((_, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    };
+    try {
+      const pending = runWithIdentity(
+        principal,
+        () => callTool("drupal_config_set", { site: "open", name: "system.site", values: {} }, {
+          identity: principal,
+          surface: "network",
+          sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" } }],
+          grants: { "agent-client": ["open"] },
+        }),
+        { surface: "network", bearer: "tok-live", introspect: async () => ({ active: true }) },
+      );
+      await started;
+      expect(registry.cancel(inFlightKeysFromIdentity(principal))).toBe(1);
+      const result = await pending;
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+      expect(result.content[0].text).not.toMatch(/^Error:/);
+    } finally {
+      allHandlers.drupal_config_set = original;
+    }
+  });
+
+  it("returns Access denied when a kill aborts during the server-tool body read", async () => {
+    const { createInFlightRegistry, inFlightKeysFromIdentity, setInFlightRegistry } = await import("../../src/lib/in-flight.js");
+    const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
+    const { runWithHttpAudit, buildHttpAuditRow } = await import("../../src/lib/http-audit.js");
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    vi.mocked(getSiteConfig).mockImplementation(() => ({
+      _name: "open",
+      baseUrl: "https://open.example.com",
+      security: { preset: "development" },
+      serverTools: { url: "/mcp" },
+    }));
+    let enteredBody = () => {};
+    const inBody = new Promise((resolve) => { enteredBody = resolve; });
+    vi.mocked(fetch).mockImplementation(async (_url, opts) => {
+      const method = JSON.parse(String(opts?.body || "{}")).method;
+      const headers = {
+        get: (h) => {
+          const key = String(h).toLowerCase();
+          if (key === "mcp-session-id") return "sess-dispatch-body";
+          if (key === "content-type") return method === "tools/call" ? "text/event-stream" : "application/json";
+          return null;
+        },
+      };
+      if (method === "initialize") {
+        return {
+          ok: true, status: 200, headers,
+          text: async () => JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", capabilities: {} } }),
+        };
+      }
+      if (method === "notifications/initialized") {
+        return { ok: true, status: 202, headers, text: async () => "" };
+      }
+      if (method === "tools/list") {
+        return {
+          ok: true, status: 200, headers,
+          text: async () => JSON.stringify({
+            jsonrpc: "2.0", id: 2,
+            result: { tools: [{ name: "tool_api__mcp_sentinel_config_set" }] },
+          }),
+        };
+      }
+      return {
+        ok: true, status: 200, headers,
+        text: async () => {
+          enteredBody();
+          const err = new Error("The operation was aborted");
+          err.name = "AbortError";
+          if (opts?.signal?.aborted) throw err;
+          return new Promise((_, reject) => {
+            opts?.signal?.addEventListener("abort", () => reject(err), { once: true });
+          });
+        },
+      };
+    });
+    const req = { url: "/mcp", method: "POST", headers: {} };
+    const pending = runWithHttpAudit(req, () => runWithIdentity(
+      principal,
+      () => callTool("drupal_config_set", { site: "open", name: "system.site", values: { name: "x" } }, {
+        identity: principal,
+        surface: "network",
+        sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" }, serverTools: { url: "/mcp" } }],
+        grants: { "agent-client": ["open"] },
+      }),
+      { surface: "network", bearer: "tok-live", introspect: async () => ({ active: true }) },
+    ));
+    await inBody;
+    expect(registry.cancel(inFlightKeysFromIdentity(principal))).toBe(1);
+    const result = await pending;
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+    expect(result.content[0].text).not.toMatch(/^Error:/);
+    expect(buildHttpAuditRow(req, { statusCode: 200 }).toolOutcome).toBe("denied");
+  });
+
+  it("lets a server-tool body-read kill stay a tool error when remap is off (red evidence)", async () => {
+    const { createInFlightRegistry, inFlightKeysFromIdentity, setInFlightRegistry } = await import("../../src/lib/in-flight.js");
+    const { GENERIC_PRINCIPAL_REFUSAL, setPrincipalAbortRemapGuard } = await import("../../src/lib/principal-context.js");
+    const { runWithHttpAudit, buildHttpAuditRow } = await import("../../src/lib/http-audit.js");
+    setPrincipalAbortRemapGuard(false);
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    vi.mocked(getSiteConfig).mockImplementation(() => ({
+      _name: "open",
+      baseUrl: "https://open.example.com",
+      security: { preset: "development" },
+      serverTools: { url: "/mcp" },
+    }));
+    let enteredBody = () => {};
+    const inBody = new Promise((resolve) => { enteredBody = resolve; });
+    vi.mocked(fetch).mockImplementation(async (_url, opts) => {
+      const method = JSON.parse(String(opts?.body || "{}")).method;
+      const headers = {
+        get: (h) => {
+          const key = String(h).toLowerCase();
+          if (key === "mcp-session-id") return "sess-dispatch-body-red";
+          if (key === "content-type") return "application/json";
+          return null;
+        },
+      };
+      if (method === "initialize") {
+        return {
+          ok: true, status: 200, headers,
+          text: async () => JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", capabilities: {} } }),
+        };
+      }
+      if (method === "notifications/initialized") {
+        return { ok: true, status: 202, headers, text: async () => "" };
+      }
+      if (method === "tools/list") {
+        return {
+          ok: true, status: 200, headers,
+          text: async () => JSON.stringify({
+            jsonrpc: "2.0", id: 2,
+            result: { tools: [{ name: "tool_api__mcp_sentinel_config_set" }] },
+          }),
+        };
+      }
+      return {
+        ok: true, status: 200, headers,
+        text: async () => {
+          enteredBody();
+          const err = new Error("The operation was aborted");
+          err.name = "AbortError";
+          if (opts?.signal?.aborted) throw err;
+          return new Promise((_, reject) => {
+            opts?.signal?.addEventListener("abort", () => reject(err), { once: true });
+          });
+        },
+      };
+    });
+    const req = { url: "/mcp", method: "POST", headers: {} };
+    try {
+      const pending = runWithHttpAudit(req, () => runWithIdentity(
+        principal,
+        () => callTool("drupal_config_set", { site: "open", name: "system.site", values: { name: "x" } }, {
+          identity: principal,
+          surface: "network",
+          sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" }, serverTools: { url: "/mcp" } }],
+          grants: { "agent-client": ["open"] },
+        }),
+        { surface: "network", bearer: "tok-live", introspect: async () => ({ active: true }) },
+      ));
+      await inBody;
+      expect(registry.cancel(inFlightKeysFromIdentity(principal))).toBe(1);
+      const result = await pending;
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).not.toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+      expect(result.content[0].text).toMatch(/^Error: The operation was aborted/);
+      expect(buildHttpAuditRow(req, { statusCode: 200 }).toolOutcome).not.toBe("denied");
+    } finally {
+      setPrincipalAbortRemapGuard(true);
+    }
+  });
+
+  it("returns Access denied when a kill aborts during a JSON:API write body read", async () => {
+    const { createInFlightRegistry, inFlightKeysFromIdentity, setInFlightRegistry } = await import("../../src/lib/in-flight.js");
+    const { GENERIC_PRINCIPAL_REFUSAL } = await import("../../src/lib/principal-context.js");
+    const { runWithHttpAudit, buildHttpAuditRow } = await import("../../src/lib/http-audit.js");
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    vi.mocked(getSiteConfig).mockImplementation(() => ({
+      _name: "open",
+      baseUrl: "https://open.example.com",
+      security: { preset: "development" },
+    }));
+    let enteredBody = () => {};
+    const inBody = new Promise((resolve) => { enteredBody = resolve; });
+    vi.mocked(fetch).mockImplementation(async (_url, opts) => {
+      const method = String(opts?.method || "GET").toUpperCase();
+      if (method === "GET" || method === "HEAD") {
+        return {
+          ok: true, status: 200,
+          headers: { get: () => "application/vnd.api+json" },
+          text: async () => JSON.stringify({ data: [] }),
+          json: async () => ({ data: [] }),
+        };
+      }
+      return {
+        ok: true, status: 201,
+        headers: { get: () => "application/vnd.api+json" },
+        text: async () => {
+          enteredBody();
+          const err = new Error("The operation was aborted");
+          err.name = "AbortError";
+          if (opts?.signal?.aborted) throw err;
+          return new Promise((_, reject) => {
+            opts?.signal?.addEventListener("abort", () => reject(err), { once: true });
+          });
+        },
+      };
+    });
+    const req = { url: "/mcp", method: "POST", headers: {} };
+    const pending = runWithHttpAudit(req, () => runWithIdentity(
+      principal,
+      () => callTool("drupal_create_node", { site: "open", type: "article", title: "T" }, {
+        identity: principal,
+        surface: "network",
+        sites: [{ _name: "open", baseUrl: "https://open.example.com", security: { preset: "development" } }],
+        grants: { "agent-client": ["open"] },
+      }),
+      { surface: "network", bearer: "tok-live", introspect: async () => ({ active: true }) },
+    ));
+    await inBody;
+    expect(registry.cancel(inFlightKeysFromIdentity(principal))).toBe(1);
+    const result = await pending;
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(`Access denied: ${GENERIC_PRINCIPAL_REFUSAL}`);
+    expect(result.content[0].text).not.toMatch(/^Error:/);
+    expect(buildHttpAuditRow(req, { statusCode: 200 }).toolOutcome).toBe("denied");
   });
 });

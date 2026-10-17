@@ -36,6 +36,7 @@ export async function createFakeIssuer({
   const introspectionUrl = `${issuer.replace(/\/+$/, "")}/introspect`;
   const revokedJti = new Set();
   const revokedTokens = new Set();
+  const killedTokens = new Set();
   let mode = "up";
   const introspectCalls = [];
 
@@ -84,6 +85,7 @@ export async function createFakeIssuer({
       }
       const token = new URLSearchParams(await readBody(input, init)).get("token") || "";
       if (revokedTokens.has(token)) return json({ active: false });
+      if (killedTokens.has(token)) return json({ active: false, killed: true });
       let claims;
       try {
         claims = decodeJwt(token);
@@ -130,6 +132,9 @@ export async function createFakeIssuer({
     fetchFn,
     mint,
     introspectCalls,
+    kill(token) {
+      killedTokens.add(String(token));
+    },
     revoke(tokenOrJti) {
       if (typeof tokenOrJti === "string" && tokenOrJti.includes(".")) {
         revokedTokens.add(tokenOrJti);

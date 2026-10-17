@@ -66,6 +66,31 @@ algorithms are pinned (`none` never; `HS*` only when explicitly configured).
 Issuer discovery and JWKS retrieval abort after 30s; introspection uses the
 shorter timeout above. A stuck issuer fails closed.
 
+**Governed writes re-introspect (DEV-846).** Immediately before a write
+commits (JSON:API mutating methods, GraphQL mutations, uploads, and
+write-like MCP tools), the connector introspects the same bearer again.
+`active !== true` or introspection `killed: true` aborts with
+`A verified principal context is required.` The 8s `/ready` probe cache
+is not consulted here, so a kill cannot hide behind that window. Matching
+in-flight calls in **this process** are cancelled (global cap 128, 16 per
+principal; the per-principal cap keys on the exact `iss|sub|actor`
+string, so a second `azp` is a second principal). The introspection body
+is never echoed. A network-origin call with no bearer is denied,
+including loopback `MCP_ALLOW_UNAUTHENTICATED`; only stdio may skip. When
+the relay edge is in use, it re-introspects before fan-down (the inbound
+bearer never crosses the tunnel) and stamps `tokenLive` so the tenant
+agent does not fail open. Cancel-on-kill does not cross that process
+boundary, and there is no kill-subscription frame.
+
+**Tenant comes from the token (DEV-839).** Network calls take tenant only
+from the token's `tenant` claim. `X-MCP-Tenant`, `X-Forwarded-Tenant`,
+and a `tenant` tool argument are not authority. A missing claim is the
+same generic deny. Session, rate-limit, and budget keys are
+`iss|sub|actor` from the mcp_sentinel twin, never `client_id`.
+**Breaking:** a network token with no `tenant` claim, or with only
+`client_id` and no `azp`/`act.sub`, is denied, and existing session and
+rate-limit buckets reset onto the new formula.
+
 The JSON revocation file (`{ "jti": [], "sub": [] }`) is not read on stdio.
 Stdio has no bearer authentication or revocation path. The file is also
 not an authority on network admission: a hosted bind accepts or rejects a
@@ -166,7 +191,10 @@ not override a partial resource server. Remove the resource-server settings
 to run unauthenticated. A non-loopback bind with that flag is fatal at
 startup (DEV-845). There is no trusted-proxy exception
 beyond loopback: network-facing HTTPS requires `auth.issuer` + `auth.audience`
-+ RFC 7662 introspection.
++ RFC 7662 introspection. Loopback unauthenticated mode cannot make
+write-like calls. The write re-check denies the local-operator identity on
+the network surface, with or without an `Authorization` header. Only stdio
+may skip that check.
 
 For `/mcp`, rate limiting and bearer authentication run before any request body
 is parsed, converted, or classified. After a resolved identity, the handler
@@ -174,7 +202,7 @@ validates `Origin` (DNS-rebinding), `MCP-Protocol-Version`, and `Accept`, then
 refuses JSON-RPC batches. POST bodies are bounded to 1 MiB, read once, and
 dispatched to exactly one era. Current 2026-07-28 requests are stateless;
 2025-era sessions are accepted by default, bound to the authenticated
-principal (`sub` + `clientId`), and can be disabled with:
+principal (`iss|sub|actor` from the access token), and can be disabled with:
 
 ```sh
 export MCP_LEGACY_TRANSPORT=reject
@@ -238,9 +266,10 @@ The HTTPS transport throttles `/mcp` with a built-in fixed-window limiter
   before any auth work**. A request still under that limit is refused with the
   shared 401 writer (`writeUnauthorized`, DEV-845 / DEV-877). A 429 body is
   only `Too Many Requests` and never includes tool data.
-- **Authenticated** requests are limited **per verified principal** (`sub` +
-  `clientId` from the validated token). Caller-supplied identity headers
-  (`X-MCP-Subject`, `X-Forwarded-User`, …) are never the key.
+- **Authenticated** requests are limited **per verified principal**
+  (`iss|sub|actor` from the access token via the mcp_sentinel twin).
+  Caller-supplied identity headers (`X-MCP-Subject`, `X-Forwarded-User`,
+  …) are never the key. `client_id` is never the actor.
 - **Non-loopback TLS bind:** defaults to **120 requests per 60s** for both
   gates when `MCP_RATE_LIMIT` is unset.
 - **Loopback / plain-HTTP dev:** off unless you set a positive `MCP_RATE_LIMIT`.

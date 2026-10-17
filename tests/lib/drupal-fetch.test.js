@@ -8,6 +8,16 @@ import { drupalFetch, drupalGraphqlFetch, drupalUploadFile, DRUPAL_FETCH_TIMEOUT
 import { CLIENT_VERSION } from "../../src/lib/config.js";
 import { clearToken } from "../../src/lib/oauth.js";
 import {
+  createInFlightRegistry,
+  inFlightKeysFromIdentity,
+  setInFlightRegistry,
+} from "../../src/lib/in-flight.js";
+import {
+  GENERIC_PRINCIPAL_REFUSAL,
+  setPrincipalAbortRemapGuard,
+} from "../../src/lib/principal-context.js";
+import { runWithIdentity } from "../../src/lib/principal.js";
+import {
   HEADER_DECLARED_CEILING,
   HEADER_DECLARED_DESTINATION,
   REASON_READ,
@@ -81,7 +91,12 @@ describe("drupalFetch oauth integration", () => {
 
 describe("drupalFetch northbound data-flow (#179)", () => {
   const flow = () => buildDataFlowContext({
-    identity: { sub: "alice", clientId: "content-agent" },
+    identity: {
+      sub: "alice",
+      iss: "https://idp.example/realms/agents",
+      azp: "content-agent",
+      clientId: "content-agent",
+    },
     target: { name: "production", baseUrl: "https://x", source: "grant" },
     site: { security: { declaredCeiling: "internal" } },
     limits: { requests: 2, requestWindowSec: 60, pages: 1, pageWindowSec: 60, results: 2, bytes: 4096 },
@@ -583,5 +598,123 @@ describe("drupalGraphqlFetch failure message (#345)", () => {
       vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ data: { ok: true }, errors }) });
       await expect(drupalGraphqlFetch(site, { query: "{ __typename }" })).resolves.toEqual({ data: { ok: true } });
     }
+  });
+});
+
+const killPrincipal = {
+  iss: "https://idp.example/realms/agents",
+  sub: "human-1",
+  azp: "agent-client",
+  tenant: "tenant-a",
+  scopes: ["mcp_write"],
+};
+
+function abortError() {
+  const err = new Error("The operation was aborted");
+  err.name = "AbortError";
+  return err;
+}
+
+function headersThenAbortBody({ ok = true, status = 200 } = {}) {
+  return (_url, opts) => ({
+    ok,
+    status,
+    headers: { get: () => (ok ? "application/vnd.api+json" : "text/plain") },
+    text: async () => {
+      if (opts?.signal?.aborted) throw abortError();
+      return new Promise((_, reject) => {
+        opts?.signal?.addEventListener("abort", () => reject(abortError()), { once: true });
+      });
+    },
+    json: async () => {
+      if (opts?.signal?.aborted) throw abortError();
+      return new Promise((_, reject) => {
+        opts?.signal?.addEventListener("abort", () => reject(abortError()), { once: true });
+      });
+    },
+  });
+}
+
+describe("drupalFetch kill during body read", () => {
+  afterEach(() => {
+    setPrincipalAbortRemapGuard(true);
+    setInFlightRegistry(null);
+  });
+
+  async function killDuring(work) {
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const keys = inFlightKeysFromIdentity(killPrincipal);
+    const flight = registry.begin(keys);
+    const pending = runWithIdentity(killPrincipal, work, {
+      surface: "network",
+      bearer: "tok-live",
+      introspect: async () => ({ active: true }),
+      abortSignal: flight.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(registry.cancel(keys)).toBe(1);
+    return pending;
+  }
+
+  it("maps a kill abort during a 2xx JSON:API body read to the generic deny", async () => {
+    vi.mocked(fetch).mockImplementation(headersThenAbortBody());
+    await expect(killDuring(() => drupalFetch(
+      { _name: "t", baseUrl: "https://x" },
+      "/jsonapi/node/article",
+      { method: "POST", body: "{}" },
+    ))).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+  });
+
+  it("maps a kill abort during a non-2xx body read to the generic deny", async () => {
+    vi.mocked(fetch).mockImplementation(headersThenAbortBody({ ok: false, status: 500 }));
+    await expect(killDuring(() => drupalFetch(
+      { _name: "t", baseUrl: "https://x" },
+      "/jsonapi/node/article",
+      { method: "POST", body: "{}" },
+    ))).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+  });
+
+  it("maps a kill abort during the upload body read to the generic deny", async () => {
+    vi.mocked(fetch).mockImplementation(headersThenAbortBody({ ok: true, status: 201 }));
+    const file = uploadFixture();
+    const previousRoot = process.env.MCP_UPLOAD_ROOT;
+    process.env.MCP_UPLOAD_ROOT = tmpdir();
+    try {
+      await expect(killDuring(() => drupalUploadFile(
+        { _name: "t", baseUrl: "https://x" },
+        "media", "image", "field_media_image", file,
+      ))).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+    } finally {
+      if (previousRoot === undefined) delete process.env.MCP_UPLOAD_ROOT;
+      else process.env.MCP_UPLOAD_ROOT = previousRoot;
+    }
+  });
+
+  it("lets an upload body-read kill stay AbortError when remap is off (red evidence)", async () => {
+    setPrincipalAbortRemapGuard(false);
+    vi.mocked(fetch).mockImplementation(headersThenAbortBody({ ok: true, status: 201 }));
+    const file = uploadFixture();
+    const previousRoot = process.env.MCP_UPLOAD_ROOT;
+    process.env.MCP_UPLOAD_ROOT = tmpdir();
+    try {
+      await expect(killDuring(() => drupalUploadFile(
+        { _name: "t", baseUrl: "https://x" },
+        "media", "image", "field_media_image", file,
+      ))).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      if (previousRoot === undefined) delete process.env.MCP_UPLOAD_ROOT;
+      else process.env.MCP_UPLOAD_ROOT = previousRoot;
+    }
+  });
+
+  it("lets a non-2xx body-read kill stay AbortError when remap is off (red evidence)", async () => {
+    setPrincipalAbortRemapGuard(false);
+    vi.mocked(fetch).mockImplementation(headersThenAbortBody({ ok: false, status: 500 }));
+    await expect(killDuring(() => drupalFetch(
+      { _name: "t", baseUrl: "https://x" },
+      "/jsonapi/node/article",
+      { method: "POST", body: "{}" },
+    ))).rejects.toMatchObject({ name: "AbortError" });
   });
 });

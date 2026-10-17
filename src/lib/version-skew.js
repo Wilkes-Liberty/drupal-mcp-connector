@@ -7,7 +7,9 @@
 
 import { CLIENT_VERSION } from "./config.js";
 
-/** Integration-contract 1.1 needs mcp_sentinel ≥ 2.9.0 when a version is visible. */
+/** Integration-contract 1.1 needs mcp_sentinel ≥ 2.9.0 when a version is visible.
+ * Contract 1.2 (tenant claim, live write introspect) needs mcp_sentinel ≥ 3.1.0
+ * on the Drupal side; the connector still speaks 1.1 to an older module. */
 export const SENTINEL_MIN_FOR_CONTRACT = "2.9.0";
 
 /**
@@ -71,7 +73,7 @@ export function extractReportedVersions(body, headers) {
  * @returns {{skew: boolean, detectable: boolean, detail: string, nextFix: string|null, youAreOn: string, siteNeeds: string|null}}
  */
 export function detectVersionSkew(reported, connectorVersion = CLIENT_VERSION) {
-  const youAreOn = `connector ${connectorVersion} (integration contract 1.1)`;
+  const youAreOn = `connector ${connectorVersion} (integration contract 1.2)`;
   const { sentinelVersion, minConnectorVersion, siteConnectorVersion } = reported ?? {};
 
   if (minConnectorVersion && compareSemver(connectorVersion, minConnectorVersion) < 0) {

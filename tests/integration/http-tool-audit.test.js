@@ -37,7 +37,14 @@ async function start(sink) {
   const legacy = createLegacySessionHandler({ buildServer, mode: "serve" });
   const handler = createMcpRequestHandler({
     authenticate: async (req) => ["Bearer synthetic-secret", "Bearer second-synthetic-secret"].includes(req.headers.authorization)
-      ? { ok: true, identity: { sub: req.headers.authorization === "Bearer synthetic-secret" ? "verified-user" : "second-user", clientId: "pilot", tenant: "verified-tenant", scopes: ["mcp_read"] } }
+      ? { ok: true, identity: {
+        iss: "https://idp.example/realms/agents",
+        sub: req.headers.authorization === "Bearer synthetic-secret" ? "verified-user" : "second-user",
+        azp: "pilot",
+        clientId: "pilot",
+        tenant: "verified-tenant",
+        scopes: ["mcp_read"],
+      } }
       : { ok: false, status: 401 },
     modernHandler: toNodeHandler(modern), legacyHandler: legacy, auditWriter: writer,
   });

@@ -67,6 +67,7 @@
     "eval:http:staging": "node tests/evals/http/run-staging.js",
     "audit": "npm audit --audit-level=high",
     "check": "npm run lint && npm run audit && npm run syntax-check && npm test",
+    "check:principal-vectors": "node scripts/check-principal-key-vectors.js",
     "syntax-check": "find src bin scripts -name '*.js' -exec sh -c 'node --input-type=module --check < \"$1\" && echo \"$1 ✓\"' _ {} \\;",
     "verify": "node bin/drupal-mcp-verify.js",
     "verify:example": "node bin/drupal-mcp-verify.js --config config/config.example.json",
@@ -82,6 +83,7 @@
     "graphql": "^17.0.0",
     "jose": "^6.2.9",
     "node-fetch": "^3.3.2",
+    "shell-quote": "^1.12.0",
     "ssh2": "^1.16.0"
   },
   "devDependencies": {

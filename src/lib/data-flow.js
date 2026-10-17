@@ -15,6 +15,8 @@
 
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { fromIdentity } from "./principal-key.js";
+import { GENERIC_PRINCIPAL_REFUSAL } from "./principal-context.js";
 import { SecurityError } from "./security.js";
 
 /** Wire header: narrow-only classification ceiling (mcp_sentinel 2.9.0). */
@@ -85,18 +87,18 @@ export class DataFlowBudgetError extends SecurityError {
 
 /**
  * Process-global budget key for an inbound identity. Session ids are never used.
+ * Network principals use the mcp_sentinel twin (`iss|sub|actor`).
  * @param {object|null} identity
  * @returns {string}
+ * @throws {SecurityError} when a JWT identity cannot compose a principal key.
  */
 export function principalBudgetKey(identity) {
-  if (!identity) return "local-operator";
-  const sub = typeof identity.sub === "string" && identity.sub.trim()
-    ? identity.sub.trim()
-    : "-";
-  const clientId = typeof identity.clientId === "string" && identity.clientId.trim()
-    ? identity.clientId.trim()
-    : "-";
-  return `${sub}:${clientId}`;
+  if (!identity || identity.localOperator === true) return "local-operator";
+  try {
+    return fromIdentity(identity).principalKey;
+  } catch {
+    throw new SecurityError(GENERIC_PRINCIPAL_REFUSAL);
+  }
 }
 
 /**

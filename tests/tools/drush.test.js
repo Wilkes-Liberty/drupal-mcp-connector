@@ -59,13 +59,15 @@ describe("drushSsh.allowedCommands enforcement", () => {
   it("permits a whitelisted command (config:status)", async () => {
     const out = await handlers.drupal_drush_config_status({ site: "dev" });
     expect(out.status).toBe("in_sync");
-    expect(lastCommand).toContain("config:status");
+    expect(lastCommand).toMatch(/config\\?:status/);
+    expect(lastCommand).toContain("--root");
+    expect(lastCommand).not.toMatch(/&&/);
   });
 
   it("permits config:export", async () => {
     const out = await handlers.drupal_drush_config_export({ site: "dev" });
     expect(out.success).toBe(true);
-    expect(lastCommand).toContain("config:export");
+    expect(lastCommand).toMatch(/config\\?:export/);
   });
 
   it("blocks a non-whitelisted command (cache:rebuild) with SecurityError", async () => {
