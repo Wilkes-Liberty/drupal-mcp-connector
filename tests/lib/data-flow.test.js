@@ -18,8 +18,20 @@ import {
 } from "../../src/lib/data-flow.js";
 import { SecurityError } from "../../src/lib/security.js";
 
-const alice = { sub: "alice", clientId: "content-agent", scopes: ["mcp_read"] };
-const bob = { sub: "bob", clientId: "content-agent", scopes: ["mcp_read"] };
+const alice = {
+  sub: "alice",
+  iss: "https://idp.example/realms/agents",
+  azp: "content-agent",
+  clientId: "content-agent",
+  scopes: ["mcp_read"],
+};
+const bob = {
+  sub: "bob",
+  iss: "https://idp.example/realms/agents",
+  azp: "content-agent",
+  clientId: "content-agent",
+  scopes: ["mcp_read"],
+};
 const prod = { name: "production", baseUrl: "https://drupal.example.com", source: "grant" };
 const staging = { name: "staging", baseUrl: "https://drupal-staging.example.com", source: "hint" };
 

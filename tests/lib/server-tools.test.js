@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("node-fetch", () => ({ default: vi.fn() }));
 import fetch from "node-fetch";
@@ -24,6 +24,16 @@ import {
   resetDataFlowBudgets,
   runWithDataFlow,
 } from "../../src/lib/data-flow.js";
+import {
+  createInFlightRegistry,
+  inFlightKeysFromIdentity,
+  setInFlightRegistry,
+} from "../../src/lib/in-flight.js";
+import {
+  GENERIC_PRINCIPAL_REFUSAL,
+  setPrincipalAbortRemapGuard,
+} from "../../src/lib/principal-context.js";
+import { runWithIdentity } from "../../src/lib/principal.js";
 
 // Unique site name per test keeps the module-scope session cache from leaking
 // between cases (callServerTool caches the Mcp-Session-Id by site._name).
@@ -85,7 +95,47 @@ function hangingFetch(_url, opts) {
   });
 }
 
+function abortError() {
+  const err = new Error("The operation was aborted");
+  err.name = "AbortError";
+  return err;
+}
+
+/** Headers resolve; body waits for the fetch signal, then rejects AbortError. */
+function headersThenAbortBody(sessionId, contentType = "application/json") {
+  return (_url, opts) => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get: (h) => {
+        const key = String(h).toLowerCase();
+        if (key === "mcp-session-id") return sessionId;
+        if (key === "content-type") return contentType;
+        return null;
+      },
+    },
+    text: async () => {
+      if (opts?.signal?.aborted) throw abortError();
+      return new Promise((_, reject) => {
+        opts?.signal?.addEventListener("abort", () => reject(abortError()), { once: true });
+      });
+    },
+  });
+}
+
+const principal = {
+  iss: "https://idp.example/realms/agents",
+  sub: "human-1",
+  azp: "agent-client",
+  tenant: "tenant-a",
+  scopes: ["mcp_write"],
+};
+
 beforeEach(() => { vi.mocked(fetch).mockReset(); resetDataFlowBudgets(); });
+afterEach(() => {
+  setPrincipalAbortRemapGuard(true);
+  setInFlightRegistry(null);
+});
 
 describe("callServerTool", () => {
   it("keeps the private Drupal bridge sessionful and pinned to MCP 2025-06-18", async () => {
@@ -163,6 +213,95 @@ describe("callServerTool", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it("maps a kill abort on tools/call to the generic deny", async () => {
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const keys = inFlightKeysFromIdentity(principal);
+    const flight = registry.begin(keys);
+    const site = plainSite();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk("sess-kill")[0])
+      .mockResolvedValueOnce(initOk("sess-kill")[1])
+      .mockImplementation(hangingFetch);
+    const pending = runWithIdentity(principal, () => callServerTool(site, CONFIG_GET, {}), {
+      abortSignal: flight.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(registry.cancel(keys)).toBe(1);
+    await expect(pending).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+  });
+
+  it("lets a kill abort stay AbortError when remap is off (red evidence)", async () => {
+    setPrincipalAbortRemapGuard(false);
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const keys = inFlightKeysFromIdentity(principal);
+    const flight = registry.begin(keys);
+    const site = plainSite();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk("sess-kill-red")[0])
+      .mockResolvedValueOnce(initOk("sess-kill-red")[1])
+      .mockImplementation(hangingFetch);
+    const pending = runWithIdentity(principal, () => callServerTool(site, CONFIG_GET, {}), {
+      abortSignal: flight.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(registry.cancel(keys)).toBe(1);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("maps a kill abort during the tools/call body read to the generic deny", async () => {
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const keys = inFlightKeysFromIdentity(principal);
+    const flight = registry.begin(keys);
+    const site = plainSite();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk("sess-body")[0])
+      .mockResolvedValueOnce(initOk("sess-body")[1])
+      .mockImplementation(headersThenAbortBody("sess-body", "text/event-stream"));
+    const pending = runWithIdentity(principal, () => callServerTool(site, CONFIG_GET, {}), {
+      abortSignal: flight.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(registry.cancel(keys)).toBe(1);
+    await expect(pending).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+  });
+
+  it("maps a kill abort during the session initialize body read to the generic deny", async () => {
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const keys = inFlightKeysFromIdentity(principal);
+    const flight = registry.begin(keys);
+    const site = plainSite();
+    vi.mocked(fetch).mockImplementation(headersThenAbortBody("sess-init"));
+    const pending = runWithIdentity(principal, () => callServerTool(site, CONFIG_GET, {}), {
+      abortSignal: flight.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(registry.cancel(keys)).toBe(1);
+    await expect(pending).rejects.toThrow(GENERIC_PRINCIPAL_REFUSAL);
+  });
+
+  it("lets a tools/call body-read kill stay AbortError when remap is off (red evidence)", async () => {
+    setPrincipalAbortRemapGuard(false);
+    const registry = createInFlightRegistry({ maxEntries: 8 });
+    setInFlightRegistry(registry);
+    const keys = inFlightKeysFromIdentity(principal);
+    const flight = registry.begin(keys);
+    const site = plainSite();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk("sess-body-red")[0])
+      .mockResolvedValueOnce(initOk("sess-body-red")[1])
+      .mockImplementation(headersThenAbortBody("sess-body-red", "text/event-stream"));
+    const pending = runWithIdentity(principal, () => callServerTool(site, CONFIG_GET, {}), {
+      abortSignal: flight.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(registry.cancel(keys)).toBe(1);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("reuses a cached session across calls (one initialize)", async () => {
@@ -268,7 +407,12 @@ describe("callServerTool", () => {
       .mockResolvedValueOnce(initOk("sess-g")[1])
       .mockResolvedValueOnce(toolOk({ content: [] }));
     const flow = buildDataFlowContext({
-      identity: { sub: "alice", clientId: "content-agent" },
+      identity: {
+        sub: "alice",
+        iss: "https://idp.example/realms/agents",
+        azp: "content-agent",
+        clientId: "content-agent",
+      },
       target: { name: "production", source: "grant" },
       site: { security: { declaredCeiling: "internal" } },
       correlationId: "corr-st",

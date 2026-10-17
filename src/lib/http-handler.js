@@ -36,6 +36,7 @@ import {
   sessionPrincipalKey,
 } from "./http-transport.js";
 import { LOCAL_OPERATOR, runWithIdentity } from "./principal.js";
+import { principalContextFromIdentity } from "./principal-context.js";
 
 /**
  * Routes that may be reached without a resolved identity. Health is a mesh
@@ -391,6 +392,9 @@ export function createLegacySessionHandler({
  * @param {boolean} [deps.allowLocalOperator=false] Unauthenticated loopback
  *   only. After a successful check, attach the local-operator identity.
  *   Default false: missing identity is 401.
+ * @param {(token: string) => Promise<object|null>} [deps.introspect]
+ *   Live RFC 7662 introspector for governed-write re-checks (DEV-846).
+ *   Never a positive cache.
  * @param {object|null} [deps.protectedResource] RFC 9728 metadata served unauthenticated.
  * @param {string} [deps.resourceMetadataUrl] RFC 9728 metadata URL included
  *   on every 401 challenge (DEV-877).
@@ -443,6 +447,7 @@ export function createLegacySessionHandler({
 export function createMcpRequestHandler({
   checkAuth = () => true,
   authenticate = null,
+  introspect = null,
   allowLocalOperator = false,
   protectedResource = null,
   resourceMetadataUrl,
@@ -624,6 +629,7 @@ export function createMcpRequestHandler({
         return false;
       }
       req.mcpIdentity = result.identity;
+      req.mcpBearer = parseBearerToken(req.headers.authorization);
       return true;
     }
     if (!checkAuth(req.headers["authorization"])) {
@@ -646,7 +652,14 @@ export function createMcpRequestHandler({
   }
 
   function dispatchWithIdentity(req, fn) {
-    return runWithHttpAudit(req, () => runWithIdentity(req.mcpIdentity, fn, { surface: "network" }));
+    const identity = req.mcpIdentity;
+    const principalContext = principalContextFromIdentity(identity, { network: true });
+    return runWithHttpAudit(req, () => runWithIdentity(identity, fn, {
+      surface: "network",
+      bearer: req.mcpBearer || parseBearerToken(req.headers.authorization),
+      introspect,
+      principalContext,
+    }));
   }
 
   return async function handle(req, res) {

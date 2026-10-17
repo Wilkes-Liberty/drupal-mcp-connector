@@ -378,7 +378,10 @@ describe("DEV-844 introspection guard is not an environment switch", () => {
       return text.includes("MCP_TEST_DISABLE_INTROSPECTION_GUARD")
         || text.includes("process.env.VITEST");
     });
-    expect(hits).toEqual([]);
+    // VITEST is read only by the test-only seam that gates set*Guard switches.
+    expect(hits).toEqual([join(REPO_ROOT, "src/lib/test-only.js")]);
+    expect(readFileSync(join(REPO_ROOT, "src/lib/test-only.js"), "utf8"))
+      .not.toMatch(/MCP_TEST_DISABLE_INTROSPECTION_GUARD/);
   });
 });
 

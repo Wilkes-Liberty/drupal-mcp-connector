@@ -15,6 +15,11 @@ import {
   northboundHeaders,
   sourceBudgetDenial,
 } from "./data-flow.js";
+import { combineAbortSignals } from "./abort-signals.js";
+import { getRequestAbortSignal, getRequestSurface } from "./principal.js";
+import { mapPrincipalAbort, throwIfPrincipalAbort } from "./principal-context.js";
+import { assertLiveTokenForGovernedWrite } from "./write-introspect.js";
+import { graphqlHasMutation } from "./security.js";
 import {
   assertUploadPathAllowed,
   sanitizeUploadFilename,
@@ -27,23 +32,40 @@ const JSON_API_CONTENT_TYPE = "application/vnd.api+json";
 /** Default northbound Drupal HTTP timeout in milliseconds. Matches `sshDrush`. */
 export const DRUPAL_FETCH_TIMEOUT_MS = 30_000;
 
+/** Fetch abort signal for a Response, so a kill during the body read remaps. */
+const drupalFetchAbortByResponse = new WeakMap();
+
 /**
- * node-fetch with the shared abort timeout. A caller `signal` wins.
+ * node-fetch with the shared abort timeout. The caller signal, the
+ * in-flight kill signal, and the 30s timeout are combined; none replaces
+ * another.
  * @param {string} url Fully-qualified request URL.
  * @param {object} [options] node-fetch options (method, body, headers, signal).
  * @returns {Promise<object>} node-fetch Response.
  * @throws {Error} when the default timeout fires (`AbortError` remapped).
  */
 async function timedDrupalFetch(url, options = {}) {
-  const signal = options.signal ?? AbortSignal.timeout(DRUPAL_FETCH_TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(DRUPAL_FETCH_TIMEOUT_MS);
+  const cancel = getRequestAbortSignal();
+  const caller = options.signal;
+  const signal = combineAbortSignals(timeout, cancel, caller) ?? timeout;
   try {
-    return await fetch(url, { ...options, signal });
+    const res = await fetch(url, { ...options, signal });
+    drupalFetchAbortByResponse.set(res, signal);
+    return res;
   } catch (err) {
-    if (err?.name === "AbortError" && !options.signal) {
+    throwIfPrincipalAbort(signal, err);
+    // Remap only the shared 30s timeout. A caller-owned abort stays AbortError.
+    if (timeout.aborted) {
       throw new Error(`Drupal request timed out after ${DRUPAL_FETCH_TIMEOUT_MS / 1000}s`);
     }
     throw err;
   }
+}
+
+function isMutatingMethod(method) {
+  const verb = String(method || "GET").toUpperCase();
+  return verb === "POST" || verb === "PATCH" || verb === "PUT" || verb === "DELETE";
 }
 
 /**
@@ -53,16 +75,19 @@ async function timedDrupalFetch(url, options = {}) {
  * @returns {Promise<{json: object|null, text: string}>}
  */
 async function readOkBody(res) {
-  if (typeof res.text === "function") {
-    const text = await res.text();
-    if (!text) return { json: null, text: "" };
-    try {
-      return { json: JSON.parse(text), text };
-    } catch {
-      return { json: null, text };
+  const signal = drupalFetchAbortByResponse.get(res) ?? getRequestAbortSignal();
+  return mapPrincipalAbort(signal, async () => {
+    if (typeof res.text === "function") {
+      const text = await res.text();
+      if (!text) return { json: null, text: "" };
+      try {
+        return { json: JSON.parse(text), text };
+      } catch {
+        return { json: null, text };
+      }
     }
-  }
-  return { json: await res.json(), text: "" };
+    return { json: await res.json(), text: "" };
+  });
 }
 
 /**
@@ -83,8 +108,11 @@ async function readOkBody(res) {
 async function failedResponseError(res, prefix, options) {
   let body;
   try {
-    body = await res.text();
-  } catch {
+    const signal = drupalFetchAbortByResponse.get(res) ?? getRequestAbortSignal();
+    body = await mapPrincipalAbort(signal, () => res.text());
+  } catch (err) {
+    throwIfPrincipalAbort(drupalFetchAbortByResponse.get(res) ?? getRequestAbortSignal(), err);
+    if (err?.name === "AbortError") throw err;
     return withStatus(new Error(`${prefix} (response body could not be read)`), res.status);
   }
   const mapped = sourceBudgetDenial(body);
@@ -119,6 +147,9 @@ function withStatus(error, status) {
  *   body and any HTML page are never included.
  */
 export async function drupalFetch(site, path, options = {}) {
+  if (isMutatingMethod(options.method)) {
+    await assertLiveTokenForGovernedWrite({ surface: getRequestSurface() });
+  }
   const url = `${site.baseUrl}${path}`;
   const collection = isCollectionJsonApiPath(path);
   let paid = false;
@@ -177,6 +208,9 @@ export async function drupalFetch(site, path, options = {}) {
  *   The raw body and any HTML page are never included.
  */
 export async function drupalGraphqlFetch(site, body) {
+  if (typeof body?.query === "string" && graphqlHasMutation(body.query)) {
+    await assertLiveTokenForGovernedWrite({ surface: getRequestSurface() });
+  }
   const endpoint = site.graphqlEndpoint || "/graphql";
   const url = `${site.baseUrl}${endpoint}`;
 
@@ -247,6 +281,7 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
   const url = `${site.baseUrl}/jsonapi/${encodeURIComponent(entityType)}/${encodeURIComponent(bundle)}/${encodeURIComponent(fieldName)}`;
 
   consumeBudgetIfEnforced("request");
+  await assertLiveTokenForGovernedWrite({ surface: getRequestSurface() });
   const res = await timedDrupalFetch(url, {
     method: "POST",
     headers: {
@@ -267,5 +302,7 @@ export async function drupalUploadFile(site, entityType, bundle, fieldName, file
     throw await failedResponseError(res, `File upload failed ${res.status}`);
   }
 
-  return res.json();
+  const { json, text } = await readOkBody(res);
+  accountNorthboundBody(json, text);
+  return json;
 }

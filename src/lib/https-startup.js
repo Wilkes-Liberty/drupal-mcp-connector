@@ -378,6 +378,7 @@ export async function startHttpsTransport({
   }
   let checkAuth = () => true;
   let authenticate = null;
+  let inboundIntrospect = null;
   let protectedResource = null;
   let resourceMetadataUrl;
   if (inboundMode.mode === "resource_server") {
@@ -387,6 +388,7 @@ export async function startHttpsTransport({
         ...(fetchFn ? { fetchFn } : {}),
       });
       authenticate = inbound.authenticate;
+      inboundIntrospect = inbound.introspect;
       protectedResource = inbound.protectedResource;
       resourceMetadataUrl = inbound.resourceMetadataUrl;
       checkAuth = () => false;
@@ -438,6 +440,7 @@ export async function startHttpsTransport({
   const requestHandler = wrapRequestHandler(createMcpRequestHandler({
     checkAuth,
     authenticate,
+    ...(typeof inboundIntrospect === "function" ? { introspect: inboundIntrospect } : {}),
     protectedResource,
     resourceMetadataUrl,
     allowLocalOperator,

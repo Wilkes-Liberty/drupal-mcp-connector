@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Principal freeze.** Network tool calls carry the verified
+  principal (`iss|sub|actor`) and tenant from the access token only. The
+  connector never widens, rewrites, or invents those fields. A JS
+  `fromClaims` twin matches mcp_sentinel `McpPrincipalKey` against the
+  shared `tests/fixtures/principal-key-vectors.json` fixture. Session,
+  rate-limit, and data-flow budget keys use that twin (PR #455 follow-on).
+- **DEV-839 tenant ownership.** Network calls take tenant only from the
+  token's `tenant` claim. Headers and tool arguments are ignored. A
+  missing claim is the same generic deny as a missing principal.
+- **DEV-846 kill switch follow-on.** Before a governed write commits, the
+  connector re-introspects the bearer (RFC 7662). Inactive or killed
+  tokens abort with the generic deny; the response is not echoed. The 8s
+  `/ready` probe cache is not consulted on this path. A bounded in-flight
+  registry (global cap 128, 16 per principal, fail closed) cancels matching
+  calls in the same process when that process's write re-check denies.
+
+### Changed
+
+- **Breaking (network binds).** Network tokens without a string
+  `tenant` claim, or without `azp` / top-level `act.sub` for the actor part
+  of `iss|sub|actor`, are denied. Session, rate-limit, and data-flow budget
+  keys now use that formula, which resets existing network sessions and
+  buckets. Tokens that previously keyed on `client_id` must be reissued
+  with `azp` (or `act.sub`). Tenant enforcement on the reference governance
+  module needs mcp_sentinel ≥ 3.1.0; the kill switch needs ≥ 3.2.0.
+- **DEV-846 cancel-on-kill is same-process.** Matching in-flight writes are
+  aborted only in the process that re-introspects the bearer. Direct HTTPS
+  re-introspects in the connector process. When the relay edge is in use,
+  it re-introspects before fan-down and stamps `tokenLive` on the frame;
+  the inbound bearer never crosses the tunnel, so the tenant agent does
+  not re-introspect and cannot cancel from a later kill. There is no
+  kill-subscription frame or extra frame type. A network-origin call with
+  no bearer is denied, including loopback `MCP_ALLOW_UNAUTHENTICATED`; only
+  stdio may skip the write re-check. Loopback unauthenticated HTTP cannot
+  make write-like calls, with or without an `Authorization` header. A stray
+  `Authorization: Bearer` on that mode does not skip the write re-check. A
+  kill abort on a governed Drupal POST (server-tool, JSON:API, GraphQL, or
+  upload), including during the response body read after headers, is the
+  same generic deny (node-fetch drops `signal.reason`).
+
+### Fixed
+
+- **Drush SSH exec quotes argv.** The remote command is `shell-quote` of
+  `vendor/bin/drush --root <drupalRoot> …`, not a concatenated
+  `cd … && …` string.
+
 ## [5.2.1] - 2026-10-17
 
 ### Fixed
