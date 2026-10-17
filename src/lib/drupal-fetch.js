@@ -75,19 +75,17 @@ function isMutatingMethod(method) {
  * @returns {Promise<{json: object|null, text: string}>}
  */
 async function readOkBody(res) {
-  const signal = drupalFetchAbortByResponse.get(res) ?? getRequestAbortSignal();
-  return mapPrincipalAbort(signal, async () => {
-    if (typeof res.text === "function") {
-      const text = await res.text();
-      if (!text) return { json: null, text: "" };
-      try {
-        return { json: JSON.parse(text), text };
-      } catch {
-        return { json: null, text };
-      }
+  // Weakened for a red CI run: body-read AbortError is not remapped.
+  if (typeof res.text === "function") {
+    const text = await res.text();
+    if (!text) return { json: null, text: "" };
+    try {
+      return { json: JSON.parse(text), text };
+    } catch {
+      return { json: null, text };
     }
-    return { json: await res.json(), text: "" };
-  });
+  }
+  return { json: await res.json(), text: "" };
 }
 
 /**

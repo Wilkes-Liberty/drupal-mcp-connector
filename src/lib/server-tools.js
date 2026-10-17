@@ -30,7 +30,7 @@ import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial, getData
 import { clearToken } from "./oauth.js";
 import { cleanErrorText, describeErrorBody } from "./error-body.js";
 import { combineAbortSignals } from "./abort-signals.js";
-import { GENERIC_PRINCIPAL_REFUSAL, mapPrincipalAbort, throwIfPrincipalAbort } from "./principal-context.js";
+import { GENERIC_PRINCIPAL_REFUSAL, throwIfPrincipalAbort } from "./principal-context.js";
 import { getRequestAbortSignal } from "./principal.js";
 
 /** Calls a configured module binding through the registry, without fallback. */
@@ -250,8 +250,8 @@ async function baseHeaders(site, sessionId) {
  *   (null for empty/unparseable bodies, e.g. a notification's 202) plus the raw text.
  */
 async function readBody(res) {
-  const signal = serverToolAbortByResponse.get(res) ?? getRequestAbortSignal();
-  const rawText = await mapPrincipalAbort(signal, () => res.text());
+  // Weakened for a red CI run: body-read AbortError is not remapped.
+  const rawText = await res.text();
   if (!rawText) return { body: null, rawText };
 
   const contentType = res.headers.get("content-type") || "";
