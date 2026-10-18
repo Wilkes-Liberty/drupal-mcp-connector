@@ -23,6 +23,7 @@ import {
   classifyOriginRefused,
   classifyProtectedResource,
   classifyUnauthenticatedMcp,
+  isExactIssuer,
   decodeJwtPayload,
   formatEt,
   formatMarkdown,
@@ -164,6 +165,36 @@ describe("hosted acceptance classifiers", () => {
         scopes_supported: ["mcp_read", "mcp_write"],
       },
     }, resource).ok).toBe(false);
+  });
+
+  it("rejects lookalike authorization_servers URLs that contain the issuer string", () => {
+    const resource = "https://mcp.wilkesliberty.com/mcp";
+    const lookalikes = [
+      `https://evil.example/?q=${ISSUER}`,
+      `https://evil.example/${ISSUER}`,
+      "https://auth.wilkesliberty.com.evil.example/realms/wilkesliberty",
+      "https://auth.wilkesliberty.com/realms/wilkesliberty/extra",
+      "https://auth.wilkesliberty.com/realms/wilkesliberty?next=1",
+      "https://auth.wilkesliberty.com/realms/wilkesliberty#frag",
+      "https://user:pass@auth.wilkesliberty.com/realms/wilkesliberty",
+      "http://auth.wilkesliberty.com/realms/wilkesliberty",
+      ISSUER.replace("https://", "https://user@"),
+    ];
+    for (const server of lookalikes) {
+      expect(isExactIssuer(server), server).toBe(false);
+      expect(classifyProtectedResource({
+        status: 200,
+        json: {
+          resource,
+          authorization_servers: [server],
+          scopes_supported: ["mcp_read"],
+        },
+      }, resource).ok, server).toBe(false);
+    }
+    expect(isExactIssuer(ISSUER)).toBe(true);
+    expect(isExactIssuer(`${ISSUER}/`)).toBe(false);
+    expect(isExactIssuer("")).toBe(false);
+    expect(isExactIssuer("not a url")).toBe(false);
   });
 
   it("requires S256 and mcp_read on AS metadata and records CIMD off", () => {

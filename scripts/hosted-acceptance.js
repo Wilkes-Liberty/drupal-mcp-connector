@@ -339,6 +339,35 @@ export function classifyDcrClosed(res) {
 }
 
 /**
+ * True when `value` is exactly the Paladin issuer URL.
+ * Scheme, host, port, and path must match {@link ISSUER}. Userinfo,
+ * query, hash, and lookalike hosts do not match.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isExactIssuer(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    return false;
+  }
+  let actual;
+  try {
+    actual = new URL(value);
+  } catch {
+    return false;
+  }
+  const expected = new URL(ISSUER);
+  return actual.protocol === expected.protocol
+    && actual.username === ""
+    && actual.password === ""
+    && actual.hostname === expected.hostname
+    && actual.port === expected.port
+    && actual.pathname === expected.pathname
+    && actual.search === ""
+    && actual.hash === "";
+}
+
+/**
  * RFC 9728 protected-resource metadata for a hosted `/mcp`.
  *
  * @param {{status: number, json?: object}} res
@@ -354,7 +383,7 @@ export function classifyProtectedResource(res, resource) {
   if (res.json.resource !== resource) {
     return { ok: false, reason: `resource ${res.json.resource} !== ${resource}` };
   }
-  if (!servers.includes(ISSUER)) {
+  if (!servers.some((server) => isExactIssuer(server))) {
     return { ok: false, reason: `authorization_servers missing ${ISSUER}` };
   }
   if (!scopes.includes("mcp_read") || scopes.length !== 1) {

@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   staging and production `/mcp` endpoints. Signed-in initialize /
   tools/list / `drupal_list_content_types` run only when the operator
   supplies a documented token or client-credentials identity. Tokens,
-  secrets, cookies, and tool payloads never reach the report.
+  secrets, cookies, and tool payloads never reach the report. Protected-resource
+  `authorization_servers` is compared as a parsed URL, so a lookalike
+  that merely contains the issuer string does not pass.
 
 ## [5.3.0] - 2026-10-18
 
