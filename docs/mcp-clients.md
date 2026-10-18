@@ -60,9 +60,30 @@ Both advertise `scopes_supported: ["mcp_read"]`. `/mcp` is an OAuth protected re
 OAuth path per client (`mcp_read` only):
 
 - **Cursor** — public PKCE client `cursor-mcp`. Register the MCP URL (`url` in `.cursor/mcp.json` or `~/.cursor/mcp.json`); Cursor completes authorization-code + PKCE against that client.
-- **Grok Bot** — `grok-bot` client / gated anonymous registration (keystone#1541). Register the same MCP URL as a remote MCP server (`grok mcp add … --url … --type http`, or the Grok API `server_url`).
+- **Grok Bot** — pre-registered public PKCE client `grok-bot` (CIMD is published but not accepted as `client_id`; gated anonymous DCR stays closed). Register the same MCP URL as a remote MCP server (`grok mcp add … --url … --type http`, or the Grok API `server_url`).
 
 Hosted `/mcp` Origin allowlist (DEV-953): `https://cursor.com`, `https://www.cursor.com`, `https://grok.com`, `https://console.x.ai`. Copy into `auth.allowedOrigins` / `MCP_ALLOWED_ORIGINS`. Matching is exact.
+
+Repeatable operator probe (no secrets in output):
+
+```bash
+npm run eval:hosted
+npm run eval:hosted -- --host staging --json
+# Signed-in initialize / tools/list / drupal_list_content_types:
+HOSTED_MCP_TOKEN=… npm run eval:hosted -- --require-signed-in
+# Or the documented Paladin smoke clients (mcp-edge-alpha / mcp-edge-prod-alpha):
+HOSTED_MCP_CLIENT_SECRET=… npm run eval:hosted -- --require-signed-in
+```
+
+OAuth facts the probe asserts:
+
+| Client | Registration | `client_id` | Redirects authorize accepts | Redirects authorize rejects | `/mcp` Origin |
+|---|---|---|---|---|---|
+| Cursor | Pre-registered public PKCE (`cursor-mcp`), S256, `mcp_read` | `cursor-mcp` | `https://www.cursor.com/agents/mcp/oauth/callback`, `http://localhost:8787/callback` | `https://cursor.com/agents/mcp/oauth/callback` (apex, not registered), any other host | `https://cursor.com`, `https://www.cursor.com` → 401 challenge |
+| Grok Bot | Pre-registered public PKCE (`grok-bot`). CIMD is published at `https://grok.com/oauth/mcp-client.json` but the realm does not enable CIMD, so that URL as `client_id` is `client_not_found`. Anonymous DCR stays closed (Trusted Hosts). | `grok-bot` | Grok CIMD redirects plus the Cursor www callback (keystone#1531) | any other host; CIMD URL as `client_id` | `https://grok.com`, `https://console.x.ai` → 401 challenge |
+| Claude (hosted OAuth) | **Not provisioned.** No realm client, DCR closed, AS metadata does not advertise CIMD (`client_id_metadata_document_supported` absent; `token_endpoint_auth_methods_supported` has no `none`). | — | — | `https://claude.ai/api/mcp/auth_callback` is `client_not_found` | `https://claude.ai` → 403 |
+| Claude Code / Claude Desktop | **stdio** (local subprocess), or remote HTTP with an operator-supplied `Authorization: Bearer` header. Not browser Origin. | — | loopback (Claude Code CIMD) is a local redirect, not a hosted `/mcp` Origin | — | missing Origin allowed |
+| Local stdio | No inbound OAuth. The client launches `node src/index.js`. | — | — | — | n/a |
 
 stdio remains the default local path. A connector you host on Tailscale / local VPN is unchanged.
 
