@@ -404,7 +404,14 @@ describe("runAcceptance with a fake fetch", () => {
   it("exchanges a documented client_credentials identity without leaking the secret", async () => {
     const env = { HOSTED_MCP_CLIENT_SECRET: secret };
     const chunks = [];
-    const fetchImpl = fakeFetchFactory();
+    const inner = fakeFetchFactory();
+    let tokenBody = "";
+    const fetchImpl = async (url, init = {}) => {
+      if (String(url).includes("/protocol/openid-connect/token")) {
+        tokenBody = String(init.body || "");
+      }
+      return inner(url, init);
+    };
     const code = await main(["--host", "staging", "--json"], {
       fetchImpl,
       env,
@@ -418,6 +425,9 @@ describe("runAcceptance with a fake fetch", () => {
     expect(printed).not.toContain(token);
     expect(printed).toContain("\"id\": \"signed-in:tools/call\"");
     expect(printed).toContain("\"ok\": true");
+    expect(tokenBody).toContain("resource=https%3A%2F%2Fmcp.staging.wilkesliberty.com%2Fmcp");
+    expect(tokenBody).toContain("scope=mcp_read");
+    expect(printed).not.toContain("client_secret");
   });
 
   it("retries a 429 authorize and then classifies the login page", async () => {

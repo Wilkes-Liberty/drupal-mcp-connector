@@ -794,6 +794,7 @@ export async function probeHost({
       client_id: tokens.clientId,
       client_secret: tokens.clientSecret,
       scope: "mcp_read",
+      resource: host.mcpUrl,
     });
     const tokenRes = await send(`${ISSUER}/protocol/openid-connect/token`, {
       method: "POST",
