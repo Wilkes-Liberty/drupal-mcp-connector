@@ -134,10 +134,13 @@ const FOREIGN_ORIGINS = Object.freeze([
   "https://claude.ai",
 ]);
 
-const SECRET_ENV = Object.freeze([
+export const SECRET_ENV = Object.freeze([
   "HOSTED_MCP_TOKEN",
   "HOSTED_MCP_TOKEN_STAGING",
   "HOSTED_MCP_TOKEN_PRODUCTION",
+  "HOSTED_MCP_TOKEN_WRONG_AUDIENCE",
+  "HOSTED_MCP_TOKEN_EXPIRED",
+  "HOSTED_MCP_TOKEN_INSUFFICIENT_SCOPE",
   "HOSTED_MCP_CLIENT_SECRET",
   "EVAL_HTTP_STAGING_TOKEN_READ",
   "EVAL_HTTP_STAGING_TOKEN_WRONG_AUDIENCE",
@@ -378,12 +381,12 @@ export function classifyProtectedResource(res, resource) {
   if (res.status !== 200 || !res.json) {
     return { ok: false, reason: `expected 200 JSON, got ${res.status}` };
   }
-  const servers = res.json.authorization_servers || [];
-  const scopes = res.json.scopes_supported || [];
+  const servers = res.json.authorization_servers;
+  const scopes = Array.isArray(res.json.scopes_supported) ? res.json.scopes_supported : [];
   if (res.json.resource !== resource) {
     return { ok: false, reason: `resource ${res.json.resource} !== ${resource}` };
   }
-  if (!servers.some((server) => isExactIssuer(server))) {
+  if (!Array.isArray(servers) || !servers.some((server) => isExactIssuer(server))) {
     return { ok: false, reason: `authorization_servers missing ${ISSUER}` };
   }
   if (!scopes.includes("mcp_read") || scopes.length !== 1) {

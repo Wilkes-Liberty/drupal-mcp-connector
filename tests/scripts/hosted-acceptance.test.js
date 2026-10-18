@@ -13,6 +13,7 @@ import {
   GROK_CLIENT_ID,
   ISSUER,
   READ_TOOL,
+  SECRET_ENV,
   assertReadOnlyTool,
   classifyAsMetadata,
   classifyAuthorize,
@@ -195,6 +196,14 @@ describe("hosted acceptance classifiers", () => {
     expect(isExactIssuer(`${ISSUER}/`)).toBe(false);
     expect(isExactIssuer("")).toBe(false);
     expect(isExactIssuer("not a url")).toBe(false);
+    expect(classifyProtectedResource({
+      status: 200,
+      json: {
+        resource,
+        authorization_servers: ISSUER,
+        scopes_supported: ["mcp_read"],
+      },
+    }, resource).ok).toBe(false);
   });
 
   it("requires S256 and mcp_read on AS metadata and records CIMD off", () => {
@@ -421,6 +430,24 @@ describe("runAcceptance with a fake fetch", () => {
     expect(report.hosts[0].steps.find((step) => step.id === "mcp-no-token").ok).toBe(false);
   });
 
+  it("fails the run when a foreign Origin is allowed through", async () => {
+    const inner = fakeFetchFactory();
+    const fetchImpl = async (url, init = {}) => {
+      if (String(url).endsWith("/mcp") && init.headers?.origin === "https://evil.example") {
+        return jsonResponse(200, { result: { protocolVersion: "2026-07-28" } });
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => step.id === "origin-deny:https://evil.example").ok).toBe(false);
+  });
+
   it("fails the run when anonymous DCR starts succeeding", async () => {
     const report = await runAcceptance({
       fetchImpl: fakeFetchFactory({ dcrStatus: 200 }),
@@ -523,6 +550,22 @@ describe("CLI wiring", () => {
     expect(retryAfterMs({ headers: { "retry-after": "99" } }, 0)).toBe(15_000);
     expect(retryAfterMs({ headers: {} }, 0)).toBe(400);
     expect(retryAfterMs({ headers: {} }, 3)).toBe(3200);
+  });
+
+  it("gates every documented token alias against report print", () => {
+    expect(SECRET_ENV).toEqual(expect.arrayContaining([
+      "HOSTED_MCP_TOKEN",
+      "HOSTED_MCP_TOKEN_STAGING",
+      "HOSTED_MCP_TOKEN_PRODUCTION",
+      "HOSTED_MCP_TOKEN_WRONG_AUDIENCE",
+      "HOSTED_MCP_TOKEN_EXPIRED",
+      "HOSTED_MCP_TOKEN_INSUFFICIENT_SCOPE",
+      "HOSTED_MCP_CLIENT_SECRET",
+      "EVAL_HTTP_STAGING_TOKEN_READ",
+      "EVAL_HTTP_STAGING_TOKEN_WRONG_AUDIENCE",
+      "EVAL_HTTP_STAGING_TOKEN_EXPIRED",
+      "EVAL_HTTP_STAGING_TOKEN_INSUFFICIENT_SCOPE",
+    ]));
   });
 
   it("does not default a production token onto staging", () => {

@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   supplies a documented token or client-credentials identity. Tokens,
   secrets, cookies, and tool payloads never reach the report. Protected-resource
   `authorization_servers` is compared as a parsed URL, so a lookalike
-  that merely contains the issuer string does not pass.
+  that merely contains the issuer string does not pass. A foreign Origin
+  that starts returning 200 turns the run red.
 
 ## [5.3.0] - 2026-10-18
 
