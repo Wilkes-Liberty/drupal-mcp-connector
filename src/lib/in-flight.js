@@ -174,15 +174,6 @@ export function createInFlightRegistry({
 
 const defaultRegistry = createInFlightRegistry();
 
-/**
- * Process-wide registry used by HTTP dispatch. Tests may {@link setInFlightRegistry}.
- *
- * @returns {ReturnType<typeof createInFlightRegistry>}
- */
-export function getInFlightRegistry() {
-  return defaultRegistry;
-}
-
 let activeRegistry = defaultRegistry;
 
 /**

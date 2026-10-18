@@ -31,7 +31,7 @@ const FRAME_TYPE_SET = new Set(FRAME_TYPES);
  * RFC 9110 hop-by-hop and transport-scoped headers. They describe one TCP
  * connection and are meaningless (or harmful) across the tunnel.
  */
-export const HOP_BY_HOP = new Set([
+const HOP_BY_HOP = new Set([
   "connection",
   "keep-alive",
   "proxy-authenticate",

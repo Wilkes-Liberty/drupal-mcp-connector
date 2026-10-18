@@ -1,8 +1,8 @@
 # Threat Model
 
-A concise threat model for `drupal-mcp-connector`, current as of the 1.0
-hardening pass. It records the trust boundaries, the controls in place, and the
-residual risks an operator should know about. For how to report a vulnerability,
+A concise threat model for `drupal-mcp-connector`, current as of 5.3.0.
+It records the trust boundaries, the controls in place, and the residual
+risks an operator should know about. For how to report a vulnerability,
 see [SECURITY.md](../SECURITY.md).
 
 ## Architecture & trust boundaries
@@ -29,15 +29,15 @@ see [SECURITY.md](../SECURITY.md).
 
 | # | Threat | Mitigation | Status |
 |---|--------|-----------|--------|
-| T1 | **Shell/command injection** via drush args on the Drupal host | All args POSIX single-quote escaped (`sanitizeSshArg`); module/role/type args additionally `validateMachineName`'d; SSH is key-only, no agent-forward; `drupalRoot` is trusted config | ✅ controlled |
-| T2 | **Path traversal / cross-resource access** via `id`/`bundle`/`entityType` interpolated into JSON:API paths (e.g. `id="../../user/user/…"` to read PII despite an entity-type denylist) | `validateUuid(id)` + `validateMachineName(entityType, bundle)` at the backend, plus `encodeURIComponent` on every path segment | ✅ fixed (this pass) |
+| T1 | **Shell/command injection** via drush args on the Drupal host | Remote argv is quoted with `shell-quote` in `src/tools/drush.js` (not concatenated into a shell string); module/role/type args are additionally `validateMachineName`'d; SSH is key-only, no agent-forward; `drupalRoot` is trusted config | ✅ controlled |
+| T2 | **Path traversal / cross-resource access** via `id`/`bundle`/`entityType` interpolated into JSON:API paths (e.g. `id="../../user/user/…"` to read PII despite an entity-type denylist) | `validateUuid(id)` + `validateMachineName(entityType, bundle)` at the backend, plus `encodeURIComponent` on every path segment | ✅ controlled |
 | T3 | **Query-param injection** via filter `field`/`value` | `URLSearchParams` percent-encodes keys and values, so inputs cannot break out into separate params | ✅ controlled (see note below) |
 | T4 | **Secret leakage** into logs / errors / tool output | Secrets sourced from env; never logged; `OAuthError` carries status only; tool errors return `err.message` without credentials; a Drupal HTTP error body is never relayed raw: only its cleaned, path-redacted, bounded detail is, and never an HTML page (`src/lib/error-body.js`); `Authorization` header never echoed; `getSecuritySummary` omits credentials | ✅ controlled |
-| T5 | **Auth bypass on the HTTPS transport** | Network-facing `/mcp` is an OAuth protected resource (issuer, audience, exp, scopes, JWKS); caller identity headers cannot become the principal; revocation file is hot-reloaded; `/health` and RFC 9728 metadata stay open and leak nothing sensitive. Loopback may still use a shared bearer | ✅ controlled |
+| T5 | **Auth bypass on the HTTPS transport** | Network-facing `/mcp` is an OAuth protected resource (issuer, audience, exp, scopes, JWKS); caller identity headers cannot become the principal; revocation file is hot-reloaded; `/health` and RFC 9728 metadata stay open and leak nothing sensitive. Loopback is unauthenticated local operator only when there is no resource-server intent; `MCP_AUTH_TOKEN` was removed in 4.0.0 and setting it is fatal | ✅ controlled |
 | T6 | **Plaintext exposure / MITM** on the network | TLS mandatory off-localhost (process exits without certs unless `MCP_ALLOW_HTTP=1`, which force-binds loopback); HSTS + strict CSP headers | ✅ controlled |
 | T7 | **DoS / brute force** against `/mcp` | Per-address limit before auth for unauthenticated requests; per-verified-principal limit after token validation (`MCP_RATE_LIMIT` / `MCP_PRINCIPAL_RATE_LIMIT`); `X-Forwarded-For` only from `MCP_TRUSTED_PROXIES` (default trust none); bounded limiter memory; recommend also rate-limiting at the reverse proxy | ✅ default-on for non-loopback TLS (120/min per address and per principal); off on loopback or plain HTTP unless `MCP_RATE_LIMIT` is set |
 | T8 | **SSRF** via request-time URL control | `baseUrl`/endpoints are operator config, not per-call tool inputs; `validateBaseUrl` enforces HTTPS for non-localhost | ✅ controlled |
-| T9 | **Unintended DB writes** via the drush `sql:query` bridge | Best-effort read-only allowlist (`validateSqlQuery`); single-statement execution. **Best-effort only** — see residual risks | ⚠️ partial |
+| T9 | **Unintended DB writes** via the drush `sql:query` bridge | Off unless a site sets `drushSsh.rawSql: "governed"`; then the query runs through mcp_sentinel's `mcp-sentinel:sql-query` (Drupal policy decides, every attempt audited). Local `validateSqlQuery` is a fast reject only. Residual: raw SQL is a weaker boundary than an entity read even when governed — see residual risks | ⚠️ partial |
 | T10 | **Over-privileged writes** (publishing, deleting, editing beyond intent) | Drupal-side governance is authoritative; connector security presets (`auditor`/`write-plane`/…) add a client-side cap; destructive ops gated | ✅ defense-in-depth |
 | T11 | **Protocol confusion / cross-era fallback** | One bounded body is classified once by the stable SDK and sent to exactly one arm; modern header/body version, method, and tool-name disagreements are rejected; a failed arm never falls through to the other | ✅ controlled |
 | T12 | **Internal error or secret disclosure at the HTTP boundary** | Expected malformed/oversized requests get stable 400/413 responses; unexpected conversion/classification/dispatch failures are sanitized, and partial responses are destroyed without echoing the error | ✅ controlled |
@@ -82,7 +82,7 @@ field-name validator — it would break legitimate relationship filters.
   Prefer TLS + tight `MCP_BIND_HOST` + rate limiting (default 120/min on
   non-loopback HTTPS) and/or a reverse-proxy allow-list.
 
-## Residual risks (post 2.2 security suite)
+## Residual risks (mitigated)
 
 | Item | Status |
 |------|--------|
@@ -92,7 +92,7 @@ field-name validator — it would break legitimate relationship filters.
 | Live link-check open redirects to private IPs | Mitigated (`redirect: "manual"`, #143) |
 | Omitted `security` defaults to open mode | Mitigated — default is `production-strict` (#140) |
 | GraphQL path skips entity allowlist + redaction | Mitigated by fail-closed gate — tools off unless `allowGraphql` (#142); raw results still bypass policy when opted in |
-| Transitive MCP transport advisories | Mitigated — stable modular MCP 2.0.0 packages plus maintained npm overrides (#128, #172) |
+| Transitive MCP transport advisories | Mitigated — current modular MCP 2.x packages (`@modelcontextprotocol/node` ^2.1.1, `@modelcontextprotocol/server` ^2.2.0) plus maintained npm overrides (#128, #172) |
 
 **When GraphQL is explicitly enabled**, treat results as Drupal-permission-only
 (no connector allowlist/redaction on that path). Prefer JSON:API entity tools

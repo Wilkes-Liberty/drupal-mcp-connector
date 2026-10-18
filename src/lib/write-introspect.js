@@ -7,9 +7,7 @@
  * generic deny as a missing principal. The response is not echoed.
  */
 
-import { introspectToken } from "./http-auth.js";
 import { activeInFlightRegistry, inFlightKeysFromIdentity } from "./in-flight.js";
-import { READY_PROBE_CACHE_MS } from "./ops-ready.js";
 import { getRequestAuthSession, isLocalOperator } from "./principal.js";
 import { principalDenied } from "./principal-context.js";
 import { assertTestOnly } from "./test-only.js";
@@ -110,7 +108,7 @@ export const WRITE_INTROSPECT_CACHE = { useReadyCache: false };
 
 /**
  * Flip the write-path cache consult for a red-run. Production never
- * calls this; {@link READY_PROBE_CACHE_MS} must not mask a kill.
+ * calls this; the 8s `/ready` probe cache must not mask a kill.
  *
  * @param {boolean} useReadyCache
  * @returns {void}
@@ -176,7 +174,6 @@ export async function assertLiveTokenForGovernedWrite({
   if (WRITE_INTROSPECT_CACHE.useReadyCache && readyCache && readyCache.active === true) {
     return;
   }
-  void READY_PROBE_CACHE_MS;
 
   let body;
   try {
@@ -194,14 +191,4 @@ function denyAndCancel(identity) {
   const keys = inFlightKeysFromIdentity(identity);
   if (keys) activeInFlightRegistry().cancel(keys);
   throw principalDenied();
-}
-
-/**
- * Bind a live introspector that never reads a positive cache.
- *
- * @param {object} options
- * @returns {(token: string) => Promise<object|null>}
- */
-export function bindLiveIntrospect(options) {
-  return (token) => introspectToken(token, options);
 }

@@ -10,7 +10,7 @@
 import { classifyHttpAuditCode, requestHasAuthorization } from "./http-audit.js";
 
 /** Closed route labels. Query strings and arbitrary paths never appear. */
-export const METRICS_ROUTES = Object.freeze(["/mcp", "/health", "/well-known", "/unknown"]);
+const METRICS_ROUTES = Object.freeze(["/mcp", "/health", "/well-known", "/unknown"]);
 
 /**
  * Map a request path to a closed metrics route label.
@@ -20,13 +20,14 @@ export const METRICS_ROUTES = Object.freeze(["/mcp", "/health", "/well-known", "
  */
 export function metricsRoute(path) {
   const raw = String(path || "").split("?")[0];
-  if (raw === "/mcp") return "/mcp";
-  if (raw === "/health") return "/health";
+  const [mcp, health, wellKnown, unknown] = METRICS_ROUTES;
+  if (raw === mcp) return mcp;
+  if (raw === health) return health;
   if (raw === "/.well-known/oauth-protected-resource"
     || raw.startsWith("/.well-known/oauth-protected-resource/")) {
-    return "/well-known";
+    return wellKnown;
   }
-  return "/unknown";
+  return unknown;
 }
 
 /**
@@ -149,7 +150,7 @@ export function createOpsMetrics({
  * @param {object} snapshot
  * @returns {string}
  */
-export function renderPrometheus(snapshot) {
+function renderPrometheus(snapshot) {
   const lines = [
     "# HELP mcp_http_requests_total HTTP requests by route and status",
     "# TYPE mcp_http_requests_total counter",

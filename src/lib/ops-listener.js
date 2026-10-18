@@ -22,7 +22,7 @@ export const OPS_PATHS = Object.freeze(["/ready", "/metrics"]);
  */
 export function isOpsPath(path) {
   const raw = String(path || "").split("?")[0];
-  return raw === "/ready" || raw === "/metrics";
+  return OPS_PATHS.includes(raw);
 }
 
 /**

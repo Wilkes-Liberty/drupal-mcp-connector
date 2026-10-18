@@ -133,27 +133,6 @@ export function validateSqlQuery(query) {
 }
 
 // ---------------------------------------------------------------------------
-// SSH argument escaping
-// Prevents command injection when building SSH commands programmatically.
-// Uses single-quote escaping: wrap value in single quotes, escape internal
-// single quotes as '\'' (end quote, escaped quote, start quote).
-// ---------------------------------------------------------------------------
-
-/**
- * Escape a value for safe inclusion as a shell argument.
- * Output is wrapped in single quotes with internal single quotes escaped.
- * @param {string} value
- * @returns {string} Shell-safe single-quoted argument.
- */
-export function sanitizeSshArg(value) {
-  if (typeof value !== "string") {
-    throw new TypeError(`sanitizeSshArg expected a string, got ${typeof value}`);
-  }
-  // Single-quote escaping: 'value' with internal ' → '\''
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-// ---------------------------------------------------------------------------
 // URL / baseUrl validation
 // Enforces HTTPS for non-localhost targets.
 // ---------------------------------------------------------------------------
