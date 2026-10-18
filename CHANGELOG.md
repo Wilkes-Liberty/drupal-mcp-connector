@@ -18,7 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   secrets, cookies, and tool payloads never reach the report. Protected-resource
   `authorization_servers` is compared as a parsed URL, so a lookalike
   that merely contains the issuer string does not pass. A foreign Origin
-  that starts returning 200 turns the run red.
+  that starts returning 200 turns the run red. `EVAL_HTTP_STAGING_*` token
+  aliases apply only to the staging host. `tools/list` is classified with
+  the connector's `isWriteLikeTool` table; a write-shaped name in the
+  advertised catalog fails the step. The probe never sends a write
+  `tools/call`.
 
 ## [5.3.0] - 2026-10-18
 

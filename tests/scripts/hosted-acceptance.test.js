@@ -14,6 +14,7 @@ import {
   ISSUER,
   READ_TOOL,
   SECRET_ENV,
+  advertisedWriteLikeTools,
   assertReadOnlyTool,
   classifyAsMetadata,
   classifyAuthorize,
@@ -73,12 +74,14 @@ describe("hosted acceptance classifiers", () => {
     expect(formatEt(new Date("2026-10-18T05:31:00Z"))).toMatch(/2026-10-18 01:31:00 EDT/);
   });
 
-  it("redacts bearer tokens, JWTs, and client_secret assignments", () => {
+  it("redacts bearer tokens, JWTs, hyphenated opaque bearers, and client_secret assignments", () => {
     const jwtValue = jwt({ sub: "lab" });
-    const raw = `Authorization: Bearer ${jwtValue} client_secret=super-secret-value`;
+    const opaque = "abcdefghijklmnopqrstuv-wxyz-0123456789abcd";
+    const raw = `Authorization: Bearer ${jwtValue} Bearer ${opaque} client_secret=super-secret-value`;
     const redacted = redactSecrets(raw);
     expect(redacted).not.toContain("super-secret-value");
     expect(redacted).not.toContain(jwtValue);
+    expect(redacted).not.toContain(opaque);
     expect(redacted).not.toMatch(/Bearer\s+eyJ/);
     expect(redacted).toMatch(/\[redacted\]/);
   });
@@ -254,6 +257,10 @@ describe("hosted acceptance classifiers", () => {
     }, "tools/list").toolCount).toBe(1);
     expect(classifyMcpJsonRpc({
       status: 200,
+      json: { result: { tools: [{ name: READ_TOOL }, { name: "drupal_create_node" }] } },
+    }, "tools/list").ok).toBe(false);
+    expect(classifyMcpJsonRpc({
+      status: 200,
       json: { result: { isError: true } },
     }, "tools/call").ok).toBe(false);
     expect(classifyMcpJsonRpc({
@@ -264,7 +271,20 @@ describe("hosted acceptance classifiers", () => {
 
   it("refuses a write-shaped tools/call before any request is sent", () => {
     expect(() => assertReadOnlyTool("drupal_create_node")).toThrow(/read-only/);
+    expect(() => assertReadOnlyTool("drupal_entity_create")).toThrow(/read-only/);
+    expect(() => assertReadOnlyTool("drupal_draft_nested_components")).toThrow(/read-only/);
+    expect(() => assertReadOnlyTool("drupal_drush_cache_rebuild")).toThrow(/read-only/);
     expect(() => assertReadOnlyTool(READ_TOOL)).not.toThrow();
+    expect(advertisedWriteLikeTools([
+      { name: READ_TOOL },
+      { name: "drupal_entity_create" },
+      { name: "drupal_draft_nested_components" },
+      { name: "drupal_drush_cron" },
+    ])).toEqual([
+      "drupal_entity_create",
+      "drupal_draft_nested_components",
+      "drupal_drush_cron",
+    ]);
   });
 });
 
@@ -522,6 +542,62 @@ describe("runAcceptance with a fake fetch", () => {
     });
     expect(code).toBe(2);
   });
+
+  it("fails the run when tools/list advertises a write tool", async () => {
+    const inner = fakeFetchFactory();
+    let writeCallSent = false;
+    const fetchImpl = async (url, init = {}) => {
+      const href = String(url);
+      const parsed = (() => {
+        try {
+          return JSON.parse(String(init.body || "{}"));
+        } catch {
+          return {};
+        }
+      })();
+      if (href.endsWith("/mcp") && parsed.method === "tools/list") {
+        return jsonResponse(200, {
+          result: { tools: [{ name: READ_TOOL }, { name: "drupal_create_node" }] },
+        });
+      }
+      if (href.endsWith("/mcp") && parsed.method === "tools/call") {
+        if (parsed.params?.name && parsed.params.name !== READ_TOOL) {
+          writeCallSent = true;
+        }
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: { HOSTED_MCP_TOKEN: token },
+      hosts: [DEFAULT_HOSTS[1]],
+      sleep: noopSleep,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => step.id === "signed-in:tools/list").ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => step.id === "signed-in:tools/list").reason)
+      .toMatch(/drupal_create_node/);
+    expect(writeCallSent).toBe(false);
+  });
+
+  it("refuses to print when an env secret appears in the report", async () => {
+    const stderr = [];
+    let printed = false;
+    const code = await main(["--host", "staging"], {
+      fetchImpl: fakeFetchFactory(),
+      env: { HOSTED_MCP_TOKEN: "https://mcp.staging.wilkesliberty.com/mcp" },
+      sleep: noopSleep,
+      stdout: {
+        write: () => {
+          printed = true;
+        },
+      },
+      stderr: { write: (chunk) => stderr.push(chunk) },
+    });
+    expect(code).toBe(1);
+    expect(printed).toBe(false);
+    expect(stderr.join("")).toMatch(/refused to print/);
+  });
 });
 
 describe("CLI wiring", () => {
@@ -573,6 +649,25 @@ describe("CLI wiring", () => {
     expect(staging.read).toBe("");
     const production = readTokenConfig({ HOSTED_MCP_TOKEN_PRODUCTION: "prod-only" }, "production");
     expect(production.read).toBe("prod-only");
+  });
+
+  it("does not apply staging eval token aliases to production", () => {
+    const env = {
+      EVAL_HTTP_STAGING_TOKEN_READ: "staging-read-only",
+      EVAL_HTTP_STAGING_TOKEN_WRONG_AUDIENCE: "staging-wrong-aud",
+      EVAL_HTTP_STAGING_TOKEN_EXPIRED: "staging-expired",
+      EVAL_HTTP_STAGING_TOKEN_INSUFFICIENT_SCOPE: "staging-scope",
+    };
+    const production = readTokenConfig(env, "production");
+    expect(production.read).toBe("");
+    expect(production.wrongAudience).toBe("");
+    expect(production.expired).toBe("");
+    expect(production.insufficientScope).toBe("");
+    const staging = readTokenConfig(env, "staging");
+    expect(staging.read).toBe("staging-read-only");
+    expect(staging.wrongAudience).toBe("staging-wrong-aud");
+    expect(staging.expired).toBe("staging-expired");
+    expect(staging.insufficientScope).toBe("staging-scope");
   });
 });
 

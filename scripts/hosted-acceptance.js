@@ -26,6 +26,7 @@ import {
   GROK_BOT_CONSOLE_ORIGIN,
   HOSTED_PUBLIC_CLIENT_ORIGINS,
 } from "../src/lib/http-transport.js";
+import { isWriteLikeTool } from "../src/lib/operations.js";
 
 /** Default hosted MCP planes the operator asked this probe to cover. */
 export const DEFAULT_HOSTS = Object.freeze([
@@ -61,8 +62,6 @@ export const GROK_CLIENT_ID = "grok-bot";
 
 /** Documented read-only tool used by the Paladin smoke on DEV-817. */
 export const READ_TOOL = "drupal_list_content_types";
-
-const WRITE_TOOL = /(?:^|")drupal_(?:create_|update_|delete_|bulk_|upload_|set_|block_|schedule_|revert_)/;
 
 const MCP_PROTOCOL = "2026-07-28";
 const ACCEPT = "application/json, text/event-stream";
@@ -170,7 +169,7 @@ export function formatEt(date = new Date()) {
   return `${pick("year")}-${pick("month")}-${pick("day")} ${pick("hour")}:${pick("minute")}:${pick("second")} ${pick("timeZoneName")}`;
 }
 
-const SECRET_PATTERN = /(?:bearer\s+eyJ[a-zA-Z0-9._~+/-]+=*|bearer\s+[a-zA-Z0-9._~+/-]{24,}=*|client_secret(?:=|(?:\s*[:\"']\s*))\S+|eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})/gi;
+const SECRET_PATTERN = /(?:bearer\s+eyJ[a-zA-Z0-9._~+/-]+=*|bearer\s+[a-zA-Z0-9._~+/=-]{24,}=*|client_secret(?:=|(?:\s*[:\"']\s*))\S+|eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})/gi;
 
 /**
  * Strip bearer tokens, JWT-shaped strings, and client_secret assignments.
@@ -494,6 +493,14 @@ export function classifyMcpJsonRpc(res, kind) {
   if (kind === "tools/list") {
     const tools = res.json.result?.tools;
     if (!Array.isArray(tools)) return { ok: false, reason: "tools/list missing tools" };
+    const writes = advertisedWriteLikeTools(tools);
+    if (writes.length > 0) {
+      return {
+        ok: false,
+        reason: `tools/list advertised write tools: ${writes.join(", ")}`,
+        toolCount: tools.length,
+      };
+    }
     return { ok: true, reason: `tools/list count=${tools.length}`, toolCount: tools.length };
   }
   const isError = res.json.result?.isError === true;
@@ -502,12 +509,31 @@ export function classifyMcpJsonRpc(res, kind) {
 }
 
 /**
+ * Advertised `tools/list` names the connector treats as writes or deletes.
+ * Uses {@link isWriteLikeTool} so entity, draft, and drush writes cannot
+ * drift from the runtime gate.
+ *
+ * @param {unknown} tools
+ * @returns {string[]}
+ */
+export function advertisedWriteLikeTools(tools) {
+  if (!Array.isArray(tools)) return [];
+  const writes = [];
+  for (const tool of tools) {
+    const name = typeof tool === "string" ? tool : tool?.name;
+    if (typeof name === "string" && isWriteLikeTool(name)) writes.push(name);
+  }
+  return writes;
+}
+
+/**
  * Refuse a write-shaped tools/call so the probe stays read-only.
+ * Driven by the connector's {@link isWriteLikeTool} table, not a local regex.
  *
  * @param {string} name
  */
 export function assertReadOnlyTool(name) {
-  if (WRITE_TOOL.test(String(name || ""))) {
+  if (isWriteLikeTool(String(name || ""))) {
     throw new Error("hosted acceptance is read-only; refused a write tool call");
   }
 }
@@ -600,16 +626,29 @@ async function request(fetchImpl, url, init = {}, retry = {}) {
  */
 export function readTokenConfig(env = process.env, hostId = "staging") {
   const suffix = hostId === "production" ? "PRODUCTION" : "STAGING";
+  const stagingOnly = hostId === "staging";
   return {
     read: String(
       env[`HOSTED_MCP_TOKEN_${suffix}`]
       || env.HOSTED_MCP_TOKEN
-      || env.EVAL_HTTP_STAGING_TOKEN_READ
+      || (stagingOnly ? env.EVAL_HTTP_STAGING_TOKEN_READ : "")
       || "",
     ).trim(),
-    wrongAudience: String(env.EVAL_HTTP_STAGING_TOKEN_WRONG_AUDIENCE || env.HOSTED_MCP_TOKEN_WRONG_AUDIENCE || "").trim(),
-    expired: String(env.EVAL_HTTP_STAGING_TOKEN_EXPIRED || env.HOSTED_MCP_TOKEN_EXPIRED || "").trim(),
-    insufficientScope: String(env.EVAL_HTTP_STAGING_TOKEN_INSUFFICIENT_SCOPE || env.HOSTED_MCP_TOKEN_INSUFFICIENT_SCOPE || "").trim(),
+    wrongAudience: String(
+      (stagingOnly ? env.EVAL_HTTP_STAGING_TOKEN_WRONG_AUDIENCE : "")
+      || env.HOSTED_MCP_TOKEN_WRONG_AUDIENCE
+      || "",
+    ).trim(),
+    expired: String(
+      (stagingOnly ? env.EVAL_HTTP_STAGING_TOKEN_EXPIRED : "")
+      || env.HOSTED_MCP_TOKEN_EXPIRED
+      || "",
+    ).trim(),
+    insufficientScope: String(
+      (stagingOnly ? env.EVAL_HTTP_STAGING_TOKEN_INSUFFICIENT_SCOPE : "")
+      || env.HOSTED_MCP_TOKEN_INSUFFICIENT_SCOPE
+      || "",
+    ).trim(),
     clientId: String(env.HOSTED_MCP_CLIENT_ID || (hostId === "production" ? "mcp-edge-prod-alpha" : "mcp-edge-alpha")).trim(),
     clientSecret: String(env.HOSTED_MCP_CLIENT_SECRET || "").trim(),
   };
