@@ -65,6 +65,7 @@
     "eval:http": "node tests/evals/http/run-pack.js",
     "eval:mutants": "node tests/evals/http/run-mutants.js",
     "eval:http:staging": "node tests/evals/http/run-staging.js",
+    "eval:hosted": "node scripts/hosted-acceptance.js",
     "audit": "npm audit --audit-level=high",
     "check": "npm run lint && npm run audit && npm run syntax-check && npm test",
     "check:principal-vectors": "node scripts/check-principal-key-vectors.js",

@@ -6,6 +6,7 @@ Run:
 npm run eval:http          # synthetic pack (stub issuer, fake upstream)
 npm run eval:mutants       # source mutants over that pack
 npm run eval:http:staging  # same deny/allow twins against a staging endpoint
+npm run eval:hosted        # live staging+production discovery / Origin / authorize / DCR (DEV-817 / DEV-953)
 ```
 
 Prerequisites: Node, npm, and an `openssl` executable on `PATH` (T1n

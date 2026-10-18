@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Hosted MCP acceptance probe (DEV-817 / DEV-953).** `npm run eval:hosted`
+  re-runs discovery, Origin allow/deny, authorization-request
+  accept/reject, and closed dynamic client registration against the
+  staging and production `/mcp` endpoints. Signed-in initialize /
+  tools/list / `drupal_list_content_types` run only when the operator
+  supplies a documented token or client-credentials identity. Tokens,
+  secrets, cookies, and tool payloads never reach the report.
+
 ## [5.3.0] - 2026-10-18
 
 ### Added
