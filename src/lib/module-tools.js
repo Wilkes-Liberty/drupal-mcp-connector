@@ -206,9 +206,9 @@ export function firstEnabledModuleEntry(site, identity, sites, grants) {
  * Shared listing work for one site: module tools (when enabled for this
  * principal) plus configured workflow prompts. tools/list and prompts/list
  * pass the same work so they share one in-flight fetch. Source governance
- * is proven first; prompt hops then overlap `tools/list` after that gate
- * (the Drupal handshake is shared). Tools are advertised as soon as
- * `tools/list` returns. The listing wait does not abort the chain.
+ * is proven first. Prompt hops then overlap the Drupal handshake and
+ * `tools/list`. Tools are advertised as soon as `tools/list` returns.
+ * The listing wait does not abort the chain.
  *
  * @param {object} [context]
  * @param {Array<object>} [context.sites]
