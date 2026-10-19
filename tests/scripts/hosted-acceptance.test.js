@@ -5,10 +5,21 @@ import { fileURLToPath } from "node:url";
 
 import { HOSTED_PUBLIC_CLIENT_ORIGINS } from "../../src/lib/http-transport.js";
 import {
+  AUTHORIZE_GATES_EXPECT,
+  AUTHORIZE_GATES_UNAUTHENTICATED_REASON,
+  CLAUDE_BROWSER_ORIGIN,
+  CLAUDE_CODE_CIMD_URL,
+  CLAUDE_HOSTED_CIMD_URL,
   CLAUDE_HOSTED_REDIRECT,
-  CLIENT_PATHS,
+  CLIENT_INVENTORY,
+  OPERATORS_DENY_FLOW,
+  OPERATORS_STAFF_GATE,
+  OPERATORS_STAFF_ROLE,
   CURSOR_CLIENT_ID,
   DEFAULT_HOSTS,
+  DENY_ORIGINS,
+  FOREIGN_LOOKALIKE_ORIGIN,
+  FOREIGN_ORIGIN,
   GROK_CIMD_URL,
   GROK_CLIENT_ID,
   ISSUER,
@@ -18,23 +29,35 @@ import {
   assertReadOnlyTool,
   classifyAsMetadata,
   classifyAuthorize,
+  classifyAuthorizeGates,
   classifyDcrClosed,
   classifyGrokCimd,
   classifyHealth,
   classifyMcpJsonRpc,
+  classifyOriginPreflight,
   classifyOriginRefused,
   classifyProtectedResource,
   classifyUnauthenticatedMcp,
   isExactIssuer,
   decodeJwtPayload,
+  countSkippedSecurityGates,
+  declaredClientIds,
   formatEt,
   formatMarkdown,
+  formatOverallLine,
+  isOperatorsDenyPage,
+  isRequiredSignedInStep,
+  isSecurityGateStep,
   main,
   parseArgs,
   parseAuthorizeResponse,
+  parseKcContext,
   parseWwwAuthenticate,
   readTokenConfig,
   redactSecrets,
+  resolveAllowOrigins,
+  resolveClientInventory,
+  resolveClientsProvisioned,
   retryAfterMs,
   runAcceptance,
 } from "../../scripts/hosted-acceptance.js";
@@ -107,6 +130,14 @@ describe("hosted acceptance classifiers", () => {
     expect(classifyOriginRefused({ status: 403 }).ok).toBe(true);
     expect(classifyOriginRefused({ status: 401 }).ok).toBe(false);
     expect(classifyOriginRefused({ status: 200 }).ok).toBe(false);
+    expect(classifyOriginRefused({ status: 204 }).ok).toBe(false);
+  });
+
+  it("requires 204 on allowlisted Origin preflight and fails any other status", () => {
+    expect(classifyOriginPreflight({ status: 204 }).ok).toBe(true);
+    expect(classifyOriginPreflight({ status: 403 }).ok).toBe(false);
+    expect(classifyOriginPreflight({ status: 401 }).ok).toBe(false);
+    expect(classifyOriginPreflight({ status: 200 }).ok).toBe(false);
   });
 
   it("classifies Keycloak authorize login vs invalid redirect vs unknown client", () => {
@@ -136,7 +167,60 @@ describe("hosted acceptance classifiers", () => {
       },
     });
     expect(classifyAuthorize(unknown, "client_not_found").ok).toBe(true);
+    expect(classifyAuthorize(unknown, "login").ok).toBe(false);
+    expect(classifyAuthorize(login, "client_not_found").ok).toBe(false);
     expect(decodeJwtPayload("not-a-jwt")).toBeNull();
+  });
+
+  it("skips consent and the operators staff gate when the login page does not expose them", () => {
+    const login = parseAuthorizeResponse({
+      status: 200,
+      body: "const kcContext = {\"pageId\": \"login-username\"};",
+      headers: {},
+    });
+    const skipped = classifyAuthorizeGates(login);
+    expect(skipped.skipped).toBe(true);
+    expect(skipped.ok).toBeNull();
+    expect(skipped.reason).toBe(AUTHORIZE_GATES_UNAUTHENTICATED_REASON);
+    expect(skipped.reason).toMatch(/wl-operator/);
+    expect(skipped.reason).toMatch(/browser-deny-non-operators/);
+  });
+
+  it("fails when the authorize page exposes consent off or a missing operators staff gate", () => {
+    const noConsent = parseAuthorizeResponse({
+      status: 200,
+      body: JSON.stringify({ pageId: "login-username", consentRequired: false, staffGate: true }),
+    });
+    expect(classifyAuthorizeGates(noConsent).ok).toBe(false);
+    expect(classifyAuthorizeGates(noConsent).reason).toMatch(/consentRequired=false/);
+
+    const noStaff = parseAuthorizeResponse({
+      status: 200,
+      body: JSON.stringify({ pageId: "login-username", consentRequired: true, staffGate: false }),
+    });
+    expect(classifyAuthorizeGates(noStaff).ok).toBe(false);
+    expect(classifyAuthorizeGates(noStaff).reason).toBe(`${OPERATORS_STAFF_GATE} absent`);
+  });
+
+  it("passes when the authorize page requires consent and the operators staff gate", () => {
+    const body = JSON.stringify({ pageId: "login-consent", consentRequired: true, staffGate: true });
+    expect(parseKcContext(body).consentRequired).toBe(true);
+    expect(classifyAuthorizeGates(parseAuthorizeResponse({ status: 200, body })).ok).toBe(true);
+  });
+
+  it("detects the browser-deny-non-operators deny page as the operators staff gate", () => {
+    const denyHtml = `<html data-flow="${OPERATORS_DENY_FLOW}">access denied</html>`;
+    expect(isOperatorsDenyPage(denyHtml, "error")).toBe(true);
+    const denied = parseAuthorizeResponse({ status: 200, body: denyHtml });
+    expect(denied.staffGate).toBe(true);
+    expect(classifyAuthorizeGates(denied).ok).toBe(true);
+
+    const login = parseAuthorizeResponse({
+      status: 200,
+      body: "const kcContext = {\"pageId\": \"login-username\"};",
+    });
+    expect(isOperatorsDenyPage(login.pageId, login.pageId)).toBe(false);
+    expect(login.staffGate).toBeUndefined();
   });
 
   it("treats anonymous DCR 403 Trusted Hosts as closed and a 200 registration as a finding", () => {
@@ -288,18 +372,57 @@ describe("hosted acceptance classifiers", () => {
   });
 });
 
-describe("hosted client path table", () => {
-  it("covers every hosted public Origin and keeps Grok on the short client id", () => {
-    const listed = CLIENT_PATHS.flatMap((client) => [...client.origins]);
+describe("hosted client inventory", () => {
+  it("covers every hosted public Origin and allowlists Claude at the edge", () => {
+    const allow = resolveAllowOrigins();
     for (const origin of HOSTED_PUBLIC_CLIENT_ORIGINS) {
-      expect(listed).toContain(origin);
+      expect(allow).toContain(origin);
     }
-    expect(CLIENT_PATHS.find((client) => client.id === "cursor").clientId).toBe(CURSOR_CLIENT_ID);
-    expect(CLIENT_PATHS.find((client) => client.id === "grok").clientId).toBe(GROK_CLIENT_ID);
-    expect(CLIENT_PATHS.find((client) => client.id === "grok").cimdClientIdExpect).toBe("client_not_found");
-    expect(CLIENT_PATHS.find((client) => client.id === "claude").originExpect).toBe("refuse");
-    expect(CLIENT_PATHS.find((client) => client.id === "claude").rejectRedirects).toContain(CLAUDE_HOSTED_REDIRECT);
+    expect(allow).toContain(CLAUDE_BROWSER_ORIGIN);
+    expect(DENY_ORIGINS).toEqual([FOREIGN_ORIGIN, FOREIGN_LOOKALIKE_ORIGIN]);
+    expect(DENY_ORIGINS).not.toContain(CLAUDE_BROWSER_ORIGIN);
+    expect(CLIENT_INVENTORY.find((client) => client.id === "cursor").clientId).toBe(CURSOR_CLIENT_ID);
+    expect(CLIENT_INVENTORY.find((client) => client.id === "grok").clientId).toBe(GROK_CLIENT_ID);
+    const claude = CLIENT_INVENTORY.find((client) => client.id === "claude");
+    expect(claude.clientId).toBe(CLAUDE_HOSTED_CIMD_URL);
+    expect(claude.clientId).not.toBe("claude");
+    expect(claude.acceptRedirects).toContain(CLAUDE_HOSTED_REDIRECT);
+    expect(CLAUDE_CODE_CIMD_URL).toMatch(/claude-code-client-metadata/);
+    expect(declaredClientIds()).not.toContain(CLAUDE_CODE_CIMD_URL);
     expect(DEFAULT_HOSTS.map((host) => host.id)).toEqual(["staging", "production"]);
+  });
+
+  it("derives authorize expects from the provisioned flag instead of hard-coding client_not_found", () => {
+    const pending = resolveClientInventory(false);
+    const grokPending = pending.find((client) => client.id === "grok");
+    const claudePending = pending.find((client) => client.id === "claude");
+    expect(grokPending.cimdAcceptExpect).toBe("client_not_found");
+    expect(grokPending.cimdRejectExpect).toBe("client_not_found");
+    expect(claudePending.inRealm).toBe(false);
+    expect(claudePending.acceptExpect).toBe("client_not_found");
+    expect(claudePending.rejectExpect).toBe("client_not_found");
+    expect(pending.find((client) => client.id === "cursor").acceptExpect).toBe("login");
+
+    const live = resolveClientInventory(true);
+    const grokLive = live.find((client) => client.id === "grok");
+    const claudeLive = live.find((client) => client.id === "claude");
+    expect(grokLive.cimdAcceptExpect).toBe("login");
+    expect(grokLive.cimdRejectExpect).toBe("invalid_redirect");
+    expect(claudeLive.inRealm).toBe(true);
+    expect(claudeLive.acceptExpect).toBe("login");
+    expect(claudeLive.rejectExpect).toBe("invalid_redirect");
+  });
+
+  it("reads the provisioned flag from CLI then env, defaulting to not provisioned", () => {
+    expect(resolveClientsProvisioned({}, {})).toBe(false);
+    expect(resolveClientsProvisioned({ HOSTED_MCP_CLIENTS_PROVISIONED: "1" }, {})).toBe(true);
+    expect(resolveClientsProvisioned({ HOSTED_MCP_CLIENTS_PROVISIONED: "0" }, {})).toBe(false);
+    expect(resolveClientsProvisioned({ HOSTED_MCP_CLIENTS_PROVISIONED: "0" }, { clientsProvisioned: true }))
+      .toBe(true);
+    expect(resolveClientsProvisioned({ HOSTED_MCP_CLIENTS_PROVISIONED: "1" }, { clientsProvisioned: false }))
+      .toBe(false);
+    expect(() => resolveClientsProvisioned({ HOSTED_MCP_CLIENTS_PROVISIONED: "maybe" }, {}))
+      .toThrow(/HOSTED_MCP_CLIENTS_PROVISIONED/);
   });
 
   it("parses WWW-Authenticate quoted params", () => {
@@ -316,7 +439,12 @@ describe("runAcceptance with a fake fetch", () => {
   const token = "lab-token-value-not-for-logs";
   const secret = "lab-client-secret-not-for-logs";
 
-  function fakeFetchFactory({ dcrStatus = 403, mcpNoTokenStatus = 401 } = {}) {
+  function fakeFetchFactory({
+    dcrStatus = 403,
+    mcpNoTokenStatus = 401,
+    clientsProvisioned = false,
+    allowOrigins = resolveAllowOrigins(),
+  } = {}) {
     return async (url, init = {}) => {
       const href = String(url);
       const method = String(init.method || "GET").toUpperCase();
@@ -364,32 +492,49 @@ describe("runAcceptance with a fake fetch", () => {
         const parsed = new URL(href);
         const clientId = parsed.searchParams.get("client_id");
         const redirect = parsed.searchParams.get("redirect_uri");
-        if (clientId === GROK_CIMD_URL || clientId === "claude") {
-          return jsonResponse(400, "{\"pageId\":\"error\"}", {
-            "set-cookie": `KC_STATE_CHECKER=${jwt({ mky: "clientNotFoundMessage", mpar: [] })}`,
-          });
-        }
-        const allowed = [
-          "https://www.cursor.com/agents/mcp/oauth/callback",
-          "http://localhost:8787/callback",
-          "https://grok.com/connectors-oauth-exchange-code/",
-          "https://console.x.ai/connectors-oauth-exchange-code/",
-        ];
-        if (clientId === GROK_CLIENT_ID && redirect === "https://www.cursor.com/agents/mcp/oauth/callback") {
-          return jsonResponse(200, "const kcContext = {\"pageId\": \"login-username\"}");
-        }
-        if (allowed.includes(redirect)) {
-          return jsonResponse(200, "const kcContext = {\"pageId\": \"login-username\"}");
-        }
-        return jsonResponse(400, "{\"pageId\":\"error\"}", {
+        const login = () => jsonResponse(200, "const kcContext = {\"pageId\": \"login-username\"};");
+        const unknown = () => jsonResponse(400, "{\"pageId\":\"error\"}", {
+          "set-cookie": `KC_STATE_CHECKER=${jwt({ mky: "clientNotFoundMessage", mpar: [] })}`,
+        });
+        const badRedirect = () => jsonResponse(400, "{\"pageId\":\"error\"}", {
           "set-cookie": `KC_STATE_CHECKER=${jwt({ mky: "invalidParameterMessage", mpar: ["redirect_uri"] })}`,
         });
+        const allowedByClient = {
+          [CURSOR_CLIENT_ID]: [
+            "https://www.cursor.com/agents/mcp/oauth/callback",
+            "http://localhost:8787/callback",
+          ],
+          [GROK_CLIENT_ID]: [
+            "https://grok.com/connectors-oauth-exchange-code/",
+            "https://console.x.ai/connectors-oauth-exchange-code/",
+            "https://www.cursor.com/agents/mcp/oauth/callback",
+          ],
+          [GROK_CIMD_URL]: [
+            "https://grok.com/connectors-oauth-exchange-code/",
+            "https://console.x.ai/connectors-oauth-exchange-code/",
+            "https://www.cursor.com/agents/mcp/oauth/callback",
+          ],
+          [CLAUDE_HOSTED_CIMD_URL]: [CLAUDE_HOSTED_REDIRECT],
+        };
+        const known = Object.hasOwn(allowedByClient, clientId);
+        const applied = clientId === CLAUDE_HOSTED_CIMD_URL || clientId === GROK_CIMD_URL
+          ? clientsProvisioned
+          : known;
+        if (!applied) return unknown();
+        if ((allowedByClient[clientId] || []).includes(redirect)) return login();
+        return badRedirect();
       }
       if (href.includes("/protocol/openid-connect/token")) {
         return jsonResponse(200, { access_token: token, token_type: "Bearer", expires_in: 300 });
       }
+      if (href.endsWith("/mcp") && method === "OPTIONS") {
+        if (origin && !allowOrigins.includes(origin)) {
+          return jsonResponse(403, "Forbidden");
+        }
+        return jsonResponse(204, "");
+      }
       if (href.endsWith("/mcp") && method === "POST") {
-        if (origin && !HOSTED_PUBLIC_CLIENT_ORIGINS.includes(origin)) {
+        if (origin && !allowOrigins.includes(origin)) {
           return jsonResponse(403, "Forbidden");
         }
         const auth = String(init.headers?.authorization || "");
@@ -426,6 +571,9 @@ describe("runAcceptance with a fake fetch", () => {
       sleep: noopSleep,
     });
     expect(report.ok).toBe(true);
+    expect(report.clientsProvisioned).toBe(false);
+    expect(report.origins).toContain(CLAUDE_BROWSER_ORIGIN);
+    expect(report.denyOrigins).toEqual([FOREIGN_ORIGIN, FOREIGN_LOOKALIKE_ORIGIN]);
     expect(report.hosts).toHaveLength(2);
     expect(report.hosts[0].skipped).toBeGreaterThan(0);
     const markdown = formatMarkdown(report);
@@ -433,10 +581,43 @@ describe("runAcceptance with a fake fetch", () => {
     expect(markdown).toContain("## staging (");
     expect(markdown).toContain("## production (");
     expect(markdown).not.toContain("## undefined");
+    expect(markdown).toContain("Client inventory: not provisioned");
+    expect(markdown).toContain(`Overall: ${formatOverallLine(report)}`);
+    expect(formatOverallLine(report)).toMatch(/PASS \(\d+ security gates skipped\)/);
+    expect(countSkippedSecurityGates(report)).toBeGreaterThan(0);
     expect(markdown).toContain("PASS");
     expect(markdown).toContain("SKIP");
     expect(markdown).not.toContain(token);
     expect(redactSecrets("401 challenge resource_metadata=https://mcp.example/.well-known/oauth-protected-resource/mcp")).toContain("resource_metadata=https://mcp.example");
+    const claudeAllow = report.hosts[0].steps.find((step) => step.id === `origin-allow:${CLAUDE_BROWSER_ORIGIN}`);
+    expect(claudeAllow.ok).toBe(true);
+    const claudePreflight = report.hosts[0].steps.find((step) => step.id === `origin-preflight:${CLAUDE_BROWSER_ORIGIN}`);
+    expect(claudePreflight.ok).toBe(true);
+    const gates = report.hosts[0].steps.filter((step) => step.id.startsWith("authorize-gates:"));
+    expect(gates.length).toBe(CLIENT_INVENTORY.length);
+    expect(gates.every((step) => step.skipped)).toBe(true);
+  });
+
+  it("passes the provisioned inventory when keystone#1559 clients accept their redirects", async () => {
+    const report = await runAcceptance({
+      fetchImpl: fakeFetchFactory({ clientsProvisioned: true }),
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+      clientsProvisioned: true,
+    });
+    expect(report.ok).toBe(true);
+    expect(report.clientsProvisioned).toBe(true);
+    expect(formatMarkdown(report)).toContain("Client inventory: provisioned");
+    const steps = report.hosts[0].steps;
+    expect(steps.find((step) => step.id === `authorize-cimd:${GROK_CIMD_URL}`).ok).toBe(true);
+    expect(steps.find((step) => step.id.startsWith("authorize-cimd-reject:")).ok).toBe(true);
+    expect(steps.find((step) => (
+      step.id === `authorize-accept:${CLAUDE_HOSTED_CIMD_URL}:${CLAUDE_HOSTED_REDIRECT}`
+    )).ok).toBe(true);
+    expect(steps.find((step) => (
+      step.id === `authorize-reject:${CLAUDE_HOSTED_CIMD_URL}:https://evil.example/callback`
+    )).ok).toBe(true);
   });
 
   it("fails the run when unauthenticated /mcp starts returning 200", async () => {
@@ -453,7 +634,7 @@ describe("runAcceptance with a fake fetch", () => {
   it("fails the run when a foreign Origin is allowed through", async () => {
     const inner = fakeFetchFactory();
     const fetchImpl = async (url, init = {}) => {
-      if (String(url).endsWith("/mcp") && init.headers?.origin === "https://evil.example") {
+      if (String(url).endsWith("/mcp") && init.headers?.origin === FOREIGN_ORIGIN) {
         return jsonResponse(200, { result: { protocolVersion: "2026-07-28" } });
       }
       return inner(url, init);
@@ -465,7 +646,255 @@ describe("runAcceptance with a fake fetch", () => {
       sleep: noopSleep,
     });
     expect(report.ok).toBe(false);
-    expect(report.hosts[0].steps.find((step) => step.id === "origin-deny:https://evil.example").ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => step.id === `origin-deny:${FOREIGN_ORIGIN}`).ok).toBe(false);
+  });
+
+  it("fails the run when a lookalike Origin is allowed through", async () => {
+    const inner = fakeFetchFactory();
+    const fetchImpl = async (url, init = {}) => {
+      if (String(url).endsWith("/mcp") && String(init.method || "GET").toUpperCase() === "POST"
+        && init.headers?.origin === FOREIGN_LOOKALIKE_ORIGIN) {
+        return jsonResponse(401, "Unauthorized", {
+          "www-authenticate": "Bearer resource_metadata=\"https://mcp.staging.wilkesliberty.com/.well-known/oauth-protected-resource/mcp\"",
+        });
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => step.id === `origin-deny:${FOREIGN_LOOKALIKE_ORIGIN}`).ok)
+      .toBe(false);
+  });
+
+  it("fails the run when foreign Origin OPTIONS is allowed through", async () => {
+    const inner = fakeFetchFactory();
+    const fetchImpl = async (url, init = {}) => {
+      if (String(url).endsWith("/mcp") && String(init.method || "").toUpperCase() === "OPTIONS"
+        && init.headers?.origin === FOREIGN_ORIGIN) {
+        return jsonResponse(204, "");
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => step.id === `origin-deny-options:${FOREIGN_ORIGIN}`).ok)
+      .toBe(false);
+  });
+
+  it("fails the run when allowlisted Origin OPTIONS loses 204", async () => {
+    const inner = fakeFetchFactory();
+    const fetchImpl = async (url, init = {}) => {
+      if (String(url).endsWith("/mcp") && String(init.method || "").toUpperCase() === "OPTIONS"
+        && init.headers?.origin === CLAUDE_BROWSER_ORIGIN) {
+        return jsonResponse(403, "Forbidden");
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => step.id === `origin-preflight:${CLAUDE_BROWSER_ORIGIN}`).ok)
+      .toBe(false);
+  });
+
+  it("fails the run when a junk bearer is accepted", async () => {
+    const inner = fakeFetchFactory();
+    const fetchImpl = async (url, init = {}) => {
+      if (String(url).endsWith("/mcp") && init.headers?.authorization === "Bearer not-a-real-token") {
+        return jsonResponse(200, { result: { protocolVersion: "2026-07-28" } });
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => step.id === "mcp-junk-token").ok).toBe(false);
+  });
+
+  it("fails the run when an unregistered redirect is accepted", async () => {
+    const inner = fakeFetchFactory();
+    const fetchImpl = async (url, init) => {
+      if (String(url).includes("/protocol/openid-connect/auth")) {
+        const parsed = new URL(String(url));
+        if (parsed.searchParams.get("redirect_uri") === "https://evil.example/callback"
+          && parsed.searchParams.get("client_id") === CURSOR_CLIENT_ID) {
+          return jsonResponse(200, "const kcContext = {\"pageId\": \"login-username\"};");
+        }
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => (
+      step.id === "authorize-reject:cursor-mcp:https://evil.example/callback"
+    )).ok).toBe(false);
+  });
+
+  it("fails the run when a not-provisioned CIMD client_id starts resolving", async () => {
+    const inner = fakeFetchFactory({ clientsProvisioned: false });
+    const fetchImpl = async (url, init) => {
+      if (String(url).includes("/protocol/openid-connect/auth")) {
+        const parsed = new URL(String(url));
+        if (parsed.searchParams.get("client_id") === GROK_CIMD_URL) {
+          return jsonResponse(200, "const kcContext = {\"pageId\": \"login-username\"};");
+        }
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+      clientsProvisioned: false,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => step.id === `authorize-cimd:${GROK_CIMD_URL}`).ok)
+      .toBe(false);
+  });
+
+  it("fails the run when a provisioned registered redirect is client_not_found", async () => {
+    const inner = fakeFetchFactory({ clientsProvisioned: true });
+    const fetchImpl = async (url, init) => {
+      if (String(url).includes("/protocol/openid-connect/auth")) {
+        const parsed = new URL(String(url));
+        if (parsed.searchParams.get("client_id") === CLAUDE_HOSTED_CIMD_URL
+          && parsed.searchParams.get("redirect_uri") === CLAUDE_HOSTED_REDIRECT) {
+          return jsonResponse(400, "{\"pageId\":\"error\"}", {
+            "set-cookie": `KC_STATE_CHECKER=${jwt({ mky: "clientNotFoundMessage", mpar: [] })}`,
+          });
+        }
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+      clientsProvisioned: true,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => (
+      step.id === `authorize-accept:${CLAUDE_HOSTED_CIMD_URL}:${CLAUDE_HOSTED_REDIRECT}`
+    )).ok).toBe(false);
+  });
+
+  it("fails the run when a provisioned CIMD unregistered redirect is accepted", async () => {
+    const inner = fakeFetchFactory({ clientsProvisioned: true });
+    const fetchImpl = async (url, init) => {
+      if (String(url).includes("/protocol/openid-connect/auth")) {
+        const parsed = new URL(String(url));
+        if (parsed.searchParams.get("client_id") === GROK_CIMD_URL
+          && parsed.searchParams.get("redirect_uri") === "https://evil.example/callback") {
+          return jsonResponse(200, "const kcContext = {\"pageId\": \"login-username\"};");
+        }
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+      clientsProvisioned: true,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => (
+      step.id === `authorize-cimd-reject:${GROK_CIMD_URL}:https://evil.example/callback`
+    )).ok).toBe(false);
+  });
+
+  it("fails the run when a provisioned unregistered redirect is accepted", async () => {
+    const inner = fakeFetchFactory({ clientsProvisioned: true });
+    const fetchImpl = async (url, init) => {
+      if (String(url).includes("/protocol/openid-connect/auth")) {
+        const parsed = new URL(String(url));
+        if (parsed.searchParams.get("client_id") === CLAUDE_HOSTED_CIMD_URL
+          && parsed.searchParams.get("redirect_uri") === "https://evil.example/callback") {
+          return jsonResponse(200, "const kcContext = {\"pageId\": \"login-username\"};");
+        }
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+      clientsProvisioned: true,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => (
+      step.id === `authorize-reject:${CLAUDE_HOSTED_CIMD_URL}:https://evil.example/callback`
+    )).ok).toBe(false);
+  });
+
+  it("fails the run when a deny token is accepted", async () => {
+    const inner = fakeFetchFactory();
+    const fetchImpl = async (url, init = {}) => {
+      if (String(url).endsWith("/mcp") && init.headers?.authorization === "Bearer shaped-deny") {
+        return jsonResponse(200, { result: { protocolVersion: "2026-07-28" } });
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: { HOSTED_MCP_TOKEN_WRONG_AUDIENCE: "shaped-deny" },
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => step.id === "deny-token:wrong-audience").ok).toBe(false);
+  });
+
+  it("fails the run when the authorize page exposes consent off", async () => {
+    const inner = fakeFetchFactory();
+    const fetchImpl = async (url, init) => {
+      if (String(url).includes("/protocol/openid-connect/auth")) {
+        const parsed = new URL(String(url));
+        if (parsed.searchParams.get("client_id") === CURSOR_CLIENT_ID
+          && parsed.searchParams.get("redirect_uri") === "https://www.cursor.com/agents/mcp/oauth/callback") {
+          return jsonResponse(200, JSON.stringify({
+            pageId: "login-username",
+            consentRequired: false,
+            staffGate: true,
+          }));
+        }
+      }
+      return inner(url, init);
+    };
+    const report = await runAcceptance({
+      fetchImpl,
+      env: {},
+      hosts: [DEFAULT_HOSTS[0]],
+      sleep: noopSleep,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.hosts[0].steps.find((step) => step.id === "authorize-gates:cursor-mcp").ok).toBe(false);
   });
 
   it("fails the run when anonymous DCR starts succeeding", async () => {
@@ -543,6 +972,23 @@ describe("runAcceptance with a fake fetch", () => {
     expect(code).toBe(2);
   });
 
+  it("returns 2 when --require-signed-in and consent or operators-gate steps are skipped", async () => {
+    const stderr = [];
+    const code = await main(["--require-signed-in", "--host", "staging"], {
+      fetchImpl: fakeFetchFactory(),
+      env: { HOSTED_MCP_TOKEN: token },
+      sleep: noopSleep,
+      stdout: { write: () => {} },
+      stderr: { write: (chunk) => stderr.push(chunk) },
+    });
+    expect(code).toBe(2);
+    expect(stderr.join("")).toMatch(/operators staff gate/);
+    expect(isSecurityGateStep({ id: "authorize-gates:cursor-mcp" })).toBe(true);
+    expect(isRequiredSignedInStep({ id: "authorize-gates:cursor-mcp" })).toBe(true);
+    expect(isRequiredSignedInStep({ id: "signed-in:initialize" })).toBe(true);
+    expect(isRequiredSignedInStep({ id: "health" })).toBe(false);
+  });
+
   it("fails the run when tools/list advertises a write tool", async () => {
     const inner = fakeFetchFactory();
     let writeCallSent = false;
@@ -601,12 +1047,16 @@ describe("runAcceptance with a fake fetch", () => {
 });
 
 describe("CLI wiring", () => {
-  it("parses host, json, and require-signed-in", () => {
-    const args = parseArgs(["--host", "production", "--json", "--require-signed-in"]);
+  it("parses host, json, require-signed-in, and the client-inventory flag", () => {
+    const args = parseArgs(["--host", "production", "--json", "--require-signed-in", "--clients-provisioned"]);
     expect(args.json).toBe(true);
     expect(args.requireSignedIn).toBe(true);
+    expect(args.clientsProvisioned).toBe(true);
     expect(args.hosts).toEqual([DEFAULT_HOSTS[1]]);
+    expect(parseArgs(["--clients-not-provisioned"]).clientsProvisioned).toBe(false);
     expect(() => parseArgs(["--host", "lab"])).toThrow(/unknown --host/);
+    expect(() => parseArgs(["--clients-provisioned", "--clients-not-provisioned"]))
+      .toThrow(/only one/);
   });
 
   it("prints help without fetching", async () => {
@@ -678,5 +1128,36 @@ describe("docs and package wiring", () => {
     expect(read("AGENTS.md")).toContain("npm run eval:hosted");
     expect(read("docs/mcp-clients.md")).toContain("npm run eval:hosted");
     expect(read("CHANGELOG.md")).toMatch(/eval:hosted/);
+  });
+
+  it("names the keystone#1564 operators staff gate on the deny flow", () => {
+    expect(AUTHORIZE_GATES_EXPECT).toBe("consent+operators-gate");
+    expect(OPERATORS_STAFF_GATE).toContain(OPERATORS_STAFF_ROLE);
+    expect(OPERATORS_STAFF_GATE).toContain(OPERATORS_DENY_FLOW);
+    for (const rel of [
+      "scripts/hosted-acceptance.js",
+      "docs/mcp-clients.md",
+      "CHANGELOG.md",
+    ]) {
+      const text = read(rel);
+      expect(text, rel).toContain(OPERATORS_STAFF_ROLE);
+      expect(text, rel).toContain(OPERATORS_DENY_FLOW);
+    }
+  });
+
+  it("fails if an inventory client_id is missing from the vendored keystone list", () => {
+    const fixture = JSON.parse(read("tests/fixtures/keystone-mcp-clients.json"));
+    expect(fixture.source.repository).toBe("https://github.com/Wilkes-Liberty/keystone");
+    expect(fixture.source.refs).toEqual(expect.arrayContaining([
+      "https://github.com/Wilkes-Liberty/keystone/pull/1539",
+      "https://github.com/Wilkes-Liberty/keystone/pull/1559",
+      "https://github.com/Wilkes-Liberty/keystone/pull/1564",
+    ]));
+    const listed = new Set(fixture.clients.map((client) => client.clientId));
+    for (const id of declaredClientIds()) {
+      expect(listed.has(id), id).toBe(true);
+    }
+    const invented = [...declaredClientIds(), "invented-client"];
+    expect(invented.every((id) => listed.has(id))).toBe(false);
   });
 });

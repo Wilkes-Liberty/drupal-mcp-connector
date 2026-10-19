@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **DEV-943 hosted acceptance expectations.** `npm run eval:hosted` now
+  allowlists `https://claude.ai` (POST 401, OPTIONS 204; infra-overlay
+  v1.16.1) and keeps the 403 deny case on `https://evil.example` plus the
+  `https://claude.ai.evil.example` lookalike. Authorize expects come from
+  one client inventory plus `--clients-provisioned` /
+  `HOSTED_MCP_CLIENTS_PROVISIONED` (default: not provisioned). When
+  provisioned, a registered Grok CIMD or Claude hosted redirect must not
+  be `client_not_found` and an unregistered redirect is still refused.
+  Consent and the operators staff gate (role `wl-operator`, flow
+  `browser-deny-non-operators`; keystone#1564) are signed-in authorize
+  steps when the login page does not expose them. The staff-gate
+  classifier detects that deny page. Skipped security gates are named
+  on the Overall line; `--require-signed-in` exits 2 when they skip.
+  Claude hosted authorize uses the keystone CIMD `client_id`
+  `https://claude.ai/oauth/mcp-oauth-client-metadata`.
 - **DEV-1019 tools/list and prompts/list timeout.** Cold `tools/list` and
   `prompts/list` walked configured sites one at a time (OAuth, readiness, then
   a full Drupal `/mcp` session) and ran those probes twice when the client

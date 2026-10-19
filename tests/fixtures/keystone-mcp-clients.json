@@ -1,0 +1,33 @@
+{
+  "source": {
+    "repository": "https://github.com/Wilkes-Liberty/keystone",
+    "refs": [
+      "https://github.com/Wilkes-Liberty/keystone/pull/1539",
+      "https://github.com/Wilkes-Liberty/keystone/pull/1559",
+      "https://github.com/Wilkes-Liberty/keystone/pull/1564"
+    ],
+    "note": "Realm-as-code MCP public clients for the wilkesliberty realm. Vendored 2026-10-19 from keystone#1539 (cursor-mcp, grok-bot), keystone#1559 (Grok CIMD URL as client_id, Claude hosted CIMD), and keystone#1564 (operators group / wl-operator / browser-deny-non-operators). This file is the cited list the probe inventory is checked against, not a live Keycloak export."
+  },
+  "clients": [
+    {
+      "clientId": "cursor-mcp",
+      "kind": "public-pkce",
+      "added": "keystone#1539"
+    },
+    {
+      "clientId": "grok-bot",
+      "kind": "public-pkce",
+      "added": "keystone#1539"
+    },
+    {
+      "clientId": "https://grok.com/oauth/mcp-client.json",
+      "kind": "cimd",
+      "added": "keystone#1559"
+    },
+    {
+      "clientId": "https://claude.ai/oauth/mcp-oauth-client-metadata",
+      "kind": "cimd",
+      "added": "keystone#1559"
+    }
+  ]
+}
