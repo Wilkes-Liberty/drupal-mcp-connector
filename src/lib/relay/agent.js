@@ -15,6 +15,7 @@
 
 import { connect as netConnect } from "node:net";
 import { createMcpHandler } from "@modelcontextprotocol/server";
+import { addModernCatalogNotifier } from "../catalog-notify.js";
 import { createConnectorServerFactory } from "../mcp-server.js";
 import { POLICY_DIGEST } from "../policy-promotion.js";
 import { runWithIdentity } from "../principal.js";
@@ -65,6 +66,7 @@ export function createRelayAgent({
   const handler = createMcpHandler(createConnectorServerFactory(surface), {
     legacy: "reject",
   });
+  addModernCatalogNotifier(handler.notify);
   let socket = null;
   let agentInfo = null;
 

@@ -11,6 +11,8 @@
  */
 
 import fetch from "node-fetch";
+import { catalogAwareTimeout } from "./catalog-signal.js";
+import { keepAliveAgentFor } from "./http-agents.js";
 
 /** Re-acquire this many ms before the stated expiry to absorb clock skew. */
 const EXPIRY_SKEW_MS = 60_000;
@@ -85,7 +87,8 @@ async function requestToken(site, useRefresh, refreshToken) {
         Accept: "application/json",
       },
       body: buildBody(oauth, useRefresh, refreshToken),
-      signal: AbortSignal.timeout(OAUTH_TOKEN_TIMEOUT_MS),
+      agent: keepAliveAgentFor(url),
+      signal: catalogAwareTimeout(OAUTH_TOKEN_TIMEOUT_MS),
     });
   } catch (err) {
     if (err?.name === "AbortError" || err?.name === "TimeoutError") {

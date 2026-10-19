@@ -12,6 +12,7 @@ import { createServer as createHttpServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
+import { addModernCatalogNotifier } from "./catalog-notify.js";
 import { CLIENT_VERSION } from "./config.js";
 import {
   createInboundHttpsAuth,
@@ -418,6 +419,7 @@ export async function startHttpsTransport({
     legacy: "reject",
     onerror: () => reportMcpTransportStage("modern-protocol"),
   });
+  const detachModernCatalogNotify = addModernCatalogNotifier(modernMcpHandler.notify);
   if (checkAuthOption !== undefined) checkAuth = checkAuthOption;
   if (authenticateOption !== undefined) authenticate = authenticateOption;
   const allowLocalOperator = allowLocalOperatorOption !== undefined
@@ -510,6 +512,7 @@ export async function startHttpsTransport({
     url,
     resourceMetadataUrl,
     close: async () => {
+      detachModernCatalogNotify();
       await modernMcpHandler.close?.();
       await legacySessionHandler.close?.();
       await new Promise((resolve) => {

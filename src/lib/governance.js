@@ -17,8 +17,14 @@
  */
 
 import fetch from "node-fetch";
+import { emitCatalogListChanged } from "./catalog-notify.js";
 import { authHeadersAsync, clientHeaders } from "./config.js";
+import { catalogAwareTimeout } from "./catalog-signal.js";
+import { keepAliveAgentFor } from "./http-agents.js";
 import { DIAGNOSTIC_TOOLS } from "./principal.js";
+
+/** Listing wait for readiness verdicts. The probe itself is not aborted. */
+const LISTING_READINESS_TIMEOUT_MS = 4_000;
 
 /** How long a passing verification stays fresh before it must be re-proven. */
 export const OK_TTL_MS = 60_000;
@@ -45,9 +51,13 @@ export class GovernanceError extends Error {
 /** Per-site verification cache: name → {ok, reason, checkedAt}. */
 const cache = new Map();
 
+/** In-flight probes, so tools/list and prompts/list share one readiness GET. */
+const inflight = new Map();
+
 /** Drop all cached verifications (tests, config reloads). */
 export function clearGovernanceCache() {
   cache.clear();
+  inflight.clear();
 }
 
 /**
@@ -67,28 +77,46 @@ export function requiresGovernance(site) {
  * result is a failure — staleness never extends trust.
  *
  * @param {object} site Resolved site config.
- * @param {{force?: boolean}} [options] `force` bypasses the cache.
+ * @param {{force?: boolean, timeoutMs?: number}} [options] `force` bypasses
+ *   the cache. `timeoutMs` is the readiness GET abort (default 30s). Listing
+ *   wait is a separate race and does not pass a short abort here.
  * @returns {Promise<{ok: boolean, reason: string|null, checkedAt: number}>}
  */
-export async function verifySourceGovernance(site, { force = false } = {}) {
+export async function verifySourceGovernance(site, { force = false, timeoutMs } = {}) {
   const key = site._name ?? site.baseUrl;
   const cached = cache.get(key);
   if (!force && cached) {
     const age = Date.now() - cached.checkedAt;
     if (age <= (cached.ok ? OK_TTL_MS : FAIL_TTL_MS)) return cached;
   }
+  if (!force) {
+    const pending = inflight.get(key);
+    if (pending) return pending;
+  }
 
-  const result = await probeReadiness(site);
-  cache.set(key, result);
-  return result;
+  const promise = probeReadiness(site, timeoutMs)
+    .then((result) => {
+      const previous = cache.get(key);
+      cache.set(key, result);
+      if (result.ok && !previous?.ok) {
+        emitCatalogListChanged({ tools: true });
+      }
+      return result;
+    })
+    .finally(() => {
+      if (inflight.get(key) === promise) inflight.delete(key);
+    });
+  inflight.set(key, promise);
+  return promise;
 }
 
 /**
  * One authenticated readiness probe; maps every outcome (including abort) to {ok, reason}.
  * @param {object} site Resolved site config.
+ * @param {number} [timeoutMs] Override for the readiness GET abort.
  * @returns {Promise<{ok: boolean, reason: string|null, checkedAt: number}>}
  */
-async function probeReadiness(site) {
+async function probeReadiness(site, timeoutMs) {
   const checkedAt = Date.now();
 
   // Credential construction is its own failure class: an OAuth token the
@@ -107,10 +135,12 @@ async function probeReadiness(site) {
 
   let res;
   try {
-    res = await fetch(`${site.baseUrl}/drupal-mcp/readiness`, {
+    const url = `${site.baseUrl}/drupal-mcp/readiness`;
+    res = await fetch(url, {
       method: "GET",
       headers,
-      signal: AbortSignal.timeout(READINESS_TIMEOUT_MS),
+      agent: keepAliveAgentFor(url),
+      signal: catalogAwareTimeout(timeoutMs ?? READINESS_TIMEOUT_MS),
     });
   } catch {
     // Network detail (addresses, DNS text) is deliberately not propagated.
@@ -198,11 +228,22 @@ export async function governanceStatus(sites) {
  *
  * @param {Array<object>} definitions Tool definitions ({name, ...}).
  * @param {Array<object>} sites       Resolved site configs.
+ * @param {{timeoutMs?: number}} [options] Listing wait for a readiness
+ *   verdict. A hung probe stays in-flight until the request timeout (30s);
+ *   this list hides governed tools if no site verifies in time.
  * @returns {Promise<Array<object>>} The discoverable definitions.
  */
-export async function filterDiscoverableTools(definitions, sites) {
-  const verdicts = await Promise.all(sites.map(async (site) =>
-    !requiresGovernance(site) || (await verifySourceGovernance(site)).ok));
+export async function filterDiscoverableTools(definitions, sites, options = {}) {
+  const waitMs = options.timeoutMs ?? LISTING_READINESS_TIMEOUT_MS;
+  const deadlineAt = Date.now() + waitMs;
+  const verdicts = await Promise.all(sites.map(async (site) => {
+    if (!requiresGovernance(site)) return true;
+    const remaining = Math.max(0, deadlineAt - Date.now());
+    return await Promise.race([
+      verifySourceGovernance(site).then((result) => result.ok),
+      new Promise((resolve) => setTimeout(() => resolve(false), remaining)),
+    ]);
+  }));
   if (verdicts.some(Boolean)) return definitions;
   return definitions.filter((d) => DIAGNOSTIC_TOOLS.has(d.name));
 }

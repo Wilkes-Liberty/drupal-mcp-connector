@@ -31,7 +31,11 @@ describe("createConnectorServerFactory", () => {
     const second = buildConnectorServer({ era: "modern" });
 
     expect(first).not.toBe(second);
-    expect(first.getCapabilities()).toEqual({ tools: {}, resources: {}, prompts: {} });
+    expect(first.getCapabilities()).toEqual({
+      tools: { listChanged: true },
+      resources: {},
+      prompts: { listChanged: true },
+    });
     expect(second.getCapabilities()).toEqual(first.getCapabilities());
   });
 

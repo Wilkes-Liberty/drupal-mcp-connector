@@ -133,7 +133,39 @@ Results preserve structured module data under `result` and report the resolved `
 
 Catalogs are limited to 16 pages, 256 tools and 256 KiB total. Schemas are limited to 64 KiB each; arguments and results to 256 KiB. External schema loading and asynchronous validators are not supported. JSON Schema 2020-12 is supported with format validation and no type coercion. Local schema references retain their own root when embedded in the connector envelope.
 
-There is no cross-request catalog cache. Discovery is deterministic and filtered by caller scope and target grant; every invocation checks again. HTTP sessions are bounded and separated by source endpoint, source credentials and requesting principal. Individual bounded transport requests time out after 15 seconds.
+Listing uses a catalog cache per (site, principal), shared by `tools/list`,
+`prompts/list`, and `prompts/get` (DEV-1019). Concurrent callers share one
+in-flight fetch. A listing waits up to 4s (`catalogDiscovery.siteDeadlineMs` or
+`MCP_CATALOG_SITE_DEADLINE_MS`) and returns built-ins plus ready snapshots. The
+wait never aborts the site chain (token, readiness, initialize,
+`notifications/initialized`, `tools/list`, or the detached `prompts/list` /
+`prompts/get` hops). A site that is not yet ready, errors, or fails governance
+is omitted — its server-side tools and prompts are not granted — and one stderr
+line names the site and the reason (no secrets). The chain finishes in the
+background; a successful snapshot is cached after the same governance and
+principal filters. When the advertised tool or prompt set changes, the
+connector emits `notifications/tools/list_changed` and
+`notifications/prompts/list_changed` (`listChanged: true` on both
+capabilities). stdio and legacy HTTP sessions receive those notifications on
+the live `Server`. Modern HTTP delivers them to clients that opened
+`subscriptions/listen`; a sessionless POST has no stream, so the client sees
+the new catalog on the next list. Catalogs are warmed at process start and on
+MCP initialize without blocking listen. The first list is not the full
+multi-site catalog unless every site finishes inside the wait. A success TTL
+(default 10 minutes; `catalogDiscovery.cacheTtlMs` / `MCP_CATALOG_CACHE_TTL_MS`)
+serves the last good snapshot immediately and refreshes in the background
+(stale-while-revalidate). Failed walks use a short negative TTL (default 5
+seconds; `catalogDiscovery.negativeTtlMs` / `MCP_CATALOG_NEGATIVE_TTL_MS`) so a
+cold start does not stampede. A denial is never cached as a grant. Session
+expiry invalidates that site's cache. Sites are walked concurrently
+(`catalogDiscovery.concurrency` / `MCP_CATALOG_CONCURRENCY`, default 16) so a
+slow host cannot stall the others. Principal filtering and source-governance
+checks still run on every listing. Invocation still re-reads the source
+catalog and validates the revision.
+
+HTTP sessions are bounded and separated by source endpoint, source credentials
+and requesting principal. Individual bounded transport requests time out after
+15 seconds. The listing wait does not shorten or abort those hops.
 
 Module writes are not automatically retried. After an uncertain result, use the module's idempotency or reconciliation operation. A read-only or idempotency annotation is a hint, not authorization or proof that replay is safe.
 

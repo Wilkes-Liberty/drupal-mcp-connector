@@ -6,6 +6,7 @@
  */
 
 import { Server } from "@modelcontextprotocol/server";
+import { registerLiveCatalogServer } from "./catalog-notify.js";
 import { markHttpAuditToolOutcome } from "./http-audit.js";
 
 /**
@@ -36,16 +37,25 @@ function resourceUriIsListed(listed, requested) {
  *   `list` hook decides what is DISCOVERABLE per request (governance + entitlement).
  * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, read: (uri: string) => Promise<object>}} surface.resources
  * @param {{definitions: Array<object>, list?: () => Promise<Array<object>>, get: (name: string, args: object) => Array<object>, describe?: (name: string, args: object) => Promise<?{description: string, messages: Array<object>}>}} surface.prompts
+ * @param {() => void} [surface.oninitialized] Warm catalogs after MCP initialize.
  * @returns {(context: import("@modelcontextprotocol/server").McpRequestContext) => Server}
  */
-export function createConnectorServerFactory({ serverInfo, tools, resources, prompts }) {
+export function createConnectorServerFactory({ serverInfo, tools, resources, prompts, oninitialized }) {
   const toolDefinitions = new Map(tools.definitions.map((definition) => [definition.name, definition]));
 
   return function buildConnectorServer(_context) {
     const server = new Server(
       serverInfo,
-      { capabilities: { tools: {}, resources: {}, prompts: {} } }
+      { capabilities: {
+        tools: { listChanged: true },
+        resources: {},
+        prompts: { listChanged: true },
+      } }
     );
+    if (typeof oninitialized === "function") {
+      server.oninitialized = oninitialized;
+    }
+    registerLiveCatalogServer(server);
 
     server.setRequestHandler("tools/list", async () => ({
       tools: tools.list ? await tools.list() : tools.definitions,

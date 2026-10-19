@@ -3,12 +3,13 @@ import { markHttpAuditToolOutcome } from "./http-audit.js";
 import { createHash } from "node:crypto";
 import Ajv from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { listServerTools, callServerTool, toolResultData } from "./server-tools.js";
+import { listServerTools, callServerTool, fetchSiteWorkflowPrompts, toolResultData } from "./server-tools.js";
+import { loadSiteCatalogs, workflowIdsFromSite } from "./site-catalog.js";
+import { buildDataFlowContext, consumeBudgetIfEnforced, DataFlowBudgetError, runWithDataFlow } from "./data-flow.js";
 import { listResolvableSiteConfigs, securityMiddleware } from "./dispatch.js";
 import { getRequestIdentity, principalHasScope, resolveGrantedSites } from "./principal.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
 import { assertSourceGovernance, GovernanceError } from "./governance.js";
-import { DataFlowBudgetError } from "./data-flow.js";
 import { toolError } from "./errors.js";
 import { withResolvedTarget } from "./site-target.js";
 import { cleanErrorData } from "./error-body.js";
@@ -187,6 +188,79 @@ function bindingScopeMatches(policy, required) {
   return configReadScopes.has(policy.scope) && configReadScopes.has(required.scope);
 }
 
+/**
+ * First module-tool entry on `site` this principal may use, or null.
+ * Listing skips a source catalog read when nothing is enabled.
+ *
+ * @param {object} site
+ * @param {object|null} identity
+ * @param {Array<object>} sites
+ * @param {object|null} [grants]
+ * @returns {object|null}
+ */
+export function firstEnabledModuleEntry(site, identity, sites, grants) {
+  return [...entries([site]).values()].find((entry) => allowed(entry, identity, sites, grants)) ?? null;
+}
+
+/**
+ * Shared listing work for one site: module tools (when enabled for this
+ * principal) plus configured workflow prompts. tools/list and prompts/list
+ * pass the same work so they share one in-flight fetch. Prompt hops run in
+ * this same detached completion — the listing wait does not abort them.
+ *
+ * @param {object} [context]
+ * @param {Array<object>} [context.sites]
+ * @param {object|null} [context.identity]
+ * @param {object|null} [context.grants]
+ * @param {Function} [context.list] Catalog page reader.
+ * @param {Function} [context.fetchPrompts] Prompt catalog reader.
+ * @returns {(site: object) => Promise<{
+ *   tools: Map<string, object>,
+ *   prompts: object[],
+ *   promptBodies: Map<string, object>,
+ *   cache: boolean,
+ * }>}
+ */
+export function createSiteCatalogWork({
+  sites,
+  identity = null,
+  grants = null,
+  list = listServerTools,
+  fetchPrompts = fetchSiteWorkflowPrompts,
+} = {}) {
+  const allSites = sites ?? [];
+  return async function loadSiteSurface(site) {
+    const tools = new Map();
+    let prompts = [];
+    let promptBodies = new Map();
+    const entry = firstEnabledModuleEntry(site, identity, allSites, grants);
+    const names = workflowIdsFromSite(site);
+    if ((!entry || typeof list !== "function") && !names.length) {
+      return { tools, prompts, promptBodies, cache: false };
+    }
+    const flow = buildDataFlowContext({
+      identity,
+      target: { name: site._name, baseUrl: site.baseUrl, source: "grant" },
+      site,
+    });
+    return await runWithDataFlow(flow, async () => {
+      consumeBudgetIfEnforced("chained_action");
+      if (entry && typeof list === "function") {
+        const found = await catalog(site, list);
+        if (found instanceof Map) {
+          for (const [name, tool] of found) tools.set(name, tool);
+        }
+      }
+      if (names.length) {
+        const fetched = await fetchPrompts(site, names);
+        prompts = Array.isArray(fetched?.list) ? fetched.list : [];
+        promptBodies = fetched?.bodies instanceof Map ? fetched.bodies : new Map();
+      }
+      return { tools, prompts, promptBodies, cache: true };
+    });
+  };
+}
+
 /** Resolves a local binding without granting access or contacting its provider. */
 export function resolveModuleBinding(site, binding, required) {
   const bindings = new Map(Object.entries(site.serverTools?.bindings ?? {}));
@@ -201,7 +275,9 @@ export function resolveModuleBinding(site, binding, required) {
 }
 
 /**
- * Build a registry without cross-request catalog or authorization caches.
+ * Build a registry. Listing uses a shared catalog cache per (site,
+ * principal) with stale-while-revalidate; invocation still re-reads the
+ * source catalog.
  * Transport injection lets unrelated fixture providers prove generic dispatch.
  */
 export function createModuleToolRegistry({ list = listServerTools, call = callServerTool } = {}) {
@@ -226,22 +302,38 @@ export function createModuleToolRegistry({ list = listServerTools, call = callSe
       const sites = context.sites ?? listResolvableSiteConfigs();
       const identity = context.identity === undefined ? getRequestIdentity() : context.identity;
       const enabled = [...entries(sites).values()].filter((entry) => allowed(entry, identity, sites, context.grants));
-      const catalogs = new Map();
+      const work = createSiteCatalogWork({
+        sites,
+        identity,
+        grants: context.grants,
+        list,
+        fetchPrompts: context.fetchPrompts ?? fetchSiteWorkflowPrompts,
+      });
+      const catalogs = await loadSiteCatalogs(sites, {
+        identity,
+        work,
+        siteDeadlineMs: context.siteDeadlineMs,
+        waitMs: context.waitMs,
+        cacheTtlMs: context.cacheTtlMs,
+        negativeTtlMs: context.negativeTtlMs,
+        concurrency: context.concurrency,
+        logPending: context.logPending,
+      });
       const definitions = [];
+      const governedSites = new Map();
       for (const entry of enabled) {
-        if (!catalogs.has(entry.site._name)) {
+        if (!governedSites.has(entry.site._name)) {
           try {
-            const found = await securityMiddleware(entry.name, { site: entry.site._name },
-              () => catalog(entry.site, list), { ...context, sites, identity, moduleTool: entry.policy });
-            catalogs.set(entry.site._name, found);
-          }
-          catch {
-            // A failed catalog fetch invalidates this provider for the request.
-            catalogs.set(entry.site._name, new Map());
+            await assertSourceGovernance({ ...entry.site, requireGovernance: true });
+            governedSites.set(entry.site._name, true);
+          } catch {
+            // A failed or stale contract cannot ride a cached catalog.
+            governedSites.set(entry.site._name, false);
           }
         }
+        if (!governedSites.get(entry.site._name)) continue;
         try {
-          const remote = catalogs.get(entry.site._name).get(entry.policy.name);
+          const remote = catalogs.get(entry.site._name)?.tools.get(entry.policy.name);
           if (remote) definitions.push(describe(entry, remote).definition);
         } catch {
           // A malformed schema disables only that action, not its siblings.

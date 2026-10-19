@@ -145,6 +145,24 @@ describe("verifySourceGovernance", () => {
     expect(result.reason).toBe("credential_acquisition_failed");
   });
 
+  it("shares one in-flight readiness probe across concurrent callers", async () => {
+    let started = 0;
+    vi.mocked(fetch).mockImplementation(async () => {
+      started += 1;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return ready();
+    });
+    const site = governedSite({ _name: "gov-inflight" });
+    const [a, b] = await Promise.all([
+      verifySourceGovernance(site),
+      verifySourceGovernance(site),
+    ]);
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    expect(started).toBe(1);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+  });
+
   it("caches a passing verification inside the TTL and re-verifies beyond it", async () => {
     vi.useFakeTimers();
     vi.mocked(fetch).mockResolvedValue(ready());

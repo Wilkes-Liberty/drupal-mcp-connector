@@ -6,7 +6,16 @@
  * docs/module-workflows.md.
  */
 
+import { createSiteCatalogWork } from "./module-tools.js";
+import { getRequestIdentity } from "./principal.js";
+import { listServerTools, fetchSiteWorkflowPrompts } from "./server-tools.js";
+import { loadSiteCatalogs } from "./site-catalog.js";
 import { sourceText } from "./tool-prompts.js";
+export {
+  lookupWorkflow,
+  registerBuiltinWorkflows,
+  replaceModuleWorkflows,
+} from "./workflow-index.js";
 
 const ID_RE = /^[a-z][a-z0-9_]{0,47}$/;
 const ARG_RE = /^[a-z][a-z0-9_]{0,47}$/;
@@ -364,14 +373,22 @@ export function workflowFromDrupalPrompt(id, listed, got, toolsMap) {
  * is not named locally is ignored. Fetch failures keep the v1 local bodies.
  *
  * @param {Array<object>} sites
- * @param {{fetch?: Function}} [deps]
+ * @param {{fetch?: Function, identity?: object|null, list?: Function}} [deps]
  * @returns {Promise<object[]>}
  */
-export async function moduleWorkflowProvidersWithRemote(sites, { fetch } = {}) {
-  const { fetchSiteWorkflowPrompts } = await import("./server-tools.js");
-  const load = fetch ?? fetchSiteWorkflowPrompts;
+export async function moduleWorkflowProvidersWithRemote(sites, { fetch, identity, list } = {}) {
+  const listSites = sites ?? [];
+  const principal = identity === undefined ? getRequestIdentity() : identity;
+  // Tests that inject `fetch` should not also hit listServerTools.
+  const work = createSiteCatalogWork({
+    sites: listSites,
+    identity: principal,
+    list: list ?? (fetch ? null : listServerTools),
+    fetchPrompts: fetch ?? fetchSiteWorkflowPrompts,
+  });
+  const catalogs = await loadSiteCatalogs(listSites, { identity: principal, work });
   const providers = [];
-  for (const site of sites ?? []) {
+  for (const site of listSites) {
     const modules = site.serverTools?.modules;
     if (!modules?.namespace || !modules.workflows || typeof modules.workflows !== "object") continue;
     const enabled = [];
@@ -379,12 +396,10 @@ export async function moduleWorkflowProvidersWithRemote(sites, { fetch } = {}) {
       if (id.startsWith("_") || !body || typeof body !== "object") continue;
       enabled.push({ id: body.id ?? id, body });
     }
-    let catalog;
-    try {
-      catalog = await load(site, enabled.map((item) => item.id));
-    } catch {
-      catalog = { list: [], bodies: new Map() };
-    }
+    const snap = catalogs.get(site._name);
+    const catalog = snap?.ok
+      ? { list: snap.prompts, bodies: snap.promptBodies }
+      : { list: [], bodies: new Map() };
     const listedByName = new Map((catalog.list ?? []).map((prompt) => [prompt.name, prompt]));
     const workflows = [];
     for (const item of enabled) {
@@ -431,36 +446,3 @@ export function moduleWorkflowProviders(sites) {
   return providers;
 }
 
-const INDEX = new Map();
-const MODULE_KEYS = new Set();
-
-/**
- * Register built-in workflows for principal filtering.
- *
- * @param {object[]} workflows
- */
-export function registerBuiltinWorkflows(workflows) {
-  for (const wf of workflows ?? []) INDEX.set(wf.name, wf);
-}
-
-/**
- * Replace the module-owned slice of the workflow index (per request).
- *
- * @param {object[]} workflows
- */
-export function replaceModuleWorkflows(workflows) {
-  for (const key of MODULE_KEYS) INDEX.delete(key);
-  MODULE_KEYS.clear();
-  for (const wf of workflows ?? []) {
-    INDEX.set(wf.name, wf);
-    MODULE_KEYS.add(wf.name);
-  }
-}
-
-/**
- * @param {string} name
- * @returns {object|undefined}
- */
-export function lookupWorkflow(name) {
-  return INDEX.get(name);
-}

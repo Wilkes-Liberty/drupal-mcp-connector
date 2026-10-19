@@ -229,7 +229,9 @@ export function getToolPromptMessages(promptName, args = {}, definitionsByName) 
 /**
  * Compose the server's prompt surface from the static prompts and the module
  * tools that live discovery returns for this request. Module prompts inherit
- * discovery's caller, site and source checks; nothing is cached across requests.
+ * discovery's caller, site and source checks. Remote site catalogs use the
+ * short-TTL shared cache in `site-catalog.js`; principal filtering still
+ * runs per request.
  *
  * @param {object} options
  * @param {Array<object>} options.staticPrompts - Workflow prompts plus built-in tool prompts.

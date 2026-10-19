@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **DEV-1019 tools/list and prompts/list timeout.** Cold `tools/list` and
+  `prompts/list` walked configured sites one at a time (OAuth, readiness, then
+  a full Drupal `/mcp` session) and ran those probes twice when the client
+  asked for both lists at once. With many sites that exceeded the client's
+  30s window, so Claude Cowork/Code reported `MCP drupal: Couldn't start`.
+  Per-site catalog discovery is now concurrent (default 16 at a time). A
+  listing waits up to 4s (`catalogDiscovery.siteDeadlineMs`) and returns
+  built-ins plus whatever snapshots are already ready; not-yet-ready sites
+  are omitted from that response (fail closed). The wait never aborts token,
+  readiness, initialize, `notifications/initialized`, or `tools/list`. The
+  chain finishes in the background, a successful snapshot is cached, and
+  `notifications/tools/list_changed` / `notifications/prompts/list_changed`
+  fire when the advertised set changes (`listChanged: true` on tools and
+  prompts). Catalogs are warmed at process start and on MCP initialize
+  without blocking listen. Success TTL is minutes (default 10) with
+  stale-while-revalidate; errors use a short negative TTL (default 5s) so a
+  cold start does not stampede. A denial is never cached as a grant.
+  Configure `catalogDiscovery.siteDeadlineMs`, `cacheTtlMs`,
+  `negativeTtlMs`, and `concurrency`, or `MCP_CATALOG_SITE_DEADLINE_MS`,
+  `MCP_CATALOG_CACHE_TTL_MS`, `MCP_CATALOG_NEGATIVE_TTL_MS`, and
+  `MCP_CATALOG_CONCURRENCY`.
+
 ### Changed
 
 - **Threat model current as of 5.3.0.** T1 cites `shell-quote` argv
