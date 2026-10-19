@@ -10,10 +10,20 @@ vi.mock("../../src/lib/config.js", async (original) => ({
   getDefaultSiteName: () => "stage",
 }));
 vi.mock("../../src/lib/governance.js", async (original) => ({
-  ...await original(), assertSourceGovernance: vi.fn(async () => {}),
+  ...await original(),
+  assertSourceGovernance: vi.fn(async () => {}),
+  listingSourceGovernanceAllows: vi.fn(async () => true),
+  listingSourceGovernanceAllowsSites: vi.fn(async (sites) => {
+    const allowed = new Map();
+    for (const site of sites ?? []) {
+      const name = site?._name ?? site?.baseUrl;
+      if (name) allowed.set(name, true);
+    }
+    return allowed;
+  }),
 }));
 import fetch from "node-fetch";
-import { assertSourceGovernance } from "../../src/lib/governance.js";
+import { assertSourceGovernance, listingSourceGovernanceAllows } from "../../src/lib/governance.js";
 import { createModuleToolRegistry } from "../../src/lib/module-tools.js";
 import { resetDataFlowBudgets } from "../../src/lib/data-flow.js";
 import { ERROR_DETAIL_MAX_CHARS } from "../../src/lib/error-body.js";
@@ -47,6 +57,7 @@ beforeEach(() => {
   resetDataFlowBudgets();
   vi.clearAllMocks();
   vi.mocked(assertSourceGovernance).mockResolvedValue();
+  vi.mocked(listingSourceGovernanceAllows).mockResolvedValue(true);
   // A fresh site name per test keeps the bridge's session cache from leaking.
   state.sites = [{
     _name: `stage-${++siteSeq}`, baseUrl: "https://stage.example.com", requireGovernance: true,

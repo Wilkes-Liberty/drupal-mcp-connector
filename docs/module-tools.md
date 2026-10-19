@@ -133,35 +133,67 @@ Results preserve structured module data under `result` and report the resolved `
 
 Catalogs are limited to 16 pages, 256 tools and 256 KiB total. Schemas are limited to 64 KiB each; arguments and results to 256 KiB. External schema loading and asynchronous validators are not supported. JSON Schema 2020-12 is supported with format validation and no type coercion. Local schema references retain their own root when embedded in the connector envelope.
 
+## Catalog listing (DEV-1019)
+
 Listing uses a catalog cache per (site, principal), shared by `tools/list`,
 `prompts/list`, and `prompts/get` (DEV-1019). Concurrent callers share one
-in-flight fetch. A listing waits up to 4s (`catalogDiscovery.siteDeadlineMs` or
-`MCP_CATALOG_SITE_DEADLINE_MS`) and returns built-ins plus ready snapshots. The
-wait never aborts the site chain (token, readiness, initialize,
-`notifications/initialized`, `tools/list`, or the detached `prompts/list` /
-`prompts/get` hops). A site that is not yet ready, errors, or fails governance
-is omitted — its server-side tools and prompts are not granted — and one stderr
-line names the site and the reason (no secrets). The chain finishes in the
-background; a successful snapshot is cached after the same governance and
-principal filters. When the advertised tool or prompt set changes, the
-connector emits `notifications/tools/list_changed` and
-`notifications/prompts/list_changed` (`listChanged: true` on both
-capabilities). stdio and legacy HTTP sessions receive those notifications on
-the live `Server`. Modern HTTP delivers them to clients that opened
-`subscriptions/listen`; a sessionless POST has no stream, so the client sees
-the new catalog on the next list. Catalogs are warmed at process start and on
-MCP initialize without blocking listen. The first list is not the full
-multi-site catalog unless every site finishes inside the wait. A success TTL
-(default 10 minutes; `catalogDiscovery.cacheTtlMs` / `MCP_CATALOG_CACHE_TTL_MS`)
-serves the last good snapshot immediately and refreshes in the background
-(stale-while-revalidate). Failed walks use a short negative TTL (default 5
-seconds; `catalogDiscovery.negativeTtlMs` / `MCP_CATALOG_NEGATIVE_TTL_MS`) so a
-cold start does not stampede. A denial is never cached as a grant. Session
-expiry invalidates that site's cache. Sites are walked concurrently
-(`catalogDiscovery.concurrency` / `MCP_CATALOG_CONCURRENCY`, default 16) so a
-slow host cannot stall the others. Principal filtering and source-governance
-checks still run on every listing. Invocation still re-reads the source
-catalog and validates the revision.
+in-flight fetch. The wait never aborts the site chain (token, readiness,
+initialize, `notifications/initialized`, `tools/list`, or prompt hops). A
+site that is not yet ready, errors, or fails governance is omitted — its
+server-side tools and prompts are not granted — and one stderr line names
+the site and the reason (no secrets). The full source catalog is stored;
+`allowed()` and governance re-checks run at list time.
+
+**Order on each site:** source-governance (cached verdict, or a readiness
+probe raced under a 4s shared deadline across sites) → Drupal handshake →
+`tools/list` (`onTools` / `notifications/tools/list_changed` as soon as that
+hop returns) → overlapping `prompts/list` / `prompts/get` after that
+handshake, then `notifications/prompts/list_changed`. Prompt hops do not
+open `/mcp` until governance has resolved. A site is not advertised until
+governance allows it. Notifications coalesce to about one per kind per burst
+(`listChanged: true` on both capabilities).
+
+`list_changed` delivery is per session, not process-global:
+
+- stdio and legacy HTTP at 2025-11-25: unsolicited `Server.notification` /
+  `sendToolListChanged` on that session only. A 2025 initialize does not
+  shorten a sibling 2026 list. The first list waits up to 4s
+  (`catalogDiscovery.siteDeadlineMs` / `MCP_CATALOG_SITE_DEADLINE_MS`) and
+  returns built-ins plus ready snapshots; the rest arrives as
+  `list_changed`.
+- stdio 2026-07-28: that connection's `subscriptions/listen`, held on the
+  transport until the Server is registered (listen can arrive first). With
+  listen (`ClientOptions.listChanged` or `Client.listen` before the first
+  list), the first list uses the 4s path. Without listen, it uses the
+  unnotified wait.
+- modern HTTP 2026-07-28: sessionless POST and per-request Servers cannot
+  be bound to a listen stream. Every 2026 HTTP list takes the unnotified
+  wait, including `Client.listen` / `ClientOptions.listChanged`. One
+  client's listen must not shorten another's first list.
+
+When this session cannot be notified, the first `tools/list` and
+`prompts/list` wait for the in-flight chain, default 20s
+(`catalogDiscovery.unnotifiedListWaitMs` /
+`MCP_CATALOG_UNNOTIFIED_LIST_WAIT_MS`), then fall back to the partial list.
+The **whole listing** — catalog wait plus the listing governance re-check —
+is hard-capped at 25s. The governance phase itself is parallel across sites
+and capped at 4s; leftover unnotified budget is not applied per site. A
+listing uses a cached governance verdict when one is fresh; otherwise it
+races that 4s deadline and omits the site if readiness does not resolve in
+time (the probe keeps running).
+
+Catalogs are warmed at process start and on MCP initialize without blocking
+listen. A success TTL (default 10 minutes; `catalogDiscovery.cacheTtlMs` /
+`MCP_CATALOG_CACHE_TTL_MS`) serves the last good snapshot immediately and
+refreshes in the background (stale-while-revalidate). Failed walks use a
+short negative TTL (default 5 seconds; `catalogDiscovery.negativeTtlMs` /
+`MCP_CATALOG_NEGATIVE_TTL_MS`) so a cold start does not stampede. A denial is
+never cached as a grant. Session expiry invalidates that site's cache. Sites
+are walked concurrently (`catalogDiscovery.concurrency` /
+`MCP_CATALOG_CONCURRENCY`, default 16) so a slow host cannot stall the
+others. Invocation still re-reads the source catalog and validates the
+revision. Stdio stdin/transport close aborts in-flight catalog work and
+destroys keep-alive HTTP agents so the process can exit.
 
 HTTP sessions are bounded and separated by source endpoint, source credentials
 and requesting principal. Individual bounded transport requests time out after

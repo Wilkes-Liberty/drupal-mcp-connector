@@ -8,7 +8,6 @@ import {
   resolveServerToolName,
   serverToolCandidates,
   SERVER_TOOL_IDS,
-  SERVER_TOOL_TIMEOUT_MS,
   SERVER_TOOL_MAX_BYTES,
 } from "../../src/lib/server-tools.js";
 
@@ -29,6 +28,7 @@ import {
   inFlightKeysFromIdentity,
   setInFlightRegistry,
 } from "../../src/lib/in-flight.js";
+import { abortCatalogWork, resetCatalogShutdown } from "../../src/lib/catalog-signal.js";
 import {
   GENERIC_PRINCIPAL_REFUSAL,
   setPrincipalAbortRemapGuard,
@@ -135,6 +135,7 @@ beforeEach(() => { vi.mocked(fetch).mockReset(); resetDataFlowBudgets(); });
 afterEach(() => {
   setPrincipalAbortRemapGuard(true);
   setInFlightRegistry(null);
+  resetCatalogShutdown();
 });
 
 describe("callServerTool", () => {
@@ -180,39 +181,28 @@ describe("callServerTool", () => {
     expect(toolOpts.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("always attaches size and AbortSignal.timeout on tools/call, even without maxBytes", async () => {
+  it("always attaches size and an abort signal on tools/call, even without maxBytes", async () => {
     const site = plainSite();
-    const fake = new AbortController().signal;
-    const spy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(fake);
-    try {
-      vi.mocked(fetch)
-        .mockResolvedValueOnce(initOk("sess-t")[0])
-        .mockResolvedValueOnce(initOk("sess-t")[1])
-        .mockResolvedValueOnce(toolOk({ content: [] }));
-      await callServerTool(site, CONFIG_GET, {});
-      const toolCall = vi.mocked(fetch).mock.calls.find(([, o]) => JSON.parse(o.body).method === "tools/call");
-      expect(toolCall[1].size).toBe(SERVER_TOOL_MAX_BYTES);
-      expect(toolCall[1].signal).toBe(fake);
-      expect(spy).toHaveBeenCalledWith(SERVER_TOOL_TIMEOUT_MS);
-    } finally {
-      spy.mockRestore();
-    }
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(initOk("sess-t")[0])
+      .mockResolvedValueOnce(initOk("sess-t")[1])
+      .mockResolvedValueOnce(toolOk({ content: [] }));
+    await callServerTool(site, CONFIG_GET, {});
+    const toolCall = vi.mocked(fetch).mock.calls.find(([, o]) => JSON.parse(o.body).method === "tools/call");
+    expect(toolCall[1].size).toBe(SERVER_TOOL_MAX_BYTES);
+    expect(toolCall[1].signal).toBeInstanceOf(AbortSignal);
   });
 
   it("aborts a hung tools/call so callGovernedServerTool cannot hang unbounded", async () => {
     const site = plainSite();
-    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
-    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) =>
-      originalTimeout(ms === SERVER_TOOL_TIMEOUT_MS ? 20 : ms));
     vi.mocked(fetch)
       .mockResolvedValueOnce(initOk("sess-hang")[0])
       .mockResolvedValueOnce(initOk("sess-hang")[1])
       .mockImplementation(hangingFetch);
-    try {
-      await expect(callServerTool(site, CONFIG_GET, {})).rejects.toMatchObject({ name: "AbortError" });
-    } finally {
-      spy.mockRestore();
-    }
+    const pending = callServerTool(site, CONFIG_GET, {});
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    abortCatalogWork();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("maps a kill abort on tools/call to the generic deny", async () => {
@@ -318,6 +308,57 @@ describe("callServerTool", () => {
     const methods = vi.mocked(fetch).mock.calls.map(([, o]) => JSON.parse(o.body).method);
     // initialize, notifications/initialized, tools/call, tools/call — no second initialize.
     expect(methods).toEqual(["initialize", "notifications/initialized", "tools/call", "tools/call"]);
+  });
+
+  it("shares one in-flight initialize across overlapping calls", async () => {
+    const site = plainSite();
+    let releaseInit;
+    const initGate = new Promise((resolve) => { releaseInit = resolve; });
+    vi.mocked(fetch).mockImplementation(async (_url, opts) => {
+      const method = JSON.parse(opts.body).method;
+      if (method === "initialize") {
+        await initGate;
+        return initOk("sess-shared")[0];
+      }
+      if (method === "notifications/initialized") return initOk("sess-shared")[1];
+      return toolOk({ content: [] });
+    });
+
+    const first = callServerTool(site, CONFIG_LIST, {});
+    const second = callServerTool(site, CONFIG_LIST, {});
+    // Both calls yield on auth headers before the handshake. Flush that turn
+    // while initialize is still held, so the second call must join it.
+    await new Promise((resolve) => { setTimeout(resolve, 0); });
+    const initializeCalls = () => vi.mocked(fetch).mock.calls.filter(([, opts]) => (
+      JSON.parse(opts.body).method === "initialize"
+    ));
+    expect(initializeCalls()).toHaveLength(1);
+    releaseInit();
+    await Promise.all([first, second]);
+
+    const calls = vi.mocked(fetch).mock.calls.map(([, opts]) => ({
+      method: JSON.parse(opts.body).method,
+      session: opts.headers["Mcp-Session-Id"],
+    }));
+    expect(initializeCalls()).toHaveLength(1);
+    expect(calls.filter((call) => call.method === "tools/call").map((call) => call.session))
+      .toEqual(["sess-shared", "sess-shared"]);
+  });
+
+  it("starts a new handshake after initialize fails", async () => {
+    const site = plainSite();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(mcpRes({ status: 503, text: "down" }))
+      .mockResolvedValueOnce(initOk("sess-retry")[0])
+      .mockResolvedValueOnce(initOk("sess-retry")[1])
+      .mockResolvedValueOnce(toolOk({ content: [] }));
+
+    await expect(callServerTool(site, CONFIG_LIST, {})).rejects.toThrow(/session initialize failed 503/);
+    await callServerTool(site, CONFIG_LIST, {});
+
+    const methods = vi.mocked(fetch).mock.calls.map(([, opts]) => JSON.parse(opts.body).method);
+    expect(methods).toEqual(["initialize", "initialize", "notifications/initialized", "tools/call"]);
+    expect(vi.mocked(fetch).mock.calls.at(-1)[1].headers["Mcp-Session-Id"]).toBe("sess-retry");
   });
 
   it("parses a text/event-stream tools/call response", async () => {

@@ -17,14 +17,13 @@
  */
 
 import fetch from "node-fetch";
-import { emitCatalogListChanged } from "./catalog-notify.js";
 import { authHeadersAsync, clientHeaders } from "./config.js";
 import { catalogAwareTimeout } from "./catalog-signal.js";
 import { keepAliveAgentFor } from "./http-agents.js";
 import { DIAGNOSTIC_TOOLS } from "./principal.js";
 
 /** Listing wait for readiness verdicts. The probe itself is not aborted. */
-const LISTING_READINESS_TIMEOUT_MS = 4_000;
+export const LISTING_READINESS_TIMEOUT_MS = 4_000;
 
 /** How long a passing verification stays fresh before it must be re-proven. */
 export const OK_TTL_MS = 60_000;
@@ -96,11 +95,7 @@ export async function verifySourceGovernance(site, { force = false, timeoutMs } 
 
   const promise = probeReadiness(site, timeoutMs)
     .then((result) => {
-      const previous = cache.get(key);
       cache.set(key, result);
-      if (result.ok && !previous?.ok) {
-        emitCatalogListChanged({ tools: true });
-      }
       return result;
     })
     .finally(() => {
@@ -172,6 +167,57 @@ async function probeReadiness(site, timeoutMs) {
 }
 
 /**
+ * Fresh cached source-governance verdict, or `null` when missing or stale.
+ *
+ * @param {object} site Resolved site config.
+ * @returns {{ok: boolean, reason: string|null, checkedAt: number}|null}
+ */
+export function cachedSourceGovernance(site) {
+  const key = site?._name ?? site?.baseUrl;
+  const cached = cache.get(key);
+  if (!cached) return null;
+  const age = Date.now() - cached.checkedAt;
+  if (age <= (cached.ok ? OK_TTL_MS : FAIL_TTL_MS)) return cached;
+  return null;
+}
+
+/**
+ * Listing gate: use a fresh cached verdict when one exists. Otherwise race
+ * the re-check against `timeoutMs` and fail closed if it does not resolve
+ * in time. The probe keeps running; listing does not pass a short abort to
+ * {@link verifySourceGovernance}. Callers that check several sites must use
+ * {@link listingSourceGovernanceAllowsSites} so the wait is one shared
+ * deadline, not N sequential leftovers.
+ *
+ * @param {object} site Resolved site config.
+ * @param {{timeoutMs?: number}} [options]
+ * @returns {Promise<boolean>}
+ */
+export async function listingSourceGovernanceAllows(site, options = {}) {
+  if (!requiresGovernance(site)) return true;
+  const cached = cachedSourceGovernance(site);
+  if (cached) return cached.ok;
+  const waitMs = Math.max(0, options.timeoutMs ?? LISTING_READINESS_TIMEOUT_MS);
+  const probe = assertSourceGovernance(site).then(() => true, () => false);
+  if (waitMs === 0) {
+    probe.catch(() => {});
+    return false;
+  }
+  return await new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => finish(false), waitMs);
+    if (typeof timer.unref === "function") timer.unref();
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    probe.then(finish, () => finish(false));
+  });
+}
+
+/**
  * Gate a governed product path: no-op for ungoverned sites, throws otherwise
  * unless the source contract verifies.
  *
@@ -218,6 +264,39 @@ export async function governanceStatus(sites) {
 }
 
 /**
+ * Listing gate for many sites: one shared deadline, probes in parallel.
+ * The wait is capped at {@link LISTING_READINESS_TIMEOUT_MS}; leftover
+ * unnotified catalog budget is not applied per site.
+ *
+ * @param {Array<object>} sites
+ * @param {{timeoutMs?: number}} [options]
+ * @returns {Promise<Map<string, boolean>>} Site name → allowed.
+ */
+export async function listingSourceGovernanceAllowsSites(sites, options = {}) {
+  const waitMs = Math.min(
+    Math.max(0, options.timeoutMs ?? LISTING_READINESS_TIMEOUT_MS),
+    LISTING_READINESS_TIMEOUT_MS,
+  );
+  const deadlineAt = Date.now() + waitMs;
+  const unique = [];
+  const seen = new Set();
+  for (const site of sites ?? []) {
+    const name = site?._name ?? site?.baseUrl;
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    unique.push(site);
+  }
+  const verdicts = await Promise.all(unique.map((site) => (
+    listingSourceGovernanceAllows(site, { timeoutMs: Math.max(0, deadlineAt - Date.now()) })
+  )));
+  const allowed = new Map();
+  unique.forEach((site, index) => {
+    allowed.set(site._name ?? site.baseUrl, verdicts[index]);
+  });
+  return allowed;
+}
+
+/**
  * Discovery gate: hide governed tools when NO configured site can serve them.
  *
  * A site can serve governed tools when it is either ungoverned or its source
@@ -230,20 +309,12 @@ export async function governanceStatus(sites) {
  * @param {Array<object>} sites       Resolved site configs.
  * @param {{timeoutMs?: number}} [options] Listing wait for a readiness
  *   verdict. A hung probe stays in-flight until the request timeout (30s);
- *   this list hides governed tools if no site verifies in time.
+ *   this list hides governed tools if no site verifies in time. Capped at
+ *   {@link LISTING_READINESS_TIMEOUT_MS} across all sites in parallel.
  * @returns {Promise<Array<object>>} The discoverable definitions.
  */
 export async function filterDiscoverableTools(definitions, sites, options = {}) {
-  const waitMs = options.timeoutMs ?? LISTING_READINESS_TIMEOUT_MS;
-  const deadlineAt = Date.now() + waitMs;
-  const verdicts = await Promise.all(sites.map(async (site) => {
-    if (!requiresGovernance(site)) return true;
-    const remaining = Math.max(0, deadlineAt - Date.now());
-    return await Promise.race([
-      verifySourceGovernance(site).then((result) => result.ok),
-      new Promise((resolve) => setTimeout(() => resolve(false), remaining)),
-    ]);
-  }));
-  if (verdicts.some(Boolean)) return definitions;
+  const allowed = await listingSourceGovernanceAllowsSites(sites, options);
+  if ([...allowed.values()].some(Boolean)) return definitions;
   return definitions.filter((d) => DIAGNOSTIC_TOOLS.has(d.name));
 }

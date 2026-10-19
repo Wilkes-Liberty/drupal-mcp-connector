@@ -10,7 +10,17 @@ vi.mock("../../src/lib/config.js", async (original) => ({
   getDefaultSiteName: () => state.site._name,
 }));
 vi.mock("../../src/lib/governance.js", async (original) => ({
-  ...await original(), assertSourceGovernance: vi.fn(async () => {}),
+  ...await original(),
+  assertSourceGovernance: vi.fn(async () => {}),
+  listingSourceGovernanceAllows: vi.fn(async () => true),
+  listingSourceGovernanceAllowsSites: vi.fn(async (sites) => {
+    const allowed = new Map();
+    for (const site of sites ?? []) {
+      const name = site?._name ?? site?.baseUrl;
+      if (name) allowed.set(name, true);
+    }
+    return allowed;
+  }),
 }));
 vi.mock("ssh2", () => ({ Client: class { connect = state.connect; } }));
 

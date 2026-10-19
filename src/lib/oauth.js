@@ -11,7 +11,7 @@
  */
 
 import fetch from "node-fetch";
-import { catalogAwareTimeout } from "./catalog-signal.js";
+import { catalogAwareTimeout, catalogShutdownSignal } from "./catalog-signal.js";
 import { keepAliveAgentFor } from "./http-agents.js";
 
 /** Re-acquire this many ms before the stated expiry to absorb clock skew. */
@@ -92,6 +92,7 @@ async function requestToken(site, useRefresh, refreshToken) {
     });
   } catch (err) {
     if (err?.name === "AbortError" || err?.name === "TimeoutError") {
+      if (catalogShutdownSignal().aborted) throw err;
       throw new OAuthError(
         `OAuth token request to ${site._name} timed out after ${OAUTH_TOKEN_TIMEOUT_MS / 1000}s.`
       );

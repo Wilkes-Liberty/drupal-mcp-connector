@@ -8,6 +8,7 @@
 import { Server } from "@modelcontextprotocol/server";
 import { registerLiveCatalogServer } from "./catalog-notify.js";
 import { markHttpAuditToolOutcome } from "./http-audit.js";
+import { catalogListWaitMs } from "./site-catalog.js";
 
 /**
  * Whether a listed resource URI (possibly templated) covers a requested URI.
@@ -57,9 +58,12 @@ export function createConnectorServerFactory({ serverInfo, tools, resources, pro
     }
     registerLiveCatalogServer(server);
 
-    server.setRequestHandler("tools/list", async () => ({
-      tools: tools.list ? await tools.list() : tools.definitions,
-    }));
+    server.setRequestHandler("tools/list", async () => {
+      const waitMs = catalogListWaitMs(server);
+      return {
+        tools: tools.list ? await tools.list({ waitMs }) : tools.definitions,
+      };
+    });
     server.setRequestHandler("tools/call", async (request) => {
       const { name, arguments: args } = request.params;
       try {
@@ -91,14 +95,17 @@ export function createConnectorServerFactory({ serverInfo, tools, resources, pro
       }
     });
 
-    server.setRequestHandler("prompts/list", async () => ({
-      prompts: prompts.list ? await prompts.list() : prompts.definitions,
-    }));
+    server.setRequestHandler("prompts/list", async () => {
+      const waitMs = catalogListWaitMs(server);
+      return {
+        prompts: prompts.list ? await prompts.list({ waitMs }) : prompts.definitions,
+      };
+    });
     server.setRequestHandler("prompts/get", async (request) => {
       const { name, arguments: args } = request.params;
       // A surface with live prompts resolves listing and messages in one pass.
       if (prompts.describe) {
-        const found = await prompts.describe(name, args ?? {});
+        const found = await prompts.describe(name, args ?? {}, { waitMs: catalogListWaitMs(server) });
         if (!found) throw new Error(`Unknown prompt: "${name}"`);
         return found;
       }

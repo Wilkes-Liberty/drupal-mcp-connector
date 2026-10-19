@@ -45,9 +45,19 @@
  *                     a present empty value clears the configured list.
  *                     Default: host of auth.resource/audience, plus loopback
  *                     hostnames on a loopback bind.
- *   MCP_CATALOG_SITE_DEADLINE_MS  Listing wait for tools/list + prompts/list
- *                     (default: 4000). The wait never aborts the site chain.
- *                     A site that is not ready is omitted from that response.
+ *   MCP_CATALOG_SITE_DEADLINE_MS  Listing wait when list_changed can reach
+ *                     the client (default: 4000). The wait never aborts the
+ *                     site chain. A site that is not ready is omitted from
+ *                     that response.
+ *   MCP_CATALOG_UNNOTIFIED_LIST_WAIT_MS  First-list wait when list_changed
+ *                     cannot reach this session (2026 stdio without
+ *                     subscriptions/listen on that connection; every
+ *                     modern HTTP 2026 list — sessionless POST cannot be
+ *                     bound to a listen stream). Default 20000. The whole
+ *                     listing (catalog wait plus a parallel 4s governance
+ *                     re-check) is hard-capped at 25000 so it stays under a
+ *                     30s client timeout. Then fall back to the partial
+ *                     list. See docs/module-tools.md#catalog-listing-dev-1019.
  *   MCP_CATALOG_CACHE_TTL_MS  Success TTL for a per-site catalog snapshot
  *                     shared by tools/list, prompts/list, prompts/get
  *                     (default: 600000, stale-while-revalidate).
@@ -68,7 +78,7 @@
  *   doctor            Connection doctor — see src/lib/doctor.js
  */
 
-import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { serveStdio, StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
 import { listSiteNames, getTlsConfig, loadConfig, CLIENT_VERSION, SERVER_INFO } from "./lib/config.js";
 import { loadLocalSecrets, secretLoadFatalMessage, secretTableMismatchMessage } from "./lib/load-secrets.js";
@@ -91,7 +101,10 @@ import { assertHostedToolScopeTable } from "./lib/tool-scopes.js";
 import { callTool, invokeReadTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
 import { fetchTextFormatContext, installTextFormatContextFetcher } from "./lib/text-format-context.js";
 import { filterDiscoverableTools } from "./lib/governance.js";
-import { getCatalogDiscoveryOptions, prefetchSiteCatalogs } from "./lib/site-catalog.js";
+import { abortCatalogWork } from "./lib/catalog-signal.js";
+import { observeStdioCatalogTransport } from "./lib/catalog-notify.js";
+import { destroyKeepAliveAgents } from "./lib/http-agents.js";
+import { getCatalogDiscoveryOptions, MAX_LIST_WAIT_MS, prefetchSiteCatalogs } from "./lib/site-catalog.js";
 import {
   filterPromptsByPrincipal,
   filterResourcesByPrincipal,
@@ -192,13 +205,18 @@ function warmSiteCatalogs() {
   }
 }
 
-async function discoverableTools() {
+async function discoverableTools(options = {}) {
   const sites = listResolvableSiteConfigs();
   const identity = getRequestIdentity();
-  const { siteDeadlineMs } = getCatalogDiscoveryOptions();
+  const waitMs = Math.min(
+    Object.hasOwn(options, "waitMs")
+      ? options.waitMs
+      : getCatalogDiscoveryOptions().siteDeadlineMs,
+    MAX_LIST_WAIT_MS,
+  );
   const [governed, moduleDefs] = await Promise.all([
-    filterDiscoverableTools(allDefinitions, sites, { timeoutMs: siteDeadlineMs }),
-    moduleTools.list({ sites, identity }),
+    filterDiscoverableTools(allDefinitions, sites, { timeoutMs: waitMs }),
+    moduleTools.list({ sites, identity, waitMs }),
   ]);
   return [
     ...filterToolsByPrincipal(governed, sites, identity),
@@ -299,13 +317,12 @@ const buildConnectorServer = createConnectorServerFactory({
     workflowNames: WORKFLOW_PROMPT_NAMES,
     workflowMessages: getPromptMessages,
     definitionsByName,
-    extraWorkflows: async (tools, taken) => {
-      const loaded = loadWorkflows(
-        await moduleWorkflowProvidersWithRemote(listResolvableSiteConfigs(), {
-          identity: getRequestIdentity(),
-        }),
-        { tools, taken },
-      );
+    extraProviders: (options) => moduleWorkflowProvidersWithRemote(listResolvableSiteConfigs(), {
+      identity: getRequestIdentity(),
+      waitMs: options?.waitMs,
+    }),
+    extraWorkflows: async (tools, taken, providers) => {
+      const loaded = loadWorkflows(providers ?? [], { tools, taken });
       replaceModuleWorkflows(loaded);
       return loaded;
     },
@@ -325,7 +342,25 @@ const reportMcpTransportStage = (stage) => {
 warmSiteCatalogs();
 
 if (transport === "stdio") {
+  const stdioWire = new StdioServerTransport();
+  const shutdownStdioCatalog = () => {
+    try {
+      abortCatalogWork();
+    } catch {
+      // Shutdown must not throw back into stdin/transport close.
+    }
+    try {
+      destroyKeepAliveAgents();
+    } catch {
+      // Keep-alive sockets may already be gone.
+    }
+    if (process.exitCode === undefined) process.exitCode = 0;
+  };
+  observeStdioCatalogTransport(stdioWire, shutdownStdioCatalog);
+  process.stdin.once("end", shutdownStdioCatalog);
+  process.stdin.once("close", shutdownStdioCatalog);
   serveStdio(buildConnectorServer, {
+    transport: stdioWire,
     legacy: "serve",
     onerror: () => reportMcpTransportStage("stdio-dispatch"),
   });

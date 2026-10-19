@@ -6,10 +6,11 @@
  * docs/module-workflows.md.
  */
 
+import { listingSourceGovernanceAllowsSites, requiresGovernance } from "./governance.js";
 import { createSiteCatalogWork } from "./module-tools.js";
 import { getRequestIdentity } from "./principal.js";
 import { listServerTools, fetchSiteWorkflowPrompts } from "./server-tools.js";
-import { loadSiteCatalogs } from "./site-catalog.js";
+import { loadSiteCatalogs, remainingCatalogListBudgetMs } from "./site-catalog.js";
 import { sourceText } from "./tool-prompts.js";
 export {
   lookupWorkflow,
@@ -373,10 +374,10 @@ export function workflowFromDrupalPrompt(id, listed, got, toolsMap) {
  * is not named locally is ignored. Fetch failures keep the v1 local bodies.
  *
  * @param {Array<object>} sites
- * @param {{fetch?: Function, identity?: object|null, list?: Function}} [deps]
+ * @param {{fetch?: Function, identity?: object|null, list?: Function, waitMs?: number}} [deps]
  * @returns {Promise<object[]>}
  */
-export async function moduleWorkflowProvidersWithRemote(sites, { fetch, identity, list } = {}) {
+export async function moduleWorkflowProvidersWithRemote(sites, { fetch, identity, list, waitMs } = {}) {
   const listSites = sites ?? [];
   const principal = identity === undefined ? getRequestIdentity() : identity;
   // Tests that inject `fetch` should not also hit listServerTools.
@@ -386,11 +387,23 @@ export async function moduleWorkflowProvidersWithRemote(sites, { fetch, identity
     list: list ?? (fetch ? null : listServerTools),
     fetchPrompts: fetch ?? fetchSiteWorkflowPrompts,
   });
-  const catalogs = await loadSiteCatalogs(listSites, { identity: principal, work });
+  const startedAt = Date.now();
+  const catalogs = await loadSiteCatalogs(listSites, {
+    identity: principal,
+    work,
+    waitMs,
+    waitUntil: "complete",
+  });
+  const remaining = remainingCatalogListBudgetMs(waitMs, startedAt);
   const providers = [];
+  const allowedBySite = await listingSourceGovernanceAllowsSites(
+    listSites,
+    remaining === undefined ? {} : { timeoutMs: remaining },
+  );
   for (const site of listSites) {
     const modules = site.serverTools?.modules;
     if (!modules?.namespace || !modules.workflows || typeof modules.workflows !== "object") continue;
+    if (requiresGovernance(site) && !allowedBySite.get(site._name ?? site.baseUrl)) continue;
     const enabled = [];
     for (const [id, body] of Object.entries(modules.workflows)) {
       if (id.startsWith("_") || !body || typeof body !== "object") continue;

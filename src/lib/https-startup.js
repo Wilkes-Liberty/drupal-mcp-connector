@@ -419,7 +419,7 @@ export async function startHttpsTransport({
     legacy: "reject",
     onerror: () => reportMcpTransportStage("modern-protocol"),
   });
-  const detachModernCatalogNotify = addModernCatalogNotifier(modernMcpHandler.notify);
+  const detachModernCatalogNotify = addModernCatalogNotifier(modernMcpHandler);
   if (checkAuthOption !== undefined) checkAuth = checkAuthOption;
   if (authenticateOption !== undefined) authenticate = authenticateOption;
   const allowLocalOperator = allowLocalOperatorOption !== undefined

@@ -29,8 +29,9 @@
   },
 
   "catalogDiscovery": {
-    "_comment": "DEV-1019. tools/list and prompts/list walk configured sites concurrently. A listing waits siteDeadlineMs (default 4000) and returns built-ins plus ready snapshots; the wait never aborts the site chain. Not-yet-ready, erroring, or governance-failed sites are omitted from that response (fail closed) and logged on stderr (site name + reason, no secrets). The chain finishes in the background; a successful snapshot is cached after governance and principal filters, and list_changed fires when the advertised set changes. Catalogs warm at process start and on MCP initialize without blocking listen. The first list is not the full multi-site catalog unless every site finishes inside the wait. cacheTtlMs (default 600000) is the success TTL with stale-while-revalidate. negativeTtlMs (default 5000) is the error TTL so a cold start does not stampede. A denial is never cached as a grant. Execution still re-reads the source catalog. Env overrides: MCP_CATALOG_SITE_DEADLINE_MS, MCP_CATALOG_CACHE_TTL_MS, MCP_CATALOG_NEGATIVE_TTL_MS, MCP_CATALOG_CONCURRENCY.",
+    "_comment": "DEV-1019. tools/list and prompts/list walk configured sites concurrently. The wait never aborts the site chain. Delivery is per session: siteDeadlineMs (default 4000) when list_changed can reach this session; unnotifiedListWaitMs (default 20000) when it cannot. The whole listing is hard-capped at 25000. Order: governance (parallel, 4s cap) then tools/list then onTools; prompt hops start after governance. cacheTtlMs success TTL with stale-while-revalidate; negativeTtlMs error TTL. See docs/module-tools.md#catalog-listing-dev-1019. Env: MCP_CATALOG_SITE_DEADLINE_MS, MCP_CATALOG_UNNOTIFIED_LIST_WAIT_MS, MCP_CATALOG_CACHE_TTL_MS, MCP_CATALOG_NEGATIVE_TTL_MS, MCP_CATALOG_CONCURRENCY.",
     "siteDeadlineMs": 4000,
+    "unnotifiedListWaitMs": 20000,
     "cacheTtlMs": 600000,
     "negativeTtlMs": 5000,
     "concurrency": 16

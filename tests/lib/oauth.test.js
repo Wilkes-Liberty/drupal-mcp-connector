@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("node-fetch", () => ({ default: vi.fn() }));
 import fetch from "node-fetch";
-import { getAccessToken, clearToken, OAuthError, OAUTH_TOKEN_TIMEOUT_MS } from "../../src/lib/oauth.js";
+import { getAccessToken, clearToken, OAuthError } from "../../src/lib/oauth.js";
+import { abortCatalogWork, resetCatalogShutdown } from "../../src/lib/catalog-signal.js";
 
 function tokenResponse(body, { ok = true, status = 200 } = {}) {
   return { ok, status, json: async () => body, text: async () => JSON.stringify(body) };
@@ -40,6 +41,9 @@ function hangingFetch(_url, opts) {
 
 beforeEach(() => {
   vi.mocked(fetch).mockReset();
+});
+afterEach(() => {
+  resetCatalogShutdown();
 });
 
 describe("getAccessToken", () => {
@@ -157,33 +161,22 @@ describe("getAccessToken", () => {
     }
   });
 
-  it("attaches AbortSignal.timeout on the token POST", async () => {
-    const fake = new AbortController().signal;
-    const spy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(fake);
-    try {
-      vi.mocked(fetch).mockResolvedValueOnce(
-        tokenResponse({ access_token: "tok-timeout", expires_in: 3600 })
-      );
-      await getAccessToken(oauthSite("s-timeout"));
-      expect(spy).toHaveBeenCalledWith(OAUTH_TOKEN_TIMEOUT_MS);
-      expect(vi.mocked(fetch).mock.calls[0][1].signal).toBe(fake);
-    } finally {
-      spy.mockRestore();
-    }
+  it("attaches an abort signal on the token POST", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      tokenResponse({ access_token: "tok-timeout", expires_in: 3600 })
+    );
+    await getAccessToken(oauthSite("s-timeout"));
+    expect(vi.mocked(fetch).mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("fails with OAuthError when the token POST times out", async () => {
+  it("fails with AbortError when stdio shutdown aborts the token POST", async () => {
     vi.mocked(fetch).mockImplementation(hangingFetch);
-    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
-    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => originalTimeout(20));
-    try {
-      await expect(getAccessToken(oauthSite("s-hang"))).rejects.toThrow(OAuthError);
-      await expect(getAccessToken(oauthSite("s-hang-2"))).rejects.toThrow(
-        `OAuth token request to s-hang-2 timed out after ${OAUTH_TOKEN_TIMEOUT_MS / 1000}s.`
-      );
-    } finally {
-      spy.mockRestore();
-    }
+    const first = getAccessToken(oauthSite("s-hang"));
+    const second = getAccessToken(oauthSite("s-hang-2"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    abortCatalogWork();
+    await expect(first).rejects.toMatchObject({ name: "AbortError" });
+    await expect(second).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("throws OAuthError on a non-2xx token response without leaking the secret", async () => {

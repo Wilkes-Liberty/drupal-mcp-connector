@@ -391,25 +391,15 @@ MCP tools rather than drush:
 [module-tools.md](module-tools.md) and the `_server_tools.example` block in
 `config/config.example.json`.
 
-`tools/list` and `prompts/list` walk configured sites concurrently. Each listing
-waits up to 4 seconds (`catalogDiscovery.siteDeadlineMs` or
-`MCP_CATALOG_SITE_DEADLINE_MS`) and returns built-ins plus snapshots that are
-already ready. The wait never aborts token, readiness, initialize, or
-`tools/list`. A site that is not ready, errors, or fails governance is omitted
-from that response — its server-side tools and prompts are not granted — and
-the connector logs one stderr line with the site name and reason. The chain
-finishes in the background; a successful snapshot is cached and the connector
-emits `notifications/tools/list_changed` and `notifications/prompts/list_changed`
-when the advertised set changes. Catalogs are warmed at process start and on
-MCP initialize without blocking listen. The first list is not the full
-multi-site catalog unless every site finishes inside the wait. A success TTL
-(default 10 minutes; `catalogDiscovery.cacheTtlMs` / `MCP_CATALOG_CACHE_TTL_MS`)
-is shared by `tools/list`, `prompts/list`, and `prompts/get` with
-stale-while-revalidate. Failed walks use a short negative TTL (default 5
-seconds; `catalogDiscovery.negativeTtlMs` / `MCP_CATALOG_NEGATIVE_TTL_MS`) so a
-cold start does not stampede. A denial is never cached as a grant. Raise
-`catalogDiscovery.concurrency` (default 16) if the estate is larger than one
-wave.
+`tools/list` and `prompts/list` walk configured sites concurrently. Delivery
+is per session: a notified client's first list waits up to 4 seconds and
+returns built-ins plus ready snapshots, then `list_changed`; an unnotified
+client waits for the in-flight chain (default 20 seconds). The whole listing
+is hard-capped at 25 seconds. Order on each site: governance → `tools/list`
+→ `onTools`; prompt hops start after governance. A site that is not ready,
+errors, or fails governance is omitted. Catalogs warm at process start and
+on MCP initialize. See
+[module-tools.md](module-tools.md#catalog-listing-dev-1019).
 
 `drupal_config_set` requires the `config-editor` (Developer) tier (or
 `security.allowConfigWrite: true`). Call `drupal_mcp_whoami` to see the effective tier,

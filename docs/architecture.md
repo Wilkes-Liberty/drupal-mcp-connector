@@ -335,9 +335,8 @@ interface SiteConfig {
 
 Top-level config also accepts `defaultSite`, a `tls` block
 (`certPath`/`keyPath`/`port`) for the HTTPS transport, `catalogDiscovery`
-(`siteDeadlineMs` listing wait, `cacheTtlMs` success TTL with
-stale-while-revalidate, `negativeTtlMs` error TTL, `concurrency` — DEV-1019;
-env `MCP_CATALOG_SITE_DEADLINE_MS`, `MCP_CATALOG_CACHE_TTL_MS`,
-`MCP_CATALOG_NEGATIVE_TTL_MS`, `MCP_CATALOG_CONCURRENCY`), and `sites` (the
-map above). See
+(`siteDeadlineMs`, `unnotifiedListWaitMs`, `cacheTtlMs`, `negativeTtlMs`,
+`concurrency` — DEV-1019; env `MCP_CATALOG_*`). The whole listing is
+hard-capped at 25s; governance is a parallel 4s phase. See
+[module-tools.md](module-tools.md#catalog-listing-dev-1019) and
 [config.example.json](../config/config.example.json).

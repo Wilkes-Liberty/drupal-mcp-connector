@@ -76,7 +76,7 @@ describe("createConnectorServerFactory", () => {
     const found = await client.getPrompt({ name: "drupal-live", arguments: { stage: "won" } });
     expect(found.description).toBe("Live prompt");
     expect(found.messages[0].content.text).toBe("live");
-    expect(current.prompts.describe).toHaveBeenCalledWith("drupal-live", { stage: "won" });
+    expect(current.prompts.describe).toHaveBeenCalledWith("drupal-live", { stage: "won" }, { waitMs: 4000 });
     expect(current.prompts.list).not.toHaveBeenCalled();
     expect(current.prompts.get).not.toHaveBeenCalled();
     await expect(client.getPrompt({ name: "drupal-gone" })).rejects.toThrow(/Unknown prompt/);

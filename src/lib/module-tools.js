@@ -4,12 +4,12 @@ import { createHash } from "node:crypto";
 import Ajv from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { listServerTools, callServerTool, fetchSiteWorkflowPrompts, toolResultData } from "./server-tools.js";
-import { loadSiteCatalogs, workflowIdsFromSite } from "./site-catalog.js";
+import { loadSiteCatalogs, remainingCatalogListBudgetMs, workflowIdsFromSite } from "./site-catalog.js";
 import { buildDataFlowContext, consumeBudgetIfEnforced, DataFlowBudgetError, runWithDataFlow } from "./data-flow.js";
 import { listResolvableSiteConfigs, securityMiddleware } from "./dispatch.js";
 import { getRequestIdentity, principalHasScope, resolveGrantedSites } from "./principal.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
-import { assertSourceGovernance, GovernanceError } from "./governance.js";
+import { assertSourceGovernance, listingSourceGovernanceAllowsSites, GovernanceError } from "./governance.js";
 import { toolError } from "./errors.js";
 import { withResolvedTarget } from "./site-target.js";
 import { cleanErrorData } from "./error-body.js";
@@ -205,8 +205,10 @@ export function firstEnabledModuleEntry(site, identity, sites, grants) {
 /**
  * Shared listing work for one site: module tools (when enabled for this
  * principal) plus configured workflow prompts. tools/list and prompts/list
- * pass the same work so they share one in-flight fetch. Prompt hops run in
- * this same detached completion — the listing wait does not abort them.
+ * pass the same work so they share one in-flight fetch. Source governance
+ * is proven first; prompt hops then overlap `tools/list` after that gate
+ * (the Drupal handshake is shared). Tools are advertised as soon as
+ * `tools/list` returns. The listing wait does not abort the chain.
  *
  * @param {object} [context]
  * @param {Array<object>} [context.sites]
@@ -229,7 +231,7 @@ export function createSiteCatalogWork({
   fetchPrompts = fetchSiteWorkflowPrompts,
 } = {}) {
   const allSites = sites ?? [];
-  return async function loadSiteSurface(site) {
+  return async function loadSiteSurface(site, hooks = {}) {
     const tools = new Map();
     let prompts = [];
     let promptBodies = new Map();
@@ -245,17 +247,33 @@ export function createSiteCatalogWork({
     });
     return await runWithDataFlow(flow, async () => {
       consumeBudgetIfEnforced("chained_action");
-      if (entry && typeof list === "function") {
-        const found = await catalog(site, list);
-        if (found instanceof Map) {
-          for (const [name, tool] of found) tools.set(name, tool);
-        }
+      const toolsHop = Boolean(entry && typeof list === "function");
+      const promptHop = names.length > 0 && fetchPrompts === fetchSiteWorkflowPrompts;
+      // Product-path contact starts only after source governance. Injected
+      // unit-test catalogs that skip the Drupal clients are not gated here.
+      if (toolsHop || promptHop) {
+        await assertSourceGovernance({ ...site, requireGovernance: true });
       }
-      if (names.length) {
-        const fetched = await fetchPrompts(site, names);
-        prompts = Array.isArray(fetched?.list) ? fetched.list : [];
-        promptBodies = fetched?.bodies instanceof Map ? fetched.bodies : new Map();
+      const toolsPromise = toolsHop
+        ? catalog(site, list)
+        : Promise.resolve(null);
+      const promptsPromise = names.length
+        ? fetchPrompts(site, names)
+        : Promise.resolve({ list: [], bodies: new Map() });
+      // Overlapping hops must not become unhandled rejections if one fails
+      // while the other is still awaited (stdio stdin EOF / shutdown).
+      promptsPromise.catch(() => {});
+      toolsPromise.catch(() => {});
+      const found = await toolsPromise;
+      if (found instanceof Map) {
+        for (const [name, tool] of found) tools.set(name, tool);
       }
+      if (typeof hooks.onTools === "function") {
+        hooks.onTools({ tools, complete: names.length === 0 });
+      }
+      const fetched = await promptsPromise;
+      prompts = Array.isArray(fetched?.list) ? fetched.list : [];
+      promptBodies = fetched?.bodies instanceof Map ? fetched.bodies : new Map();
       return { tools, prompts, promptBodies, cache: true };
     });
   };
@@ -309,28 +327,28 @@ export function createModuleToolRegistry({ list = listServerTools, call = callSe
         list,
         fetchPrompts: context.fetchPrompts ?? fetchSiteWorkflowPrompts,
       });
+      const startedAt = Date.now();
       const catalogs = await loadSiteCatalogs(sites, {
         identity,
         work,
         siteDeadlineMs: context.siteDeadlineMs,
         waitMs: context.waitMs,
+        waitUntil: context.waitUntil ?? "tools",
         cacheTtlMs: context.cacheTtlMs,
         negativeTtlMs: context.negativeTtlMs,
         concurrency: context.concurrency,
         logPending: context.logPending,
       });
+      const remaining = remainingCatalogListBudgetMs(
+        Object.hasOwn(context, "waitMs") ? context.waitMs : undefined,
+        startedAt,
+      );
       const definitions = [];
-      const governedSites = new Map();
+      const governedSites = await listingSourceGovernanceAllowsSites(
+        enabled.map((entry) => ({ ...entry.site, requireGovernance: true })),
+        remaining === undefined ? {} : { timeoutMs: remaining },
+      );
       for (const entry of enabled) {
-        if (!governedSites.has(entry.site._name)) {
-          try {
-            await assertSourceGovernance({ ...entry.site, requireGovernance: true });
-            governedSites.set(entry.site._name, true);
-          } catch {
-            // A failed or stale contract cannot ride a cached catalog.
-            governedSites.set(entry.site._name, false);
-          }
-        }
         if (!governedSites.get(entry.site._name)) continue;
         try {
           const remote = catalogs.get(entry.site._name)?.tools.get(entry.policy.name);
