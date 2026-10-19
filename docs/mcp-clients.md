@@ -80,8 +80,11 @@ HOSTED_MCP_CLIENT_SECRET=… npm run eval:hosted -- --require-signed-in
 
 The probe prints `Client inventory: provisioned` or `not provisioned` so the
 operator can see which authorize expects it used. Default is not provisioned
-(live realm as of 2026-10-19). Consent and the mcp-operators staff gate are
+(live realm as of 2026-10-19). Consent and the operators staff gate
+(keystone#1564: role `wl-operator`, flow `browser-deny-non-operators`) are
 signed-in authorize steps; the unauthenticated login page does not expose them.
+A skipped consent or staff-gate step is named on the Overall line and fails
+`--require-signed-in` the same way a skipped initialize does.
 
 OAuth facts the probe asserts:
 
@@ -89,7 +92,7 @@ OAuth facts the probe asserts:
 |---|---|---|---|---|---|
 | Cursor | Pre-registered public PKCE (`cursor-mcp`), S256, `mcp_read` | `cursor-mcp` | `https://www.cursor.com/agents/mcp/oauth/callback`, `http://localhost:8787/callback` | `https://cursor.com/agents/mcp/oauth/callback` (apex, not registered), any other host | `https://cursor.com`, `https://www.cursor.com` → 401 challenge; OPTIONS 204 |
 | Grok Bot | Pre-registered public PKCE (`grok-bot`). CIMD is published at `https://grok.com/oauth/mcp-client.json`. The short id is on the live realm (keystone#1539). The CIMD URL as `client_id` is the keystone#1559 client: `client_not_found` until provisioned; then the published Grok redirects must not be `client_not_found` and any other host is still refused. Anonymous DCR stays closed (Trusted Hosts). | `grok-bot` | Grok CIMD redirects plus the Cursor www callback (keystone#1531) | any other host; CIMD URL as `client_id` until provisioned | `https://grok.com`, `https://console.x.ai` → 401 challenge; OPTIONS 204 |
-| Claude (hosted OAuth) | Public PKCE client in realm-as-code (keystone#1559). Not on the live realm until `--clients-provisioned`. DCR stays closed. AS metadata does not advertise CIMD (`client_id_metadata_document_supported` absent; `token_endpoint_auth_methods_supported` has no `none`). | `claude` | `https://claude.ai/api/mcp/auth_callback` when provisioned | that callback is `client_not_found` until provisioned; any other host is refused once the client is present | `https://claude.ai` → 401 challenge; OPTIONS 204 (infra-overlay v1.16.1) |
+| Claude (hosted OAuth) | Public PKCE CIMD client in realm-as-code (keystone#1559). `client_id` is the CIMD URL, not a short `claude` id. Not on the live realm until `--clients-provisioned`. DCR stays closed. | `https://claude.ai/oauth/mcp-oauth-client-metadata` | `https://claude.ai/api/mcp/auth_callback` when provisioned | that callback is `client_not_found` until provisioned; any other host is refused once the client is present | `https://claude.ai` → 401 challenge; OPTIONS 204 (infra-overlay v1.16.1) |
 | Claude Code / Claude Desktop | **stdio** (local subprocess), or remote HTTP with an operator-supplied `Authorization: Bearer` header. Not browser Origin. | — | loopback (Claude Code CIMD) is a local redirect, not a hosted `/mcp` Origin | — | missing Origin allowed |
 | Local stdio | No inbound OAuth. The client launches `node src/index.js`. | — | — | — | n/a |
 

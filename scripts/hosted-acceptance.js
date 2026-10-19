@@ -50,11 +50,42 @@ export const ISSUER = "https://auth.wilkesliberty.com/realms/wilkesliberty";
 /** Published Grok Bot client ID metadata document (CIMD). */
 export const GROK_CIMD_URL = "https://grok.com/oauth/mcp-client.json";
 
-/** Published Claude Code client ID metadata document (CIMD). */
-export const CLAUDE_CIMD_URL = "https://claude.ai/oauth/claude-code-client-metadata";
+/**
+ * Claude hosted CIMD client_id from keystone#1559. This is the realm
+ * client id — there is no short `claude` id.
+ */
+export const CLAUDE_HOSTED_CIMD_URL = "https://claude.ai/oauth/mcp-oauth-client-metadata";
 
-/** Claude hosted-app OAuth callback (not a provisioned realm client). */
+/**
+ * Claude Code CIMD document. A genuinely separate local/stdio client
+ * (loopback redirects), not a hosted realm client, and not provisioned.
+ */
+export const CLAUDE_CODE_CIMD_URL = "https://claude.ai/oauth/claude-code-client-metadata";
+
+/** Claude hosted-app OAuth callback (keystone#1559). */
 export const CLAUDE_HOSTED_REDIRECT = "https://claude.ai/api/mcp/auth_callback";
+
+/** keystone#1564 flow that refuses a signed-in non-operator. */
+export const OPERATORS_DENY_FLOW = "browser-deny-non-operators";
+
+/** keystone#1564 role on the existing `operators` group. */
+export const OPERATORS_STAFF_ROLE = "wl-operator";
+
+/**
+ * keystone#1564 staff gate: the existing `operators` group (role
+ * {@link OPERATORS_STAFF_ROLE}) and the {@link OPERATORS_DENY_FLOW} flow.
+ */
+export const OPERATORS_STAFF_GATE = `operators staff gate (role ${OPERATORS_STAFF_ROLE}, flow ${OPERATORS_DENY_FLOW})`;
+
+/** Probe `expect` for consent plus {@link OPERATORS_STAFF_GATE}. */
+export const AUTHORIZE_GATES_EXPECT = "consent+operators-gate";
+
+/**
+ * Unauthenticated login does not show consent or the operators gate.
+ *
+ * @type {string}
+ */
+export const AUTHORIZE_GATES_UNAUTHENTICATED_REASON = `consent and the ${OPERATORS_STAFF_GATE} require a signed-in authorize; not observable without credentials`;
 
 /** Cursor public PKCE client from keystone#1539. */
 export const CURSOR_CLIENT_ID = "cursor-mcp";
@@ -123,9 +154,9 @@ export const CLIENT_INVENTORY = Object.freeze([
   }),
   Object.freeze({
     id: "claude",
-    name: "Claude",
-    clientId: "claude",
-    cimdUrl: CLAUDE_CIMD_URL,
+    name: "Claude hosted",
+    clientId: CLAUDE_HOSTED_CIMD_URL,
+    cimdUrl: CLAUDE_HOSTED_CIMD_URL,
     registration: "pre-registered-public-pkce",
     realm: "provisioned",
     pkce: "S256",
@@ -135,6 +166,27 @@ export const CLIENT_INVENTORY = Object.freeze([
     rejectRedirects: Object.freeze(["https://evil.example/callback"]),
   }),
 ]);
+
+/**
+ * Every `client_id` the inventory will send on authorize, including a
+ * Grok CIMD URL used as `client_id` when {@link resolveClientsProvisioned}
+ * is true.
+ *
+ * @param {readonly object[]} [inventory]
+ * @returns {readonly string[]}
+ */
+export function declaredClientIds(inventory = CLIENT_INVENTORY) {
+  const ids = [];
+  const seen = new Set();
+  for (const client of inventory) {
+    for (const id of [client.clientId, client.cimdAsClientId ? client.cimdUrl : undefined]) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return Object.freeze(ids);
+}
 
 /** True foreign Origin used as the 403 deny case. */
 export const FOREIGN_ORIGIN = "https://evil.example";
@@ -403,7 +455,7 @@ function readTriState(value) {
 
 /**
  * Pull Keycloak `kcContext` from authorize HTML or a JSON body. Used only
- * for pageId / consent / staff-gate signals.
+ * for pageId / consent / operators-gate signals.
  *
  * @param {string} body
  * @returns {object}
@@ -433,10 +485,21 @@ export function parseKcContext(body) {
  * @param {string} pageId
  * @returns {boolean|undefined}
  */
+/**
+ * True when authorize HTML is the keystone#1564 deny page.
+ *
+ * @param {string} body
+ * @param {string} [pageId]
+ * @returns {boolean}
+ */
+export function isOperatorsDenyPage(body, pageId = "") {
+  return new RegExp(OPERATORS_DENY_FLOW, "i").test(`${pageId}\n${body}`);
+}
+
 function readStaffGate(kc, body, pageId) {
+  if (isOperatorsDenyPage(body, pageId)) return true;
   const explicit = readTriState(kc.staffGate ?? kc.staffGateRequired);
   if (explicit !== undefined) return explicit;
-  if (/staff-gate|mcp-operators/i.test(pageId)) return true;
   if (/"staffGate(?:Required)?":\s*false/.test(body)) return false;
   if (/"staffGate(?:Required)?":\s*true/.test(body)) return true;
   return undefined;
@@ -507,9 +570,9 @@ export function classifyAuthorize(parsed, expect) {
 }
 
 /**
- * Consent and the mcp-operators staff gate, when the unauthenticated
+ * Consent and the {@link OPERATORS_STAFF_GATE}, when the unauthenticated
  * authorize page exposes them. Missing signals are a signed-in step —
- * the login page does not show consent or the staff gate.
+ * the login page does not show consent or the operators gate.
  *
  * @param {ReturnType<typeof parseAuthorizeResponse>} parsed
  * @returns {{ok: boolean|null, skipped?: boolean, reason: string}}
@@ -521,7 +584,7 @@ export function classifyAuthorizeGates(parsed) {
     return {
       ok: null,
       skipped: true,
-      reason: "consent and mcp-operators staff gate require a signed-in authorize; not observable without credentials",
+      reason: AUTHORIZE_GATES_UNAUTHENTICATED_REASON,
     };
   }
   const failures = [];
@@ -529,12 +592,58 @@ export function classifyAuthorizeGates(parsed) {
     failures.push("consentRequired=false");
   }
   if (staffObserved && parsed.staffGate !== true) {
-    failures.push("staff gate absent");
+    failures.push(`${OPERATORS_STAFF_GATE} absent`);
   }
   if (failures.length > 0) {
     return { ok: false, reason: failures.join("; ") };
   }
-  return { ok: true, reason: "authorize requires consent and staff gate" };
+  return { ok: true, reason: `authorize requires consent and the ${OPERATORS_STAFF_GATE}` };
+}
+
+/**
+ * Consent / operators-gate steps. Skipped ones are signed-in work.
+ *
+ * @param {{id?: string}} step
+ * @returns {boolean}
+ */
+export function isSecurityGateStep(step) {
+  return String(step?.id || "").startsWith("authorize-gates:");
+}
+
+/**
+ * @param {{id?: string}} step
+ * @returns {boolean}
+ */
+export function isRequiredSignedInStep(step) {
+  const id = String(step?.id || "");
+  return id.startsWith("signed-in:") || isSecurityGateStep(step);
+}
+
+/**
+ * @param {{hosts?: {steps?: object[]}[]}} report
+ * @returns {number}
+ */
+export function countSkippedSecurityGates(report) {
+  let count = 0;
+  for (const host of report.hosts || []) {
+    for (const step of host.steps || []) {
+      if (step.skipped && isSecurityGateStep(step)) count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * Overall line. Skipped consent / operators-gate steps are named so a
+ * PASS cannot hide missing signed-in coverage.
+ *
+ * @param {{ok: boolean, hosts?: {steps?: object[]}[]}} report
+ * @returns {string}
+ */
+export function formatOverallLine(report) {
+  const base = report.ok ? "PASS" : "FAIL";
+  const skipped = countSkippedSecurityGates(report);
+  return skipped > 0 ? `${base} (${skipped} security gates skipped)` : base;
 }
 
 /**
@@ -1094,14 +1203,14 @@ export async function probeHost({
     const gates = add({
       id: `authorize-gates:${client.clientId}`,
       client: client.id,
-      expect: "consent+staff-gate",
+      expect: AUTHORIZE_GATES_EXPECT,
     });
     finish(gates, gateParsed
       ? classifyAuthorizeGates(gateParsed)
       : {
         ok: null,
         skipped: true,
-        reason: "consent and mcp-operators staff gate require a signed-in authorize; not observable without credentials",
+        reason: AUTHORIZE_GATES_UNAUTHENTICATED_REASON,
       });
   }
 
@@ -1257,7 +1366,7 @@ export function formatMarkdown(report) {
     `Allowed Origins: ${report.origins.join(", ")}`,
     `Denied Origins: ${(report.denyOrigins || []).join(", ")}`,
     `Client inventory: ${report.clientsProvisioned ? "provisioned" : "not provisioned"} (keystone#1559 Grok CIMD + Claude hosted)`,
-    `Overall: ${report.ok ? "PASS" : "FAIL"}`,
+    `Overall: ${formatOverallLine(report)}`,
     "",
   ];
   for (const host of report.hosts) {
@@ -1362,10 +1471,10 @@ export async function main(argv = process.argv.slice(2), io = {}) {
   if (!report.ok) return 1;
   if (args.requireSignedIn) {
     const skippedSignedIn = report.hosts.some((host) =>
-      host.steps.some((step) => step.id.startsWith("signed-in:") && step.skipped),
+      host.steps.some((step) => isRequiredSignedInStep(step) && step.skipped),
     );
     if (skippedSignedIn) {
-      stderr.write("signed-in steps were skipped; pass a documented token or --help.\n");
+      stderr.write("signed-in steps were skipped; pass a documented token or complete consent and the operators staff gate.\n");
       return 2;
     }
   }

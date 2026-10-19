@@ -5,9 +5,16 @@ import { fileURLToPath } from "node:url";
 
 import { HOSTED_PUBLIC_CLIENT_ORIGINS } from "../../src/lib/http-transport.js";
 import {
+  AUTHORIZE_GATES_EXPECT,
+  AUTHORIZE_GATES_UNAUTHENTICATED_REASON,
   CLAUDE_BROWSER_ORIGIN,
+  CLAUDE_CODE_CIMD_URL,
+  CLAUDE_HOSTED_CIMD_URL,
   CLAUDE_HOSTED_REDIRECT,
   CLIENT_INVENTORY,
+  OPERATORS_DENY_FLOW,
+  OPERATORS_STAFF_GATE,
+  OPERATORS_STAFF_ROLE,
   CURSOR_CLIENT_ID,
   DEFAULT_HOSTS,
   DENY_ORIGINS,
@@ -33,8 +40,14 @@ import {
   classifyUnauthenticatedMcp,
   isExactIssuer,
   decodeJwtPayload,
+  countSkippedSecurityGates,
+  declaredClientIds,
   formatEt,
   formatMarkdown,
+  formatOverallLine,
+  isOperatorsDenyPage,
+  isRequiredSignedInStep,
+  isSecurityGateStep,
   main,
   parseArgs,
   parseAuthorizeResponse,
@@ -159,7 +172,7 @@ describe("hosted acceptance classifiers", () => {
     expect(decodeJwtPayload("not-a-jwt")).toBeNull();
   });
 
-  it("skips consent and staff-gate when the login page does not expose them", () => {
+  it("skips consent and the operators staff gate when the login page does not expose them", () => {
     const login = parseAuthorizeResponse({
       status: 200,
       body: "const kcContext = {\"pageId\": \"login-username\"};",
@@ -168,10 +181,12 @@ describe("hosted acceptance classifiers", () => {
     const skipped = classifyAuthorizeGates(login);
     expect(skipped.skipped).toBe(true);
     expect(skipped.ok).toBeNull();
-    expect(skipped.reason).toMatch(/signed-in authorize/);
+    expect(skipped.reason).toBe(AUTHORIZE_GATES_UNAUTHENTICATED_REASON);
+    expect(skipped.reason).toMatch(/wl-operator/);
+    expect(skipped.reason).toMatch(/browser-deny-non-operators/);
   });
 
-  it("fails when the authorize page exposes consent off or a missing staff gate", () => {
+  it("fails when the authorize page exposes consent off or a missing operators staff gate", () => {
     const noConsent = parseAuthorizeResponse({
       status: 200,
       body: JSON.stringify({ pageId: "login-username", consentRequired: false, staffGate: true }),
@@ -184,13 +199,28 @@ describe("hosted acceptance classifiers", () => {
       body: JSON.stringify({ pageId: "login-username", consentRequired: true, staffGate: false }),
     });
     expect(classifyAuthorizeGates(noStaff).ok).toBe(false);
-    expect(classifyAuthorizeGates(noStaff).reason).toMatch(/staff gate absent/);
+    expect(classifyAuthorizeGates(noStaff).reason).toBe(`${OPERATORS_STAFF_GATE} absent`);
   });
 
-  it("passes when the authorize page requires consent and the staff gate", () => {
+  it("passes when the authorize page requires consent and the operators staff gate", () => {
     const body = JSON.stringify({ pageId: "login-consent", consentRequired: true, staffGate: true });
     expect(parseKcContext(body).consentRequired).toBe(true);
     expect(classifyAuthorizeGates(parseAuthorizeResponse({ status: 200, body })).ok).toBe(true);
+  });
+
+  it("detects the browser-deny-non-operators deny page as the operators staff gate", () => {
+    const denyHtml = `<html data-flow="${OPERATORS_DENY_FLOW}">access denied</html>`;
+    expect(isOperatorsDenyPage(denyHtml, "error")).toBe(true);
+    const denied = parseAuthorizeResponse({ status: 200, body: denyHtml });
+    expect(denied.staffGate).toBe(true);
+    expect(classifyAuthorizeGates(denied).ok).toBe(true);
+
+    const login = parseAuthorizeResponse({
+      status: 200,
+      body: "const kcContext = {\"pageId\": \"login-username\"};",
+    });
+    expect(isOperatorsDenyPage(login.pageId, login.pageId)).toBe(false);
+    expect(login.staffGate).toBeUndefined();
   });
 
   it("treats anonymous DCR 403 Trusted Hosts as closed and a 200 registration as a finding", () => {
@@ -353,8 +383,12 @@ describe("hosted client inventory", () => {
     expect(DENY_ORIGINS).not.toContain(CLAUDE_BROWSER_ORIGIN);
     expect(CLIENT_INVENTORY.find((client) => client.id === "cursor").clientId).toBe(CURSOR_CLIENT_ID);
     expect(CLIENT_INVENTORY.find((client) => client.id === "grok").clientId).toBe(GROK_CLIENT_ID);
-    expect(CLIENT_INVENTORY.find((client) => client.id === "claude").acceptRedirects)
-      .toContain(CLAUDE_HOSTED_REDIRECT);
+    const claude = CLIENT_INVENTORY.find((client) => client.id === "claude");
+    expect(claude.clientId).toBe(CLAUDE_HOSTED_CIMD_URL);
+    expect(claude.clientId).not.toBe("claude");
+    expect(claude.acceptRedirects).toContain(CLAUDE_HOSTED_REDIRECT);
+    expect(CLAUDE_CODE_CIMD_URL).toMatch(/claude-code-client-metadata/);
+    expect(declaredClientIds()).not.toContain(CLAUDE_CODE_CIMD_URL);
     expect(DEFAULT_HOSTS.map((host) => host.id)).toEqual(["staging", "production"]);
   });
 
@@ -480,10 +514,10 @@ describe("runAcceptance with a fake fetch", () => {
             "https://console.x.ai/connectors-oauth-exchange-code/",
             "https://www.cursor.com/agents/mcp/oauth/callback",
           ],
-          claude: [CLAUDE_HOSTED_REDIRECT],
+          [CLAUDE_HOSTED_CIMD_URL]: [CLAUDE_HOSTED_REDIRECT],
         };
         const known = Object.hasOwn(allowedByClient, clientId);
-        const applied = clientId === "claude" || clientId === GROK_CIMD_URL
+        const applied = clientId === CLAUDE_HOSTED_CIMD_URL || clientId === GROK_CIMD_URL
           ? clientsProvisioned
           : known;
         if (!applied) return unknown();
@@ -548,6 +582,9 @@ describe("runAcceptance with a fake fetch", () => {
     expect(markdown).toContain("## production (");
     expect(markdown).not.toContain("## undefined");
     expect(markdown).toContain("Client inventory: not provisioned");
+    expect(markdown).toContain(`Overall: ${formatOverallLine(report)}`);
+    expect(formatOverallLine(report)).toMatch(/PASS \(\d+ security gates skipped\)/);
+    expect(countSkippedSecurityGates(report)).toBeGreaterThan(0);
     expect(markdown).toContain("PASS");
     expect(markdown).toContain("SKIP");
     expect(markdown).not.toContain(token);
@@ -575,8 +612,12 @@ describe("runAcceptance with a fake fetch", () => {
     const steps = report.hosts[0].steps;
     expect(steps.find((step) => step.id === `authorize-cimd:${GROK_CIMD_URL}`).ok).toBe(true);
     expect(steps.find((step) => step.id.startsWith("authorize-cimd-reject:")).ok).toBe(true);
-    expect(steps.find((step) => step.id === `authorize-accept:claude:${CLAUDE_HOSTED_REDIRECT}`).ok).toBe(true);
-    expect(steps.find((step) => step.id === "authorize-reject:claude:https://evil.example/callback").ok).toBe(true);
+    expect(steps.find((step) => (
+      step.id === `authorize-accept:${CLAUDE_HOSTED_CIMD_URL}:${CLAUDE_HOSTED_REDIRECT}`
+    )).ok).toBe(true);
+    expect(steps.find((step) => (
+      step.id === `authorize-reject:${CLAUDE_HOSTED_CIMD_URL}:https://evil.example/callback`
+    )).ok).toBe(true);
   });
 
   it("fails the run when unauthenticated /mcp starts returning 200", async () => {
@@ -740,7 +781,7 @@ describe("runAcceptance with a fake fetch", () => {
     const fetchImpl = async (url, init) => {
       if (String(url).includes("/protocol/openid-connect/auth")) {
         const parsed = new URL(String(url));
-        if (parsed.searchParams.get("client_id") === "claude"
+        if (parsed.searchParams.get("client_id") === CLAUDE_HOSTED_CIMD_URL
           && parsed.searchParams.get("redirect_uri") === CLAUDE_HOSTED_REDIRECT) {
           return jsonResponse(400, "{\"pageId\":\"error\"}", {
             "set-cookie": `KC_STATE_CHECKER=${jwt({ mky: "clientNotFoundMessage", mpar: [] })}`,
@@ -758,7 +799,7 @@ describe("runAcceptance with a fake fetch", () => {
     });
     expect(report.ok).toBe(false);
     expect(report.hosts[0].steps.find((step) => (
-      step.id === `authorize-accept:claude:${CLAUDE_HOSTED_REDIRECT}`
+      step.id === `authorize-accept:${CLAUDE_HOSTED_CIMD_URL}:${CLAUDE_HOSTED_REDIRECT}`
     )).ok).toBe(false);
   });
 
@@ -792,7 +833,7 @@ describe("runAcceptance with a fake fetch", () => {
     const fetchImpl = async (url, init) => {
       if (String(url).includes("/protocol/openid-connect/auth")) {
         const parsed = new URL(String(url));
-        if (parsed.searchParams.get("client_id") === "claude"
+        if (parsed.searchParams.get("client_id") === CLAUDE_HOSTED_CIMD_URL
           && parsed.searchParams.get("redirect_uri") === "https://evil.example/callback") {
           return jsonResponse(200, "const kcContext = {\"pageId\": \"login-username\"};");
         }
@@ -808,7 +849,7 @@ describe("runAcceptance with a fake fetch", () => {
     });
     expect(report.ok).toBe(false);
     expect(report.hosts[0].steps.find((step) => (
-      step.id === "authorize-reject:claude:https://evil.example/callback"
+      step.id === `authorize-reject:${CLAUDE_HOSTED_CIMD_URL}:https://evil.example/callback`
     )).ok).toBe(false);
   });
 
@@ -929,6 +970,23 @@ describe("runAcceptance with a fake fetch", () => {
       stderr: { write: () => {} },
     });
     expect(code).toBe(2);
+  });
+
+  it("returns 2 when --require-signed-in and consent or operators-gate steps are skipped", async () => {
+    const stderr = [];
+    const code = await main(["--require-signed-in", "--host", "staging"], {
+      fetchImpl: fakeFetchFactory(),
+      env: { HOSTED_MCP_TOKEN: token },
+      sleep: noopSleep,
+      stdout: { write: () => {} },
+      stderr: { write: (chunk) => stderr.push(chunk) },
+    });
+    expect(code).toBe(2);
+    expect(stderr.join("")).toMatch(/operators staff gate/);
+    expect(isSecurityGateStep({ id: "authorize-gates:cursor-mcp" })).toBe(true);
+    expect(isRequiredSignedInStep({ id: "authorize-gates:cursor-mcp" })).toBe(true);
+    expect(isRequiredSignedInStep({ id: "signed-in:initialize" })).toBe(true);
+    expect(isRequiredSignedInStep({ id: "health" })).toBe(false);
   });
 
   it("fails the run when tools/list advertises a write tool", async () => {
@@ -1070,5 +1128,36 @@ describe("docs and package wiring", () => {
     expect(read("AGENTS.md")).toContain("npm run eval:hosted");
     expect(read("docs/mcp-clients.md")).toContain("npm run eval:hosted");
     expect(read("CHANGELOG.md")).toMatch(/eval:hosted/);
+  });
+
+  it("names the keystone#1564 operators staff gate on the deny flow", () => {
+    expect(AUTHORIZE_GATES_EXPECT).toBe("consent+operators-gate");
+    expect(OPERATORS_STAFF_GATE).toContain(OPERATORS_STAFF_ROLE);
+    expect(OPERATORS_STAFF_GATE).toContain(OPERATORS_DENY_FLOW);
+    for (const rel of [
+      "scripts/hosted-acceptance.js",
+      "docs/mcp-clients.md",
+      "CHANGELOG.md",
+    ]) {
+      const text = read(rel);
+      expect(text, rel).toContain(OPERATORS_STAFF_ROLE);
+      expect(text, rel).toContain(OPERATORS_DENY_FLOW);
+    }
+  });
+
+  it("fails if an inventory client_id is missing from the vendored keystone list", () => {
+    const fixture = JSON.parse(read("tests/fixtures/keystone-mcp-clients.json"));
+    expect(fixture.source.repository).toBe("https://github.com/Wilkes-Liberty/keystone");
+    expect(fixture.source.refs).toEqual(expect.arrayContaining([
+      "https://github.com/Wilkes-Liberty/keystone/pull/1539",
+      "https://github.com/Wilkes-Liberty/keystone/pull/1559",
+      "https://github.com/Wilkes-Liberty/keystone/pull/1564",
+    ]));
+    const listed = new Set(fixture.clients.map((client) => client.clientId));
+    for (const id of declaredClientIds()) {
+      expect(listed.has(id), id).toBe(true);
+    }
+    const invented = [...declaredClientIds(), "invented-client"];
+    expect(invented.every((id) => listed.has(id))).toBe(false);
   });
 });
