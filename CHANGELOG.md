@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Threat model current as of 5.3.0.** T1 cites `shell-quote` argv
+  quoting plus `validateMachineName` (not a leftover SSH-arg escaper).
+  T5 matches loopback unauthenticated local-operator behavior after
+  `MCP_AUTH_TOKEN` was removed in 4.0.0. T9 matches the governed
+  `drushSsh.rawSql` + `mcp-sentinel:sql-query` residual. Stale
+  "1.0 hardening pass" / "this pass" / "post 2.2" wording and the
+  "MCP 2.0.0 packages" line are gone.
+
+### Removed
+
+- Unused SSH-arg escaper, process-wide in-flight registry getter, and
+  live-introspect binder. No call sites remained.
+
 ### Added
 
 - **Hosted MCP acceptance probe (DEV-817 / DEV-953).** `npm run eval:hosted`

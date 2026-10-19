@@ -13,8 +13,18 @@ import { assertHostedToolScopeTable } from "./tool-scopes.js";
 import { resolveSecurityConfig } from "./security.js";
 import { resolveAllowedHosts, resolveAllowedOrigins } from "./http-transport.js";
 
+const CHECK_INTROSPECTION = "introspection";
+const CHECK_AUTH = "auth";
+const CHECK_SCOPE_TABLE = "scope_table";
+const CHECK_ALLOWLISTS = "allowlists";
+
 /** Closed check names returned in a 503 body. */
-export const READY_CHECK_NAMES = Object.freeze(["introspection", "auth", "scope_table", "allowlists"]);
+export const READY_CHECK_NAMES = Object.freeze([
+  CHECK_INTROSPECTION,
+  CHECK_AUTH,
+  CHECK_SCOPE_TABLE,
+  CHECK_ALLOWLISTS,
+]);
 
 const DEFAULT_READY_TIMEOUT_MS = 2000;
 
@@ -184,15 +194,15 @@ export async function runReadyChecks({
       timeoutMs: inboundCfg.introspectionTimeoutMs,
       fetchFn,
     });
-    if (!reachable) failed.push("introspection");
+    if (!reachable) failed.push(CHECK_INTROSPECTION);
   } else if (inboundCfg.issuer && inboundCfg.audience) {
-    failed.push("introspection");
+    failed.push(CHECK_INTROSPECTION);
   } else if (!loopbackBind) {
-    failed.push("auth");
+    failed.push(CHECK_AUTH);
   }
 
-  if (!checkScopeTable(definitions)) failed.push("scope_table");
-  if (!checkAllowlists({ sites, inboundCfg, loopbackBind })) failed.push("allowlists");
+  if (!checkScopeTable(definitions)) failed.push(CHECK_SCOPE_TABLE);
+  if (!checkAllowlists({ sites, inboundCfg, loopbackBind })) failed.push(CHECK_ALLOWLISTS);
 
   return { ok: failed.length === 0, failed };
 }
