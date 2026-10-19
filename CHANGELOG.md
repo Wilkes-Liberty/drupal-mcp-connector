@@ -7,9 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.0] - 2026-10-19
+
+### Added
+
+- **Hosted MCP acceptance probe (DEV-817 / DEV-953) (#494).** `npm run eval:hosted`
+  re-runs discovery, Origin allow/deny, authorization-request
+  accept/reject, and closed dynamic client registration against the
+  staging and production `/mcp` endpoints. Signed-in initialize /
+  tools/list / `drupal_list_content_types` run only when the operator
+  supplies a documented token or client-credentials identity. Tokens,
+  secrets, cookies, and tool payloads never reach the report. Protected-resource
+  `authorization_servers` is compared as a parsed URL, so a lookalike
+  that merely contains the issuer string does not pass. A foreign Origin
+  that starts returning 200 turns the run red. `EVAL_HTTP_STAGING_*` token
+  aliases apply only to the staging host. `tools/list` is classified with
+  the connector's `isWriteLikeTool` table; a write-shaped name in the
+  advertised catalog fails the step. The probe never sends a write
+  `tools/call`.
+
+### Changed
+
+- **Threat model current as of 5.3.0 (#495).** T1 cites `shell-quote` argv
+  quoting plus `validateMachineName` (not a leftover SSH-arg escaper).
+  T5 matches loopback unauthenticated local-operator behavior after
+  `MCP_AUTH_TOKEN` was removed in 4.0.0. T9 matches the governed
+  `drushSsh.rawSql` + `mcp-sentinel:sql-query` residual. Stale
+  "1.0 hardening pass" / "this pass" / "post 2.2" wording and the
+  "MCP 2.0.0 packages" line are gone.
+- Rate-limit and session-key comments name `iss|sub|actor` (not the
+  retired `sub`+`clientId` formula). HTTP audit sanitization no longer
+  uses an empty `if` to keep a numeric status (#496).
+
+### Removed
+
+- Unused SSH-arg escaper, process-wide in-flight registry getter, and
+  live-introspect binder (#495). No call sites remained.
+- Unused leftover production exports: `READY_CHECK_NAMES`, `OPS_PATHS` /
+  `isOpsPath`, `snakeToPascal`, `isTrustedProxy`,
+  `rewriteWorkingCopyPatchError`, `isJsonRpcNotification` /
+  `isJsonRpcResponse`, and `quotasRequired` (#496). No production call sites
+  remained.
+
 ### Fixed
 
-- **DEV-943 hosted acceptance expectations.** `npm run eval:hosted` now
+- **DEV-943 hosted acceptance expectations (#500).** `npm run eval:hosted` now
   allowlists `https://claude.ai` (POST 401, OPTIONS 204; infra-overlay
   v1.16.1) and keeps the 403 deny case on `https://evil.example` plus the
   `https://claude.ai.evil.example` lookalike. Authorize expects come from
@@ -24,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the Overall line; `--require-signed-in` exits 2 when they skip.
   Claude hosted authorize uses the keystone CIMD `client_id`
   `https://claude.ai/oauth/mcp-oauth-client-metadata`.
-- **DEV-1019 tools/list and prompts/list timeout.** Cold `tools/list` and
+- **DEV-1019 tools/list and prompts/list timeout (#497, #499).** Cold `tools/list` and
   `prompts/list` walked configured sites one at a time and exceeded the
   client's 30s window, so Claude Cowork/Code reported
   `MCP drupal: Couldn't start`. Per-site discovery is concurrent (default
@@ -39,46 +81,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warm at process start and on MCP initialize. Full wait matrix, cache
   TTLs, and session-delivery rules:
   [docs/module-tools.md](docs/module-tools.md#catalog-listing-dev-1019).
-
-### Changed
-
-- **Threat model current as of 5.3.0.** T1 cites `shell-quote` argv
-  quoting plus `validateMachineName` (not a leftover SSH-arg escaper).
-  T5 matches loopback unauthenticated local-operator behavior after
-  `MCP_AUTH_TOKEN` was removed in 4.0.0. T9 matches the governed
-  `drushSsh.rawSql` + `mcp-sentinel:sql-query` residual. Stale
-  "1.0 hardening pass" / "this pass" / "post 2.2" wording and the
-  "MCP 2.0.0 packages" line are gone.
-- Rate-limit and session-key comments name `iss|sub|actor` (not the
-  retired `sub`+`clientId` formula). HTTP audit sanitization no longer
-  uses an empty `if` to keep a numeric status.
-
-### Removed
-
-- Unused SSH-arg escaper, process-wide in-flight registry getter, and
-  live-introspect binder. No call sites remained.
-- Unused leftover production exports: `READY_CHECK_NAMES`, `OPS_PATHS` /
-  `isOpsPath`, `snakeToPascal`, `isTrustedProxy`,
-  `rewriteWorkingCopyPatchError`, `isJsonRpcNotification` /
-  `isJsonRpcResponse`, and `quotasRequired`. No production call sites
-  remained.
-
-### Added
-
-- **Hosted MCP acceptance probe (DEV-817 / DEV-953).** `npm run eval:hosted`
-  re-runs discovery, Origin allow/deny, authorization-request
-  accept/reject, and closed dynamic client registration against the
-  staging and production `/mcp` endpoints. Signed-in initialize /
-  tools/list / `drupal_list_content_types` run only when the operator
-  supplies a documented token or client-credentials identity. Tokens,
-  secrets, cookies, and tool payloads never reach the report. Protected-resource
-  `authorization_servers` is compared as a parsed URL, so a lookalike
-  that merely contains the issuer string does not pass. A foreign Origin
-  that starts returning 200 turns the run red. `EVAL_HTTP_STAGING_*` token
-  aliases apply only to the staging host. `tools/list` is classified with
-  the connector's `isWriteLikeTool` table; a write-shaped name in the
-  advertised catalog fails the step. The probe never sends a write
-  `tools/call`.
 
 ## [5.3.0] - 2026-10-18
 
