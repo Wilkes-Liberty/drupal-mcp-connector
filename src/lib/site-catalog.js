@@ -13,8 +13,8 @@
  * hard-capped at 25s, then the partial list. Governance is checked in
  * parallel under a 4s cap (not leftover unnotified budget per site).
  *
- * Order: governance → Drupal handshake → tools/list (`onTools`) →
- * overlapping prompt hops after that handshake. Success snapshots use a
+ * Order: governance → Drupal tools/list (`onTools`); prompt hops start
+ * after governance and overlap the handshake. Success snapshots use a
  * minutes-scale TTL (default 10 min) with stale-while-revalidate. Errors use
  * a short negative TTL. A denial is never cached as a grant.
  */
