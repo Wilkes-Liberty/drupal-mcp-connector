@@ -12,21 +12,44 @@ vi.mock("../../src/lib/config.js", async (original) => ({
 vi.mock("../../src/lib/governance.js", async (original) => ({
   ...await original(),
   assertSourceGovernance: vi.fn(async () => {}),
+  listingSourceGovernanceAllows: vi.fn(async () => true),
+  listingSourceGovernanceAllowsSites: vi.fn(async (sites) => {
+    const allowed = new Map();
+    for (const site of sites ?? []) {
+      const name = site?._name ?? site?.baseUrl;
+      if (name) allowed.set(name, true);
+    }
+    return allowed;
+  }),
 }));
 import fetch from "node-fetch";
-import { assertSourceGovernance } from "../../src/lib/governance.js";
+import {
+  assertSourceGovernance,
+  listingSourceGovernanceAllows,
+  listingSourceGovernanceAllowsSites,
+} from "../../src/lib/governance.js";
 import { createModuleToolRegistry } from "../../src/lib/module-tools.js";
 import { subscribeCatalogNotifications, clearCatalogNotifications } from "../../src/lib/catalog-notify.js";
 import {
   CATALOG_LIST_BUDGET_MS,
+  catalogListWaitMs,
+  catalogPrincipalKey,
   clearSiteCatalogCache,
+  DEFAULT_UNNOTIFIED_LIST_WAIT_MS,
   getCatalogDiscoveryOptions,
+  remainingCatalogListBudgetMs,
   invalidateSiteCatalogsForSite,
   loadSiteCatalog,
   mapSitesBounded,
+  MAX_LIST_WAIT_MS,
   prefetchSiteCatalogs,
   workflowIdsFromSite,
 } from "../../src/lib/site-catalog.js";
+import {
+  CATALOG_NOTIFY_DEBOUNCE_MS,
+  noteInboundCatalogSessionMessage,
+  registerLiveCatalogServer,
+} from "../../src/lib/catalog-notify.js";
 import {
   clearGovernanceCache,
   filterDiscoverableTools,
@@ -86,10 +109,20 @@ beforeEach(() => {
   state.sites = [];
   vi.mocked(fetch).mockReset();
   vi.mocked(assertSourceGovernance).mockResolvedValue();
+  vi.mocked(listingSourceGovernanceAllows).mockResolvedValue(true);
+  vi.mocked(listingSourceGovernanceAllowsSites).mockImplementation(async (sites) => {
+    const allowed = new Map();
+    for (const site of sites ?? []) {
+      const name = site?._name ?? site?.baseUrl;
+      if (name) allowed.set(name, true);
+    }
+    return allowed;
+  });
 });
 afterEach(() => {
   vi.useRealTimers();
   delete process.env.MCP_CATALOG_SITE_DEADLINE_MS;
+  delete process.env.MCP_CATALOG_UNNOTIFIED_LIST_WAIT_MS;
   delete process.env.MCP_CATALOG_CACHE_TTL_MS;
   delete process.env.MCP_CATALOG_NEGATIVE_TTL_MS;
   delete process.env.MCP_CATALOG_CONCURRENCY;
@@ -98,11 +131,13 @@ afterEach(() => {
 describe("getCatalogDiscoveryOptions", () => {
   it("reads env overrides over defaults", () => {
     process.env.MCP_CATALOG_SITE_DEADLINE_MS = "2500";
+    process.env.MCP_CATALOG_UNNOTIFIED_LIST_WAIT_MS = "18000";
     process.env.MCP_CATALOG_CACHE_TTL_MS = "12000";
     process.env.MCP_CATALOG_NEGATIVE_TTL_MS = "3000";
     process.env.MCP_CATALOG_CONCURRENCY = "32";
     expect(getCatalogDiscoveryOptions({})).toMatchObject({
       siteDeadlineMs: 2500,
+      unnotifiedListWaitMs: 18000,
       cacheTtlMs: 12000,
       negativeTtlMs: 3000,
       concurrency: 32,
@@ -112,10 +147,48 @@ describe("getCatalogDiscoveryOptions", () => {
   it("ignores non-positive values", () => {
     expect(getCatalogDiscoveryOptions({ siteDeadlineMs: 0, concurrency: -1, negativeTtlMs: 0 })).toMatchObject({
       siteDeadlineMs: 4000,
+      unnotifiedListWaitMs: DEFAULT_UNNOTIFIED_LIST_WAIT_MS,
       cacheTtlMs: 600_000,
       negativeTtlMs: 5_000,
       concurrency: 16,
     });
+  });
+
+  it("uses the unnotified wait unless list_changed can reach this session", () => {
+    const modern = { getNegotiatedProtocolVersion: () => "2026-07-28" };
+    const legacy = { getNegotiatedProtocolVersion: () => "2025-11-25" };
+    expect(catalogListWaitMs()).toBe(DEFAULT_UNNOTIFIED_LIST_WAIT_MS);
+    expect(catalogListWaitMs(modern)).toBe(DEFAULT_UNNOTIFIED_LIST_WAIT_MS);
+    expect(catalogListWaitMs(legacy)).toBe(4000);
+    registerLiveCatalogServer(modern);
+    noteInboundCatalogSessionMessage({ method: "initialize", params: { protocolVersion: "2026-07-28" } }, modern);
+    expect(catalogListWaitMs(modern)).toBe(DEFAULT_UNNOTIFIED_LIST_WAIT_MS);
+    noteInboundCatalogSessionMessage({
+      method: "subscriptions/listen",
+      id: 3,
+      params: { notifications: { toolsListChanged: true } },
+    }, modern);
+    expect(catalogListWaitMs(modern)).toBe(4000);
+    expect(catalogListWaitMs()).toBe(DEFAULT_UNNOTIFIED_LIST_WAIT_MS);
+  });
+
+  it("clamps listing waits so catalog plus governance stay under 25s", () => {
+    expect(getCatalogDiscoveryOptions({ unnotifiedListWaitMs: 60_000 }).unnotifiedListWaitMs)
+      .toBe(MAX_LIST_WAIT_MS);
+    expect(getCatalogDiscoveryOptions({ siteDeadlineMs: 60_000 }).siteDeadlineMs)
+      .toBe(MAX_LIST_WAIT_MS);
+    process.env.MCP_CATALOG_UNNOTIFIED_LIST_WAIT_MS = "60000";
+    expect(catalogListWaitMs()).toBe(MAX_LIST_WAIT_MS);
+  });
+
+  it("computes the remaining listing budget for the governance re-check", () => {
+    expect(remainingCatalogListBudgetMs(undefined, Date.now())).toBeUndefined();
+    expect(remainingCatalogListBudgetMs(0, Date.now())).toBe(0);
+    const started = Date.now();
+    expect(remainingCatalogListBudgetMs(5_000, started)).toBeLessThanOrEqual(5_000);
+    expect(remainingCatalogListBudgetMs(5_000, started)).toBeGreaterThan(4_000);
+    expect(remainingCatalogListBudgetMs(60_000, started)).toBeLessThanOrEqual(MAX_LIST_WAIT_MS);
+    expect(remainingCatalogListBudgetMs(60_000, started)).toBeGreaterThan(MAX_LIST_WAIT_MS - 50);
   });
 });
 
@@ -320,6 +393,91 @@ describe("DEV-1019 catalog listing", () => {
     expect(list).toHaveBeenCalledTimes(2);
   });
 
+  it("ignores an in-flight store after the catalog cache is cleared", async () => {
+    const site = useSites([moduleSite("epoch", "epoch_ns")])[0];
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const firstList = vi.fn(async () => {
+      await gate;
+      return { tools: [remote("tool_api.item")] };
+    });
+    const first = createModuleToolRegistry({ list: firstList }).list({
+      sites: [site], identity: listingIdentity(["epoch"]), waitMs: 20, logPending: false,
+    });
+    while (firstList.mock.calls.length === 0) await delay(5);
+    clearSiteCatalogCache();
+    release();
+    await first;
+    const secondList = vi.fn(async () => ({ tools: [remote("tool_api.item")] }));
+    const second = await createModuleToolRegistry({ list: secondList }).list({
+      sites: [site], identity: listingIdentity(["epoch"]), waitMs: 200, logPending: false,
+    });
+    expect(secondList).toHaveBeenCalled();
+    expect(second).toHaveLength(1);
+  });
+
+  it("does not start a second catalog walk when invalidate runs during an in-flight walk", async () => {
+    const site = useSites([moduleSite("dup", "dup_ns")])[0];
+    let walks = 0;
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const list = vi.fn(async () => {
+      walks += 1;
+      await gate;
+      return { tools: [remote("tool_api.item")] };
+    });
+    const registry = createModuleToolRegistry({ list });
+    const identity = listingIdentity(["dup"]);
+    const first = registry.list({
+      sites: [site], identity, waitMs: 50, logPending: false,
+    });
+    while (walks === 0) await delay(5);
+    invalidateSiteCatalogsForSite("dup", null);
+    const second = registry.list({
+      sites: [site], identity, waitMs: 400, logPending: false,
+    });
+    await delay(40);
+    expect(walks).toBe(1);
+    release();
+    await Promise.all([first, second]);
+  });
+
+  it("does not start prompt hops until source governance resolves", async () => {
+    const site = useSites([moduleSite("hop", "hop_ns", {
+      workflows: {
+        review: {
+          description: "Review.",
+          readOnly: true,
+          tools: ["item"],
+          instructions: "Call {tool:item}.",
+        },
+      },
+    })])[0];
+    let releaseGov;
+    const govGate = new Promise((resolve) => { releaseGov = resolve; });
+    vi.mocked(assertSourceGovernance).mockImplementation(() => govGate);
+    let promptsStarted = false;
+    const fetchPrompts = vi.fn(async () => {
+      promptsStarted = true;
+      return { list: [], bodies: new Map() };
+    });
+    const list = vi.fn(async () => ({ tools: [remote("tool_api.item")] }));
+    const registry = createModuleToolRegistry({ list });
+    const pending = registry.list({
+      sites: [site],
+      identity: listingIdentity(["hop"]),
+      fetchPrompts,
+      waitMs: 500,
+      logPending: false,
+    });
+    await delay(40);
+    expect(promptsStarted).toBe(false);
+    expect(list).not.toHaveBeenCalled();
+    releaseGov();
+    await pending;
+    expect(promptsStarted).toBe(true);
+  });
+
   it("does not share a catalog across principals", async () => {
     const site = useSites([moduleSite("iso", "iso_ns")])[0];
     const list = vi.fn(async () => ({ tools: [remote("tool_api.item")] }));
@@ -349,6 +507,7 @@ describe("DEV-1019 catalog listing", () => {
       while (events.length === 0 && Date.now() - started < 1_000) {
         await delay(10);
       }
+      await delay(CATALOG_NOTIFY_DEBOUNCE_MS + 20);
       expect(events.some((event) => event.tools)).toBe(true);
       expect(await registry.list(ctx)).toHaveLength(1);
     } finally {
@@ -434,5 +593,85 @@ describe("DEV-1019 catalog listing", () => {
     const snap = await loadSiteCatalog(site, { work, waitMs: 20 });
     expect(snap.ok).toBe(true);
     expect(work).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed on a stale governance verdict even when the catalog snapshot is still ok", async () => {
+    const site = useSites([moduleSite("stale", "stale_ns", {
+      workflows: {
+        review: {
+          description: "Local fallback.",
+          readOnly: true,
+          tools: ["item"],
+          instructions: "Call {tool:item}.",
+        },
+      },
+    })])[0];
+    const list = vi.fn(async () => ({ tools: [remote("tool_api.item")] }));
+    const fetchPrompts = vi.fn(async () => ({
+      list: [{ name: "review", description: "Remote." }],
+      bodies: new Map([["review", {
+        messages: [{ role: "user", content: { type: "text", text: "Call {tool:item}." } }],
+      }]]),
+    }));
+    const identity = listingIdentity(["stale"]);
+    const first = await moduleWorkflowProvidersWithRemote([site], {
+      identity, list, fetch: fetchPrompts, waitMs: 200,
+    });
+    expect(first[0].workflows[0].description).toBe("Remote.");
+    vi.mocked(listingSourceGovernanceAllowsSites).mockImplementationOnce(async (sites) => {
+      const allowed = new Map();
+      for (const site of sites ?? []) {
+        const name = site?._name ?? site?.baseUrl;
+        if (name) allowed.set(name, false);
+      }
+      return allowed;
+    });
+    const second = await moduleWorkflowProvidersWithRemote([site], {
+      identity, list, fetch: fetchPrompts, waitMs: 200,
+    });
+    expect(second).toEqual([]);
+    expect(JSON.stringify(second)).not.toContain("Remote.");
+  });
+
+  it("does not cache malformed identities and advertises no module tools", async () => {
+    const site = useSites([moduleSite("mal", "mal_ns")])[0];
+    const list = vi.fn(async () => ({ tools: [remote("tool_api.item")] }));
+    const registry = createModuleToolRegistry({ list });
+    const missingIss = { sub: "operator-a", azp: "agent", scopes: ["module_access"], sites: ["mal"] };
+    const missingSub = { iss: "https://idp.example/realms/agents", azp: "agent", scopes: ["module_access"], sites: ["mal"] };
+    expect(catalogPrincipalKey(missingIss)).toBeNull();
+    expect(catalogPrincipalKey(missingSub)).toBeNull();
+    const [a, b] = await Promise.all([
+      registry.list({ sites: [site], identity: missingIss, waitMs: 200 }),
+      registry.list({ sites: [site], identity: missingSub, waitMs: 200 }),
+    ]);
+    expect(a).toEqual([]);
+    expect(b).toEqual([]);
+    expect(list).not.toHaveBeenCalled();
+    const good = await registry.list({
+      sites: [site],
+      identity: listingIdentity(["mal"]),
+      waitMs: 200,
+    });
+    expect(good).toHaveLength(1);
+  });
+
+  it("waits for the in-flight chain when list_changed cannot reach the client", async () => {
+    const site = useSites([moduleSite("wait", "wait_ns")])[0];
+    const list = vi.fn(async () => {
+      await delay(80);
+      return { tools: [remote("tool_api.item")] };
+    });
+    const registry = createModuleToolRegistry({ list });
+    const ctx = {
+      sites: [site],
+      identity: listingIdentity(["wait"]),
+      waitMs: 500,
+      logPending: false,
+    };
+    const started = performance.now();
+    const definitions = await registry.list(ctx);
+    expect(performance.now() - started).toBeGreaterThan(60);
+    expect(definitions).toHaveLength(1);
   });
 });

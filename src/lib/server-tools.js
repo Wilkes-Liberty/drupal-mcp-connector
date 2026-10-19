@@ -194,6 +194,8 @@ let rpcId = 0;
  * server reports the session is gone (expiry).
  */
 const sessions = new Map();
+/** In-flight handshakes (`{ slot, promise }`) so tools/list and prompts/list share one initialize. */
+const handshakeInflight = new Map();
 // Ephemeral cache identity only, never a persisted password verifier. A keyed
 // digest also prevents offline guessing if a diagnostic exposes a cache key.
 const sessionIdentityKey = randomBytes(32);
@@ -439,7 +441,20 @@ async function initializeSession(site, endpoint, key) {
  */
 async function ensureSession(site, endpoint, key) {
   const cached = sessions.get(key);
-  return cached || initializeSession(site, endpoint, key);
+  if (cached) return cached;
+  const pending = handshakeInflight.get(key);
+  if (pending) return pending.promise;
+  // Identity is a plain object. Comparing the promise itself is what CodeQL
+  // reports as a missing await.
+  const slot = {};
+  const promise = initializeSession(site, endpoint, key);
+  handshakeInflight.set(key, { slot, promise });
+  try {
+    return await promise;
+  } finally {
+    const row = handshakeInflight.get(key);
+    if (row?.slot === slot) handshakeInflight.delete(key);
+  }
 }
 
 /**

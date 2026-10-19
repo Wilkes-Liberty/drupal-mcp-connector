@@ -201,7 +201,7 @@ describe("DEV-1019 real catalog chain", () => {
     const registry = createModuleToolRegistry();
     const identity = listingIdentity(sites.map((site) => site._name));
     const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
-    const timings = { coldMs: 0, listChangedMs: 0, warmMs: 0 };
+    const timings = { coldMs: 0, toolsListChangedMs: 0, promptsListChangedMs: 0, warmMs: 0 };
     try {
       const started = performance.now();
       const cold = await registry.list({ sites, identity });
@@ -215,14 +215,18 @@ describe("DEV-1019 real catalog chain", () => {
       let ready = [];
       while (Date.now() < deadline) {
         ready = await registry.list({ sites, identity, waitMs: 0, logPending: false });
-        if (ready.length === 13 && events.some((event) => event.tools)) {
-          timings.listChangedMs = events.findLast((event) => event.tools).at - started;
+        if (ready.length === 13 && events.some((event) => event.tools) && events.some((event) => event.prompts)) {
+          timings.toolsListChangedMs = events.findLast((event) => event.tools).at - started;
+          timings.promptsListChangedMs = events.findLast((event) => event.prompts).at - started;
           break;
         }
         await delay(50);
       }
       expect(ready).toHaveLength(13);
       expect(events.some((event) => event.tools)).toBe(true);
+      expect(events.some((event) => event.prompts)).toBe(true);
+      expect(timings.toolsListChangedMs).toBeGreaterThan(7_000);
+      expect(timings.toolsListChangedMs).toBeLessThan(11_000);
 
       const warmStarted = performance.now();
       const warm = await registry.list({ sites, identity });
@@ -235,7 +239,9 @@ describe("DEV-1019 real catalog chain", () => {
       expect(counts.mcp.promptsList).toBe(13);
       expect(counts.mcp.promptsGet).toBe(13);
       const line = `[DEV-1019] real-chain timings: cold=${Math.round(timings.coldMs)}ms ` +
-        `list_changed=${Math.round(timings.listChangedMs)}ms warm=${Math.round(timings.warmMs)}ms`;
+        `tools_list_changed=${Math.round(timings.toolsListChangedMs)}ms ` +
+        `prompts_list_changed=${Math.round(timings.promptsListChangedMs)}ms ` +
+        `warm=${Math.round(timings.warmMs)}ms`;
       console.error(line);
       process.stdout.write(`${line}\n`);
     } finally {
@@ -317,4 +323,34 @@ describe("DEV-1019 real catalog chain", () => {
       stderr.mockRestore();
     }
   }, 15_000);
+
+  it("waits for the real chain on the first list when list_changed cannot be delivered", async () => {
+    const sites = useSites(Array.from({ length: 13 }, (_, i) => (
+      moduleSite(`wait${i}`, `ns${i}`, `host${i % 3}`)
+    )));
+    const counts = {
+      token: 0,
+      readiness: 0,
+      mcp: { initialize: 0, initialized: 0, toolsList: 0, promptsList: 0, promptsGet: 0 },
+    };
+    installRealChainFetch({ counts });
+    const registry = createModuleToolRegistry();
+    const identity = listingIdentity(sites.map((site) => site._name));
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const started = performance.now();
+      const cold = await registry.list({
+        sites, identity, waitMs: 20_000, logPending: false,
+      });
+      const coldMs = performance.now() - started;
+      expect(cold).toHaveLength(13);
+      expect(coldMs).toBeGreaterThan(7_000);
+      expect(coldMs).toBeLessThan(20_000);
+      const line = `[DEV-1019] real-chain unnotified first list: ${Math.round(coldMs)}ms tools=${cold.length}`;
+      console.error(line);
+      process.stdout.write(`${line}\n`);
+    } finally {
+      stderr.mockRestore();
+    }
+  }, 30_000);
 });

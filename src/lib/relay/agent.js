@@ -66,7 +66,7 @@ export function createRelayAgent({
   const handler = createMcpHandler(createConnectorServerFactory(surface), {
     legacy: "reject",
   });
-  addModernCatalogNotifier(handler.notify);
+  const detachCatalogNotify = addModernCatalogNotifier(handler);
   let socket = null;
   let agentInfo = null;
 
@@ -206,6 +206,7 @@ export function createRelayAgent({
     },
 
     async close() {
+      detachCatalogNotify();
       this.drop();
       await handler.close();
     },

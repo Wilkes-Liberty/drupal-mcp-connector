@@ -2,7 +2,8 @@
  * Shared keep-alive HTTP(S) agents for outbound Drupal / MCP calls.
  *
  * Listing walks many sites at once. Reusing sockets keeps a cold tools/list
- * from opening a new TLS session per hop (token, readiness, /mcp).
+ * from opening a new TLS session per hop (token, readiness, /mcp). Destroyed
+ * on stdio stdin/transport close so the process can exit after EOF.
  */
 
 import http from "node:http";
@@ -15,11 +16,25 @@ const AGENT_OPTIONS = Object.freeze({
   timeout: 60_000,
 });
 
+function createAgents() {
+  return {
+    http: new http.Agent(AGENT_OPTIONS),
+    https: new https.Agent(AGENT_OPTIONS),
+  };
+}
+
+let agents = createAgents();
+
 /** Shared HTTP keep-alive agent. */
-export const keepAliveHttpAgent = new http.Agent(AGENT_OPTIONS);
+export let keepAliveHttpAgent = agents.http;
 
 /** Shared HTTPS keep-alive agent. */
-export const keepAliveHttpsAgent = new https.Agent(AGENT_OPTIONS);
+export let keepAliveHttpsAgent = agents.https;
+
+function bindExports() {
+  keepAliveHttpAgent = agents.http;
+  keepAliveHttpsAgent = agents.https;
+}
 
 /**
  * Pick the keep-alive agent for a request URL.
@@ -33,4 +48,33 @@ export function keepAliveAgentFor(url) {
   } catch {
     return keepAliveHttpsAgent;
   }
+}
+
+/**
+ * Tear down keep-alive sockets so a stdio process can exit after stdin EOF.
+ *
+ * @returns {void}
+ */
+export function destroyKeepAliveAgents() {
+  try {
+    keepAliveHttpAgent.destroy();
+  } catch {
+    // Already torn down.
+  }
+  try {
+    keepAliveHttpsAgent.destroy();
+  } catch {
+    // Already torn down.
+  }
+}
+
+/**
+ * Recreate keep-alive agents after destroy (tests).
+ *
+ * @returns {void}
+ */
+export function resetKeepAliveAgents() {
+  destroyKeepAliveAgents();
+  agents = createAgents();
+  bindExports();
 }

@@ -10,9 +10,23 @@ vi.mock("../../src/lib/config.js", async (original) => ({
   getDefaultSiteName: () => "stage",
 }));
 vi.mock("../../src/lib/governance.js", async (original) => ({
-  ...await original(), assertSourceGovernance: vi.fn(async () => {}),
+  ...await original(),
+  assertSourceGovernance: vi.fn(async () => {}),
+  listingSourceGovernanceAllows: vi.fn(async () => true),
+  listingSourceGovernanceAllowsSites: vi.fn(async (sites) => {
+    const allowed = new Map();
+    for (const site of sites ?? []) {
+      const name = site?._name ?? site?.baseUrl;
+      if (name) allowed.set(name, true);
+    }
+    return allowed;
+  }),
 }));
-import { assertSourceGovernance } from "../../src/lib/governance.js";
+import {
+  assertSourceGovernance,
+  listingSourceGovernanceAllows,
+  listingSourceGovernanceAllowsSites,
+} from "../../src/lib/governance.js";
 import { createModuleToolRegistry, configuredModuleTools } from "../../src/lib/module-tools.js";
 import { resetDataFlowBudgets } from "../../src/lib/data-flow.js";
 import { clearSiteCatalogCache } from "../../src/lib/site-catalog.js";
@@ -30,6 +44,15 @@ beforeEach(() => {
   clearSiteCatalogCache();
   vi.clearAllMocks();
   vi.mocked(assertSourceGovernance).mockResolvedValue();
+  vi.mocked(listingSourceGovernanceAllows).mockResolvedValue(true);
+  vi.mocked(listingSourceGovernanceAllowsSites).mockImplementation(async (sites) => {
+    const allowed = new Map();
+    for (const site of sites ?? []) {
+      const name = site?._name ?? site?.baseUrl;
+      if (name) allowed.set(name, true);
+    }
+    return allowed;
+  });
   state.sites = [{
     _name: "stage", baseUrl: "https://stage.example.com", requireGovernance: true,
     security: { preset: "development", readOnly: false },
@@ -228,6 +251,15 @@ describe("module-owned tool registry", () => {
   it("requires source governance and never retains an unavailable catalog", async () => {
     const [definition] = await registry.list(context());
     vi.mocked(assertSourceGovernance).mockRejectedValue(new Error("not ready"));
+    vi.mocked(listingSourceGovernanceAllows).mockResolvedValue(false);
+    vi.mocked(listingSourceGovernanceAllowsSites).mockImplementation(async (sites) => {
+      const allowed = new Map();
+      for (const site of sites ?? []) {
+        const name = site?._name ?? site?.baseUrl;
+        if (name) allowed.set(name, false);
+      }
+      return allowed;
+    });
     expect(await registry.list(context())).toEqual([]);
     expect((await registry.call(definition.name, parameters(definition), context())).isError).toBe(true);
     expect(call).not.toHaveBeenCalled();

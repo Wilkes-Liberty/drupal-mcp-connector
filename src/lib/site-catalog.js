@@ -1,24 +1,45 @@
 /**
  * Concurrent per-site catalog discovery for tools/list and prompts/list.
  *
- * A listing waits up to `siteDeadlineMs` (default 4s) for snapshots that are
- * already ready. The wait never aborts token, readiness, initialize,
- * notifications/initialized, tools/list, or prompts hops. Not-yet-ready sites
- * are omitted from that response (fail closed). The chain finishes in the
- * background; a successful snapshot is cached and may emit list_changed.
+ * A listing never aborts token, readiness, initialize,
+ * notifications/initialized, tools/list, or prompt hops. When list_changed
+ * can reach this session, the wait is `siteDeadlineMs` (default 4s): stdio
+ * and legacy HTTP at 2025-11-25, or stdio 2026-07-28 after
+ * `subscriptions/listen` on that connection (held until the Server is
+ * registered). Modern HTTP 2026-07-28 cannot bind a listen to a
+ * sessionless POST / per-request Server, so it always uses the unnotified
+ * wait. That wait is `unnotifiedListWaitMs` (default 20s). The whole
+ * listing — catalog wait plus the listing governance re-check — is
+ * hard-capped at 25s, then the partial list. Governance is checked in
+ * parallel under a 4s cap (not leftover unnotified budget per site).
  *
- * Success snapshots use a minutes-scale TTL (default 10 min) with
- * stale-while-revalidate. Errors use a short negative TTL so a cold start
- * does not stampede every host. A denial is never cached as a grant.
+ * Order: governance → Drupal handshake → tools/list (`onTools`) →
+ * overlapping prompt hops after that handshake. Success snapshots use a
+ * minutes-scale TTL (default 10 min) with stale-while-revalidate. Errors use
+ * a short negative TTL. A denial is never cached as a grant.
  */
 
-import { isCatalogDeadlineError } from "./catalog-signal.js";
-import { emitIfCatalogAdvertisementChanged } from "./catalog-notify.js";
+import { catalogShutdownSignal } from "./catalog-signal.js";
+import { catalogChangeCanReachClient, emitIfCatalogAdvertisementChanged } from "./catalog-notify.js";
 import { loadConfig } from "./config.js";
 import { fromIdentity } from "./principal-key.js";
 
-/** Listing wait. A site that is not ready by then is omitted from that list. */
+/** Listing wait when list_changed can reach the client. */
 export const DEFAULT_SITE_DEADLINE_MS = 4_000;
+
+/**
+ * First-list wait when list_changed cannot reach the client. Well under a
+ * typical 30s client timeout. Config/env values above
+ * {@link MAX_LIST_WAIT_MS} are clamped so the whole listing (catalog wait
+ * plus the listing governance re-check) stays inside that cap.
+ */
+export const DEFAULT_UNNOTIFIED_LIST_WAIT_MS = 20_000;
+
+/**
+ * Hard cap on the whole listing wait (notified or not): catalog wait plus
+ * the listing governance re-check. Leaves headroom under a 30s client timeout.
+ */
+export const MAX_LIST_WAIT_MS = 25_000;
 
 /** Successful catalog snapshot TTL (stale-while-revalidate after this). */
 export const DEFAULT_CATALOG_TTL_MS = 600_000;
@@ -32,10 +53,8 @@ export const DEFAULT_NEGATIVE_TTL_MS = 5_000;
  */
 export const DEFAULT_CATALOG_CONCURRENCY = 16;
 
-/** Acceptance budget for a cold tools/list / prompts/list (DEV-1019). */
+/** Acceptance budget for a cold tools/list when list_changed can be delivered. */
 export const CATALOG_LIST_BUDGET_MS = 5_000;
-
-export { CATALOG_DEADLINE_CODE, isCatalogDeadlineError } from "./catalog-signal.js";
 
 /** @type {Map<string, {at: number, ttl: number, snapshot: SiteCatalogSnapshot}>} */
 const cache = new Map();
@@ -43,14 +62,21 @@ const cache = new Map();
 /** @type {Map<string, Promise<SiteCatalogSnapshot>>} */
 const inflight = new Map();
 
+/** @type {Map<string, Set<(snapshot: SiteCatalogSnapshot) => void>>} */
+const cacheWaiters = new Map();
+
 /** @type {Set<string>} */
 const pendingLogged = new Set();
+
+/** Bumped on full cache clear so a live walk cannot store after reset. */
+let catalogEpoch = 0;
 
 /**
  * @typedef {object} SiteCatalogSnapshot
  * @property {string} siteName
  * @property {string} principalKey
  * @property {boolean} ok
+ * @property {boolean} complete
  * @property {string|null} reason
  * @property {Map<string, object>} tools
  * @property {object[]} prompts
@@ -70,6 +96,7 @@ function omittedSnapshot(siteName, principalKey, reason) {
     siteName,
     principalKey,
     ok: false,
+    complete: false,
     reason,
     tools: new Map(),
     prompts: [],
@@ -90,6 +117,17 @@ function readPositiveInt(value, fallback) {
 }
 
 /**
+ * Positive integer capped at {@link MAX_LIST_WAIT_MS}.
+ *
+ * @param {*} value
+ * @param {number} fallback
+ * @returns {number}
+ */
+function readClampedWaitMs(value, fallback) {
+  return Math.min(readPositiveInt(value, fallback), MAX_LIST_WAIT_MS);
+}
+
+/**
  * Non-negative integer (0 is a valid prefetch wait).
  *
  * @param {*} value
@@ -102,20 +140,13 @@ function readNonNegativeInt(value, fallback) {
 }
 
 /**
- * @param {number} ms
- * @returns {Promise<void>}
- */
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
  * Resolve wait / TTL / concurrency from overrides, env, then config.
  *
  * @param {object} [overrides]
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {{
  *   siteDeadlineMs: number,
+ *   unnotifiedListWaitMs: number,
  *   cacheTtlMs: number,
  *   negativeTtlMs: number,
  *   concurrency: number,
@@ -130,9 +161,13 @@ export function getCatalogDiscoveryOptions(overrides = {}, env = process.env) {
     // Tests and single-site env fallback still get defaults.
   }
   return {
-    siteDeadlineMs: readPositiveInt(
+    siteDeadlineMs: readClampedWaitMs(
       overrides.siteDeadlineMs ?? env.MCP_CATALOG_SITE_DEADLINE_MS ?? file.siteDeadlineMs,
       DEFAULT_SITE_DEADLINE_MS,
+    ),
+    unnotifiedListWaitMs: readClampedWaitMs(
+      overrides.unnotifiedListWaitMs ?? env.MCP_CATALOG_UNNOTIFIED_LIST_WAIT_MS ?? file.unnotifiedListWaitMs,
+      DEFAULT_UNNOTIFIED_LIST_WAIT_MS,
     ),
     cacheTtlMs: readPositiveInt(
       overrides.cacheTtlMs ?? env.MCP_CATALOG_CACHE_TTL_MS ?? file.cacheTtlMs,
@@ -150,18 +185,53 @@ export function getCatalogDiscoveryOptions(overrides = {}, env = process.env) {
 }
 
 /**
- * Cache / session key for one principal. Stdio and unresolved identities
- * share the `local` bucket so a listing never mixes with a network principal.
+ * Listing wait for this session: 4s when list_changed can be delivered
+ * to this session, otherwise the unnotified budget (default 20s, hard
+ * cap {@link MAX_LIST_WAIT_MS} for the whole listing). The governance
+ * phase is separate, parallel, and capped at 4s. Modern HTTP 2026
+ * always takes the unnotified wait.
+ *
+ * @param {{getNegotiatedProtocolVersion?: Function}|null|undefined} [server]
+ * @param {object} [overrides]
+ * @returns {number}
+ */
+export function catalogListWaitMs(server, overrides = {}) {
+  const settings = getCatalogDiscoveryOptions(overrides);
+  const wait = catalogChangeCanReachClient(server)
+    ? settings.siteDeadlineMs
+    : settings.unnotifiedListWaitMs;
+  return Math.min(wait, MAX_LIST_WAIT_MS);
+}
+
+/**
+ * Remaining listing budget after catalog wait. Passed into the listing
+ * governance helper, which then caps the phase at 4s in parallel — leftover
+ * unnotified budget is not applied per site. `waitMs` 0 is valid (no
+ * remaining budget). Omitted/`undefined` wait is unbounded (`undefined`).
+ *
+ * @param {number|undefined} waitMs
+ * @param {number} startedAt
+ * @returns {number|undefined}
+ */
+export function remainingCatalogListBudgetMs(waitMs, startedAt) {
+  if (waitMs === undefined) return undefined;
+  return Math.max(0, Math.min(MAX_LIST_WAIT_MS, Number(waitMs)) - (Date.now() - startedAt));
+}
+
+/**
+ * Cache / session key for one principal. Stdio identities share the
+ * `local` bucket so a listing never mixes with a network principal.
+ * A malformed identity is uncacheable (`null`) and fail-closed.
  *
  * @param {object|null|undefined} identity
- * @returns {string}
+ * @returns {string|null}
  */
 export function catalogPrincipalKey(identity) {
   if (!identity || identity.localOperator === true) return "local";
   try {
     return fromIdentity(identity).principalKey;
   } catch {
-    return "unresolved";
+    return null;
   }
 }
 
@@ -173,7 +243,9 @@ export function catalogPrincipalKey(identity) {
  * @returns {string}
  */
 export function catalogCacheKey(site, identity) {
-  return `${site?._name ?? ""}\0${catalogPrincipalKey(identity)}`;
+  const principalKey = catalogPrincipalKey(identity);
+  if (principalKey === null) return null;
+  return `${site?._name ?? ""}\0${principalKey}`;
 }
 
 /**
@@ -182,35 +254,41 @@ export function catalogCacheKey(site, identity) {
  * @returns {void}
  */
 export function clearSiteCatalogCache() {
+  catalogEpoch += 1;
   cache.clear();
   inflight.clear();
+  cacheWaiters.clear();
   pendingLogged.clear();
 }
 
 /**
  * Drop cached catalogs for a site after an MCP session expiry. A null
- * `principalKey` clears every principal for that site.
+ * `principalKey` clears every principal for that site. A live in-flight
+ * walk is kept so a concurrent listing cannot start a second handshake;
+ * orphaned waiters (no live walk) are dropped.
  *
  * @param {string} siteName
  * @param {string|null} [principalKey]
  * @returns {void}
  */
 export function invalidateSiteCatalogsForSite(siteName, principalKey = null) {
-  const prefix = `${siteName}\0`;
-  for (const key of cache.keys()) {
-    if (!key.startsWith(prefix)) continue;
-    if (principalKey !== null && !key.endsWith(`\0${principalKey}`)) continue;
-    cache.delete(key);
+  const matches = (key) => {
+    const prefix = `${siteName}\0`;
+    if (!key.startsWith(prefix)) return false;
+    if (principalKey !== null && !key.endsWith(`\0${principalKey}`)) return false;
+    return true;
+  };
+  for (const key of [...cache.keys()]) {
+    if (matches(key)) cache.delete(key);
   }
-  for (const key of inflight.keys()) {
-    if (!key.startsWith(prefix)) continue;
-    if (principalKey !== null && !key.endsWith(`\0${principalKey}`)) continue;
-    inflight.delete(key);
+  // Keep a live walk. Dropping inflight here lets the next listing start a
+  // second handshake for the same key while runCatalogWork is still running.
+  for (const key of [...cacheWaiters.keys()]) {
+    if (!matches(key) || inflight.has(key)) continue;
+    cacheWaiters.delete(key);
   }
   for (const key of [...pendingLogged]) {
-    if (!key.startsWith(prefix)) continue;
-    if (principalKey !== null && !key.endsWith(`\0${principalKey}`)) continue;
-    pendingLogged.delete(key);
+    if (matches(key)) pendingLogged.delete(key);
   }
 }
 
@@ -250,7 +328,6 @@ export function logOmittedSite(siteName, reason) {
  * @returns {string}
  */
 function omitReasonFromError(error) {
-  if (isCatalogDeadlineError(error)) return "deadline exceeded";
   if (error?.name === "TimeoutError" || error?.name === "AbortError") return "source error";
   if (typeof error?.reason === "string" && error.reason && !/secret|token|bearer|password/i.test(error.reason)) {
     return error.reason;
@@ -285,7 +362,29 @@ export async function mapSitesBounded(items, concurrency, fn) {
 }
 
 /**
- * Wait for `promise` up to `waitMs` without cancelling it.
+ * @param {SiteCatalogSnapshot|null|undefined} snapshot
+ * @param {"tools"|"complete"} until
+ * @returns {boolean}
+ */
+function snapshotSatisfies(snapshot, until) {
+  if (!snapshot?.ok) return false;
+  return until === "complete" ? snapshot.complete === true : true;
+}
+
+/**
+ * @param {string} key
+ * @param {SiteCatalogSnapshot} snapshot
+ * @returns {void}
+ */
+function notifyCacheWaiters(key, snapshot) {
+  const waiters = cacheWaiters.get(key);
+  if (!waiters) return;
+  for (const waiter of [...waiters]) waiter(snapshot);
+}
+
+/**
+ * Wait for `promise` up to `waitMs` without cancelling it. Resolves early
+ * when a tools-ready (or complete) snapshot is cached.
  *
  * @param {Promise<SiteCatalogSnapshot>} promise
  * @param {number} waitMs
@@ -293,22 +392,67 @@ export async function mapSitesBounded(items, concurrency, fn) {
  * @param {string} principalKey
  * @param {string} key
  * @param {boolean} logPending
+ * @param {"tools"|"complete"} until
  * @returns {Promise<SiteCatalogSnapshot>}
  */
-async function waitForSnapshot(promise, waitMs, siteName, principalKey, key, logPending) {
+async function waitForSnapshot(promise, waitMs, siteName, principalKey, key, logPending, until) {
+  const cached = cache.get(key)?.snapshot;
+  if (snapshotSatisfies(cached, until)) return cached;
   if (waitMs <= 0) {
     return omittedSnapshot(siteName, principalKey, "not ready");
   }
-  const result = await Promise.race([
-    promise.then((snapshot) => ({ done: true, snapshot })),
-    delay(waitMs).then(() => ({ done: false })),
-  ]);
-  if (result.done) return result.snapshot;
-  if (logPending && !pendingLogged.has(key)) {
-    pendingLogged.add(key);
-    logOmittedSite(siteName, "not ready");
-  }
-  return omittedSnapshot(siteName, principalKey, "not ready");
+  return await new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (logPending && !pendingLogged.has(key)) {
+        pendingLogged.add(key);
+        logOmittedSite(siteName, "not ready");
+      }
+      finish(omittedSnapshot(siteName, principalKey, "not ready"));
+    }, waitMs);
+    if (typeof timer.unref === "function") timer.unref();
+    const finish = (snapshot) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const waiters = cacheWaiters.get(key);
+      if (waiters) {
+        waiters.delete(onCache);
+        if (waiters.size === 0) cacheWaiters.delete(key);
+      }
+      resolve(snapshot);
+    };
+    const onCache = (snapshot) => {
+      if (snapshotSatisfies(snapshot, until)) finish(snapshot);
+    };
+    const waiters = cacheWaiters.get(key) ?? new Set();
+    waiters.add(onCache);
+    cacheWaiters.set(key, waiters);
+    const already = cache.get(key)?.snapshot;
+    if (snapshotSatisfies(already, until)) {
+      finish(already);
+      return;
+    }
+    promise.then((snapshot) => finish(snapshot), () => {
+      finish(omittedSnapshot(siteName, principalKey, "source error"));
+    });
+  });
+}
+
+/**
+ * Store a snapshot and notify waiters.
+ *
+ * @param {string} key
+ * @param {SiteCatalogSnapshot} snapshot
+ * @param {number} ttl
+ * @param {SiteCatalogSnapshot|undefined} previous
+ * @returns {void}
+ */
+function storeSnapshot(key, snapshot, ttl, previous) {
+  cache.set(key, { at: Date.now(), ttl, snapshot });
+  pendingLogged.delete(key);
+  emitIfCatalogAdvertisementChanged(previous, snapshot);
+  notifyCacheWaiters(key, snapshot);
 }
 
 /**
@@ -324,40 +468,70 @@ async function waitForSnapshot(promise, waitMs, siteName, principalKey, key, log
  */
 async function runCatalogWork(site, options, key, siteName, principalKey, settings) {
   const work = options.work;
+  const epoch = catalogEpoch;
   const previous = cache.get(key)?.snapshot;
   if (typeof work !== "function") {
     return omittedSnapshot(siteName, principalKey, "source error");
   }
+  if (catalogShutdownSignal().aborted) {
+    return omittedSnapshot(siteName, principalKey, "source error");
+  }
   try {
-    const loaded = await work(site);
+    const loaded = await work(site, {
+      onTools(partial) {
+        if (catalogShutdownSignal().aborted) return;
+        const snapshot = {
+          siteName,
+          principalKey,
+          ok: true,
+          complete: partial?.complete === true,
+          reason: null,
+          tools: partial?.tools instanceof Map ? partial.tools : new Map(),
+          prompts: Array.isArray(partial?.prompts) ? partial.prompts : (previous?.prompts ?? []),
+          promptBodies: partial?.promptBodies instanceof Map
+            ? partial.promptBodies
+            : (previous?.promptBodies ?? new Map()),
+        };
+        if (epoch === catalogEpoch) {
+          storeSnapshot(key, snapshot, settings.cacheTtlMs, previous);
+        }
+      },
+    });
+    if (catalogShutdownSignal().aborted) {
+      return omittedSnapshot(siteName, principalKey, "source error");
+    }
     const snapshot = {
       siteName,
       principalKey,
       ok: true,
+      complete: true,
       reason: null,
       tools: loaded?.tools instanceof Map ? loaded.tools : new Map(),
       prompts: Array.isArray(loaded?.prompts) ? loaded.prompts : [],
       promptBodies: loaded?.promptBodies instanceof Map ? loaded.promptBodies : new Map(),
     };
     // A skip (nothing enabled, source never contacted) is not a catalog.
-    if (loaded?.cache !== false) {
-      cache.set(key, { at: Date.now(), ttl: settings.cacheTtlMs, snapshot });
-      pendingLogged.delete(key);
-      emitIfCatalogAdvertisementChanged(previous, snapshot);
+    if (loaded?.cache !== false && epoch === catalogEpoch) {
+      storeSnapshot(key, snapshot, settings.cacheTtlMs, cache.get(key)?.snapshot ?? previous);
     }
     return snapshot;
   } catch (error) {
     const reason = omitReasonFromError(error);
     logOmittedSite(siteName, reason);
-    if (previous?.ok) {
-      // Keep the last good snapshot. A failed refresh is not a grant and
-      // must not hide a verified catalog.
-      return previous;
+    const latest = cache.get(key)?.snapshot ?? previous;
+    if (latest?.ok) {
+      // Keep the last good snapshot, including a tools-ready partial if
+      // prompt hops fail. A failed refresh is not a grant and must not
+      // hide a verified catalog.
+      return latest;
     }
     const snapshot = omittedSnapshot(siteName, principalKey, reason);
-    cache.set(key, { at: Date.now(), ttl: settings.negativeTtlMs, snapshot });
-    pendingLogged.delete(key);
-    emitIfCatalogAdvertisementChanged(previous, snapshot);
+    if (epoch === catalogEpoch) {
+      cache.set(key, { at: Date.now(), ttl: settings.negativeTtlMs, snapshot });
+      pendingLogged.delete(key);
+      emitIfCatalogAdvertisementChanged(previous, snapshot);
+      notifyCacheWaiters(key, snapshot);
+    }
     return snapshot;
   }
 }
@@ -391,7 +565,7 @@ function startCatalogWork(site, options, key, siteName, principalKey, settings) 
  * @param {object} site
  * @param {object} [options]
  * @param {object|null} [options.identity]
- * @param {(site: object) => Promise<{
+ * @param {(site: object, hooks?: {onTools?: Function}) => Promise<{
  *   tools?: Map<string, object>,
  *   prompts?: object[],
  *   promptBodies?: Map<string, object>,
@@ -402,36 +576,52 @@ function startCatalogWork(site, options, key, siteName, principalKey, settings) 
  * @param {number} [options.cacheTtlMs]
  * @param {number} [options.negativeTtlMs]
  * @param {boolean} [options.logPending]
+ * @param {"tools"|"complete"} [options.waitUntil]
  * @returns {Promise<SiteCatalogSnapshot>}
  */
 export async function loadSiteCatalog(site, options = {}) {
   const identity = options.identity;
   const principalKey = catalogPrincipalKey(identity);
   const siteName = site?._name ?? "";
+  if (principalKey === null) {
+    return omittedSnapshot(siteName, "malformed", "malformed identity");
+  }
   const key = catalogCacheKey(site, identity);
   const settings = getCatalogDiscoveryOptions(options);
-  const waitMs = Object.hasOwn(options, "waitMs")
-    ? readNonNegativeInt(options.waitMs, settings.siteDeadlineMs)
-    : settings.siteDeadlineMs;
+  const waitMs = Math.min(
+    Object.hasOwn(options, "waitMs")
+      ? readNonNegativeInt(options.waitMs, settings.siteDeadlineMs)
+      : settings.siteDeadlineMs,
+    MAX_LIST_WAIT_MS,
+  );
+  const until = options.waitUntil === "complete" ? "complete" : "tools";
   const logPending = options.logPending !== false;
   const cached = cache.get(key);
   if (cached) {
     const age = Date.now() - cached.at;
     if (cached.snapshot.ok) {
-      if (age < cached.ttl) return cached.snapshot;
-      startCatalogWork(site, options, key, siteName, principalKey, settings);
+      if (age < cached.ttl && snapshotSatisfies(cached.snapshot, until)) {
+        return cached.snapshot;
+      }
+      if (age < cached.ttl && until === "complete" && inflight.has(key)) {
+        return waitForSnapshot(inflight.get(key), waitMs, siteName, principalKey, key, logPending, until);
+      }
+      if (age >= cached.ttl) {
+        startCatalogWork(site, options, key, siteName, principalKey, settings);
+        if (snapshotSatisfies(cached.snapshot, until)) return cached.snapshot;
+      }
+    } else if (age < cached.ttl) {
       return cached.snapshot;
     }
-    if (age < cached.ttl) return cached.snapshot;
   }
 
   const pending = inflight.get(key);
   if (pending) {
-    return waitForSnapshot(pending, waitMs, siteName, principalKey, key, logPending);
+    return waitForSnapshot(pending, waitMs, siteName, principalKey, key, logPending, until);
   }
 
   const promise = startCatalogWork(site, options, key, siteName, principalKey, settings);
-  return waitForSnapshot(promise, waitMs, siteName, principalKey, key, logPending);
+  return waitForSnapshot(promise, waitMs, siteName, principalKey, key, logPending, until);
 }
 
 /**

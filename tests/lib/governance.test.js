@@ -6,12 +6,19 @@ import {
   requiresGovernance,
   verifySourceGovernance,
   assertSourceGovernance,
+  listingSourceGovernanceAllows,
+  listingSourceGovernanceAllowsSites,
   governanceStatus,
   clearGovernanceCache,
   filterDiscoverableTools,
+  LISTING_READINESS_TIMEOUT_MS,
   OK_TTL_MS,
-  READINESS_TIMEOUT_MS,
 } from "../../src/lib/governance.js";
+import {
+  clearCatalogNotifications,
+  subscribeCatalogNotifications,
+} from "../../src/lib/catalog-notify.js";
+import { abortCatalogWork, resetCatalogShutdown } from "../../src/lib/catalog-signal.js";
 
 const governedSite = (over = {}) => ({
   _name: "gov",
@@ -52,8 +59,11 @@ function hangingFetch(_url, opts) {
 beforeEach(() => {
   vi.mocked(fetch).mockReset();
   clearGovernanceCache();
+  clearCatalogNotifications();
 });
 afterEach(() => {
+  abortCatalogWork();
+  resetCatalogShutdown();
   vi.useRealTimers();
 });
 
@@ -96,32 +106,19 @@ describe("verifySourceGovernance", () => {
     expect(result.reason).toBe("not_authorized_for_governance");
   });
 
-  it("attaches AbortSignal.timeout on the readiness GET", async () => {
-    const fake = new AbortController().signal;
-    const spy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(fake);
-    try {
-      vi.mocked(fetch).mockResolvedValueOnce(ready());
-      await verifySourceGovernance(governedSite({ _name: "gov-timeout" }));
-      expect(spy).toHaveBeenCalledWith(READINESS_TIMEOUT_MS);
-      const [, opts] = vi.mocked(fetch).mock.calls[0];
-      expect(opts.method).toBe("GET");
-      expect(opts.signal).toBe(fake);
-    } finally {
-      spy.mockRestore();
-    }
+  it("attaches an abort signal on the readiness GET", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(ready());
+    await verifySourceGovernance(governedSite({ _name: "gov-timeout" }));
+    const [, opts] = vi.mocked(fetch).mock.calls[0];
+    expect(opts.method).toBe("GET");
+    expect(opts.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("treats a hung readiness probe as unreachable", async () => {
     vi.mocked(fetch).mockImplementation(hangingFetch);
-    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
-    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => originalTimeout(20));
-    try {
-      const result = await verifySourceGovernance(governedSite({ _name: "gov-hang" }));
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe("sentinel_unreachable");
-    } finally {
-      spy.mockRestore();
-    }
+    const result = await verifySourceGovernance(governedSite({ _name: "gov-hang" }), { timeoutMs: 20 });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("sentinel_unreachable");
   });
 
   it("treats a network failure as unreachable", async () => {
@@ -143,6 +140,19 @@ describe("verifySourceGovernance", () => {
     const result = await verifySourceGovernance(site);
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("credential_acquisition_failed");
+  });
+
+  it("does not emit tools list_changed on the first governance ok", async () => {
+    const events = [];
+    const stop = subscribeCatalogNotifications((event) => events.push(event));
+    vi.mocked(fetch).mockResolvedValueOnce(ready());
+    try {
+      const result = await verifySourceGovernance(governedSite({ _name: "gov-first-ok" }));
+      expect(result.ok).toBe(true);
+      expect(events).toEqual([]);
+    } finally {
+      stop();
+    }
   });
 
   it("shares one in-flight readiness probe across concurrent callers", async () => {
@@ -290,5 +300,42 @@ describe("filterDiscoverableTools", () => {
     vi.mocked(fetch).mockResolvedValue(notReady());
     const visible = await filterDiscoverableTools(defs, [governedSite(), openSite()]);
     expect(visible).toHaveLength(defs.length);
+  });
+});
+
+describe("listingSourceGovernanceAllows", () => {
+  it("uses a cached verdict without joining a hanging probe", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(ready());
+    await verifySourceGovernance(governedSite({ _name: "gov-cached" }));
+    vi.mocked(fetch).mockImplementation(hangingFetch);
+    const started = performance.now();
+    await expect(listingSourceGovernanceAllows(governedSite({ _name: "gov-cached" }), { timeoutMs: 30 }))
+      .resolves.toBe(true);
+    expect(performance.now() - started).toBeLessThan(50);
+  });
+
+  it("fails closed when a hanging probe does not resolve in the listing budget", async () => {
+    vi.mocked(fetch).mockImplementation(hangingFetch);
+    const started = performance.now();
+    await expect(listingSourceGovernanceAllows(governedSite({ _name: "gov-list-hang" }), { timeoutMs: 40 }))
+      .resolves.toBe(false);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+});
+
+describe("listingSourceGovernanceAllowsSites", () => {
+  it("checks hanging sites in parallel under one shared deadline", async () => {
+    vi.mocked(fetch).mockImplementation(hangingFetch);
+    const sites = [
+      governedSite({ _name: "gov-a", baseUrl: "https://a.example.com" }),
+      governedSite({ _name: "gov-b", baseUrl: "https://b.example.com" }),
+      governedSite({ _name: "gov-c", baseUrl: "https://c.example.com" }),
+    ];
+    const started = performance.now();
+    const allowed = await listingSourceGovernanceAllowsSites(sites, { timeoutMs: 50 });
+    const elapsed = performance.now() - started;
+    expect([...allowed.values()]).toEqual([false, false, false]);
+    expect(elapsed).toBeLessThan(100);
+    expect(elapsed).toBeLessThan(LISTING_READINESS_TIMEOUT_MS);
   });
 });
