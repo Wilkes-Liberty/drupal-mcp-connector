@@ -177,17 +177,6 @@ export function normalizeQuotas(raw) {
 }
 
 /**
- * Whether a quota table is in force (fail-closed even when every row is
- * malformed).
- *
- * @param {object|null} raw
- * @returns {boolean}
- */
-export function quotasRequired(raw) {
-  return normalizeQuotas(raw) !== null;
-}
-
-/**
  * Quota and abuse gate. Fixed windows per tenant and per principal, plus a
  * denial counter that locks a principal. Every request reaching the window
  * checks counts whether or not it is then allowed, so a flood of refused

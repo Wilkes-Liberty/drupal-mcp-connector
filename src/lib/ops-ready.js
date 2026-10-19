@@ -18,14 +18,6 @@ const CHECK_AUTH = "auth";
 const CHECK_SCOPE_TABLE = "scope_table";
 const CHECK_ALLOWLISTS = "allowlists";
 
-/** Closed check names returned in a 503 body. */
-export const READY_CHECK_NAMES = Object.freeze([
-  CHECK_INTROSPECTION,
-  CHECK_AUTH,
-  CHECK_SCOPE_TABLE,
-  CHECK_ALLOWLISTS,
-]);
-
 const DEFAULT_READY_TIMEOUT_MS = 2000;
 
 /** How long a /ready probe result is reused (5–10s). */

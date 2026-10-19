@@ -212,8 +212,6 @@ export function createRateLimiter({
 /**
  * Rate-limit key for a verified principal. Built from the mcp_sentinel
  * twin (`iss|sub|actor`) after token validation. Never from a header.
- * `#455` previously used `sub`+`clientId`; that formula moved onto
- * `fromIdentity`.
  *
  * @param {object|null|undefined} identity
  * @returns {?string}

@@ -366,8 +366,7 @@ export function hostAllowed(hostHeader, allowlist) {
  * `iss|sub|actor` (the mcp_sentinel twin) is the same principal (token
  * refresh). A local-operator identity shares one loopback key.
  * Unidentifiable identities return null so a session cannot be minted
- * or reused. `#455` previously keyed on `sub`+`clientId`; that formula
- * lives on the `fromIdentity` twin now.
+ * or reused.
  *
  * @param {object|null|undefined} identity
  * @returns {?string}
@@ -467,39 +466,4 @@ export function mcpAcceptOk(method, acceptHeader) {
  */
 export function isJsonRpcBatch(body) {
   return Array.isArray(body);
-}
-
-/**
- * True when the parsed body is a JSON-RPC notification (no `id`).
- *
- * @param {unknown} body
- * @returns {boolean}
- */
-export function isJsonRpcNotification(body) {
-  return Boolean(
-    body
-    && typeof body === "object"
-    && !Array.isArray(body)
-    && body.jsonrpc === "2.0"
-    && typeof body.method === "string"
-    && !Object.hasOwn(body, "id"),
-  );
-}
-
-/**
- * True when the parsed body is a JSON-RPC response (no `method`).
- *
- * @param {unknown} body
- * @returns {boolean}
- */
-export function isJsonRpcResponse(body) {
-  return Boolean(
-    body
-    && typeof body === "object"
-    && !Array.isArray(body)
-    && body.jsonrpc === "2.0"
-    && Object.hasOwn(body, "id")
-    && !Object.hasOwn(body, "method")
-    && (Object.hasOwn(body, "result") || Object.hasOwn(body, "error")),
-  );
 }

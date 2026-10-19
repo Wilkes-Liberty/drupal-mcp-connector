@@ -1,16 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { pascalToSnake, snakeToPascal, graphqlTypeToEntity } from "../../src/lib/backends/graphql-names.js";
+import { pascalToSnake, graphqlTypeToEntity } from "../../src/lib/backends/graphql-names.js";
 
 describe("graphql-names", () => {
   it("pascalToSnake", () => {
     expect(pascalToSnake("Article")).toBe("article");
     expect(pascalToSnake("CaseStudy")).toBe("case_study");
     expect(pascalToSnake("PHero")).toBe("p_hero");
-  });
-
-  it("snakeToPascal", () => {
-    expect(snakeToPascal("article")).toBe("Article");
-    expect(snakeToPascal("case_study")).toBe("CaseStudy");
   });
 
   it("graphqlTypeToEntity maps prefixed type names to entityType/bundle", () => {

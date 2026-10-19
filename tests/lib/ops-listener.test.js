@@ -7,13 +7,12 @@ import { describe, expect, it } from "vitest";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { createMcpRequestHandler, isUnauthenticatedRoute } from "../../src/lib/http-handler.js";
+import { createMcpRequestHandler } from "../../src/lib/http-handler.js";
 import { createConnectorServerFactory } from "../../src/lib/mcp-server.js";
 import { startHttpsTransport } from "../../src/lib/https-startup.js";
 import { createOpsMetrics } from "../../src/lib/ops-metrics.js";
 import {
   createOpsRequestHandler,
-  isOpsPath,
   startOpsListener,
 } from "../../src/lib/ops-listener.js";
 import { TOOL_SCOPE_TABLE } from "../../src/lib/tool-scopes.js";
@@ -99,23 +98,6 @@ async function assertPublicOpsNotServed(handle, path = "/ready") {
   expect(unauthorized.body).not.toContain("mcp_http_requests_total");
   expect(unauthorized.body).not.toMatch(/# TYPE /);
 }
-
-describe("ops paths", () => {
-  it("names only exact /ready and /metrics", () => {
-    expect(isOpsPath("/ready")).toBe(true);
-    expect(isOpsPath("/metrics")).toBe(true);
-    expect(isOpsPath("/ready?x=1")).toBe(true);
-    expect(isOpsPath("/ready/")).toBe(false);
-    expect(isOpsPath("/READY")).toBe(false);
-    expect(isOpsPath("/%72eady")).toBe(false);
-    expect(isOpsPath("/health")).toBe(false);
-    expect(isOpsPath("/mcp")).toBe(false);
-    expect(isUnauthenticatedRoute("GET", "/ready")).toBe(false);
-    expect(isUnauthenticatedRoute("GET", "/metrics")).toBe(false);
-    expect(isUnauthenticatedRoute("GET", "/ready/")).toBe(false);
-    expect(isUnauthenticatedRoute("GET", "/READY")).toBe(false);
-  });
-});
 
 describe("public listener refuses /ready and /metrics (DEV-863)", () => {
   it("returns 401 without a token and 404 after auth, never readiness or prometheus", async () => {
