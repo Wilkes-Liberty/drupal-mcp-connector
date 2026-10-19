@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Hosted MCP acceptance probe (DEV-817 / DEV-953).
+ * Hosted MCP acceptance probe (DEV-817 / DEV-953 / DEV-943).
  *
  * Read-only checks against the live staging and production Streamable HTTP
  * endpoints, plus the advertised Paladin issuer. Proves discovery, Origin
@@ -24,9 +24,11 @@ import {
   CURSOR_WWW_BROWSER_ORIGIN,
   GROK_BOT_BROWSER_ORIGIN,
   GROK_BOT_CONSOLE_ORIGIN,
-  HOSTED_PUBLIC_CLIENT_ORIGINS,
 } from "../src/lib/http-transport.js";
 import { isWriteLikeTool } from "../src/lib/operations.js";
+
+/** Claude hosted-app browser Origin (infra-overlay v1.16.1). */
+export const CLAUDE_BROWSER_ORIGIN = "https://claude.ai";
 
 /** Default hosted MCP planes the operator asked this probe to cover. */
 export const DEFAULT_HOSTS = Object.freeze([
@@ -68,19 +70,27 @@ const ACCEPT = "application/json, text/event-stream";
 const ET = "America/New_York";
 
 /**
- * Per-client OAuth facts this probe asserts. Origins match
- * {@link HOSTED_PUBLIC_CLIENT_ORIGINS}. Redirects are the live realm lists
- * observed 2026-10-18 (cursor-mcp + grok-bot, including the Cursor callbacks
- * on grok-bot from keystone#1531).
+ * Declared MCP client inventory. Authorize expectations come from
+ * {@link resolveClientInventory}; they are not hard-coded to one realm
+ * state. Origins include the edge allowlist (infra-overlay v1.16.1).
+ * Redirects are the live realm lists observed 2026-10-18 (cursor-mcp +
+ * grok-bot, including the Cursor callbacks on grok-bot from
+ * keystone#1531) plus the Claude hosted callback from keystone#1559.
+ *
+ * `realm: "always"` is already on the live realm (keystone#1539).
+ * `realm: "provisioned"` is the keystone#1559 Grok CIMD URL client and
+ * Claude hosted PKCE client — present in realm-as-code, applied when
+ * {@link resolveClientsProvisioned} is true.
  *
  * @type {readonly object[]}
  */
-export const CLIENT_PATHS = Object.freeze([
+export const CLIENT_INVENTORY = Object.freeze([
   Object.freeze({
     id: "cursor",
     name: "Cursor",
     clientId: CURSOR_CLIENT_ID,
     registration: "pre-registered-public-pkce",
+    realm: "always",
     pkce: "S256",
     scopes: Object.freeze(["mcp_read"]),
     origins: Object.freeze([CURSOR_BROWSER_ORIGIN, CURSOR_WWW_BROWSER_ORIGIN]),
@@ -98,7 +108,9 @@ export const CLIENT_PATHS = Object.freeze([
     name: "Grok Bot",
     clientId: GROK_CLIENT_ID,
     cimdUrl: GROK_CIMD_URL,
+    cimdAsClientId: true,
     registration: "pre-registered-public-pkce",
+    realm: "always",
     pkce: "S256",
     scopes: Object.freeze(["mcp_read"]),
     origins: Object.freeze([GROK_BOT_BROWSER_ORIGIN, GROK_BOT_CONSOLE_ORIGIN]),
@@ -108,30 +120,132 @@ export const CLIENT_PATHS = Object.freeze([
       "https://www.cursor.com/agents/mcp/oauth/callback",
     ]),
     rejectRedirects: Object.freeze(["https://evil.example/callback"]),
-    cimdClientId: GROK_CIMD_URL,
-    cimdClientIdExpect: "client_not_found",
   }),
   Object.freeze({
     id: "claude",
     name: "Claude",
     clientId: "claude",
     cimdUrl: CLAUDE_CIMD_URL,
-    registration: "not-provisioned",
+    registration: "pre-registered-public-pkce",
+    realm: "provisioned",
     pkce: "S256",
     scopes: Object.freeze(["mcp_read"]),
-    origins: Object.freeze(["https://claude.ai"]),
-    originExpect: "refuse",
-    acceptRedirects: Object.freeze([]),
-    rejectRedirects: Object.freeze([CLAUDE_HOSTED_REDIRECT]),
-    unknownClientExpect: "client_not_found",
+    origins: Object.freeze([CLAUDE_BROWSER_ORIGIN]),
+    acceptRedirects: Object.freeze([CLAUDE_HOSTED_REDIRECT]),
+    rejectRedirects: Object.freeze(["https://evil.example/callback"]),
   }),
 ]);
 
-const FOREIGN_ORIGINS = Object.freeze([
-  "https://evil.example",
-  "https://cursor.com.evil.example",
-  "https://claude.ai",
+/** True foreign Origin used as the 403 deny case. */
+export const FOREIGN_ORIGIN = "https://evil.example";
+
+/** Lookalike of the Claude edge Origin; must stay 403. */
+export const FOREIGN_LOOKALIKE_ORIGIN = "https://claude.ai.evil.example";
+
+/**
+ * Present Origins that must fail closed. A true foreign host plus a
+ * suffix lookalike of an allowlisted Origin.
+ *
+ * @type {readonly string[]}
+ */
+export const DENY_ORIGINS = Object.freeze([
+  FOREIGN_ORIGIN,
+  FOREIGN_LOOKALIKE_ORIGIN,
 ]);
+
+/**
+ * Truthy / falsy tokens for {@link resolveClientsProvisioned}.
+ *
+ * @type {ReadonlyMap<string, boolean>}
+ */
+const PROVISIONED_TOKENS = new Map([
+  ["1", true],
+  ["true", true],
+  ["yes", true],
+  ["on", true],
+  ["0", false],
+  ["false", false],
+  ["no", false],
+  ["off", false],
+]);
+
+/**
+ * Whether keystone#1559 clients (Grok CIMD URL as `client_id`, Claude
+ * hosted) are expected on the live realm. CLI flags win over
+ * `HOSTED_MCP_CLIENTS_PROVISIONED`. Unset means not provisioned — the
+ * live realm as of 2026-10-19.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @param {{clientsProvisioned?: boolean}} [args]
+ * @returns {boolean}
+ */
+export function resolveClientsProvisioned(env = process.env, args = {}) {
+  if (args.clientsProvisioned === true) return true;
+  if (args.clientsProvisioned === false) return false;
+  const raw = String(env.HOSTED_MCP_CLIENTS_PROVISIONED ?? "").trim().toLowerCase();
+  if (!raw) return false;
+  if (!PROVISIONED_TOKENS.has(raw)) {
+    throw new Error("HOSTED_MCP_CLIENTS_PROVISIONED must be 1/0, true/false, yes/no, or on/off");
+  }
+  return PROVISIONED_TOKENS.get(raw);
+}
+
+/**
+ * Authorize expect for one inventory row.
+ *
+ * @param {boolean} inRealm
+ * @param {"login"|"invalid_redirect"} whenPresent
+ * @returns {"login"|"invalid_redirect"|"client_not_found"}
+ */
+function expectWhen(inRealm, whenPresent) {
+  return inRealm ? whenPresent : "client_not_found";
+}
+
+/**
+ * Derive accept/reject/CIMD expectations from {@link CLIENT_INVENTORY}
+ * and the provisioned flag. The report prints this state; nothing here
+ * hard-codes `client_not_found` for the keystone#1559 clients.
+ *
+ * @param {boolean} [provisioned]
+ * @param {readonly object[]} [inventory]
+ * @returns {readonly object[]}
+ */
+export function resolveClientInventory(provisioned = false, inventory = CLIENT_INVENTORY) {
+  return Object.freeze(inventory.map((client) => {
+    const inRealm = client.realm === "always" || (client.realm === "provisioned" && provisioned);
+    const cimdInRealm = Boolean(client.cimdAsClientId) && provisioned;
+    return Object.freeze({
+      ...client,
+      inRealm,
+      acceptExpect: expectWhen(inRealm, "login"),
+      rejectExpect: expectWhen(inRealm, "invalid_redirect"),
+      cimdClientId: client.cimdAsClientId ? client.cimdUrl : undefined,
+      cimdAcceptExpect: client.cimdAsClientId ? expectWhen(cimdInRealm, "login") : undefined,
+      cimdRejectExpect: client.cimdAsClientId ? expectWhen(cimdInRealm, "invalid_redirect") : undefined,
+    });
+  }));
+}
+
+/**
+ * Edge-allowlisted Origins from the inventory (Cursor, Grok, Claude).
+ * Independent of the keystone#1559 provisioned flag: overlay v1.16.1
+ * already allowlists Claude.
+ *
+ * @param {readonly object[]} [inventory]
+ * @returns {readonly string[]}
+ */
+export function resolveAllowOrigins(inventory = CLIENT_INVENTORY) {
+  const seen = new Set();
+  const origins = [];
+  for (const client of inventory) {
+    for (const origin of client.origins || []) {
+      if (seen.has(origin)) continue;
+      seen.add(origin);
+      origins.push(origin);
+    }
+  }
+  return Object.freeze(origins);
+}
 
 export const SECRET_ENV = Object.freeze([
   "HOSTED_MCP_TOKEN",
@@ -231,7 +345,7 @@ export function classifyUnauthenticatedMcp(res, expectedMetadata) {
 }
 
 /**
- * A present disallowed Origin must fail closed with 403.
+ * A present disallowed Origin must fail closed with 403 (POST or OPTIONS).
  *
  * @param {{status: number}} res
  * @returns {{ok: boolean, reason: string}}
@@ -241,6 +355,19 @@ export function classifyOriginRefused(res) {
     return { ok: false, reason: `expected 403, got ${res.status}` };
   }
   return { ok: true, reason: "403 foreign Origin" };
+}
+
+/**
+ * Allowlisted Origin preflight must be 204 (infra-overlay v1.16.1).
+ *
+ * @param {{status: number}} res
+ * @returns {{ok: boolean, reason: string}}
+ */
+export function classifyOriginPreflight(res) {
+  if (res.status !== 204) {
+    return { ok: false, reason: `expected 204, got ${res.status}` };
+  }
+  return { ok: true, reason: "204 allowlisted Origin preflight" };
 }
 
 /**
@@ -263,14 +390,68 @@ export function decodeJwtPayload(token) {
 }
 
 /**
+ * Read a boolean that may be missing from unauthenticated HTML.
+ *
+ * @param {unknown} value
+ * @returns {boolean|undefined}
+ */
+function readTriState(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+  return undefined;
+}
+
+/**
+ * Pull Keycloak `kcContext` from authorize HTML or a JSON body. Used only
+ * for pageId / consent / staff-gate signals.
+ *
+ * @param {string} body
+ * @returns {object}
+ */
+export function parseKcContext(body) {
+  const raw = String(body || "");
+  const fromConst = /(?:const|let|var)\s+kcContext\s*=\s*(\{[\s\S]*?\})\s*;/.exec(raw);
+  const candidate = fromConst?.[1] || (raw.trim().startsWith("{") ? raw.trim() : "");
+  if (candidate) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      // Login HTML is often not strict JSON; fall through to pageId.
+    }
+  }
+  const pageId = /"pageId":\s*"([^"]+)"/.exec(raw)?.[1] || "";
+  return pageId ? { pageId } : {};
+}
+
+/**
+ * Staff-gate signal when the page exposes one. Undefined means not
+ * observable without credentials.
+ *
+ * @param {object} kc
+ * @param {string} body
+ * @param {string} pageId
+ * @returns {boolean|undefined}
+ */
+function readStaffGate(kc, body, pageId) {
+  const explicit = readTriState(kc.staffGate ?? kc.staffGateRequired);
+  if (explicit !== undefined) return explicit;
+  if (/staff-gate|mcp-operators/i.test(pageId)) return true;
+  if (/"staffGate(?:Required)?":\s*false/.test(body)) return false;
+  if (/"staffGate(?:Required)?":\s*true/.test(body)) return true;
+  return undefined;
+}
+
+/**
  * Read Keycloak authorize HTML/cookies into a secret-free verdict.
  *
  * @param {{status: number, headers?: Record<string, string>, body?: string}} res
- * @returns {{status: number, pageId: string, error: string, errorParam: string}}
+ * @returns {{status: number, pageId: string, error: string, errorParam: string, consentRequired?: boolean, staffGate?: boolean}}
  */
 export function parseAuthorizeResponse(res) {
   const body = String(res.body || "");
-  const pageId = /"pageId":\s*"([^"]+)"/.exec(body)?.[1] || "";
+  const kc = parseKcContext(body);
+  const pageId = String(kc.pageId || /"pageId":\s*"([^"]+)"/.exec(body)?.[1] || "");
   const headers = res.headers || {};
   const cookie = String(headers["set-cookie"] || headers["Set-Cookie"] || "");
   const match = /KC_STATE_CHECKER=([^;]+)/i.exec(cookie);
@@ -280,6 +461,8 @@ export function parseAuthorizeResponse(res) {
     pageId,
     error: String(payload?.mky || ""),
     errorParam: Array.isArray(payload?.mpar) ? payload.mpar.join(",") : "",
+    consentRequired: readTriState(kc.consentRequired ?? kc.client?.consentRequired),
+    staffGate: readStaffGate(kc, body, pageId),
   };
 }
 
@@ -321,6 +504,37 @@ export function classifyAuthorize(parsed, expect) {
     };
   }
   return { ok: false, reason: `unknown expect ${expect}` };
+}
+
+/**
+ * Consent and the mcp-operators staff gate, when the unauthenticated
+ * authorize page exposes them. Missing signals are a signed-in step —
+ * the login page does not show consent or the staff gate.
+ *
+ * @param {ReturnType<typeof parseAuthorizeResponse>} parsed
+ * @returns {{ok: boolean|null, skipped?: boolean, reason: string}}
+ */
+export function classifyAuthorizeGates(parsed) {
+  const consentObserved = parsed.consentRequired === true || parsed.consentRequired === false;
+  const staffObserved = parsed.staffGate === true || parsed.staffGate === false;
+  if (!consentObserved && !staffObserved) {
+    return {
+      ok: null,
+      skipped: true,
+      reason: "consent and mcp-operators staff gate require a signed-in authorize; not observable without credentials",
+    };
+  }
+  const failures = [];
+  if (consentObserved && parsed.consentRequired !== true) {
+    failures.push("consentRequired=false");
+  }
+  if (staffObserved && parsed.staffGate !== true) {
+    failures.push("staff gate absent");
+  }
+  if (failures.length > 0) {
+    return { ok: false, reason: failures.join("; ") };
+  }
+  return { ok: true, reason: "authorize requires consent and staff gate" };
 }
 
 /**
@@ -677,6 +891,13 @@ function initializeBody() {
  * @param {string} [detail]
  */
 function finish(step, verdict, detail) {
+  if (verdict.skipped) {
+    step.ok = null;
+    step.skipped = true;
+    step.reason = verdict.reason;
+    if (detail) step.detail = redactSecrets(detail);
+    return step;
+  }
   step.ok = verdict.ok;
   step.reason = verdict.reason;
   if (detail) step.detail = redactSecrets(detail);
@@ -693,6 +914,7 @@ function finish(step, verdict, detail) {
  * @param {NodeJS.ProcessEnv} [options.env]
  * @param {() => string} [options.now]
  * @param {{challenge: string}} [options.pkce]
+ * @param {boolean} [options.clientsProvisioned]
  */
 export async function probeHost({
   fetchImpl,
@@ -701,12 +923,15 @@ export async function probeHost({
   now = formatEt,
   pkce = buildPkce(),
   sleep = defaultSleep,
+  clientsProvisioned = resolveClientsProvisioned(env),
 }) {
   const generatedAt = now();
   const steps = [];
   const metadataUrl = `${host.origin}/.well-known/oauth-protected-resource/mcp`;
   const tokens = readTokenConfig(env, host.id);
   const send = (url, init) => request(fetchImpl, url, init, { sleep });
+  const clients = resolveClientInventory(clientsProvisioned);
+  const allowOrigins = resolveAllowOrigins();
 
   const add = (step) => {
     steps.push({
@@ -759,7 +984,7 @@ export async function probeHost({
       : `expected 401, got ${junkRes.status}`,
   });
 
-  for (const origin of HOSTED_PUBLIC_CLIENT_ORIGINS) {
+  for (const origin of allowOrigins) {
     const step = add({ id: `origin-allow:${origin}`, client: origin, expect: "401" });
     finish(step, classifyUnauthenticatedMcp(
       await send(host.mcpUrl, {
@@ -773,9 +998,16 @@ export async function probeHost({
       }),
       metadataUrl,
     ));
+    const preflight = add({ id: `origin-preflight:${origin}`, client: origin, expect: "204" });
+    finish(preflight, classifyOriginPreflight(
+      await send(host.mcpUrl, {
+        method: "OPTIONS",
+        headers: { origin, accept: ACCEPT },
+      }),
+    ));
   }
 
-  for (const origin of FOREIGN_ORIGINS) {
+  for (const origin of DENY_ORIGINS) {
     const step = add({ id: `origin-deny:${origin}`, client: origin, expect: "403" });
     finish(step, classifyOriginRefused(
       await send(host.mcpUrl, {
@@ -786,6 +1018,13 @@ export async function probeHost({
           origin,
         },
         body: initializeBody(),
+      }),
+    ));
+    const preflight = add({ id: `origin-deny-options:${origin}`, client: origin, expect: "403" });
+    finish(preflight, classifyOriginRefused(
+      await send(host.mcpUrl, {
+        method: "OPTIONS",
+        headers: { origin, accept: ACCEPT },
       }),
     ));
   }
@@ -806,35 +1045,64 @@ export async function probeHost({
     return parseAuthorizeResponse(res);
   };
 
-  for (const client of CLIENT_PATHS) {
+  for (const client of clients) {
+    let gateParsed;
     for (const redirect of client.acceptRedirects) {
+      const parsed = await authorize(client.clientId, redirect);
+      if (!gateParsed) gateParsed = parsed;
       const step = add({
         id: `authorize-accept:${client.clientId}:${redirect}`,
         client: client.id,
-        expect: "login",
+        expect: client.acceptExpect,
       });
-      finish(step, classifyAuthorize(await authorize(client.clientId, redirect), "login"));
+      finish(step, classifyAuthorize(parsed, client.acceptExpect));
     }
     for (const redirect of client.rejectRedirects) {
-      const expect = client.unknownClientExpect || "invalid_redirect";
+      const parsed = await authorize(client.clientId, redirect);
+      if (!gateParsed) gateParsed = parsed;
       const step = add({
         id: `authorize-reject:${client.clientId}:${redirect}`,
         client: client.id,
-        expect,
+        expect: client.rejectExpect,
       });
-      finish(step, classifyAuthorize(await authorize(client.clientId, redirect), expect));
+      finish(step, classifyAuthorize(parsed, client.rejectExpect));
     }
     if (client.cimdClientId) {
-      const step = add({
+      const acceptRedirect = client.acceptRedirects[0];
+      const rejectRedirect = client.rejectRedirects[0];
+      const cimdAccept = add({
         id: `authorize-cimd:${client.cimdClientId}`,
         client: client.id,
-        expect: client.cimdClientIdExpect,
+        expect: client.cimdAcceptExpect,
       });
-      finish(step, classifyAuthorize(
-        await authorize(client.cimdClientId, client.acceptRedirects[0]),
-        client.cimdClientIdExpect,
+      finish(cimdAccept, classifyAuthorize(
+        await authorize(client.cimdClientId, acceptRedirect),
+        client.cimdAcceptExpect,
       ));
+      if (rejectRedirect) {
+        const cimdReject = add({
+          id: `authorize-cimd-reject:${client.cimdClientId}:${rejectRedirect}`,
+          client: client.id,
+          expect: client.cimdRejectExpect,
+        });
+        finish(cimdReject, classifyAuthorize(
+          await authorize(client.cimdClientId, rejectRedirect),
+          client.cimdRejectExpect,
+        ));
+      }
     }
+    const gates = add({
+      id: `authorize-gates:${client.clientId}`,
+      client: client.id,
+      expect: "consent+staff-gate",
+    });
+    finish(gates, gateParsed
+      ? classifyAuthorizeGates(gateParsed)
+      : {
+        ok: null,
+        skipped: true,
+        reason: "consent and mcp-operators staff gate require a signed-in authorize; not observable without credentials",
+      });
   }
 
   const dcr = add({ id: "dcr-closed", client: "*", expect: "403" });
@@ -939,6 +1207,7 @@ export async function probeHost({
     id: host.id,
     mcpUrl: host.mcpUrl,
     generatedAt,
+    clientsProvisioned,
     passed,
     failed,
     skipped,
@@ -956,15 +1225,18 @@ export async function runAcceptance({
   hosts = DEFAULT_HOSTS,
   now = formatEt,
   sleep,
+  clientsProvisioned = resolveClientsProvisioned(env),
 } = {}) {
   const reports = [];
   for (const host of hosts) {
-    reports.push(await probeHost({ fetchImpl, host, env, now, sleep }));
+    reports.push(await probeHost({ fetchImpl, host, env, now, sleep, clientsProvisioned }));
   }
   return {
     generatedAt: now(),
     issuer: ISSUER,
-    origins: [...HOSTED_PUBLIC_CLIENT_ORIGINS],
+    origins: [...resolveAllowOrigins()],
+    denyOrigins: [...DENY_ORIGINS],
+    clientsProvisioned,
     ok: reports.every((report) => report.ok),
     hosts: reports,
   };
@@ -983,6 +1255,8 @@ export function formatMarkdown(report) {
     `Generated: ${report.generatedAt}`,
     `Issuer: ${report.issuer}`,
     `Allowed Origins: ${report.origins.join(", ")}`,
+    `Denied Origins: ${(report.denyOrigins || []).join(", ")}`,
+    `Client inventory: ${report.clientsProvisioned ? "provisioned" : "not provisioned"} (keystone#1559 Grok CIMD + Claude hosted)`,
     `Overall: ${report.ok ? "PASS" : "FAIL"}`,
     "",
   ];
@@ -1012,7 +1286,17 @@ export function parseArgs(argv) {
     const arg = pending.shift();
     if (arg === "--require-signed-in") args.requireSignedIn = true;
     else if (arg === "--json") args.json = true;
-    else if (arg === "--host") {
+    else if (arg === "--clients-provisioned") {
+      if (args.clientsProvisioned === false) {
+        throw new Error("use only one of --clients-provisioned or --clients-not-provisioned");
+      }
+      args.clientsProvisioned = true;
+    } else if (arg === "--clients-not-provisioned") {
+      if (args.clientsProvisioned === true) {
+        throw new Error("use only one of --clients-provisioned or --clients-not-provisioned");
+      }
+      args.clientsProvisioned = false;
+    } else if (arg === "--host") {
       const id = String(pending.shift() || "").trim();
       args.hosts = DEFAULT_HOSTS.filter((host) => host.id === id);
       if (args.hosts.length === 0) {
@@ -1027,13 +1311,18 @@ export function parseArgs(argv) {
 
 function usage() {
   return [
-    "hosted MCP acceptance probe (DEV-817 / DEV-953)",
+    "hosted MCP acceptance probe (DEV-817 / DEV-953 / DEV-943)",
     "",
     "  node scripts/hosted-acceptance.js [--host staging|production] [--json] [--require-signed-in]",
+    "    [--clients-provisioned | --clients-not-provisioned]",
+    "",
+    "Client inventory default is not provisioned (live realm). Use",
+    "--clients-provisioned or HOSTED_MCP_CLIENTS_PROVISIONED=1 after keystone#1559",
+    "Grok CIMD + Claude hosted are applied. The report prints which state it used.",
     "",
     "Optional env (never printed): HOSTED_MCP_TOKEN, HOSTED_MCP_TOKEN_STAGING,",
     "HOSTED_MCP_TOKEN_PRODUCTION, HOSTED_MCP_CLIENT_ID, HOSTED_MCP_CLIENT_SECRET,",
-    "EVAL_HTTP_STAGING_TOKEN_*.",
+    "EVAL_HTTP_STAGING_TOKEN_*, HOSTED_MCP_CLIENTS_PROVISIONED.",
     "",
   ].join("\n");
 }
@@ -1050,13 +1339,14 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     stdout.write(usage());
     return 0;
   }
+  const env = io.env || process.env;
   const report = await runAcceptance({
     fetchImpl: io.fetchImpl || globalThis.fetch,
-    env: io.env || process.env,
+    env,
     hosts: args.hosts || DEFAULT_HOSTS,
     sleep: io.sleep,
+    clientsProvisioned: resolveClientsProvisioned(env, args),
   });
-  const env = io.env || process.env;
   const leaked = SECRET_ENV.some((key) => {
     const value = String(Object.hasOwn(env, key) ? Reflect.get(env, key) : "");
     if (!value) return false;
