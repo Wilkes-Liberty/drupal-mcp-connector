@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect } from "vitest";
+import { clearSiteCatalogCache } from "../../src/lib/site-catalog.js";
 
 import {
   normalizeWorkflow,
@@ -236,6 +237,9 @@ function remoteCatalog(prompts) {
 }
 
 describe("remote Drupal prompts", () => {
+  beforeEach(() => {
+    clearSiteCatalogCache();
+  });
   it("hides a remote workflow when local config omits it", async () => {
     const providers = await moduleWorkflowProvidersWithRemote([exampleSite({
       review_and_log: {

@@ -45,6 +45,15 @@
  *                     a present empty value clears the configured list.
  *                     Default: host of auth.resource/audience, plus loopback
  *                     hostnames on a loopback bind.
+ *   MCP_CATALOG_SITE_DEADLINE_MS  Listing wait for tools/list + prompts/list
+ *                     (default: 4000). The wait never aborts the site chain.
+ *                     A site that is not ready is omitted from that response.
+ *   MCP_CATALOG_CACHE_TTL_MS  Success TTL for a per-site catalog snapshot
+ *                     shared by tools/list, prompts/list, prompts/get
+ *                     (default: 600000, stale-while-revalidate).
+ *   MCP_CATALOG_NEGATIVE_TTL_MS  Error TTL so a cold start does not stampede
+ *                     (default: 5000). A denial is never cached as a grant.
+ *   MCP_CATALOG_CONCURRENCY  Concurrent site walks (default: 16).
  *   MCP_OPS_LISTEN    Optional mesh-only ops listener <addr:port> (DEV-863).
  *                     Disabled when unset. Loopback or Tailscale only
  *                     (100.64.0.0/10, fd7a:115c:a1e0::/48). 0.0.0.0, ::,
@@ -82,6 +91,7 @@ import { assertHostedToolScopeTable } from "./lib/tool-scopes.js";
 import { callTool, invokeReadTool, listResolvableSiteConfigs } from "./lib/dispatch.js";
 import { fetchTextFormatContext, installTextFormatContextFetcher } from "./lib/text-format-context.js";
 import { filterDiscoverableTools } from "./lib/governance.js";
+import { getCatalogDiscoveryOptions, prefetchSiteCatalogs } from "./lib/site-catalog.js";
 import {
   filterPromptsByPrincipal,
   filterResourcesByPrincipal,
@@ -92,7 +102,7 @@ import {
 
 // Tools — aggregated (single source of truth, side-effect-free) and per-tool prompts
 import { allDefinitions, definitionsByName } from "./tools/index.js";
-import { createModuleToolRegistry, isModuleTool } from "./lib/module-tools.js";
+import { createModuleToolRegistry, createSiteCatalogWork, isModuleTool } from "./lib/module-tools.js";
 import { buildToolPrompts, createPromptSurface } from "./lib/tool-prompts.js";
 import {
   loadWorkflows,
@@ -162,13 +172,37 @@ const RESOURCES = [
 
 const moduleTools = createModuleToolRegistry();
 
+/**
+ * Warm per-site catalogs without blocking serveStdio or HTTP listen.
+ * Process start uses the local principal; MCP initialize uses the request
+ * identity so a hosted session prefetches its own bucket.
+ *
+ * @returns {void}
+ */
+function warmSiteCatalogs() {
+  try {
+    const sites = listResolvableSiteConfigs();
+    const identity = getRequestIdentity();
+    prefetchSiteCatalogs(sites, {
+      identity,
+      work: createSiteCatalogWork({ sites, identity }),
+    });
+  } catch {
+    // Config or site resolution can fail before listen; warming is best-effort.
+  }
+}
+
 async function discoverableTools() {
   const sites = listResolvableSiteConfigs();
   const identity = getRequestIdentity();
-  const governed = await filterDiscoverableTools(allDefinitions, sites);
+  const { siteDeadlineMs } = getCatalogDiscoveryOptions();
+  const [governed, moduleDefs] = await Promise.all([
+    filterDiscoverableTools(allDefinitions, sites, { timeoutMs: siteDeadlineMs }),
+    moduleTools.list({ sites, identity }),
+  ]);
   return [
     ...filterToolsByPrincipal(governed, sites, identity),
-    ...await moduleTools.list({ sites, identity }),
+    ...moduleDefs,
   ];
 }
 
@@ -242,6 +276,7 @@ function getPromptMessages(name, args) {
 
 const buildConnectorServer = createConnectorServerFactory({
   serverInfo: SERVER_INFO,
+  oninitialized: warmSiteCatalogs,
   tools: {
     definitions: allDefinitions,
     list: discoverableTools,
@@ -266,7 +301,9 @@ const buildConnectorServer = createConnectorServerFactory({
     definitionsByName,
     extraWorkflows: async (tools, taken) => {
       const loaded = loadWorkflows(
-        await moduleWorkflowProvidersWithRemote(listResolvableSiteConfigs()),
+        await moduleWorkflowProvidersWithRemote(listResolvableSiteConfigs(), {
+          identity: getRequestIdentity(),
+        }),
         { tools, taken },
       );
       replaceModuleWorkflows(loaded);
@@ -284,6 +321,8 @@ const transport = process.env.MCP_TRANSPORT || "stdio";
 const reportMcpTransportStage = (stage) => {
   console.error(`[drupal-mcp-connector] MCP ${stage} failed.`);
 };
+
+warmSiteCatalogs();
 
 if (transport === "stdio") {
   serveStdio(buildConnectorServer, {

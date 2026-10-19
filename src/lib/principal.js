@@ -19,7 +19,7 @@ import { inferOperation, isWriteLikeCall } from "./operations.js";
 import { POLICY_DIGEST } from "./policy-promotion.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
 import { networkToolScopeDenial, requiredScopesForTool } from "./tool-scopes.js";
-import { lookupWorkflow } from "./workflow-prompts.js";
+import { lookupWorkflow } from "./workflow-index.js";
 
 const identityStore = new AsyncLocalStorage();
 

@@ -15,6 +15,7 @@ vi.mock("../../src/lib/governance.js", async (original) => ({
 import { assertSourceGovernance } from "../../src/lib/governance.js";
 import { createModuleToolRegistry, configuredModuleTools } from "../../src/lib/module-tools.js";
 import { resetDataFlowBudgets } from "../../src/lib/data-flow.js";
+import { clearSiteCatalogCache } from "../../src/lib/site-catalog.js";
 
 const schema = {
   type: "object", required: ["id"], additionalProperties: false,
@@ -26,6 +27,7 @@ const rule = (name, operation = "read") => ({ name, operation, scope: "module_ac
 let list, call, registry;
 beforeEach(() => {
   resetDataFlowBudgets();
+  clearSiteCatalogCache();
   vi.clearAllMocks();
   vi.mocked(assertSourceGovernance).mockResolvedValue();
   state.sites = [{
@@ -235,6 +237,7 @@ describe("module-owned tool registry", () => {
     list.mockResolvedValueOnce({ tools: [], nextCursor: "" }).mockResolvedValueOnce({ tools: [remote("tool_api.asset")] });
     expect(await registry.list(context())).toHaveLength(1);
     expect(list.mock.calls[1][1]).toBe("");
+    clearSiteCatalogCache();
     list.mockResolvedValue({ tools: [], nextCursor: "again" });
     expect(await registry.list(context())).toEqual([]);
   });

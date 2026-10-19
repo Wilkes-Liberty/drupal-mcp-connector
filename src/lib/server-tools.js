@@ -25,11 +25,13 @@
 
 import fetch from "node-fetch";
 import { createHmac, randomBytes } from "node:crypto";
+import { catalogAwareTimeout } from "./catalog-signal.js";
 import { authHeadersAsync, clientHeaders, CLIENT_NAME, CLIENT_VERSION } from "./config.js";
+import { keepAliveAgentFor } from "./http-agents.js";
+import { invalidateSiteCatalogsForSite } from "./site-catalog.js";
 import { consumeBudgetIfEnforced, northboundHeaders, sourceBudgetDenial, getDataFlowContext } from "./data-flow.js";
 import { clearToken } from "./oauth.js";
 import { cleanErrorText, describeErrorBody } from "./error-body.js";
-import { combineAbortSignals } from "./abort-signals.js";
 import { GENERIC_PRINCIPAL_REFUSAL, mapPrincipalAbort, throwIfPrincipalAbort } from "./principal-context.js";
 import { getRequestAbortSignal } from "./principal.js";
 
@@ -153,10 +155,7 @@ export const SERVER_TOOL_TIMEOUT_MS = 15_000;
  * @returns {AbortSignal}
  */
 function serverToolAbortSignal() {
-  return combineAbortSignals(
-    AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS),
-    getRequestAbortSignal(),
-  ) ?? AbortSignal.timeout(SERVER_TOOL_TIMEOUT_MS);
+  return catalogAwareTimeout(SERVER_TOOL_TIMEOUT_MS, getRequestAbortSignal());
 }
 
 /** Fetch abort signal for a Response, so a kill during the body read remaps. */
@@ -173,7 +172,7 @@ const serverToolAbortByResponse = new WeakMap();
 async function fetchServerTool(endpoint, init) {
   const signal = serverToolAbortSignal();
   try {
-    const res = await fetch(endpoint, { ...init, signal });
+    const res = await fetch(endpoint, { ...init, agent: keepAliveAgentFor(endpoint), signal });
     serverToolAbortByResponse.set(res, signal);
     return res;
   } catch (err) {
@@ -539,14 +538,14 @@ export async function fetchSiteWorkflowPrompts(site, names, { list = listServerP
   const listed = await advertisedServerPrompts(site, list);
   const want = new Set(names ?? []);
   const bodies = new Map();
-  for (const prompt of listed) {
-    if (!want.has(prompt.name)) continue;
+  await Promise.all(listed.map(async (prompt) => {
+    if (!want.has(prompt.name)) return;
     try {
       bodies.set(prompt.name, await get(site, prompt.name));
     } catch {
       // Fail closed for this id: no body, so the merge will not list it.
     }
-  }
+  }));
   return { list: listed, bodies };
 }
 
@@ -592,6 +591,7 @@ async function requestServerTool(site, method, params, options) {
     if (isSessionError(res, body) && !reinitedSession && options.retryRejected !== false) {
       reinitedSession = true;
       sessions.delete(sessionKey);
+      invalidateSiteCatalogsForSite(site._name, getDataFlowContext()?.principalKey ?? null);
       sessionId = await ensureSession(site, endpoint, sessionKey);
       continue;
     }

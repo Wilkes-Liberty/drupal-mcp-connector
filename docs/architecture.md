@@ -333,4 +333,11 @@ interface SiteConfig {
 }
 ```
 
-Top-level config also accepts `defaultSite`, a `tls` block (`certPath`/`keyPath`/`port`) for the HTTPS transport, and `sites` (the map above). See [config.example.json](../config/config.example.json).
+Top-level config also accepts `defaultSite`, a `tls` block
+(`certPath`/`keyPath`/`port`) for the HTTPS transport, `catalogDiscovery`
+(`siteDeadlineMs` listing wait, `cacheTtlMs` success TTL with
+stale-while-revalidate, `negativeTtlMs` error TTL, `concurrency` — DEV-1019;
+env `MCP_CATALOG_SITE_DEADLINE_MS`, `MCP_CATALOG_CACHE_TTL_MS`,
+`MCP_CATALOG_NEGATIVE_TTL_MS`, `MCP_CATALOG_CONCURRENCY`), and `sites` (the
+map above). See
+[config.example.json](../config/config.example.json).

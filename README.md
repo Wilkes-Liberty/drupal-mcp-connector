@@ -256,6 +256,15 @@ Hosted `/mcp` Origin allowlist (DEV-953): `https://cursor.com`, `https://www.cur
 entry — this repo does not submit listings. If the client only shows
 `drupal_list_sites` and `drupal_governance_status`, run `doctor`.
 
+`tools/list` and `prompts/list` walk sites concurrently. A listing waits up
+to 4s (`catalogDiscovery.siteDeadlineMs` / `MCP_CATALOG_SITE_DEADLINE_MS`)
+and returns built-ins plus ready snapshots; not-yet-ready sites are omitted
+from that response. The wait does not abort the site chain. Catalogs warm at
+process start and on MCP initialize, finish in the background, and emit
+`list_changed` when the advertised set changes. The first list is not the
+full multi-site catalog unless every site finishes inside the wait. See
+[docs/module-tools.md](docs/module-tools.md).
+
 ### Cursor plugin (stdio)
 
 Local skeleton only (`.cursor-plugin/plugin.json` + root `mcp.json`): the client

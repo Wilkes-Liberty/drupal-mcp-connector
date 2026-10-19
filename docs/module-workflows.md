@@ -34,7 +34,9 @@ The loader therefore takes definitions from:
    local config already named. Remote instruction text is the source of truth
    when the catalog returns that id; a local body remains the fallback when
    the catalog omits it or the fetch fails. A remote prompt that is not named
-   locally is ignored.
+   locally is ignored. Site walks are concurrent and share the listing catalog
+   cache with `tools/list` (DEV-1019). A site that misses its deadline is
+   omitted and the local body remains the fallback.
 
 A remote catalog cannot add tools the local policy did not approve, and
 local config cannot enable a remote workflow whose named tools are not
