@@ -145,14 +145,14 @@ the site and the reason (no secrets). The full source catalog is stored;
 `allowed()` and governance re-checks run at list time.
 
 **Order on each site:** source-governance (cached verdict, or a readiness
-probe raced under a 4s shared deadline across sites), then the Drupal
-handshake / `tools/list` and the prompt hops start together. `onTools` /
-`notifications/tools/list_changed` fire when `tools/list` returns.
-`notifications/prompts/list_changed` follows the prompt hop. Prompt hops
-overlap the handshake; they do not open `/mcp` until governance has
-resolved. A site is not advertised until governance allows it.
-Notifications coalesce to about one per kind per burst (`listChanged: true`
-on both capabilities).
+probe raced under a 4s shared deadline across sites) → Drupal `tools/list`
+(`onTools` / `notifications/tools/list_changed` as soon as that hop
+returns); prompt hops (`prompts/list` / `prompts/get`) start after
+governance and overlap the Drupal handshake, then
+`notifications/prompts/list_changed`. Prompt hops do not open `/mcp` until
+governance has resolved. A site is not advertised until governance allows
+it. Notifications coalesce to about one per kind per burst
+(`listChanged: true` on both capabilities).
 
 `list_changed` delivery is per session, not process-global:
 

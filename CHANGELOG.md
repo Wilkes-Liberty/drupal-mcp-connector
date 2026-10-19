@@ -81,6 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warm at process start and on MCP initialize. Full wait matrix, cache
   TTLs, and session-delivery rules:
   [docs/module-tools.md](docs/module-tools.md#catalog-listing-dev-1019).
+- **DEV-1019 catalog order docs (#502).** The `site-catalog` module docblock and
+  the catalog-listing section now match the code: prompt hops start after
+  source governance and overlap the Drupal handshake / `tools/list`.
 
 ## [5.3.0] - 2026-10-18
 
