@@ -11,20 +11,6 @@ import { CLIENT_VERSION } from "./config.js";
 import { isOpsBindAllowed, opsBindRefusedReason, resolveOpsListen } from "./ops-bind.js";
 import { createReadyChecker, readyBody } from "./ops-ready.js";
 
-/** Paths that exist only on the ops listener. */
-export const OPS_PATHS = Object.freeze(["/ready", "/metrics"]);
-
-/**
- * Whether `path` is an ops-only route (`/ready`, `/metrics`).
- *
- * @param {unknown} path
- * @returns {boolean}
- */
-export function isOpsPath(path) {
-  const raw = String(path || "").split("?")[0];
-  return OPS_PATHS.includes(raw);
-}
-
 /**
  * @param {unknown} url
  * @returns {string}

@@ -34,15 +34,6 @@ export function pascalToSnake(s) {
 }
 
 /**
- * Convert a snake_case machine name to PascalCase.
- * @param {string} s e.g. "basic_page".
- * @returns {string} e.g. "BasicPage".
- */
-export function snakeToPascal(s) {
-  return s.split("_").map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
-}
-
-/**
  * Map a graphql_compose type name to its Drupal entityType/bundle.
  * @param {string} typeName e.g. "NodeArticle".
  * @returns {{entityType: string, bundle: string}|null} Pair, or null when the

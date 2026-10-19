@@ -16,11 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `drushSsh.rawSql` + `mcp-sentinel:sql-query` residual. Stale
   "1.0 hardening pass" / "this pass" / "post 2.2" wording and the
   "MCP 2.0.0 packages" line are gone.
+- Rate-limit and session-key comments name `iss|sub|actor` (not the
+  retired `sub`+`clientId` formula). HTTP audit sanitization no longer
+  uses an empty `if` to keep a numeric status.
 
 ### Removed
 
 - Unused SSH-arg escaper, process-wide in-flight registry getter, and
   live-introspect binder. No call sites remained.
+- Unused leftover production exports: `READY_CHECK_NAMES`, `OPS_PATHS` /
+  `isOpsPath`, `snakeToPascal`, `isTrustedProxy`,
+  `rewriteWorkingCopyPatchError`, `isJsonRpcNotification` /
+  `isJsonRpcResponse`, and `quotasRequired`. No production call sites
+  remained.
 
 ### Added
 

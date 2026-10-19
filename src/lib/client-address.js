@@ -123,18 +123,6 @@ export function resolveTrustedProxies({ trustedProxies, env = process.env } = {}
 }
 
 /**
- * Whether `address` is on the trusted-proxy list (exact IP or CIDR).
- *
- * @param {unknown} address
- * @param {readonly string[]} [proxies]
- * @returns {boolean}
- */
-export function isTrustedProxy(address, proxies = []) {
-  if (!proxies.length) return false;
-  return createTrustedProxyMatcher(proxies)(address);
-}
-
-/**
  * Build a matcher for a trusted-proxy list. Prefer this when checking many
  * addresses against the same list.
  *

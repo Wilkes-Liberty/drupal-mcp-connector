@@ -301,9 +301,7 @@ export function sanitizeHttpAuditRow(row, secrets = []) {
     else if (key === "toolOutcome" && TOOL_OUTCOMES.has(bag.get(key))) out.toolOutcome = bag.get(key);
   }
   if (!CODE_SET.has(out.code)) out.code = "forbidden";
-  if (typeof out.status === "number") {
-    // keep
-  } else if (out.status !== undefined) {
+  if (typeof out.status !== "number" && out.status !== undefined) {
     const n = Number(out.status);
     if (Number.isFinite(n)) out.status = n;
     else delete out.status;

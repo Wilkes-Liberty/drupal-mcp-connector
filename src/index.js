@@ -314,7 +314,7 @@ if (transport === "stdio") {
   const inboundCfg = resolveInboundAuthConfig(config);
   // Fixed-window rate limiting on /mcp (DEV-860). Unauthenticated requests
   // are keyed by client address before auth; authenticated requests are keyed
-  // by the verified principal (sub+clientId). Limits, window, and the
+  // by the verified principal (iss|sub|actor). Limits, window, and the
   // non-loopback TLS default (120/min, #141) are resolved once in
   // createStartupRateLimiters and only logged here. Counts are per-process;
   // multi-replica should also rate-limit at the reverse proxy.

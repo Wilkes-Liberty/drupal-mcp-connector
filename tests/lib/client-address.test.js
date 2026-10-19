@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  isTrustedProxy,
+  createTrustedProxyMatcher,
   normalizeIp,
   parseForwardedFor,
   parseTrustedProxies,
@@ -63,12 +63,12 @@ describe("parseTrustedProxies / resolveTrustedProxies", () => {
     // would reach BlockList as /0 and trust every peer.
     for (const bad of ["10.0.0.0/", "10.0.0.0/0x0", "10.0.0.0/0e0", "10.0.0.0/1e1", "10.0.0.0/+8", "10.0.0.0/-0", "10.0.0.0/ 8", "10.0.0.0/8.0", "2001:db8::/0x40"]) {
       expect(parseTrustedProxies([bad]), bad).toEqual([]);
-      expect(isTrustedProxy("8.8.8.8", [bad]), bad).toBe(false);
-      expect(isTrustedProxy("2001:db8::1", [bad]), bad).toBe(false);
+      expect(createTrustedProxyMatcher([bad])("8.8.8.8"), bad).toBe(false);
+      expect(createTrustedProxyMatcher([bad])("2001:db8::1"), bad).toBe(false);
     }
     expect(parseTrustedProxies(["10.0.0.0/0", "10.0.0.0/08", "2001:db8::/64"])).toEqual(["10.0.0.0/0", "10.0.0.0/08", "2001:db8::/64"]);
-    expect(isTrustedProxy("8.8.8.8", ["10.0.0.0/0"])).toBe(true);
-    expect(isTrustedProxy("10.3.0.1", ["10.0.0.0/08"])).toBe(true);
+    expect(createTrustedProxyMatcher(["10.0.0.0/0"])("8.8.8.8")).toBe(true);
+    expect(createTrustedProxyMatcher(["10.0.0.0/08"])("10.3.0.1")).toBe(true);
   });
 
   it("lets MCP_TRUSTED_PROXIES replace the configured list, including empty", () => {
@@ -83,12 +83,12 @@ describe("parseTrustedProxies / resolveTrustedProxies", () => {
   });
 });
 
-describe("isTrustedProxy", () => {
+describe("createTrustedProxyMatcher", () => {
   it("matches exact IPs and CIDR ranges", () => {
-    expect(isTrustedProxy("10.0.0.1", ["10.0.0.1"])).toBe(true);
-    expect(isTrustedProxy("10.1.2.3", ["10.1.0.0/16"])).toBe(true);
-    expect(isTrustedProxy("192.0.2.1", ["10.0.0.0/8"])).toBe(false);
-    expect(isTrustedProxy("203.0.113.9", [])).toBe(false);
+    expect(createTrustedProxyMatcher(["10.0.0.1"])("10.0.0.1")).toBe(true);
+    expect(createTrustedProxyMatcher(["10.1.0.0/16"])("10.1.2.3")).toBe(true);
+    expect(createTrustedProxyMatcher(["10.0.0.0/8"])("192.0.2.1")).toBe(false);
+    expect(createTrustedProxyMatcher([])("203.0.113.9")).toBe(false);
   });
 });
 

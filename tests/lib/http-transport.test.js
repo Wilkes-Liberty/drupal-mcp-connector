@@ -5,8 +5,6 @@ import {
   MCP_PROTOCOL_VERSIONS,
   acceptIncludes,
   isJsonRpcBatch,
-  isJsonRpcNotification,
-  isJsonRpcResponse,
   isSupportedProtocolVersion,
   mcpAcceptOk,
   normalizeOrigin,
@@ -237,12 +235,8 @@ describe("http-transport helpers", () => {
     expect(parseHostHeader("[fe80::1%25eth0]:3443")).toBeNull();
   });
 
-  it("detects JSON-RPC batches, notifications, and responses", () => {
+  it("detects JSON-RPC batches", () => {
     expect(isJsonRpcBatch([{ jsonrpc: "2.0", id: 1, method: "ping" }])).toBe(true);
     expect(isJsonRpcBatch({ jsonrpc: "2.0", id: 1, method: "ping" })).toBe(false);
-    expect(isJsonRpcNotification({ jsonrpc: "2.0", method: "notifications/initialized" })).toBe(true);
-    expect(isJsonRpcNotification({ jsonrpc: "2.0", id: 1, method: "ping" })).toBe(false);
-    expect(isJsonRpcResponse({ jsonrpc: "2.0", id: 1, result: {} })).toBe(true);
-    expect(isJsonRpcResponse({ jsonrpc: "2.0", id: 1, method: "ping" })).toBe(false);
   });
 });

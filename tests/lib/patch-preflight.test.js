@@ -9,7 +9,6 @@ import {
   STALE_COPY_CODE,
   STALE_COPY_MESSAGE,
   isWorkingCopyPatchError,
-  rewriteWorkingCopyPatchError,
   shouldPreflightPatch,
   preflightPatchWritable,
   prepareGuardedPatch,
@@ -56,10 +55,10 @@ function backendStub(over = {}) {
   };
 }
 
-describe("working-copy PATCH error rewrite (#201)", () => {
-  it("recognises core's working-copy 400 and rewrites it", () => {
+describe("working-copy PATCH error (#201)", () => {
+  it("recognises core's working-copy 400", () => {
     expect(isWorkingCopyPatchError(WC_400)).toBe(true);
-    const rewritten = rewriteWorkingCopyPatchError(WC_400);
+    const rewritten = new PatchBlockedError(WC_400);
     expect(rewritten).toBeInstanceOf(PatchBlockedError);
     expect(rewritten.code).toBe(PATCH_BLOCKED_CODE);
     expect(rewritten.message).toBe(PATCH_BLOCKED_MESSAGE);
@@ -71,7 +70,6 @@ describe("working-copy PATCH error rewrite (#201)", () => {
   it("leaves unrelated errors alone", () => {
     const other = new Error("Drupal 422 on PATCH: title is required");
     expect(isWorkingCopyPatchError(other)).toBe(false);
-    expect(rewriteWorkingCopyPatchError(other)).toBe(other);
   });
 });
 

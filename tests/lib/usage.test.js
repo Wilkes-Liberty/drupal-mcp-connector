@@ -14,7 +14,6 @@ import {
   createQuotaGate,
   createUsageLedger,
   normalizeQuotas,
-  quotasRequired,
   readUsage,
   reconcileUsage,
   usagePrincipalKey,
@@ -80,15 +79,15 @@ describe("usagePrincipalKey / attributedTenant", () => {
   });
 });
 
-describe("normalizeQuotas / quotasRequired", () => {
+describe("normalizeQuotas", () => {
   it("treats a missing or comment-only table as omitted", () => {
     expect(normalizeQuotas(null)).toBeNull();
     expect(normalizeQuotas(undefined)).toBeNull();
     expect(normalizeQuotas({ _comment: "x" })).toBeNull();
     expect(normalizeQuotas({ tenants: { _comment: "x" } })).toBeNull();
-    expect(quotasRequired(null)).toBe(false);
-    expect(quotasRequired({ _comment: "x" })).toBe(false);
-    expect(quotasRequired({ tenants: { _comment: "x" } })).toBe(false);
+    expect(normalizeQuotas(null) !== null).toBe(false);
+    expect(normalizeQuotas({ _comment: "x" }) !== null).toBe(false);
+    expect(normalizeQuotas({ tenants: { _comment: "x" } }) !== null).toBe(false);
   });
 
   it("keeps well-formed rows and defaults the window", () => {
@@ -123,13 +122,13 @@ describe("normalizeQuotas / quotasRequired", () => {
       .toEqual({ invalid: true, reason: "tenants.tenant-obj" });
     expect(normalizeQuotas({ principals: { "sub-a": { requests: 1, windowSec: 0 } } }))
       .toEqual({ invalid: true, reason: "principals.sub-a.windowSec" });
-    expect(quotasRequired({ tenants: { "tenant-bad": { requests: 0 } } })).toBe(true);
+    expect(normalizeQuotas({ tenants: { "tenant-bad": { requests: 0 } } }) !== null).toBe(true);
   });
 
   it("flags a present table that is not an object as invalid, never as omitted", () => {
     for (const raw of ["oops", [], [{ tenants: {} }], 5, true, false]) {
       expect(normalizeQuotas(raw)).toEqual({ invalid: true, reason: "quotas" });
-      expect(quotasRequired(raw)).toBe(true);
+      expect(normalizeQuotas(raw) !== null).toBe(true);
     }
   });
 
@@ -143,7 +142,7 @@ describe("normalizeQuotas / quotasRequired", () => {
       .toEqual({ invalid: true, reason: "principal" });
     expect(normalizeQuotas({ abuseLock: { denials: 3 } }))
       .toEqual({ invalid: true, reason: "abuseLock" });
-    expect(quotasRequired({ tenants: "oops" })).toBe(true);
+    expect(normalizeQuotas({ tenants: "oops" }) !== null).toBe(true);
   });
 
   it("flags a malformed abuse block instead of inventing defaults", () => {

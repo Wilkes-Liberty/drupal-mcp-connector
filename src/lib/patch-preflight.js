@@ -210,17 +210,6 @@ export function isWorkingCopyPatchError(err) {
 }
 
 /**
- * Rewrite a core working-copy 400 into {@link PatchBlockedError}; otherwise
- * return the original value. Used only for the stray-revision (#201) case.
- * @param {unknown} err
- * @returns {unknown}
- */
-export function rewriteWorkingCopyPatchError(err) {
-  if (!isWorkingCopyPatchError(err)) return err;
-  return new PatchBlockedError(err instanceof Error ? err : new Error(String(err)));
-}
-
-/**
  * Load `rel:working-copy` so a write can target the pending draft (#166).
  * @param {object} backend
  * @param {{entityType: string, bundle: string, id: string}} ref
