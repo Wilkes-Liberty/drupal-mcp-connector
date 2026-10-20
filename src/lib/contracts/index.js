@@ -43,4 +43,4 @@ export { createMemoryApproval } from "./approval.js";
 export { createMemoryEvidenceSink, requiresEvidence } from "./evidence-sink.js";
 export { bindApprovalForExecute, comparePostconditions } from "./system-of-record.js";
 export { createMemoryBackend } from "./fixtures.js";
-export { createDrupalAdapter, mapDrupalAction } from "./drupal.js";
+export { createDrupalAdapter } from "./drupal.js";

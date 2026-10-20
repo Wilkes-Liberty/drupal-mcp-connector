@@ -96,7 +96,7 @@ const UNREACHABLE_CODES = new Set([
  * @param {string[]} argv
  * @returns {Record<string, string|boolean|string[]>}
  */
-export function parseWizardArgs(argv) {
+function parseWizardArgs(argv) {
   const args = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];

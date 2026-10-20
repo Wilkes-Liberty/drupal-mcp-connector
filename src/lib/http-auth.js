@@ -371,7 +371,7 @@ export function denyUnavailable({
  * @param {object} identity
  * @returns {{ok: true, identity: object}}
  */
-export function allowAuth(identity) {
+function allowAuth(identity) {
   return { ok: true, identity };
 }
 
@@ -381,7 +381,7 @@ export function allowAuth(identity) {
  * @param {unknown} value
  * @returns {number}
  */
-export function normalizeMaxTokenLifetime(value) {
+function normalizeMaxTokenLifetime(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return DEFAULT_MAX_TOKEN_LIFETIME;
   return Math.floor(n);
@@ -395,7 +395,7 @@ export function normalizeMaxTokenLifetime(value) {
  * @param {unknown} value
  * @returns {string[]}
  */
-export function normalizeTokenAlgorithms(value) {
+function normalizeTokenAlgorithms(value) {
   const explicit = Array.isArray(value) || (typeof value === "string" && value.trim());
   let list;
   if (Array.isArray(value)) {
@@ -419,7 +419,7 @@ export function normalizeTokenAlgorithms(value) {
  * @param {unknown} value
  * @returns {number}
  */
-export function normalizeIntrospectionTimeoutMs(value) {
+function normalizeIntrospectionTimeoutMs(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return DEFAULT_INTROSPECTION_TIMEOUT_MS;
   return Math.floor(n);
@@ -921,7 +921,7 @@ export const NETWORK_INTROSPECTION_REQUIRED_REASON =
  * @param {object|null|undefined} resourceServer
  * @returns {boolean}
  */
-export function hasCompleteNetworkResourceServer(resourceServer) {
+function hasCompleteNetworkResourceServer(resourceServer) {
   return Boolean(
     resourceServer?.issuer
     && resourceServer?.audience

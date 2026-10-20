@@ -45,7 +45,7 @@ const SKIPPED = "skipped";
 /** Probe timeout. Matches wizard (do not hang CI). */
 const PROBE_TIMEOUT_MS = 4_000;
 
-export const DOCTOR_USAGE = `drupal-mcp-connector doctor
+const DOCTOR_USAGE = `drupal-mcp-connector doctor
 
 Diagnose the first failing connection gate and print the exact next fix.
 
@@ -69,7 +69,7 @@ ${formatTransportPresetHelp()}
  * @param {string[]} argv
  * @returns {object}
  */
-export function parseDoctorArgs(argv) {
+function parseDoctorArgs(argv) {
   const args = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];

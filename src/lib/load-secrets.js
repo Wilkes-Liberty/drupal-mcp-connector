@@ -82,7 +82,7 @@ export function namedSecretEnvVars(cfg) {
  * @param {string} item
  * @returns {string}
  */
-export function lookupKeychainItem(item) {
+function lookupKeychainItem(item) {
   if (process.platform !== "darwin" || !item) return "";
   try {
     const value = execFileSync("security", ["find-generic-password", "-s", item, "-w"], {

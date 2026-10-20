@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Unused leftover production exports: `resetKeepAliveAgents` and the
+  same-file-only helpers left public after #496 (`ALLOWED_HANDLER_OVERRIDE_KEYS`,
+  `assertHandlerOverrides`, `plainHttpNonLoopbackReason`,
+  `applyHttpsSecurityHeaders`, `USAGE_PHASES` / `USAGE_DECISIONS` /
+  `RECEIPT_OUTCOMES`, `assertBundleAllowed` / `assertOperationAllowed`,
+  `keepAliveHttpAgent` / `keepAliveHttpsAgent`, `parseWizardArgs`,
+  `DOCTOR_USAGE` / `parseDoctorArgs`, `mapDrupalAction`,
+  `lookupKeychainItem`, `firstEnabledModuleEntry`, `allowAuth`,
+  inbound-auth `normalize*` helpers, and `hasCompleteNetworkResourceServer`).
+  Implementations stay except `resetKeepAliveAgents`. No production call
+  sites remained.
+
 ## [5.4.0] - 2026-10-19
 
 ### Added
