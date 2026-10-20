@@ -198,7 +198,7 @@ function bindingScopeMatches(policy, required) {
  * @param {object|null} [grants]
  * @returns {object|null}
  */
-export function firstEnabledModuleEntry(site, identity, sites, grants) {
+function firstEnabledModuleEntry(site, identity, sites, grants) {
   return [...entries([site]).values()].find((entry) => allowed(entry, identity, sites, grants)) ?? null;
 }
 

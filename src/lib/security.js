@@ -861,7 +861,7 @@ export function assertEntityTypeAllowed(secConfig, entityType) {
  * @returns {void} No-op when the entity type has no bundle rules.
  * @throws {SecurityError} if the bundle is denied, or not in a configured allowlist.
  */
-export function assertBundleAllowed(secConfig, entityType, bundle) {
+function assertBundleAllowed(secConfig, entityType, bundle) {
   const rules = new Map(Object.entries(secConfig.entityRules)).get(entityType);
   if (!rules) return; // no rules = allowed
 
@@ -887,7 +887,7 @@ export function assertBundleAllowed(secConfig, entityType, bundle) {
  * @returns {void} No-op when the type has no allowedOperations restriction.
  * @throws {SecurityError} if the operation is not in the type's allowedOperations.
  */
-export function assertOperationAllowed(secConfig, operation, entityType) {
+function assertOperationAllowed(secConfig, operation, entityType) {
   const rules = new Map(Object.entries(secConfig.entityRules)).get(entityType);
   if (!rules?.allowedOperations) return; // no restriction
 

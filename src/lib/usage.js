@@ -20,16 +20,16 @@ import { randomUUID } from "node:crypto";
 import { createRateLimiter } from "./rate-limit.js";
 
 /** Record phases. A denied decision never has a receipt. */
-export const USAGE_PHASES = Object.freeze(["decision", "receipt"]);
+const USAGE_PHASES = Object.freeze(["decision", "receipt"]);
 
 /** Decision vocabulary at the edge. */
-export const USAGE_DECISIONS = Object.freeze(["allow", "deny"]);
+const USAGE_DECISIONS = Object.freeze(["allow", "deny"]);
 
 /**
  * Receipt outcomes. `unknown` means the frame crossed but no settled
  * response came back — the tenant may have executed the request.
  */
-export const RECEIPT_OUTCOMES = Object.freeze(["ok", "failed", "unknown"]);
+const RECEIPT_OUTCOMES = Object.freeze(["ok", "failed", "unknown"]);
 
 const PHASE_SET = new Set(USAGE_PHASES);
 const DECISION_SET = new Set(USAGE_DECISIONS);

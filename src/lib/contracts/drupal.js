@@ -235,7 +235,7 @@ export function createDrupalAdapter(options = {}) {
  * @param {object} proposal
  * @returns {string}
  */
-export function mapDrupalAction(proposal = {}) {
+function mapDrupalAction(proposal = {}) {
   const operation = String(proposal.operation ?? "read");
   const entityType = String(proposal.entityType ?? "");
   if (

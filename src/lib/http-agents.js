@@ -16,25 +16,11 @@ const AGENT_OPTIONS = Object.freeze({
   timeout: 60_000,
 });
 
-function createAgents() {
-  return {
-    http: new http.Agent(AGENT_OPTIONS),
-    https: new https.Agent(AGENT_OPTIONS),
-  };
-}
-
-let agents = createAgents();
-
 /** Shared HTTP keep-alive agent. */
-export let keepAliveHttpAgent = agents.http;
+const keepAliveHttpAgent = new http.Agent(AGENT_OPTIONS);
 
 /** Shared HTTPS keep-alive agent. */
-export let keepAliveHttpsAgent = agents.https;
-
-function bindExports() {
-  keepAliveHttpAgent = agents.http;
-  keepAliveHttpsAgent = agents.https;
-}
+const keepAliveHttpsAgent = new https.Agent(AGENT_OPTIONS);
 
 /**
  * Pick the keep-alive agent for a request URL.
@@ -66,15 +52,4 @@ export function destroyKeepAliveAgents() {
   } catch {
     // Already torn down.
   }
-}
-
-/**
- * Recreate keep-alive agents after destroy (tests).
- *
- * @returns {void}
- */
-export function resetKeepAliveAgents() {
-  destroyKeepAliveAgents();
-  agents = createAgents();
-  bindExports();
 }

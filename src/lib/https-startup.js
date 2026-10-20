@@ -29,7 +29,7 @@ import { createHttpRateLimiters, resolveHttpRateLimitOptions } from "./rate-limi
  * dedicated options so a spread cannot drop the #451 writer or unauthenticate
  * `/mcp` (DEV-866 review L1).
  */
-export const ALLOWED_HANDLER_OVERRIDE_KEYS = Object.freeze([
+const ALLOWED_HANDLER_OVERRIDE_KEYS = Object.freeze([
   "originAllowedFn",
   "protocolVersionSupportedFn",
   "acceptOkFn",
@@ -124,7 +124,7 @@ const FORBIDDEN_HANDLER_OVERRIDE_KEYS = Object.freeze([
  *
  * @param {object} [overrides]
  */
-export function assertHandlerOverrides(overrides = {}) {
+function assertHandlerOverrides(overrides = {}) {
   if (overrides === null || overrides === undefined || typeof overrides !== "object" || Array.isArray(overrides)) {
     throw new Error("handlerOverrides must be an object");
   }
@@ -173,7 +173,7 @@ function pickHandlerOverrides(overrides = {}) {
  * @param {string} bindHost
  * @returns {string}
  */
-export function plainHttpNonLoopbackReason(bindHost) {
+function plainHttpNonLoopbackReason(bindHost) {
   return `Plain HTTP binds loopback only; refusing to listen on ${bindHost} without TLS certificates.`;
 }
 
@@ -221,7 +221,7 @@ function invokeOnRequest(onRequest, req, res) {
  *
  * @param {import("http").ServerResponse} res
  */
-export function applyHttpsSecurityHeaders(res) {
+function applyHttpsSecurityHeaders(res) {
   res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
