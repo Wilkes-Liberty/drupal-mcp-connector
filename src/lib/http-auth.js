@@ -9,8 +9,14 @@
  *     positive cache: a revoke takes effect on the next call. Introspection
  *     unreachable / timeout / error is 503 and does not dispatch; inactive is
  *     401. `iss` must be present and equal the configured issuer; audience is
- *     an exact match against the one configured plane. JWT algorithms are
- *     pinned (`none` never; `HS*` only when explicitly configured). The
+ *     an exact match against the one configured plane. On the network path a
+ *     compact JWS is also verified locally when JWKS is reachable: the signed
+ *     `aud` is the resource-server check (Keycloak introspection often returns
+ *     only `account`). A verified JWT whose `aud` is the wrong plane is 401
+ *     even if introspection names the configured audience. JWKS/network
+ *     failures still fall back to introspection claims (DEV-844). JWT
+ *     algorithms are pinned (`none` never; `HS*` only when explicitly
+ *     configured). The
  *     revocation file is not an authority on network admission. Stdio has
  *     no bearer authentication and no revocation path. Bearer tokens must
  *     carry `exp` and `iat` and stay within `auth.maxTokenLifetime`.
@@ -35,6 +41,14 @@ export const INBOUND_IDP_TIMEOUT_MS = 30_000;
  * be slower. There is no positive cache.
  */
 export const DEFAULT_INTROSPECTION_TIMEOUT_MS = 2000;
+
+/**
+ * Optional local JWT verify on the network path (DEV-1052). JWKS
+ * unavailability must not stall admission: introspection remains the
+ * gate (DEV-844). Claim-validation failures (`aud` / `iss`) still deny
+ * immediately.
+ */
+export const NETWORK_JWT_VERIFY_BUDGET_MS = 2000;
 
 /**
  * In-process guard (DEV-844). Production leaves `required` true. The only
@@ -492,10 +506,65 @@ export function compactJwtAlgorithmRefusal(token, allowedAlgs) {
   return null;
 }
 
+/**
+ * Compare a token `aud` to the one configured resource identifier.
+ * Arrays must include that identifier. A space-delimited string (some
+ * RFC 7662 responses) is split. Trailing slashes are ignored so
+ * `https://host/mcp` and `https://host/mcp/` are the same plane; the
+ * staging and production hosted URLs still do not match each other.
+ *
+ * @param {unknown} aud
+ * @param {string} expected
+ * @returns {boolean}
+ */
 function audienceMatches(aud, expected) {
-  if (aud === undefined || aud === null) return false;
-  if (Array.isArray(aud)) return aud.includes(expected);
-  return aud === expected;
+  if (!expected) return false;
+  const want = String(expected).replace(/\/+$/, "");
+  const entries = Array.isArray(aud)
+    ? aud.map(String).filter(Boolean)
+    : (typeof aud === "string" && aud.includes(" ")
+      ? aud.split(/\s+/).filter(Boolean)
+      : (aud === undefined || aud === null ? [] : [String(aud)]));
+  return entries.some((item) => item.replace(/\/+$/, "") === want);
+}
+
+/**
+ * jose claim-validation failures on `aud` / `iss` are policy denies.
+ * JWKS timeouts and transport errors are not — those fall back to
+ * introspection (DEV-844).
+ *
+ * @param {unknown} err
+ * @returns {?string}
+ */
+function networkJwtPolicyRefusal(err) {
+  if (!err || typeof err !== "object") return null;
+  const code = "code" in err ? err.code : "";
+  const claim = "claim" in err ? err.claim : "";
+  if (code !== "ERR_JWT_CLAIM_VALIDATION_FAILED") return null;
+  if (claim === "aud") return "Audience mismatch";
+  if (claim === "iss") return "Issuer mismatch";
+  return null;
+}
+
+/**
+ * Bound an optional JWT verify so a hung JWKS fetch cannot stall the
+ * introspection path.
+ *
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} budgetMs
+ * @returns {Promise<T>}
+ */
+function withVerifyBudget(promise, budgetMs) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error("JWKS verification budget exceeded");
+      err.name = "AbortError";
+      reject(err);
+    }, budgetMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function normalizeIssuer(issuer) {
@@ -508,6 +577,24 @@ function isHttpsUrl(value) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Compare RFC 9728 resource identifiers / token audiences. Trailing
+ * slashes on the path are ignored; host and path must still match.
+ *
+ * @param {string} value
+ * @returns {string}
+ */
+function normalizeResourceIdentifier(value) {
+  const url = new URL(String(value));
+  url.hash = "";
+  url.search = "";
+  const path = url.pathname.replace(/\/+$/, "");
+  url.pathname = path === "" ? "/" : path;
+  return path === "" || path === "/"
+    ? url.origin
+    : `${url.origin}${url.pathname}`;
 }
 
 /**
@@ -780,6 +867,20 @@ export function createResourceAuthenticator({
       }
       if (!claims) {
         return fail(401, { error: "invalid_token", errorDescription: "Token is not active" });
+      }
+      // Prefer the signed JWT for iss/aud when verification succeeds.
+      // Introspection stays the admission gate (active / 503). A JWT
+      // whose aud is the wrong plane is refused even if introspection
+      // names this resource — that is the Paladin staging-vs-prod miss.
+      if ((jwks || verifyJwt) && token.split(".").length === 3) {
+        try {
+          claims = await withVerifyBudget(claimsFromJwt(token), NETWORK_JWT_VERIFY_BUDGET_MS);
+        } catch (err) {
+          const policy = networkJwtPolicyRefusal(err);
+          if (policy) {
+            return fail(401, { error: "invalid_token", errorDescription: policy });
+          }
+        }
       }
     } else {
       let jwtOk = false;
@@ -1108,6 +1209,14 @@ export async function createInboundHttpsAuth({ inboundCfg, fetchFn = fetch }) {
   const resource = inboundCfg.resource || inboundCfg.audience;
   if (!isHttpsUrl(resource)) {
     throw new Error("auth.resource (or auth.audience) must be an https URL");
+  }
+  if (inboundCfg.resource && inboundCfg.audience
+    && normalizeResourceIdentifier(inboundCfg.resource)
+      !== normalizeResourceIdentifier(inboundCfg.audience)) {
+    throw new Error(
+      "auth.resource must equal auth.audience so the RFC 9728 resource "
+      + "identifier matches the token audience (RFC 8707)",
+    );
   }
   if (!isHttpsUrl(inboundCfg.issuer)) {
     throw new Error("auth.issuer must be an https URL");

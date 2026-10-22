@@ -1049,6 +1049,26 @@ describe("discoverAuthorizationServer / introspectToken", () => {
       .rejects.toThrow(/metadata not found/);
   });
 
+  it("refuses to start when auth.resource and auth.audience name different planes", async () => {
+    await expect(createInboundHttpsAuth({
+      inboundCfg: {
+        issuer: "https://idp.example.com",
+        audience: "https://mcp.staging.example.com/mcp",
+        resource: "https://mcp.example.com/mcp",
+        introspectionUrl: "https://idp.example.com/introspect",
+        introspectionClientId: "rs",
+        introspectionClientSecret: "rs-secret",
+      },
+      fetchFn: async () => ({
+        ok: true,
+        json: async () => ({
+          issuer: "https://idp.example.com",
+          jwks_uri: "https://idp.example.com/jwks",
+        }),
+      }),
+    })).rejects.toThrow(/auth\.resource must equal auth\.audience/);
+  });
+
   it("refuses to start a resource server against an HTTP issuer", async () => {
     await expect(createInboundHttpsAuth({
       inboundCfg: {
