@@ -16,7 +16,7 @@ import { assertTestOnly } from "./test-only.js";
  * In-process write re-introspection guard. Production leaves `required`
  * true. Tests call {@link setWriteReintrospectGuard} for a red run.
  */
-export const WRITE_REINTROSPECT_GUARD = { required: true };
+const WRITE_REINTROSPECT_GUARD = { required: true };
 
 /**
  * Per-branch skips for red companions. Production leaves every flag
@@ -104,7 +104,7 @@ export function introspectionAllowsWrite(body) {
  * always returns false. A test-only red path can force the cache so
  * the deny test can fail.
  */
-export const WRITE_INTROSPECT_CACHE = { useReadyCache: false };
+const WRITE_INTROSPECT_CACHE = { useReadyCache: false };
 
 /**
  * Flip the write-path cache consult for a red-run. Production never

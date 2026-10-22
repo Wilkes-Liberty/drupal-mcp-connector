@@ -42,7 +42,7 @@ export function isLocalOperator(identity) {
 }
 
 /** Caller fields that look like a target but are never authority. */
-export const TARGET_HINT_KEYS = Object.freeze(["site", "environment", "tenant", "target"]);
+const TARGET_HINT_KEYS = Object.freeze(["site", "environment", "tenant", "target"]);
 
 const ACTOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Unused leftover production exports (second wave after #503): same-file
+  helpers and constants that nothing outside the defining file imported
+  (`keyIdOf` / `canonicalInclusion`, `SUMMARY_DEPRECATED_WARNING`,
+  `CANONICAL_DRAFT_TYPES` / `REVISION_IDENTITY_CODE` /
+  `DRAFT_CONTINUATION_UNSUPPORTED_CODE` / `WRITE_RESULT_UNCERTAIN_CODE` /
+  `uncertainWriteError`, `DRAFT_COMPONENTS_OPERATION`,
+  `SOURCE_BUDGET_REASONS` / `DEFAULT_BUDGETS` / `resolveBudgetLimits`,
+  `resolveDoctorSite` / `resolveAgentClientId`, `asFormatList` /
+  `fieldDefinitionFromDrush`, `READINESS_TIMEOUT_MS` / `FAIL_TTL_MS` /
+  `cachedSourceGovernance`, `LEGACY_SESSION_IDLE_MS` /
+  `sessionlessMethodRefused`, `NESTED_REPLACEMENT_OPERATION` /
+  `nestedDraftPartial` / `nestedDraftUncertain`, `OAUTH_TOKEN_TIMEOUT_MS`,
+  `isIntrospectionBody`, `PATCH_WORKING_COPY_STALE_CODE` /
+  `PATCH_TARGET_AMBIGUOUS_CODE` / `PatchTargetAmbiguousError` /
+  `loadWorkingCopy`, `actChainFromClaim` / `PRINCIPAL_ABORT_REMAP` /
+  `isPrincipalAbort`, `PRINCIPAL_KEY_SEPARATOR` /
+  `PRINCIPAL_KEY_MAX_PART_LENGTH` / `assertSafePart`, `TARGET_HINT_KEYS`,
+  `EDGE_WRITE_REINTROSPECT`, `REVISE_PUBLISHED_TRANSLATION` /
+  `REVISE_OVER_WORKING_COPY`, `SERVER_TOOL_TIMEOUT_MS`,
+  `DEFAULT_SITE_DEADLINE_MS` / `DEFAULT_CATALOG_TTL_MS` /
+  `DEFAULT_NEGATIVE_TTL_MS` / `DEFAULT_CATALOG_CONCURRENCY` /
+  `catalogCacheKey` / `logOmittedSite`, `hostedScopeTableFatal`,
+  `TRANSPORT_PRESETS`, `WIZARD_PROBE_TIMEOUT_MS` / `resolveWizardAnswers` /
+  `buildClientConfigs` / `runReadinessChecks` / `writeClientConfigs` /
+  `formatWizardReport`, `WRITE_REINTROSPECT_GUARD` /
+  `WRITE_INTROSPECT_CACHE`). Implementations stay. Tests keep using the
+  public flip helpers and string codes, not these names.
 - Unused leftover production exports: `resetKeepAliveAgents` and the
   same-file-only helpers left public after #496 (`ALLOWED_HANDLER_OVERRIDE_KEYS`,
   `assertHandlerOverrides`, `plainHttpNonLoopbackReason`,

@@ -54,7 +54,7 @@ const UNAUTHENTICATED_ROUTES = Object.freeze([
 export const LEGACY_SESSION_CAP = 128;
 
 /** Idle 2025 sessions are closed on the next request after this many ms. */
-export const LEGACY_SESSION_IDLE_MS = 30 * 60 * 1000;
+const LEGACY_SESSION_IDLE_MS = 30 * 60 * 1000;
 
 /** Single MCP endpoint path. Sessionless GET/DELETE are 405 after auth. */
 export const MCP_HTTP_PATH = "/mcp";
@@ -71,7 +71,7 @@ export const MCP_HTTP_METHODS = Object.freeze(["POST", "GET", "DELETE"]);
  * @param {unknown} sessionId
  * @returns {boolean}
  */
-export function sessionlessMethodRefused(method, sessionId) {
+function sessionlessMethodRefused(method, sessionId) {
   return (method === "GET" || method === "DELETE") && !sessionId;
 }
 

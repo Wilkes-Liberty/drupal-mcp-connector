@@ -177,7 +177,7 @@ async function probe(fetchImpl, url, headers) {
  * @param {NodeJS.ProcessEnv} env
  * @returns {object}
  */
-export function resolveDoctorSite(args, env = process.env) {
+function resolveDoctorSite(args, env = process.env) {
   if (args.host) return siteFromFlags(args, env);
   if (args.config) {
     // eslint-disable-next-line security/detect-non-literal-fs-filename -- operator --config path
@@ -243,7 +243,7 @@ function hasCredential(site) {
  * @param {NodeJS.ProcessEnv} env
  * @returns {string}
  */
-export function resolveAgentClientId(site, args = {}, env = process.env) {
+function resolveAgentClientId(site, args = {}, env = process.env) {
   if (args["client-id"]) return String(args["client-id"]);
   if (env.MCP_CLIENT_ID !== undefined) return env.MCP_CLIENT_ID;
   if (site.clientId) return String(site.clientId);

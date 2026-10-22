@@ -22,7 +22,7 @@ const MISSING_DRAFT_RE = /does not provide Sentinel's governed draft endpoint/;
 const MISSING_TRANSLATION_RE = /does not provide Sentinel's governed draft-translation endpoint/;
 
 /** Inventory operation that opens a draft over a published translation. */
-export const REVISE_PUBLISHED_TRANSLATION = "revise_published_translation";
+const REVISE_PUBLISHED_TRANSLATION = "revise_published_translation";
 
 /**
  * First MCP Sentinel release that honors `X-MCP-Draft-Mode: revise`.
@@ -30,7 +30,7 @@ export const REVISE_PUBLISHED_TRANSLATION = "revise_published_translation";
  */
 export const MIN_SENTINEL_REVISE_VERSION = "2.24.0";
 /** Inventory operation: revise accepts a named working copy (`If-Match: "live:working"`). */
-export const REVISE_OVER_WORKING_COPY = "revise_over_working_copy";
+const REVISE_OVER_WORKING_COPY = "revise_over_working_copy";
 /** First MCP Sentinel release that revises a published translation over a working copy. */
 export const MIN_SENTINEL_REVISE_OVER_WORKING_VERSION = "2.25.0";
 /** First Sentinel release that keeps a default-language draft out of translation-write rules (#379). */

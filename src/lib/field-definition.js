@@ -52,7 +52,7 @@ function isEnabledFormatId(value) {
   return typeof value === "string" && value !== "" && value !== "0";
 }
 
-export function asFormatList(raw) {
+function asFormatList(raw) {
   if (Array.isArray(raw)) return raw.filter(isEnabledFormatId);
   if (raw && typeof raw === "object") {
     return [...new Map(Object.entries(raw)).values()].filter(isEnabledFormatId);
@@ -110,7 +110,7 @@ function unwrapDrushConfig(raw, configName) {
  * @param {string} fieldName
  * @returns {Promise<?{fieldName: string, fieldType: ?string, allowedFormats: string[]}>}
  */
-export async function fieldDefinitionFromDrush(site, entityType, bundle, fieldName) {
+async function fieldDefinitionFromDrush(site, entityType, bundle, fieldName) {
   validateMachineName(entityType, "entityType");
   validateMachineName(bundle, "bundle");
   validateMachineName(fieldName, "fieldName");

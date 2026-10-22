@@ -25,7 +25,7 @@ import { loadConfig } from "./config.js";
 import { fromIdentity } from "./principal-key.js";
 
 /** Listing wait when list_changed can reach the client. */
-export const DEFAULT_SITE_DEADLINE_MS = 4_000;
+const DEFAULT_SITE_DEADLINE_MS = 4_000;
 
 /**
  * First-list wait when list_changed cannot reach the client. Well under a
@@ -42,16 +42,16 @@ export const DEFAULT_UNNOTIFIED_LIST_WAIT_MS = 20_000;
 export const MAX_LIST_WAIT_MS = 25_000;
 
 /** Successful catalog snapshot TTL (stale-while-revalidate after this). */
-export const DEFAULT_CATALOG_TTL_MS = 600_000;
+const DEFAULT_CATALOG_TTL_MS = 600_000;
 
 /** Negative TTL for a failed site walk (seconds-scale). */
-export const DEFAULT_NEGATIVE_TTL_MS = 5_000;
+const DEFAULT_NEGATIVE_TTL_MS = 5_000;
 
 /**
  * Concurrent site walks. Default is high enough that a 13-site estate
  * starts in one wave.
  */
-export const DEFAULT_CATALOG_CONCURRENCY = 16;
+const DEFAULT_CATALOG_CONCURRENCY = 16;
 
 /** Acceptance budget for a cold tools/list when list_changed can be delivered. */
 export const CATALOG_LIST_BUDGET_MS = 5_000;
@@ -242,7 +242,7 @@ export function catalogPrincipalKey(identity) {
  * @param {object|null|undefined} identity
  * @returns {string}
  */
-export function catalogCacheKey(site, identity) {
+function catalogCacheKey(site, identity) {
   const principalKey = catalogPrincipalKey(identity);
   if (principalKey === null) return null;
   return `${site?._name ?? ""}\0${principalKey}`;
@@ -317,7 +317,7 @@ export function workflowIdsFromSite(site) {
  * @param {string} reason
  * @returns {void}
  */
-export function logOmittedSite(siteName, reason) {
+function logOmittedSite(siteName, reason) {
   console.error(`[drupal-mcp-connector] Catalog discovery omitted site "${siteName}": ${reason}`);
 }
 

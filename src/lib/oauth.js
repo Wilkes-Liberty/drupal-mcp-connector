@@ -18,7 +18,7 @@ import { keepAliveAgentFor } from "./http-agents.js";
 const EXPIRY_SKEW_MS = 60_000;
 
 /** Token-endpoint abort timeout. Matches Drupal/Drush outbound HTTP. */
-export const OAUTH_TOKEN_TIMEOUT_MS = 30_000;
+const OAUTH_TOKEN_TIMEOUT_MS = 30_000;
 
 /**
  * Per-site token cache, keyed by site._name. A value is either a resolved

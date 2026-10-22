@@ -29,10 +29,10 @@ export const LISTING_READINESS_TIMEOUT_MS = 4_000;
 export const OK_TTL_MS = 60_000;
 
 /** Readiness GET abort timeout. Matches Drupal/Drush outbound HTTP. */
-export const READINESS_TIMEOUT_MS = 30_000;
+const READINESS_TIMEOUT_MS = 30_000;
 
 /** How long a failed verification is held before the next attempt re-checks. */
-export const FAIL_TTL_MS = 5_000;
+const FAIL_TTL_MS = 5_000;
 
 /** Denial for a governed path whose source-governance contract is not verified. */
 export class GovernanceError extends Error {
@@ -172,7 +172,7 @@ async function probeReadiness(site, timeoutMs) {
  * @param {object} site Resolved site config.
  * @returns {{ok: boolean, reason: string|null, checkedAt: number}|null}
  */
-export function cachedSourceGovernance(site) {
+function cachedSourceGovernance(site) {
   const key = site?._name ?? site?.baseUrl;
   const cached = cache.get(key);
   if (!cached) return null;
