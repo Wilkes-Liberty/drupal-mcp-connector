@@ -126,7 +126,7 @@ never stores them.
 ## Assurance performed
 
 - `eslint-plugin-security` runs in CI lint.
-- Quality gate in CI and release on pinned Node 20 (`npm run check`:
+- Quality gate in CI and release on pinned Node 24 LTS (`npm run check`:
   lint + high-severity audit + syntax-check + test).
   Tool dispatch and security middleware live in `src/lib/dispatch.js`;
   `resources/read` for content-types and security-policy goes through

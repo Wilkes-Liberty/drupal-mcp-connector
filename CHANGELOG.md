@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Container image and CI move from Node 20 to Node 24 LTS.** Node 20 is
+  end-of-life and did not get the
+  [2026-10-21 Node.js security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+  (CVE-2026-111497 Brotli plus three High TLS/DNS fixes; fixed in 22.23.4,
+  24.22.1 and 26.12.1). The `Dockerfile` now builds `FROM node:24-alpine`, and
+  the CI and release workflows run Node 24. `engines.node` stays `>=20.0.0`.
+  The required check keeps its `Lint, Syntax & Unit (Node 20)` name until
+  branch protection is updated.
+
 ### Removed
 
 - Unused leftover production exports: `resetKeepAliveAgents` and the

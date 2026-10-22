@@ -19,6 +19,9 @@ concurrency:
 jobs:
   # Display name is the master required status check. Renaming it without
   # updating branch protection blocks every pull request.
+  # The "(Node 20)" in the name is now out of date: the job runs Node 24 (see
+  # setup-node below). The name stays as-is until branch protection and
+  # tests/scripts/quality-gate.test.js are updated in the same change.
   lint-and-syntax:
     name: Lint, Syntax & Unit (Node 20)
     runs-on: ubuntu-latest
@@ -28,9 +31,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          # 20 is the advertised floor (engines.node >=20.0.0). vitest 4+
-          # requires Node >=20, and 18 is past end-of-life.
-          node-version: '20'
+          # Node 24 (Active LTS). Node 20 is end-of-life, and the 2026-10-21
+          # Node.js security release ships fixes only for 22.x, 24.x and 26.x.
+          # setup-node resolves '24' to the newest 24.x (>= 24.22.1).
+          # engines.node is still >=20.0.0; that floor is a separate decision.
+          # https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -176,7 +182,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          # Same Node line as lint-and-syntax: 24 LTS, since 20 is end-of-life
+          # (2026-10-21 Node.js security release).
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -196,7 +204,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          # Same Node line as lint-and-syntax: 24 LTS, since 20 is end-of-life
+          # (2026-10-21 Node.js security release).
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies

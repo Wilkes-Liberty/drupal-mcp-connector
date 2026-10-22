@@ -74,14 +74,16 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          # Publish on the same Node line CI tests on: 24 LTS. Node 20 is
+          # end-of-life and missed the 2026-10-21 Node.js security release.
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
 
       # Trusted publishing needs npm >= 11.5.1. Pin to the 11.x line rather than
-      # `@latest`: npm 12+ requires Node >= 22, but this job runs Node 20, so
-      # `npm install -g npm@latest` fails with EBADENGINE. The latest 11.x is
-      # >= 11.5.1 and Node 20-compatible.
+      # `@latest` so the publishing npm only changes on purpose. The pin was
+      # first added because npm 12+ needs Node >= 22 and this job ran Node 20.
+      # It now runs Node 24, so moving to npm 12 is possible as its own change.
       - name: Upgrade npm (trusted publishing needs npm >= 11.5.1)
         run: npm install -g npm@11
 
