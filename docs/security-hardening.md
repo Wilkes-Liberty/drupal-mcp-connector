@@ -61,7 +61,12 @@ network call is introspected at the issuer (RFC 7662). There is **no positive
 cache**: a revoke takes effect on the next call. Introspection unreachable,
 timed out (default **2s**), or errored is **503** and the tool never runs.
 `active: false` is **401**. `iss` must be present and equal the configured
-issuer; audience is an exact match against the one configured plane. JWT
+issuer; audience is an exact match against the one configured plane
+(`auth.resource` must equal `auth.audience`). When the bearer is a compact
+JWS and JWKS verifies, that signed `aud` is the check — Keycloak
+introspection often returns only `account`. A verified JWT for another
+plane (for example the staging hosted URL on production) is **401** even
+if introspection names this audience. JWT
 algorithms are pinned (`none` never; `HS*` only when explicitly configured).
 Issuer discovery and JWKS retrieval abort after 30s; introspection uses the
 shorter timeout above. A stuck issuer fails closed.

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hosted Paladin audience check uses the signed JWT when JWKS verifies
+  (DEV-1052).** Network admission still requires a live RFC 7662
+  introspection result (inactive is 401, issuer down is 503). When the
+  bearer is a compact JWS and verification succeeds, `iss` / `aud` come
+  from that JWT so a grok-bot token whose JWT `aud` includes
+  `https://mcp.wilkesliberty.com/mcp` is not refused just because
+  Keycloak introspection returned only `account`. A verified JWT whose
+  `aud` is the staging resource is still 401 on the production plane,
+  even if introspection names production. `auth.resource` must equal
+  `auth.audience` at startup. Audience matching treats a space-delimited
+  `aud` string and a trailing slash as the same identifier; it does not
+  accept a different host or path.
 ### Security
 
 - **Container image and CI move from Node 20 to Node 24 LTS.** Node 20 is
