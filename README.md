@@ -1,6 +1,6 @@
 # Drupal MCP Connector
 
-> Multi-site MCP server for Drupal over JSON:API and GraphQL, with governed writes and an SSH Drush bridge. Hosted HTTPS is an OAuth resource server that introspects every authenticated call at the issuer. The shared bearer is gone in 4.0. `init` writes a client config from a transport preset. `doctor` checks reachability, auth, and version skew.
+> Multi-site MCP server for Drupal over JSON:API and GraphQL, with governed writes and an SSH Drush bridge. Hosted HTTPS introspects every authenticated call at the issuer. `init` writes a client config. `doctor` checks reachability, auth, and version skew.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-green)](https://nodejs.org)
@@ -306,8 +306,8 @@ the allowlist or Sentinel profile excludes the type — run `doctor` and
 ### From npm (recommended for operators)
 
 ```bash
-npm install -g drupal-mcp-connector@5.4.1
-# or: npx -y drupal-mcp-connector@5.4.1
+npm install -g drupal-mcp-connector@5.4.2
+# or: npx -y drupal-mcp-connector@5.4.2
 ```
 
 Point your MCP client at the installed binary (path from `which drupal-mcp-connector`
@@ -322,16 +322,16 @@ unbounded range.
 
 1. Pin an exact version in the lockfile (`package-lock.json` or
    `npm-shrinkwrap.json`), or in `package.json` as
-   `"drupal-mcp-connector": "5.4.1"` (use the version you intend to run).
+   `"drupal-mcp-connector": "5.4.2"` (use the version you intend to run).
 2. Confirm the registry checksum before you install.
-   `npm view drupal-mcp-connector@5.4.1 dist.integrity` prints the integrity
+   `npm view drupal-mcp-connector@5.4.2 dist.integrity` prints the integrity
    npm checks. A lockfile install fails when the tarball does not match.
 3. Read [CHANGELOG.md](CHANGELOG.md) for that version.
 4. Run `npm audit --omit=dev` against the lockfile and read any advisory
    before you upgrade. There is no separate scanner to install.
 
 Restart the MCP client after the upgrade. Run `drupal-mcp-doctor` when the
-package is on your PATH, or `npx -y drupal-mcp-connector@5.4.1 doctor` when
+package is on your PATH, or `npx -y drupal-mcp-connector@5.4.2 doctor` when
 you launch it with npx.
 
 ### From a git clone (development)

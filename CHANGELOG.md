@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.2] - 2026-10-23
+
+### Fixed
+
+- **npm package description no longer ends mid-word.** The registry stores
+  at most 255 characters. 5.4.1's description was cut off at "init writes
+  a cli". The short description now finishes its sentences.
+
 ## [5.4.1] - 2026-10-23
 
 ### Fixed
