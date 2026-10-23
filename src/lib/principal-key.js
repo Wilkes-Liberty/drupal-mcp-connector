@@ -17,10 +17,10 @@
  * budgets import this formula (PR #455 key logic).
  */
 
-export const PRINCIPAL_KEY_SEPARATOR = "|";
+const PRINCIPAL_KEY_SEPARATOR = "|";
 
 /** Maximum Unicode characters per iss, sub, or actor part. */
-export const PRINCIPAL_KEY_MAX_PART_LENGTH = 256;
+const PRINCIPAL_KEY_MAX_PART_LENGTH = 256;
 
 /** Path of the shared vector file, relative to the repo root. */
 export const PRINCIPAL_KEY_VECTORS_FILE = "tests/fixtures/principal-key-vectors.json";
@@ -243,7 +243,7 @@ function splitKey(key, separators) {
  * @returns {void}
  * @throws {PrincipalKeyError}
  */
-export function assertSafePart(part) {
+function assertSafePart(part) {
   if (typeof part !== "string" || !isValidUtf8String(part)) {
     throw new PrincipalKeyError(
       PRINCIPAL_KEY_ERRORS.INVALID_UTF8,

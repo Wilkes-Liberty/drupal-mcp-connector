@@ -63,7 +63,7 @@ export function formatBoundUrl(address, scheme = "http") {
  * @param {import("node:crypto").KeyObject} publicKey
  * @returns {string}
  */
-export function keyIdOf(publicKey) {
+function keyIdOf(publicKey) {
   return createHash("sha256").update(pinPublicKey(publicKey)).digest("hex").slice(0, 16);
 }
 
@@ -86,7 +86,7 @@ export function generateNotaryKeys() {
  * @param {{anchorId: string, receiptDigest: string, signedAt: string, keyId: string}} inclusion
  * @returns {Buffer}
  */
-export function canonicalInclusion(inclusion) {
+function canonicalInclusion(inclusion) {
   return Buffer.from(
     `v1\n${inclusion.anchorId}\n${inclusion.receiptDigest}\n${inclusion.signedAt}\n${inclusion.keyId}`,
     "utf8",

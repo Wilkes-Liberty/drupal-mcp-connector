@@ -24,7 +24,7 @@ export const EMPTY_REQUIRED_SCOPES_REASON = "Tool has empty requiredScopes";
  * @param {string} detail
  * @returns {string}
  */
-export function hostedScopeTableFatal(detail) {
+function hostedScopeTableFatal(detail) {
   return `Hosted/network profile refuses an incomplete tool scope table: ${detail}`;
 }
 

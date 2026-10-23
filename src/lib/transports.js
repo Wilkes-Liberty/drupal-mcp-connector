@@ -18,7 +18,7 @@
  */
 
 /** Named presets in display order. */
-export const TRANSPORT_PRESETS = {
+const TRANSPORT_PRESETS = {
   "local-stdio": {
     id: "local-stdio",
     label: "Local stdio",

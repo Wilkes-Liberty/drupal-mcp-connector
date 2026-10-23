@@ -8,7 +8,7 @@
  */
 
 /** Warning attached when `summary` is written onto a text_with_summary body. */
-export const SUMMARY_DEPRECATED_WARNING = {
+const SUMMARY_DEPRECATED_WARNING = {
   code: "summary_parameter_deprecated",
   message:
     "The `summary` argument writes body.summary on core text_with_summary. " +
