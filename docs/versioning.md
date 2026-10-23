@@ -64,7 +64,8 @@ That pin does not limit northbound clients to the same revision.
 
 ## Runtime support
 
-- **Node.js 20+** (`engines.node`). CI runs the suite on Node 20.
+- **Node.js 20+** (`engines.node`). CI and the container image run Node 24
+  LTS. Node 20 is end-of-life, so run 22.x, 24.x or 26.x in production.
 - **Drupal 10 / 11** for the Drupal side.
 
 ## Before you upgrade
