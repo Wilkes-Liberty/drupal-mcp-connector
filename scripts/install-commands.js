@@ -176,7 +176,7 @@ function isModuleStub(path) {
  * @param {Set<string>} moduleFiles
  * @returns {{stubs: Array<{file: string, workflow: object}>, refused: Array<object>}}
  */
-export function planWorkflowStubs(workflows, builtInFiles, moduleFiles) {
+function planWorkflowStubs(workflows, builtInFiles, moduleFiles) {
   const stubs = [];
   const refused = [];
   const byFile = new Map();
@@ -278,7 +278,7 @@ export function install(options = {}) {
  *
  * @returns {Promise<{definitions: Array<object>, configured: string[], parts: Map<string, {namespace: string, alias: string}>}>}
  */
-export async function discoverModuleDefinitions() {
+async function discoverModuleDefinitions() {
   // Loaded on demand so a plain install needs no site config or network.
   const { loadLocalSecrets } = await import("../src/lib/load-secrets.js");
   const { listResolvableSiteConfigs } = await import("../src/lib/dispatch.js");

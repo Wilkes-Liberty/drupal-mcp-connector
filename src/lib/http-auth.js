@@ -48,7 +48,7 @@ export const DEFAULT_INTROSPECTION_TIMEOUT_MS = 2000;
  * gate (DEV-844). Claim-validation failures (`aud` / `iss`) still deny
  * immediately.
  */
-export const NETWORK_JWT_VERIFY_BUDGET_MS = 2000;
+const NETWORK_JWT_VERIFY_BUDGET_MS = 2000;
 
 /**
  * In-process guard (DEV-844). Production leaves `required` true. The only
@@ -86,7 +86,7 @@ export function networkIntrospectionRequired() {
  * conservative for access tokens; operators with longer-lived issuers raise
  * `auth.maxTokenLifetime`.
  */
-export const DEFAULT_MAX_TOKEN_LIFETIME = 3600;
+const DEFAULT_MAX_TOKEN_LIFETIME = 3600;
 
 /**
  * Default JWS algorithms accepted on the hosted resource-server path.
@@ -95,7 +95,7 @@ export const DEFAULT_MAX_TOKEN_LIFETIME = 3600;
  * with `auth.algorithms` when the issuer uses a subset. `HS*` is accepted
  * only when the operator names it explicitly.
  */
-export const DEFAULT_TOKEN_ALGORITHMS = Object.freeze([
+const DEFAULT_TOKEN_ALGORITHMS = Object.freeze([
   "RS256", "RS384", "RS512",
   "ES256", "ES384", "ES512",
   "PS256", "PS384", "PS512",

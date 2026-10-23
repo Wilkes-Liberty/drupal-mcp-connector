@@ -866,7 +866,7 @@ export function assertReadOnlyTool(name) {
  *
  * @returns {{verifier: string, challenge: string}}
  */
-export function buildPkce() {
+function buildPkce() {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
   return { verifier, challenge };
@@ -1025,7 +1025,7 @@ function finish(step, verdict, detail) {
  * @param {{challenge: string}} [options.pkce]
  * @param {boolean} [options.clientsProvisioned]
  */
-export async function probeHost({
+async function probeHost({
   fetchImpl,
   host,
   env = process.env,

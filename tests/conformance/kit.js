@@ -16,7 +16,7 @@ import {
  * @param {object} decision
  * @returns {void}
  */
-export function assertTypedDecision(decision) {
+function assertTypedDecision(decision) {
   expect(decision).toEqual(expect.objectContaining({
     decisionId: expect.any(String),
     result: expect.any(String),
@@ -37,7 +37,7 @@ export function assertTypedDecision(decision) {
  * @param {object} receipt
  * @returns {void}
  */
-export function assertExecutionReceipt(receipt) {
+function assertExecutionReceipt(receipt) {
   expect(receipt).toEqual(expect.objectContaining({
     receiptId: expect.any(String),
     outcome: expect.any(String),

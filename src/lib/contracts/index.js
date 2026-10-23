@@ -17,7 +17,6 @@ export {
   ASSURANCE_CLASSES,
   DECISION_RESULTS,
   assertActionClass,
-  assertAssuranceClass,
   assertDecisionResult,
   createActionManifest,
   createDecisionRecord,

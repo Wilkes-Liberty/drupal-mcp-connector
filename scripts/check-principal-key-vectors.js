@@ -67,7 +67,7 @@ export function collidingVectorNames(mirror, extra) {
  * @param {string} [tag]
  * @returns {string}
  */
-export function upstreamRawUrl(tag = PRINCIPAL_KEY_VECTORS_SENTINEL_TAG) {
+function upstreamRawUrl(tag = PRINCIPAL_KEY_VECTORS_SENTINEL_TAG) {
   return `https://raw.githubusercontent.com/${SENTINEL_REPO}/${tag}/${PRINCIPAL_KEY_VECTORS_SENTINEL_PATH}`;
 }
 
@@ -75,7 +75,7 @@ export function upstreamRawUrl(tag = PRINCIPAL_KEY_VECTORS_SENTINEL_TAG) {
  * @param {string} [tag]
  * @returns {string}
  */
-export function upstreamApiUrl(tag = PRINCIPAL_KEY_VECTORS_SENTINEL_TAG) {
+function upstreamApiUrl(tag = PRINCIPAL_KEY_VECTORS_SENTINEL_TAG) {
   const api = process.env.GITHUB_API_URL || "https://api.github.com";
   return `${api.replace(/\/+$/, "")}/repos/${SENTINEL_REPO}/contents/${PRINCIPAL_KEY_VECTORS_SENTINEL_PATH}?ref=${encodeURIComponent(tag)}`;
 }
@@ -86,7 +86,7 @@ export function upstreamApiUrl(tag = PRINCIPAL_KEY_VECTORS_SENTINEL_TAG) {
  * @param {{fetchFn?: typeof fetch, token?: string, tag?: string}} [options]
  * @returns {Promise<string>}
  */
-export async function fetchUpstreamVectors({
+async function fetchUpstreamVectors({
   fetchFn = fetch,
   token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "",
   tag = PRINCIPAL_KEY_VECTORS_SENTINEL_TAG,

@@ -100,7 +100,7 @@ export function createConnectionLedger() {
  *
  * @returns {{issue: Function, lookup: Function, revoke: Function}}
  */
-export function createLabCredentialRegistry() {
+function createLabCredentialRegistry() {
   const issued = [];
 
   return {
@@ -143,7 +143,7 @@ export function createLabCredentialRegistry() {
  * @param {object} [params.ledger]
  * @returns {object}
  */
-export function createStubDrupal({ site = LAB_SITE, ledger = createConnectionLedger() } = {}) {
+function createStubDrupal({ site = LAB_SITE, ledger = createConnectionLedger() } = {}) {
   let hits = 0;
   let hold = null;
   let boundIdentity = null;
@@ -262,7 +262,7 @@ export function createStubDrupal({ site = LAB_SITE, ledger = createConnectionLed
  * @param {ReturnType<typeof createConnectionLedger>} [params.ledger]
  * @returns {Promise<object>}
  */
-export async function createLabRelay({
+async function createLabRelay({
   credentials,
   targetRelay,
   ledger = createConnectionLedger(),
