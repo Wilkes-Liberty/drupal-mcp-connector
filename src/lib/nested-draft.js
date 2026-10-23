@@ -31,7 +31,7 @@ import { PREFLIGHT_NONE, PREFLIGHT_SENTINEL_DRAFT, dryRunChecks } from "./dry-ru
 export const NESTED_DRAFT_PARTIAL_CODE = "NESTED_DRAFT_PARTIAL";
 
 /** Inventory operation: one atomic nested paragraph replacement. */
-export const NESTED_REPLACEMENT_OPERATION = "nested_replacement";
+const NESTED_REPLACEMENT_OPERATION = "nested_replacement";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NAME_RE = /^[a-z][a-z0-9_]*$/;
@@ -48,7 +48,7 @@ const SKIPPED_FIELDS = new Set([
  * @param {object[]} prepared
  * @returns {Error}
  */
-export function nestedDraftPartial(detail, prepared) {
+function nestedDraftPartial(detail, prepared) {
   const ids = prepared.map((row) => row.id).filter(Boolean).join(", ") || "none";
   const hasParent = prepared.some((row) => row.role === "parent" && row.id);
   const recovery = hasParent
@@ -72,7 +72,7 @@ export function nestedDraftPartial(detail, prepared) {
  * @param {object[]} prepared
  * @returns {Error}
  */
-export function nestedDraftUncertain(detail, prepared) {
+function nestedDraftUncertain(detail, prepared) {
   const ids = prepared.map((row) => row.id).join(", ");
   const err = new Error(
     `The nested draft outcome is uncertain (${detail}). Prepared paragraphs (${ids}) may or may not be pinned. ` +

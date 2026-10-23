@@ -41,7 +41,7 @@ function allowlistFieldOk(value) {
  * @param {unknown} body
  * @returns {boolean}
  */
-export function isIntrospectionBody(body) {
+function isIntrospectionBody(body) {
   return Boolean(
     body
     && typeof body === "object"

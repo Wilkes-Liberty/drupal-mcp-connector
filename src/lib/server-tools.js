@@ -146,7 +146,7 @@ export async function callGovernedServerTool(site, binding, args = {}) {
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 
 /** MCP server-tool POST timeout. Handshake, catalog, and tools/call share this. */
-export const SERVER_TOOL_TIMEOUT_MS = 15_000;
+const SERVER_TOOL_TIMEOUT_MS = 15_000;
 
 /**
  * Timeout plus the in-flight cancel signal so a kill aborts a governed

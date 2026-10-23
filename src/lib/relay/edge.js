@@ -119,7 +119,7 @@ export const EDGE_MCP_PROTOCOL = "2026-07-28";
  * true. Tests call {@link setEdgeWriteReintrospectGuard} for a red run
  * of that branch only.
  */
-export const EDGE_WRITE_REINTROSPECT = { required: true };
+const EDGE_WRITE_REINTROSPECT = { required: true };
 
 /**
  * Flip {@link EDGE_WRITE_REINTROSPECT} for a red-run. Restore `true`

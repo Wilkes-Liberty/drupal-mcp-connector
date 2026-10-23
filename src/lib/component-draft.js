@@ -22,7 +22,7 @@ import { applyParagraphTextFormats } from "./field-definition.js";
 import { PREFLIGHT_SENTINEL_DRAFT, dryRunChecks } from "./dry-run-checks.js";
 
 /** Inventory operation: component paragraph changes inside a draft save. */
-export const DRAFT_COMPONENTS_OPERATION = "draft_components";
+const DRAFT_COMPONENTS_OPERATION = "draft_components";
 /** Inventory operation: open the first working copy from live (`If-Match: "live"`). */
 export const OPEN_DRAFT_OPERATION = "open_draft";
 /** First MCP Sentinel release with both operations. */

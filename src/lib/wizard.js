@@ -18,7 +18,7 @@ import { formatTransportPresetHelp, isReservedDocumentationHost, resolveTranspor
 import { detectVersionSkew, extractReportedVersions, versionSkewCheck } from "./version-skew.js";
 
 /** Short probe timeout so an unreachable host cannot hang the wizard. */
-export const WIZARD_PROBE_TIMEOUT_MS = 4_000;
+const WIZARD_PROBE_TIMEOUT_MS = 4_000;
 
 const USAGE = `drupal-mcp-connector wizard|init
 
@@ -160,7 +160,7 @@ export async function runWizardCli(argv, options = {}) {
  * @param {{stdin?: NodeJS.ReadableStream, stdout?: NodeJS.WritableStream, cwd?: string}} [options]
  * @returns {Promise<object>}
  */
-export async function resolveWizardAnswers(args, options = {}) {
+async function resolveWizardAnswers(args, options = {}) {
   const yes = Boolean(args.yes || args["non-interactive"] || envTruthy("MCP_WIZARD_YES"));
   const cwd = options.cwd || process.cwd();
   const outputDir = String(args.output || process.env.MCP_WIZARD_OUTPUT || cwd);
@@ -300,7 +300,7 @@ export async function resolveWizardAnswers(args, options = {}) {
  * @param {object} answers
  * @returns {{cursor: object, claude: object}}
  */
-export function buildClientConfigs(answers) {
+function buildClientConfigs(answers) {
   return {
     cursor: {
       label: "Cursor",
@@ -323,7 +323,7 @@ export function buildClientConfigs(answers) {
  * @param {{fetchImpl?: typeof fetch}} [options]
  * @returns {Promise<{whoami: object, contract_ready: object}>}
  */
-export async function runReadinessChecks(answers, options = {}) {
+async function runReadinessChecks(answers, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   const target = answers.drupalUrl || answers.host;
   if (!target) {
@@ -372,7 +372,7 @@ export async function runReadinessChecks(answers, options = {}) {
  * @param {string[]} selected
  * @returns {object[]}
  */
-export function writeClientConfigs(answers, configs, selected) {
+function writeClientConfigs(answers, configs, selected) {
   if (!answers.write) {
     return selected.map((id) => ({
       id,
@@ -402,7 +402,7 @@ export function writeClientConfigs(answers, configs, selected) {
  * @param {string[]} selected
  * @returns {string}
  */
-export function formatWizardReport(result, selected) {
+function formatWizardReport(result, selected) {
   const { answers, configs, writes, checks } = result;
   const lines = [
     `Drupal MCP Connector wizard v${CLIENT_VERSION}`,

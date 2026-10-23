@@ -33,7 +33,7 @@ export const REASON_CHAINED_ACTION = "chained_action_budget_exceeded";
 export const REASON_BUDGET_CONTEXT_MISSING = "budget_context_missing";
 
 /** Codes the source already emits; remapped onto a connector correlation id. */
-export const SOURCE_BUDGET_REASONS = Object.freeze([
+const SOURCE_BUDGET_REASONS = Object.freeze([
   REASON_READ,
   REASON_PAGE,
   REASON_RESPONSE_SIZE,
@@ -45,7 +45,7 @@ export const SOURCE_BUDGET_REASONS = Object.freeze([
  * Built-in defaults — identical to mcp_sentinel McpReadBudgetResolver.
  * A second model is out of scope; these numbers are the shared floor.
  */
-export const DEFAULT_BUDGETS = Object.freeze({
+const DEFAULT_BUDGETS = Object.freeze({
   results: 500,
   bytes: 8388608,
   requests: 600,
@@ -116,7 +116,7 @@ function sanitizeDeclaration(value) {
  * @param {object} [raw]
  * @returns {typeof DEFAULT_BUDGETS}
  */
-export function resolveBudgetLimits(raw = {}) {
+function resolveBudgetLimits(raw = {}) {
   const merged = new Map(Object.entries(DEFAULT_BUDGETS));
   const supplied = new Map(Object.entries(raw));
   for (const [key, fallback] of Object.entries(DEFAULT_BUDGETS)) {

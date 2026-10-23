@@ -46,10 +46,10 @@ import { PREFLIGHT_NONE, PREFLIGHT_CORE_GUARD, PREFLIGHT_SENTINEL_DRAFT } from "
 export const PATCH_BLOCKED_CODE = "PATCH_BLOCKED";
 
 /** Stable error code when a working-copy PATCH itself is rejected. */
-export const PATCH_WORKING_COPY_STALE_CODE = "PATCH_WORKING_COPY_STALE";
+const PATCH_WORKING_COPY_STALE_CODE = "PATCH_WORKING_COPY_STALE";
 
 /** Stable error code when the working-copy resource does not match the target. */
-export const PATCH_TARGET_AMBIGUOUS_CODE = "PATCH_TARGET_AMBIGUOUS";
+const PATCH_TARGET_AMBIGUOUS_CODE = "PATCH_TARGET_AMBIGUOUS";
 
 /** Stable error code for Sentinel's save-time stale-default-revision refusal. */
 export const STALE_COPY_CODE = "STALE_COPY";
@@ -184,7 +184,7 @@ export function rewriteStaleCopyError(err) {
  * Thrown when `rel:working-copy` resolves to a different UUID than the
  * entity being updated.
  */
-export class PatchTargetAmbiguousError extends Error {
+class PatchTargetAmbiguousError extends Error {
   /**
    * @param {string} expectedId Requested entity UUID.
    * @param {string} actualId Working-copy resource UUID.
@@ -215,7 +215,7 @@ export function isWorkingCopyPatchError(err) {
  * @param {{entityType: string, bundle: string, id: string}} ref
  * @returns {Promise<?object>}
  */
-export async function loadWorkingCopy(backend, { entityType, bundle, id }) {
+async function loadWorkingCopy(backend, { entityType, bundle, id }) {
   if (typeof backend?.getEntity !== "function") return null;
   try {
     const wc = await backend.getEntity({

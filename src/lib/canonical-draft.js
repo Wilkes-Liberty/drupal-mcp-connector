@@ -44,7 +44,7 @@ import {
 import { OPEN_DRAFT_OPERATION } from "./component-draft.js";
 
 /** Entity types that stay on the canonical PATCH unless open_draft is advertised. */
-export const CANONICAL_DRAFT_TYPES = new Set(["paragraphs_library_item", "block_content"]);
+const CANONICAL_DRAFT_TYPES = new Set(["paragraphs_library_item", "block_content"]);
 
 /** @param {?string} entityType */
 export function isCanonicalDraftType(entityType) {
@@ -52,13 +52,13 @@ export function isCanonicalDraftType(entityType) {
 }
 
 /** Stable code when a revision id or version alias cannot be verified. */
-export const REVISION_IDENTITY_CODE = "REVISION_IDENTITY";
+const REVISION_IDENTITY_CODE = "REVISION_IDENTITY";
 
 /** Stable code when a forward draft has no governed continuation route. */
-export const DRAFT_CONTINUATION_UNSUPPORTED_CODE = "DRAFT_CONTINUATION_UNSUPPORTED";
+const DRAFT_CONTINUATION_UNSUPPORTED_CODE = "DRAFT_CONTINUATION_UNSUPPORTED";
 
 /** Stable code when a sent write could not be confirmed from a re-read. */
-export const WRITE_RESULT_UNCERTAIN_CODE = "WRITE_RESULT_UNCERTAIN";
+const WRITE_RESULT_UNCERTAIN_CODE = "WRITE_RESULT_UNCERTAIN";
 
 /**
  * @param {string} entityType
@@ -97,7 +97,7 @@ export class UnsupportedDraftContinuationError extends Error {
  * @param {string} detail
  * @returns {Error}
  */
-export function uncertainWriteError(entityType, detail) {
+function uncertainWriteError(entityType, detail) {
   const err = new Error(
     `The ${entityType} write result is uncertain (${detail}). ` +
     "Re-read the default revision and rel:latest-version before retrying. " +

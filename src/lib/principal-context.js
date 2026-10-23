@@ -85,7 +85,7 @@ export function tenantFromClaims(claims) {
  * @param {unknown} act
  * @returns {string[]}
  */
-export function actChainFromClaim(act) {
+function actChainFromClaim(act) {
   const chain = [];
   let current = act;
   while (current && typeof current === "object" && !Array.isArray(current)) {
@@ -174,7 +174,7 @@ export function principalDenied() {
  * Production leaves `enabled` true. Tests call
  * {@link setPrincipalAbortRemapGuard} for a red run of one branch.
  */
-export const PRINCIPAL_ABORT_REMAP = { enabled: true };
+const PRINCIPAL_ABORT_REMAP = { enabled: true };
 
 /**
  * Flip {@link PRINCIPAL_ABORT_REMAP} for a red-run. Restore `true`
@@ -196,7 +196,7 @@ export function setPrincipalAbortRemapGuard(enabled) {
  * @param {*} err
  * @returns {boolean}
  */
-export function isPrincipalAbort(signal, err) {
+function isPrincipalAbort(signal, err) {
   const reason = signal?.reason ?? err?.cause ?? err;
   if (reason instanceof Error && reason.message === GENERIC_PRINCIPAL_REFUSAL) return true;
   if (reason === GENERIC_PRINCIPAL_REFUSAL) return true;
