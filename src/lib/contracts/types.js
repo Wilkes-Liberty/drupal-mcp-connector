@@ -30,18 +30,19 @@ export const DECISION_RESULTS = Object.freeze([
 
 const DECISION_RESULT_SET = new Set(DECISION_RESULTS);
 
-/** Assurance classes. Never presented as equivalent. */
+/**
+ * Assurance classes. Never presented as equivalent. The catalog is public
+ * so adapters can name a class; nothing in this package maps onto one
+ * yet, so there is no assert helper.
+ */
 export const ASSURANCE_CLASSES = Object.freeze([
   "source_enforced",
   "boundary_enforced",
   "advisory",
 ]);
 
-const ASSURANCE_CLASS_SET = new Set(ASSURANCE_CLASSES);
-
 const ACTION_CLASS_MAP = new Map(ACTION_CLASSES.map((name) => [name, name]));
 const DECISION_RESULT_MAP = new Map(DECISION_RESULTS.map((name) => [name, name]));
-const ASSURANCE_CLASS_MAP = new Map(ASSURANCE_CLASSES.map((name) => [name, name]));
 
 /**
  * @param {string} value
@@ -63,17 +64,6 @@ export function assertDecisionResult(value) {
     throw new TypeError(`Unknown decision result: ${String(value)}`);
   }
   return DECISION_RESULT_MAP.get(value);
-}
-
-/**
- * @param {string} value
- * @returns {string}
- */
-export function assertAssuranceClass(value) {
-  if (!ASSURANCE_CLASS_SET.has(value)) {
-    throw new TypeError(`Unknown assurance class: ${String(value)}`);
-  }
-  return ASSURANCE_CLASS_MAP.get(value);
 }
 
 /**

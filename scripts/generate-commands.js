@@ -21,8 +21,8 @@
  *
  * Exports `renderCommandMarkdown`, `renderClaudeCommandMarkdown`,
  * `renderCodexSkillMarkdown`, `renderCodexToolsReference`, `CODEX_SKILL_NAME`,
- * `commandFileName`, `COMMANDS_DIR`, and `generate` for tests; the file-writing
- * side effect runs only when executed directly.
+ * `commandFileName`, and `COMMANDS_DIR` for tests. `generate` stays local;
+ * the file-writing side effect runs only when executed directly.
  */
 
 /* eslint-disable security/detect-non-literal-fs-filename -- writes the in-repo .agents/commands tree; argv[1] is the invoked-script identity check */
@@ -258,7 +258,7 @@ export function renderCodexToolsReference(definitions = allDefinitions) {
  * @param {Array<object>} [definitions] - Tool definitions (defaults to allDefinitions).
  * @returns {string[]} The filenames written.
  */
-export function generate(definitions = allDefinitions) {
+function generate(definitions = allDefinitions) {
   mkdirSync(COMMANDS_DIR, { recursive: true });
   for (const f of readdirSync(COMMANDS_DIR)) {
     if (/^drupal-.*\.md$/.test(f)) rmSync(new URL(f, COMMANDS_DIR));
