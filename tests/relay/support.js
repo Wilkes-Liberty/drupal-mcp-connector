@@ -16,9 +16,10 @@ import { decodeJwt, exportJWK, generateKeyPair, SignJWT } from "jose";
 
 export const ISSUER = "https://idp.test";
 export const AUDIENCE = "https://edge.test/mcp";
-export const INTROSPECTION_URL = `${ISSUER}/introspect`;
-export const INTROSPECTION_CLIENT_ID = "edge-rs";
-export const INTROSPECTION_CLIENT_SECRET = "edge-rs-secret";
+// Same-file only: resourceServerAuth and the issuer fixture build these.
+const INTROSPECTION_URL = `${ISSUER}/introspect`;
+const INTROSPECTION_CLIENT_ID = "edge-rs";
+const INTROSPECTION_CLIENT_SECRET = "edge-rs-secret";
 
 /** Inbound resource-server config for the relay edge (DEV-844). */
 export function resourceServerAuth(extra = {}) {

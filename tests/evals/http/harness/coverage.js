@@ -28,10 +28,10 @@ const PUBLIC_GET_CANDIDATES = Object.freeze([
 const { EDGE_NORTHBOUND_AUX_ROUTES } = relayEdge;
 
 /** Synthetic name used only by the Ta5-add-orphan mutant. Not a real tool. */
-export const ORPHAN_TOOL = "drupal_eval_orphan_no_case";
+const ORPHAN_TOOL = "drupal_eval_orphan_no_case";
 
 /** Case the delete-case mutant removes from the pack. */
-export const DELETED_CASE = "T16";
+const DELETED_CASE = "T16";
 
 const ASSIGNMENT_PATH = fileURLToPath(new URL("../coverage.json", import.meta.url));
 

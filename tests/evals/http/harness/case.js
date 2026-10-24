@@ -27,7 +27,7 @@ delete KNOWN_RED._schema;
  * @param {unknown} value
  * @returns {{ticket?: string, expires?: string, reason?: string}|null}
  */
-export function knownRedEntry(value) {
+function knownRedEntry(value) {
   if (!value) return null;
   if (typeof value === "string") return { ticket: value };
   if (typeof value === "object") return value;

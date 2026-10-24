@@ -61,7 +61,7 @@ export function legacyPost(method, params = {}, { id = 1, sessionId, notificatio
 }
 
 /** POST /mcp with the content type set and no body at all. */
-export function emptyPost() {
+function emptyPost() {
   return { method: "POST", headers: { accept: ACCEPT, "content-type": "application/json" }, body: "" };
 }
 

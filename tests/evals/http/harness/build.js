@@ -35,7 +35,7 @@ import { createStubIssuer } from "./stub-issuer.js";
 import { createTap } from "./taps.js";
 
 /** Transport-required scope for the hosted configuration (fixture value). */
-export const REQUIRED_SCOPES = ["mcp_connect"];
+const REQUIRED_SCOPES = ["mcp_connect"];
 
 /** Fixture per-source limit, high enough that no case reaches it. Not a recommendation. */
 const FIXTURE_RATE_LIMIT = 1000;
@@ -192,27 +192,13 @@ function acceptAnyAuth() {
 }
 
 /**
- * Inbound-mode resolver for T1n. The green run uses the real function; the
- * mutant run uses the fail-open swap from {@link MUTANTS}.
+ * Dependency swap for one mutant id. `buildHarness` is the only caller;
+ * T1n uses `failOpenInboundAuthMode` directly plus this table.
  *
- * @param {object} options
- * @param {string|null} [mutant]
- * @returns {{mode: string, reason?: string}}
- */
-export function inboundAuthModeForEval(options, mutant = null) {
-  const swap = mutant && MUTANTS[mutant] ? MUTANTS[mutant]() : {};
-  const resolve = swap.resolveInboundAuthMode ?? httpAuth.resolveInboundAuthMode;
-  return resolve(options);
-}
-
-/** @returns {string[]} mutant ids that have a dependency-swap */
-export const mutantIds = () => Object.keys(MUTANTS);
-
-/**
  * @param {string} id
  * @returns {object}
  */
-export function mutantSwap(id) {
+function mutantSwap(id) {
   if (id !== null && !MUTANTS[id]) throw new Error(`Unknown mutant "${id}".`);
   return id && MUTANTS[id] ? MUTANTS[id]() : {};
 }
