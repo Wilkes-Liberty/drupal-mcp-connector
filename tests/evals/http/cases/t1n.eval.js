@@ -28,7 +28,7 @@ const INDEX = join(SRC_DIR, "index.js");
  * first and the fail-open mutant could never be observed.
  */
 /** True when an `openssl` executable answers `openssl version`. */
-export function opensslAvailable() {
+function opensslAvailable() {
   const probe = spawnSync("openssl", ["version"], { encoding: "utf8" });
   return probe.status === 0;
 }

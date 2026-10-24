@@ -11,7 +11,6 @@ import { decodeJwt, exportJWK, generateKeyPair, SignJWT } from "jose";
 
 export const FAKE_ISSUER_URL = "https://issuer.test";
 export const FAKE_AUDIENCE = "https://mcp.example.com/mcp";
-export const FAKE_INTROSPECTION_URL = `${FAKE_ISSUER_URL}/introspect`;
 
 const FIXTURE_TTL_SEC = 300;
 

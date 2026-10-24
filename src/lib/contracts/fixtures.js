@@ -1,16 +1,13 @@
 /**
  * In-process contract fixtures (#181).
  *
- * These implement relay / approval / evidence-sink / backend roles for the
- * Drupal conformance kit. They are not a second system-of-record adapter.
+ * `createMemoryBackend` is the in-memory system-of-record stand-in for the
+ * Drupal conformance kit. Relay, approval, and evidence-sink fixtures live
+ * in their own modules (and on the documented `contracts/index.js` barrel).
+ * This file is not a second system-of-record adapter.
  */
 
 import { randomUUID } from "node:crypto";
-import { createMemoryApproval } from "./approval.js";
-import { createMemoryEvidenceSink } from "./evidence-sink.js";
-import { createLocalRelay } from "./relay.js";
-
-export { createMemoryApproval, createMemoryEvidenceSink, createLocalRelay };
 
 /**
  * In-memory backend used by the Drupal adapter during conformance.

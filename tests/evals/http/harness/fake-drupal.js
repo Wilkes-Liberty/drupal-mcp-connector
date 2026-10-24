@@ -18,7 +18,7 @@ const CANARY_SEED = "dev-866-http-eval-harness";
  * @param {string} tenant
  * @returns {{secret: string, host: string}}
  */
-export function canaryFor(tenant) {
+function canaryFor(tenant) {
   const digest = createHash("sha256").update(`${CANARY_SEED}:${tenant}`).digest("hex").slice(0, 10);
   return {
     secret: `CANARY-SECRET-${tenant}-${digest}`,
