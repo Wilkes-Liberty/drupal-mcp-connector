@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **npm audit high and moderate advisories cleared without a connector
+  release.** The required `Lint, Syntax & Unit (Node 20)` job fails on
+  `npm audit --audit-level=high`. Three new advisories landed after the
+  last green default-branch run: high `zod` below 4.6.6
+  ([GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5),
+  memory exhaustion while validating oversized constrained collections),
+  moderate `hono` 4.12.4–4.13.10
+  ([GHSA-5r4p-p66f-jhc7](https://github.com/advisories/GHSA-5r4p-p66f-jhc7),
+  `serveStatic` double decode), and moderate `fast-uri` 3.0.0–3.1.8
+  (scheme spoofing, host confusion, and related URI GHSAs, fixed in
+  3.1.9). This connector does not depend on those packages directly.
+  Overrides now pin `zod` `^4.6.6`, `hono` `^4.13.11`, and `fast-uri`
+  `^3.1.9` so the lockfile resolves zod 4.4.3 → 4.6.7, hono 4.13.7 →
+  4.13.13, and fast-uri 3.1.8 → 3.1.9. `npm audit` reports 0
+  vulnerabilities. Package version stays 5.4.2.
+
+  **Zod reachability.** Reachable from an MCP client. The TypeScript SDK
+  (`@modelcontextprotocol/core`) parses every inbound JSON-RPC message
+  with Zod — including `tools/call` — before connector handlers run.
+  Hosted HTTPS still admits the request first (Origin, Host, live
+  introspection). Stdio and loopback-unauthenticated HTTP reach Zod from
+  the connected client. Tool `arguments` are
+  `z.record(z.string(), z.unknown())`; the SDK does not convert the
+  connector's JSON Schema `inputSchema` into Zod. Most protocol arrays
+  are unbounded (4.6.6 does not change those). The protocol `.max(100)`
+  is on completion *results*, not inbound tool arguments. Valid-sized
+  input still validates the same. Oversized bounded collections now fail
+  closed with one `too_big` instead of allocating one issue per element.
+  Connector-authored tool schemas stay JSON Schema / Ajv (module tools)
+  or dispatch-time checks (built-ins).
+
+  **Hono / fast-uri.** The HTTP surface does not mount `serveStatic`;
+  the hono bump is a same-minor patch to clear the advisory. `fast-uri`
+  stays on 3.x (Ajv's range) for `$id`/`$ref` resolution of module-tool
+  schemas. Operators: pull this lockfile; no config or version bump.
+
 ### Removed
 
 - Unused leftover production exports (third wave after #505): same-file
