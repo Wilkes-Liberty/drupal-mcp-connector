@@ -103,7 +103,9 @@ function installRealChainFetch({
   denyGovernance = new Set(),
   errorSites = new Set(),
   counts,
+  slowPromptRequestsAfter = Infinity,
 } = {}) {
+  let promptRequests = 0;
   vi.mocked(fetch).mockImplementation(async (url, opts) => {
     const u = String(url);
     if (u.includes("/oauth/token")) {
@@ -158,6 +160,7 @@ function installRealChainFetch({
         });
       }
       if (body.method === "prompts/get") {
+        if (++promptRequests > slowPromptRequestsAfter) await delay(1_500);
         counts.mcp.promptsGet += 1;
         return jsonRes(200, {
           jsonrpc: "2.0",
@@ -195,7 +198,8 @@ describe("DEV-1019 real catalog chain", () => {
       readiness: 0,
       mcp: { initialize: 0, initialized: 0, toolsList: 0, promptsList: 0, promptsGet: 0 },
     };
-    installRealChainFetch({ counts });
+    // Exercise independently completing prompt discovery on the last two sites.
+    installRealChainFetch({ counts, slowPromptRequestsAfter: 11 });
     const events = [];
     const stop = subscribeCatalogNotifications((event) => events.push({ ...event, at: performance.now() }));
     const registry = createModuleToolRegistry();
@@ -215,7 +219,9 @@ describe("DEV-1019 real catalog chain", () => {
       let ready = [];
       while (Date.now() < deadline) {
         ready = await registry.list({ sites, identity, waitMs: 0, logPending: false });
-        if (ready.length === 13 && events.some((event) => event.tools) && events.some((event) => event.prompts)) {
+        // One prompt notification does not mean every detached site has finished.
+        if (ready.length === 13 && counts.mcp.promptsGet === sites.length
+          && events.some((event) => event.tools) && events.some((event) => event.prompts)) {
           timings.toolsListChangedMs = events.findLast((event) => event.tools).at - started;
           timings.promptsListChangedMs = events.findLast((event) => event.prompts).at - started;
           break;
