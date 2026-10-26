@@ -11,7 +11,7 @@
 
 ## Checklist
 - [ ] Tests added/updated
-- [ ] CHANGELOG.md updated
+- [ ] One changelog fragment added (or `no-changelog` exemption applies)
 - [ ] docs/tools-reference.md updated (if adding tools)
 - [ ] `config/config.example.json` updated (if adding config options)
 - [ ] No credentials committed

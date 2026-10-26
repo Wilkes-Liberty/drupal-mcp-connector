@@ -62,7 +62,7 @@ targeted tests while iterating (`npx vitest run tests/tools/nodes.test.js`).
   tests. After tool description/schema changes run `npm run generate:commands`.
 - JSDoc on exported functions.
 - Conventional Commits (`feat:`, `fix:`, `docs:`, …).
-- Update `CHANGELOG.md` under `[Unreleased]` for user-visible changes.
+- Add one `changelog.d/<issue>-<slug>.md` fragment for user-visible changes; see CONTRIBUTING.md.
 - Branch names for tracked work: `fix/<issue>-<slug>` or `feat/<issue>-<slug>`.
 
 ## Security (non-negotiable)
