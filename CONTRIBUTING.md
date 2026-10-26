@@ -113,7 +113,7 @@ docs: update getting-started for DDEV setup
 
 - One feature or fix per PR.
 - Add a test if you're adding a tool or fixing a bug.
-- Update `CHANGELOG.md` under `[Unreleased]`. A `CHANGELOG updated` CI check
+- Add one `changelog.d/<issue>-<slug>.md` fragment. A `CHANGELOG updated` CI check
   enforces this; a trivial PR that genuinely needs no entry can carry the
   `no-changelog` label to bypass it. (Dependabot PRs are exempt automatically.)
 - Update [docs/tools-reference.md](docs/tools-reference.md) if you add or change tools.
@@ -127,6 +127,54 @@ docs: update getting-started for DDEV setup
 If you find a security vulnerability, please do **not** open a public issue.
 See [SECURITY.md](SECURITY.md) for private reporting.
 
+## Changelog fragments
+
+A fragment is required by default. The `no-changelog` label exempts trivial
+changes from the entry requirement; Dependabot is exempt automatically.
+Structural validation still runs for every change.
+
+Add one uniquely named `changelog.d/<issue>-<slug>.md` per pull request instead
+of editing `CHANGELOG.md`. For example:
+
+```markdown
+---
+section: Fixed
+---
+Describe the user-visible correction and reference its issue.
+```
+
+Use `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, or `Security`;
+`Docs`, `Documentation`, `Dependencies`, and `Tests` are also accepted.
+Fragments do not contain headings or fenced blocks. Shared changelog edits are
+reserved for a verified release compilation, regardless of labels.
+
+Fetch the published compiler into a temporary location, then validate locally:
+
+```bash
+gh api 'repos/Wilkes-Liberty/shared-ci/contents/.github/scripts/changelog-fragments.py?ref=f0ca57b1511c452a9905051585f07b90e6b0494f' \
+  -H 'Accept: application/vnd.github.raw' > /tmp/changelog-fragments.py
+python3 -I /tmp/changelog-fragments.py check --base origin/master \
+  --preserve-history --enforce-fragments --require-entry \
+  --extra-sections Docs,Documentation,Dependencies,Tests
+```
+
+For an authorized final release, compile on the release preparation branch
+before the final tag. Replace the example version and date with the approved
+release values:
+
+```bash
+python3 -I /tmp/changelog-fragments.py compile --version X.Y.Z --date YYYY-MM-DD \
+  --preserve-history --extra-sections Docs,Documentation,Dependencies,Tests
+```
+
+Review and commit the generated changelog plus consumed fragment deletions.
+Existing historical sections remain intact. Compilation does not create tags,
+merge a PR, publish a package, or authorize deployment.
+
+The connector retains its package and image release workflow. Compile notes before
+release preparation, and preserve the container digest section when editing GitHub
+release notes as described below.
+
 ## Releasing
 
 Releases are cut from `master` and published by the `release.yml` GitHub
@@ -137,8 +185,8 @@ Because `master` is protected, the release commit lands via a PR and the tag is
 created **after** the merge, on the resulting `master` commit:
 
 1. Branch off `master` (e.g. `git checkout -b release/vX.Y.Z`).
-2. Roll the `[Unreleased]` CHANGELOG section into a new dated version heading,
-   and add its `[X.Y.Z]` link reference at the bottom.
+2. Compile pending fragments using the command above and review the generated
+   version section and consumed fragment deletions.
 3. Bump the version without tagging yet:
    `npm version <x.y.z> --no-git-tag-version`.
 4. Commit (`release: vX.Y.Z — …`), push the branch, and open a PR to `master`.
