@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Unused leftover production exports (third wave after #505): same-file
+  helpers and constants that nothing outside the defining file imported
+  (`NETWORK_JWT_VERIFY_BUDGET_MS` / `DEFAULT_MAX_TOKEN_LIFETIME` /
+  `DEFAULT_TOKEN_ALGORITHMS`, `assertAssuranceClass`, `generate`,
+  `buildPkce` / `probeHost`, `planWorkflowStubs` /
+  `discoverModuleDefinitions`, `upstreamRawUrl` / `upstreamApiUrl` /
+  `fetchUpstreamVectors`, `createLabCredentialRegistry` /
+  `createStubDrupal` / `createLabRelay`, `assertTypedDecision` /
+  `assertExecutionReceipt`). Implementations stay except
+  `assertAssuranceClass`, which had no call sites. Tests keep using the
+  public harness and kit runners, not these names.
+
 ### Security
 
 - **npm audit high and moderate advisories cleared without a connector
@@ -44,20 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the hono bump is a same-minor patch to clear the advisory. `fast-uri`
   stays on 3.x (Ajv's range) for `$id`/`$ref` resolution of module-tool
   schemas. Operators: pull this lockfile; no config or version bump.
-
-### Removed
-
-- Unused leftover production exports (third wave after #505): same-file
-  helpers and constants that nothing outside the defining file imported
-  (`NETWORK_JWT_VERIFY_BUDGET_MS` / `DEFAULT_MAX_TOKEN_LIFETIME` /
-  `DEFAULT_TOKEN_ALGORITHMS`, `assertAssuranceClass`, `generate`,
-  `buildPkce` / `probeHost`, `planWorkflowStubs` /
-  `discoverModuleDefinitions`, `upstreamRawUrl` / `upstreamApiUrl` /
-  `fetchUpstreamVectors`, `createLabCredentialRegistry` /
-  `createStubDrupal` / `createLabRelay`, `assertTypedDecision` /
-  `assertExecutionReceipt`). Implementations stay except
-  `assertAssuranceClass`, which had no call sites. Tests keep using the
-  public harness and kit runners, not these names.
 
 ## [5.4.2] - 2026-10-23
 
