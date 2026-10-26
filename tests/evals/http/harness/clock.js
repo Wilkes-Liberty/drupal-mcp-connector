@@ -6,7 +6,7 @@
 import { vi } from "vitest";
 
 /** Fixed start instant for every case (synthetic). */
-export const FIXTURE_NOW = new Date("2026-10-10T16:00:00.000Z");
+const FIXTURE_NOW = new Date("2026-10-10T16:00:00.000Z");
 
 /**
  * Install the fake `Date`. Call `restore()` in teardown.

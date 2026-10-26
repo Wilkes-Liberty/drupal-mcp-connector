@@ -68,7 +68,8 @@ function main() {
   ], {
     cwd: REPO,
     stdio: "inherit",
-    env: cleanEnv({ EVAL_HTTP_EVIDENCE: evidencePath, EVAL_HTTP_MODE: "staging" }),
+    // Staging vs synthetic is the vitest config, not an env flag.
+    env: cleanEnv({ EVAL_HTTP_EVIDENCE: evidencePath }),
   });
   if (child.status !== 0) violations.push(`vitest exited with status ${child.status}`);
 

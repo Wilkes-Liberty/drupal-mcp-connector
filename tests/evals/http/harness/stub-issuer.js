@@ -15,9 +15,8 @@
 import { decodeJwt, SignJWT } from "jose";
 import { generateSigningKey } from "./keys.js";
 
-export const STUB_ISSUER_URL = "https://stub-issuer.invalid";
-export const STUB_AUDIENCE = "https://mcp.stub.invalid/mcp";
-export const STUB_INTROSPECTION_URL = `${STUB_ISSUER_URL}/introspect`;
+const STUB_ISSUER_URL = "https://stub-issuer.invalid";
+const STUB_AUDIENCE = "https://mcp.stub.invalid/mcp";
 
 /** Fixture token lifetime in seconds. Not a recommendation. */
 const FIXTURE_TOKEN_TTL_SEC = 300;
