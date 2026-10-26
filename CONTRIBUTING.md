@@ -148,10 +148,16 @@ Use `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, or `Security`;
 Fragments do not contain headings or fenced blocks. Shared changelog edits are
 reserved for a verified release compilation, regardless of labels.
 
-Fetch the published compiler into a temporary location, then validate locally:
+Commit the fragment and related changes before the entry check: `--base` compares
+committed HEAD. For an uncommitted syntax check, omit `--base` and
+`--require-entry`. Resolve the same floating `v1` revision used by CI before
+fetching the compiler into a temporary location:
 
 ```bash
-gh api 'repos/Wilkes-Liberty/shared-ci/contents/.github/scripts/changelog-fragments.py?ref=f0ca57b1511c452a9905051585f07b90e6b0494f' \
+SHARED_CI_REV=$(gh api repos/Wilkes-Liberty/shared-ci/git/ref/tags/v1 \
+  --jq 'select(.object.type == "commit") | .object.sha')
+test -n "$SHARED_CI_REV"
+gh api "repos/Wilkes-Liberty/shared-ci/contents/.github/scripts/changelog-fragments.py?ref=$SHARED_CI_REV" \
   -H 'Accept: application/vnd.github.raw' > /tmp/changelog-fragments.py
 python3 -I /tmp/changelog-fragments.py check --base origin/master \
   --preserve-history --enforce-fragments --require-entry \
