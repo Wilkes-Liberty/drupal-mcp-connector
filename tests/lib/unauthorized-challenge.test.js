@@ -102,7 +102,8 @@ function expectRfc9728Challenge(res, {
   const challenge = res.headers?.["WWW-Authenticate"] ?? res.headers?.["www-authenticate"];
   expect(challenge, "WWW-Authenticate present").toEqual(expect.any(String));
   expect(challenge).toMatch(/^Bearer\b/);
-  expect(challenge).toContain(`error="${error}"`);
+  if (error) expect(challenge).toContain(`error="${error}"`);
+  else expect(challenge).not.toMatch(/\berror(?:_description)?=/);
   if (errorDescription) {
     expect(challenge).toContain(`error_description="${errorDescription}"`);
   }
@@ -175,7 +176,7 @@ describe("DEV-877: 401 challenge matches served RFC 9728 metadata", () => {
     const handle = handler({ authenticate });
     const res = mockRes();
     await handle(bodyReq({ jsonrpc: "2.0", id: 1, method: "tools/list" }), res);
-    expectRfc9728Challenge(res, { errorDescription: "Bearer token required" });
+    expectRfc9728Challenge(res, { error: null });
   });
 
   it("invalid token includes resource_metadata", async () => {

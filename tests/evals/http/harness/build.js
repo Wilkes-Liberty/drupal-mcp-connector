@@ -139,8 +139,7 @@ const MUTANTS = {
         // Reaching the handler is the mutation; the 401 is written below.
       }
       httpAuth.writeUnauthorized(res, {
-        error: "invalid_token",
-        errorDescription: "Bearer token required",
+        error: "",
         resourceMetadata: ctx.resourceMetadataUrl,
       });
     },
