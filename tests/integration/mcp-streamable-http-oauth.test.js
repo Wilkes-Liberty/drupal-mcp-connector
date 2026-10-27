@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
@@ -60,11 +60,11 @@ async function startOauthConnector() {
         description: "List nodes from the stub upstream",
         inputSchema: { type: "object", properties: {} },
       }],
-      call: async () => {
+      call: vi.fn(async () => {
         const res = await fetch(`${upstream}/jsonapi/node/article`);
         const json = await res.json();
         return { content: [{ type: "text", text: JSON.stringify(json) }] };
-      },
+      }),
     },
     resources: { definitions: [], read: async () => ({}) },
     prompts: { definitions: [], get: () => [] },
@@ -87,10 +87,44 @@ async function startOauthConnector() {
   return {
     url: new URL(`http://127.0.0.1:${server.address().port}/mcp`),
     privateKey,
+    callTool: surface.tools.call,
   };
 }
 
 describe("Streamable HTTP OAuth client (DEV-840)", () => {
+  it.each(["2026-07-28", "2025-11-25"])(
+    "distinguishes absent credentials from rejected tokens over HTTP (%s)",
+    async (protocolVersion) => {
+      const { url, callTool } = await startOauthConnector();
+      const metadata = "https://mcp.example.com/.well-known/oauth-protected-resource/mcp";
+      const plainChallenge = `Bearer realm="mcp", resource_metadata="${metadata}"`;
+      for (const authorization of [undefined, "Basic c3ludGhldGljOnRlc3Q=", "Bearer invalid-token"]) {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "mcp-protocol-version": protocolVersion,
+            ...(authorization ? { authorization } : {}),
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0", id: 1, method: "tools/call",
+            params: { name: "drupal_list_nodes", arguments: {} },
+          }),
+        });
+        expect(response.status).toBe(401);
+        const challenge = response.headers.get("www-authenticate");
+        if (authorization?.startsWith("Bearer ")) {
+          expect(challenge).toContain('error="invalid_token"');
+          expect(challenge).toContain(`resource_metadata="${metadata}"`);
+        } else {
+          expect(challenge).toBe(plainChallenge);
+        }
+        expect(await response.text()).toBe("Unauthorized");
+        expect(callTool).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it("connects with a bearer token, lists tools, and calls one against a stub upstream", async () => {
     const { url, privateKey } = await startOauthConnector();
     const token = await mintToken(privateKey);

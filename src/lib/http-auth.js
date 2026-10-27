@@ -849,7 +849,9 @@ export function createResourceAuthenticator({
     void requestHeaders;
     const token = parseBearerToken(authorizationHeader);
     if (!token) {
-      return fail(401, { error: "invalid_token", errorDescription: "Bearer token required" });
+      // RFC 6750 section 3.1: absent or unsupported authentication gets a
+      // discovery challenge without token-error details.
+      return fail(401);
     }
 
     const algorithmRefusal = compactJwtAlgorithmRefusal(token, allowedAlgs);

@@ -2,7 +2,7 @@
  * T1 (DEV-866): POST /mcp with no Authorization, and GET/DELETE /mcp, against
  * the hosted configuration started through `startHttpsTransport`.
  *
- * Expected: 401; error="invalid_token", description "Bearer token required";
+ * Expected: 401; no error or error_description for absent credentials;
  * resource_metadata present; body "Unauthorized"; handler not reached;
  * Ch = Ct = Cu = 0; no Mcp-Session-Id issued; the request body is not read.
  *

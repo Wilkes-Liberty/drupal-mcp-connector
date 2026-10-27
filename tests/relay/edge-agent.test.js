@@ -481,8 +481,12 @@ describe("DEV-877: edge 401s carry resource_metadata", () => {
     expect(denied.status).toBe(401);
     const challenge = denied.headers["www-authenticate"];
     expect(challenge).toMatch(/^Bearer\b/i);
-    expect(challenge).toContain("error=\"invalid_token\"");
-    expect(challenge).toContain(`error_description="${errorDescription}"`);
+    if (errorDescription) {
+      expect(challenge).toContain("error=\"invalid_token\"");
+      expect(challenge).toContain(`error_description="${errorDescription}"`);
+    } else {
+      expect(challenge).not.toMatch(/\berror(?:_description)?=/);
+    }
     expect(challenge).toContain(`resource_metadata="${metadataUrl}"`);
     expect(new URL(metadataUrl).pathname).toBe("/.well-known/oauth-protected-resource/mcp");
   }
@@ -496,7 +500,7 @@ describe("DEV-877: edge 401s carry resource_metadata", () => {
     expect((await metadata.json()).resource).toBe(AUDIENCE);
 
     const missing = await modernCall(harness.edge.northboundUrl, null);
-    expectEdgeChallenge(missing, harness.edge.resourceMetadataUrl, "Bearer token required");
+    expectEdgeChallenge(missing, harness.edge.resourceMetadataUrl);
 
     const invalid = await modernCall(harness.edge.northboundUrl, "not-a-jwt");
     expectEdgeChallenge(invalid, harness.edge.resourceMetadataUrl, "Token is not active");
@@ -550,12 +554,10 @@ describe("DEV-877: edge 401s carry resource_metadata", () => {
     expectEdgeChallenge(
       await usageGet(edge.northboundUrl, null),
       edge.resourceMetadataUrl,
-      "Bearer token required",
     );
     expectEdgeChallenge(
       await assessorGet(edge.northboundUrl, null),
       edge.resourceMetadataUrl,
-      "Bearer token required",
     );
   });
 

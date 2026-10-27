@@ -19,15 +19,22 @@ function check(h, run) {
  */
 export function expectRefused(h, label, res, {
   status = 401,
-  error = "invalid_token",
-  description = "Bearer token required",
+  error,
+  description,
   body = "Unauthorized",
 } = {}) {
   check(h, () => expect(res.status, `${label}: status`).toBe(status));
   check(h, () => expect(res.headers["www-authenticate"], `${label}: Bearer`).toMatch(/^Bearer\b/i));
-  check(h, () => expect(res.headers["www-authenticate"], `${label}: error code`).toContain(`error="${error}"`));
-  check(h, () => expect(res.headers["www-authenticate"], `${label}: description`)
-    .toContain(`error_description="${description}"`));
+  check(h, () => {
+    const challenge = expect(res.headers["www-authenticate"], `${label}: error code`);
+    if (error) challenge.toContain(`error="${error}"`);
+    else challenge.not.toMatch(/\berror=/);
+  });
+  check(h, () => {
+    const challenge = expect(res.headers["www-authenticate"], `${label}: description`);
+    if (description) challenge.toContain(`error_description="${description}"`);
+    else challenge.not.toMatch(/\berror_description=/);
+  });
   if (h.resourceMetadataUrl) {
     check(h, () => expect(res.headers["www-authenticate"], `${label}: resource_metadata`)
       .toContain(`resource_metadata="${h.resourceMetadataUrl}"`));
