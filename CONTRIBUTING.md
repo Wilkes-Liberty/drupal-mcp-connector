@@ -195,6 +195,8 @@ created **after** the merge, on the resulting `master` commit:
    version section and consumed fragment deletions.
 3. Bump the version without tagging yet:
    `npm version <x.y.z> --no-git-tag-version`.
+   Set `.cursor-plugin/plugin.json` to the same version, and update the
+   installation examples in `README.md` and `docs/getting-started.md`.
 4. Commit (`release: vX.Y.Z — …`), push the branch, and open a PR to `master`.
 5. Once CI is green, merge the PR (resolve any review threads first).
 6. Update local master and tag the merge commit:
@@ -218,8 +220,8 @@ created **after** the merge, on the resulting `master` commit:
    section and upload the digest assets (`--clobber` on rerun).
 
 The connector reports its own version from `package.json` at runtime (MCP
-handshake, `X-MCP-Client` header, startup logs), so step 3 is the only place a
-version number needs to change.
+handshake, `X-MCP-Client` header, startup logs). The Cursor plugin manifest
+has its own version field; the marketplace test checks that it matches.
 
 **One-time setup — npm trusted publishing (no token, no secret):**
 publishing authenticates via GitHub Actions **OIDC** — npm trusts this exact
