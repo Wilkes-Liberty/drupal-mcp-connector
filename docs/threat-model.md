@@ -126,8 +126,9 @@ never stores them.
 ## Assurance performed
 
 - `eslint-plugin-security` runs in CI lint.
-- Quality gate in CI and release on pinned Node 24 LTS (`npm run check`:
-  lint + high-severity audit + syntax-check + test).
+- Quality gate in CI on Node 20 (required `Lint, Syntax & Unit (Node 20)`
+  check) and Node 24 (non-required), and in release on Node 24 LTS
+  (`npm run check`: lint + high-severity audit + syntax-check + test).
   Tool dispatch and security middleware live in `src/lib/dispatch.js`;
   `resources/read` for content-types and security-policy goes through
   `invokeReadTool` → `callTool`.

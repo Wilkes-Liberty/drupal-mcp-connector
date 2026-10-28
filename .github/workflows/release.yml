@@ -74,8 +74,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          # Publish on the same Node line CI tests on: 24 LTS. Node 20 is
-          # end-of-life and missed the 2026-10-21 Node.js security release.
+          # Publish on Node 24 LTS (container image line). Required CI covers
+          # the engines.node floor on Node 20; a non-required CI job also
+          # runs the same quality gate on 24.
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
