@@ -18,10 +18,8 @@ concurrency:
 
 jobs:
   # Display name is the master required status check. Renaming it without
-  # updating branch protection blocks every pull request.
-  # The "(Node 20)" in the name is now out of date: the job runs Node 24 (see
-  # setup-node below). The name stays as-is until branch protection and
-  # tests/scripts/quality-gate.test.js are updated in the same change.
+  # updating branch protection blocks every pull request. node-version must
+  # stay 20 so the name, engines.node (>=20.0.0), and the runner agree.
   lint-and-syntax:
     name: Lint, Syntax & Unit (Node 20)
     runs-on: ubuntu-latest
@@ -31,12 +29,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          # Node 24 (Active LTS). Node 20 is end-of-life, and the 2026-10-21
-          # Node.js security release ships fixes only for 22.x, 24.x and 26.x.
-          # setup-node resolves '24' to the newest 24.x (>= 24.22.1).
-          # engines.node is still >=20.0.0; that floor is a separate decision.
-          # https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
-          node-version: '24'
+          # engines.node floor (>=20.0.0). Keep this on 20; the required
+          # check name above is what branch protection matches. Node 24 LTS
+          # is the non-required sibling job, plus container/release.
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
@@ -54,6 +50,40 @@ jobs:
       # release workflow is the first place some steps ever run. Resolve every
       # action reference on the PR instead. Network-only; not part of
       # `npm run check` so the release job never depends on the GitHub API.
+      - name: Resolve every workflow action reference
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run lint:actions
+
+  # Same quality-gate steps as lint-and-syntax, on Node 24 LTS (the
+  # container image and release publish line). Not a required status check.
+  # Do not add this job to branch protection; failures stay visible on the
+  # PR without blocking merge of a green Node 20 required check.
+  lint-and-syntax-node24:
+    name: Lint, Syntax & Unit (Node 24)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          # Active LTS. setup-node resolves '24' to the newest 24.x.
+          # Kept off branch protection on purpose (see job comment above).
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: npm run check
+        run: npm run check
+
+      - name: Principal-key vectors match mcp_sentinel
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run check:principal-vectors
+
       - name: Resolve every workflow action reference
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -182,8 +212,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          # Same Node line as lint-and-syntax: 24 LTS, since 20 is end-of-life
-          # (2026-10-21 Node.js security release).
+          # Node 24 LTS, matching the container image and the non-required
+          # quality-gate job. The required lint-and-syntax job covers Node 20.
           node-version: '24'
           cache: 'npm'
 
@@ -204,8 +234,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          # Same Node line as lint-and-syntax: 24 LTS, since 20 is end-of-life
-          # (2026-10-21 Node.js security release).
+          # Node 24 LTS, matching the container image and the non-required
+          # quality-gate job. The required lint-and-syntax job covers Node 20.
           node-version: '24'
           cache: 'npm'
 

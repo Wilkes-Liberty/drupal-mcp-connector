@@ -18,6 +18,42 @@ function runCommands(workflow) {
   });
 }
 
+/**
+ * Split a workflow into job-id → YAML block. Job ids are the two-space
+ * mapping keys under `jobs:`; a rename or indent change fails the
+ * Node 20 / Node 24 assertions below instead of matching the wrong job.
+ */
+function workflowJobs(workflow) {
+  const header = workflow.match(/^jobs:\s*$/m);
+  if (!header) return {};
+  const body = workflow.slice(workflow.indexOf("\n", header.index) + 1);
+  const jobs = {};
+  let currentId = null;
+  let lines = [];
+  const flush = () => {
+    if (currentId) jobs[currentId] = lines.join("\n");
+  };
+  for (const line of body.split("\n")) {
+    const idMatch = line.match(/^  ([A-Za-z0-9_-]+):\s*$/);
+    if (idMatch) {
+      flush();
+      currentId = idMatch[1];
+      lines = [line];
+      continue;
+    }
+    if (currentId) lines.push(line);
+  }
+  flush();
+  return jobs;
+}
+
+/** Every `node-version:` pin in a job, in source order. */
+function nodeVersions(block) {
+  return [...block.matchAll(/^\s*node-version:\s*['"]?([^'"\s]+)/gm)].map(
+    (match) => match[1],
+  );
+}
+
 describe("advertised quality gate", () => {
   const pkg = JSON.parse(read("package.json"));
   const ci = read(".github/workflows/ci.yml");
@@ -54,9 +90,35 @@ describe("advertised quality gate", () => {
     expect(publishAt).toBeGreaterThan(checkAt);
   });
 
+  it("required CI job runs Node 20, matching engines.node and the check name", () => {
+    // Floor advertised to npm; CI must actually install that major.
+    expect(pkg.engines.node).toBe(">=20.0.0");
+
+    const jobs = workflowJobs(ci);
+    const required = jobs["lint-and-syntax"];
+    expect(required, "missing lint-and-syntax job").toBeTruthy();
+    expect(required).toMatch(/^\s{4}name: Lint, Syntax & Unit \(Node 20\)\s*$/m);
+    // Fail closed: any extra pin in this job (e.g. silently moving to 24)
+    // is a mismatch with the required-check name.
+    expect(nodeVersions(required)).toEqual(["20"]);
+    expect(runCommands(required)).toContain("npm run check");
+
+    // Same gate on 24 LTS, different display name, so branch protection
+    // that keys on "(Node 20)" does not start requiring 24.
+    const node24 = jobs["lint-and-syntax-node24"];
+    expect(node24, "missing lint-and-syntax-node24 job").toBeTruthy();
+    expect(node24).toMatch(/^\s{4}name: Lint, Syntax & Unit \(Node 24\)\s*$/m);
+    expect(nodeVersions(node24)).toEqual(["24"]);
+    expect(runCommands(node24)).toContain("npm run check");
+  });
+
   it("docs name the same CI and release quality gate as the workflows", () => {
     expect(agents).toContain("lint + audit + syntax-check + test (CI and release quality gate)");
     expect(contributing).toContain("lint + audit + syntax-check + test (CI and release quality gate)");
     expect(contributing).toContain("re-runs `npm run check`");
+    // engines.node, getting-started, and versioning all advertise 20+.
+    expect(contributing).toContain("Node.js 20+");
+    expect(read("docs/getting-started.md")).toContain("Node.js 20+");
+    expect(read("docs/versioning.md")).toMatch(/\*\*Node\.js 20\+\*\*/);
   });
 });
