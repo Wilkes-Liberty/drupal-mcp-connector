@@ -72,7 +72,7 @@ const FAN_DOWN_TIMEOUT_MS = 10_000;
  *
  * @returns {{listens: object[], connects: object[], recordListen: Function, recordConnect: Function}}
  */
-export function createConnectionLedger() {
+function createConnectionLedger() {
   const listens = [];
   const connects = [];
   return {

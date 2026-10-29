@@ -12,8 +12,8 @@ import { getRequestIdentity } from "./principal.js";
 import { listServerTools, fetchSiteWorkflowPrompts } from "./server-tools.js";
 import { loadSiteCatalogs, remainingCatalogListBudgetMs } from "./site-catalog.js";
 import { sourceText } from "./tool-prompts.js";
+// lookupWorkflow stays on workflow-index.js; principal.js imports it there.
 export {
-  lookupWorkflow,
   registerBuiltinWorkflows,
   replaceModuleWorkflows,
 } from "./workflow-index.js";

@@ -97,10 +97,13 @@ function actChainFromClaim(act) {
 }
 
 /**
- * Copy only the claims the key formula reads. Values are not rewritten.
+ * Copy only the claims the shared principal-key formula reads. Values are
+ * not rewritten: an integer `sub` stays an integer so fromClaims fails
+ * closed instead of widening it to a string. Shared with http-auth so
+ * inbound identity and principal context pick the same four claims.
  *
  * @param {object} claims
- * @returns {object}
+ * @returns {Readonly<object>}
  */
 export function freezeKeyClaims(claims) {
   const out = {};

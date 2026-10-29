@@ -20,10 +20,7 @@ import { createModuleToolRegistry } from "../../src/lib/module-tools.js";
 import { clearToken } from "../../src/lib/oauth.js";
 import { CATALOG_LIST_BUDGET_MS, clearSiteCatalogCache } from "../../src/lib/site-catalog.js";
 import { clearGovernanceCache } from "../../src/lib/governance.js";
-
-const TOKEN_MS = 500;
-const READY_MS = 200;
-const MCP_MS = 2_500;
+import { TOKEN_MS, READY_MS, MCP_MS } from "../helpers/real-chain-drupal.js";
 const SCHEMA = {
   type: "object", required: ["id"], additionalProperties: false,
   properties: { id: { type: "integer", minimum: 1 } },
