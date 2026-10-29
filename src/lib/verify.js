@@ -209,10 +209,12 @@ function mentionedHosts(value) {
  *
  * Ties an evidence document to the exact input that produced it without
  * carrying that input — or any secret in it — into the result.
+ * Callers assert `result.subject.configDigest`; they do not import this.
+ *
  * @param {object} config The configuration under verification.
  * @returns {string} `sha256:<hex>`
  */
-export function configDigest(config) {
+function configDigest(config) {
   const redactKeys = new Set(["clientSecret", "apiToken", "secret", "password"]);
   const normalize = (value) => {
     if (Array.isArray(value)) return value.map(normalize);

@@ -182,10 +182,13 @@ export const TOOL_SCOPE_TABLE = Object.freeze(Object.fromEntries([
 ]));
 
 /**
+ * Closed-table lookup used by requiredScopesForTool and the network deny.
+ * Not a public surface; eval mutants patch this source string in place.
+ *
  * @param {string} toolName
  * @returns {{requiredScopes: readonly string[]}|undefined}
  */
-export function toolScopeEntry(toolName) {
+function toolScopeEntry(toolName) {
   // eslint-disable-next-line security/detect-object-injection -- toolName is an MCP tool name; the table is a frozen closed map
   return TOOL_SCOPE_TABLE[toolName];
 }

@@ -29,6 +29,7 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { createRemoteJWKSet, customFetch, decodeProtectedHeader, jwtVerify } from "jose";
 import { resolveConfiguredOrigins } from "./http-transport.js";
+import { freezeKeyClaims } from "./principal-context.js";
 import { assertTestOnly } from "./test-only.js";
 
 /** Inbound IdP HTTP timeout (discovery / JWKS). Matches Drupal/Drush outbound HTTP. */
@@ -148,22 +149,6 @@ export function scopesFromClaim(scope) {
   if (Array.isArray(scope)) return scope.map((item) => String(item)).filter(Boolean);
   if (typeof scope === "string") return scope.split(/[\s,]+/).filter(Boolean);
   return [];
-}
-
-/**
- * Copy only the claims the shared principal-key formula reads. Values are
- * not rewritten: an integer `sub` stays an integer so fromClaims fails
- * closed instead of widening it to a string.
- *
- * @param {object} claims
- * @returns {Readonly<object>}
- */
-function freezeKeyClaims(claims) {
-  const out = {};
-  for (const name of ["iss", "sub", "azp", "act"]) {
-    if (Object.hasOwn(claims, name)) out[name] = claims[name];
-  }
-  return Object.freeze(out);
 }
 
 /**

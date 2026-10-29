@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+// Shared with the catalog-chain test so both fixtures stay on the same delays.
 export const TOKEN_MS = 500;
 export const READY_MS = 200;
 export const MCP_MS = 2_500;
