@@ -1,6 +1,6 @@
 {
   "name": "drupal-mcp-connector",
-  "version": "5.4.3",
+  "version": "5.4.4",
   "description": "MCP server for Drupal: connects MCP clients to one or more sites over JSON:API or GraphQL, with governed writes and an SSH Drush bridge. Hosted HTTPS mode checks every call with the token issuer.",
   "type": "module",
   "main": "src/index.js",
