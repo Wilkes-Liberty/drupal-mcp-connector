@@ -1,18 +1,27 @@
 name: Claude
 
-# Lets a maintainer tag `@claude` on an issue or PR and have Claude act on this
-# repo and open a PR. This repo is public, so the job is inlined and
+# Lets an allowlisted maintainer tag `@claude` on an issue or PR and have Claude act
+# on this repo and open a PR. This repo is public, so the agent job is inlined and
 # self-contained (a private org reusable workflow cannot be consumed here).
+# Hardened by DEV-1197 (Wilkes-Liberty/vault#852).
 #
-# The `if:` guards below only pass event bodies to `contains(...)` (a boolean
-# test); no untrusted event data reaches any `run:`/shell context — so there is
-# no workflow-injection surface.
+# The gate is load-bearing on a public repo: without it, any GitHub account could
+# comment @claude and consume the org's Claude quota. author_association alone is
+# not enough either, because anyone posting through a shared human login (including
+# automation) satisfies it. The `authorize` job therefore also requires:
+#   - the repo/org variable CLAUDE_ALLOWED_ACTORS to list the actor, the triggering
+#     actor and the sender (comma- or whitespace-separated GitHub logins). Empty or
+#     unset means NO ONE can start a run: it fails closed;
+#   - a User sender (Bot senders and any login ending in [bot] are skipped).
+# The rules live in .github/scripts/claude-actor-gate.sh and are tested by
+# .github/scripts/tests/test-claude-actor-gate.sh (workflow: claude-gate-test.yml).
 #
-# The author gate is load-bearing on a public repo: without it, any GitHub
-# account could comment @claude and consume the org's Claude quota.
+# Event data only reaches `if:` expressions, `env:` and `with:`; nothing from
+# github.event is interpolated into a `run:` line.
 #
-# INERT until: the Claude GitHub App is installed on this repo and the
-# CLAUDE_CODE_OAUTH_TOKEN org Actions secret is made visible to it.
+# INERT until: the Claude GitHub App is installed on this repo, the
+# CLAUDE_CODE_OAUTH_TOKEN org Actions secret is made visible to it, and
+# CLAUDE_ALLOWED_ACTORS names at least one human.
 #
 # No issues:opened — that path skips under the author_association guard
 # (.github#18 / webcms#502). Invoke via a comment instead.
@@ -22,29 +31,62 @@ on:
   pull_request_review_comment: { types: [created] }
   pull_request_review:         { types: [submitted] }
 
-permissions:
-  contents: write        # create branches / commits on a PR
-  issues: write          # respond on issues
-  pull-requests: write   # open PRs, comment on PRs
-  # The action exchanges a GitHub OIDC token for its app credentials in every
-  # auth mode -- the first activation run failed without this.
-  id-token: write
-
-concurrency:
-  # One Claude run per issue/PR at a time; a stale run is left to finish.
-  group: claude-${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}
-  cancel-in-progress: false
+# Nothing at the workflow level; each job asks for the least it needs.
+permissions: {}
 
 jobs:
-  claude:
+  authorize:
+    # Cheap pre-filter so ordinary comments and bot events never start a runner.
+    # The real decision is the gate step below.
     if: |
-      !endsWith(github.actor, '[bot]') && (
-        (github.event_name == 'issue_comment'               && contains(github.event.comment.body || '', '@claude') && contains(fromJSON('["MEMBER","OWNER","COLLABORATOR"]'), github.event.comment.author_association)) ||
-        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body || '', '@claude') && contains(fromJSON('["MEMBER","OWNER","COLLABORATOR"]'), github.event.comment.author_association)) ||
-        (github.event_name == 'pull_request_review'         && contains(github.event.review.body  || '', '@claude') && contains(fromJSON('["MEMBER","OWNER","COLLABORATOR"]'), github.event.review.author_association))
+      github.event.sender.type != 'Bot' && !endsWith(github.actor, '[bot]') && (
+        (github.event_name == 'issue_comment'               && contains(github.event.comment.body || '', '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body || '', '@claude')) ||
+        (github.event_name == 'pull_request_review'         && contains(github.event.review.body  || '', '@claude'))
       )
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      allowed: ${{ steps.gate.outputs.allowed }}
+    steps:
+      # Always the default branch's copy of the gate: on review events the
+      # default ref is the PR merge commit, which a PR author controls.
+      - name: Checkout gate script (default branch)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Check the actor allowlist
+        id: gate
+        env:
+          CLAUDE_ALLOWED_ACTORS: ${{ vars.CLAUDE_ALLOWED_ACTORS }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          SENDER_LOGIN: ${{ github.event.sender.login }}
+          SENDER_TYPE: ${{ github.event.sender.type }}
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association || github.event.review.author_association }}
+        run: bash .github/scripts/claude-actor-gate.sh
+
+  claude:
+    needs: authorize
+    if: needs.authorize.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Only this job gets write scopes.
+    permissions:
+      contents: write        # create branches / commits on a PR
+      issues: write          # respond on issues
+      pull-requests: write   # open PRs, comment on PRs
+      # The action exchanges a GitHub OIDC token for its app credentials in every
+      # auth mode -- the first activation run failed without this.
+      id-token: write
+    concurrency:
+      # One Claude run per issue/PR at a time; a stale run is left to finish.
+      group: claude-${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
