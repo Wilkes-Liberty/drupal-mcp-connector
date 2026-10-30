@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.4] - 2026-10-29
+
+### Changed
+- Run the required `Lint, Syntax & Unit (Node 20)` CI job on Node 20 so the check name, `engines.node` (>=20.0.0), and the runner agree. The same quality-gate steps also run on Node 24 in a separate non-required job. The container image and release publish stay on Node 24 LTS.
+- Un-export leftover same-file helpers and drop unused eval re-exports. Inbound identity now uses the shared `freezeKeyClaims` helper so the `iss|sub|azp|act` copy cannot drift from principal context.
+
+### Docs
+- Rewrite the npm package description and README lead as two plain sentences: what the connector is, what it connects over, and how hosted HTTPS mode checks each call.
+
 ## [5.4.3] - 2026-10-27
 
 ### Changed
