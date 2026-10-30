@@ -1,6 +1,6 @@
 # Drupal MCP Connector
 
-> Multi-site MCP server for Drupal over JSON:API and GraphQL, with governed writes and an SSH Drush bridge. Hosted HTTPS introspects every authenticated call at the issuer. `init` writes a client config. `doctor` checks reachability, auth, and version skew.
+> MCP server for Drupal: connects MCP clients to one or more sites over JSON:API or GraphQL, with governed writes and an SSH Drush bridge. Hosted HTTPS mode checks every call with the token issuer.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-green)](https://nodejs.org)
