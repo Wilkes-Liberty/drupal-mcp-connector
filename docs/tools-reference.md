@@ -1,6 +1,6 @@
 # Tools Reference
 
-Complete reference for all 123 tools across 27 modules.
+Complete reference for all 124 tools across 28 modules.
 
 > **Tip:** Call `drupal_list_entity_types` first on an unfamiliar site to discover available resource types, and `drupal_security_info` to see the active access policy.
 
@@ -64,6 +64,7 @@ Complete reference for all 123 tools across 27 modules.
 - [Bulk](#bulk) — 2 tools
 - [Translations](#translations) — 2 tools
 - [Paragraphs](#paragraphs) — 3 tools
+- [Nested](#nested) — 1 tool
 - [Structure](#structure) — 5 tools
 - [Redirects](#redirects) — 2 tools
 - [Search](#search) — 1 tool
@@ -73,7 +74,7 @@ Complete reference for all 123 tools across 27 modules.
 - [Reports — Content Quality](#reports--content-quality) — 8 tools
 - [Audit (Composite)](#audit-composite) — 1 tool
 
-**Total: 123 tools across 27 modules.**
+**Total: 124 tools across 28 modules.**
 
 ---
 
@@ -842,11 +843,12 @@ The create/update tools return `relationshipData` that includes that meta key. H
 
 **Do not create paragraphs and then attach them without probing the host.** A doomed host PATCH (#201) leaves the paragraphs as orphans, and a content-tier agent cannot delete them. Call [`drupal_list_revisions`](#revisions) (`possiblyPatchBlocked`) and `dryRun` the host update *before* `drupal_create_paragraph`. Preflight inside `drupal_update_node` does not un-orphan work that already happened.
 
+Nested children of a paragraph field are replaced with [`drupal_draft_nested_components`](#nested), not by editing a live child.
+
 | Tool | Required params | Description |
 |------|----------------|-------------|
 | `drupal_create_paragraph` | `paragraphType` | Create a Paragraph of a given bundle. Returns the paragraph plus `relationshipData` (`{ type: 'paragraph--<bundle>', id, meta: { target_revision_id } }`). Governed write. |
 | `drupal_update_paragraph` | `paragraphType`, `id` | Partial update of an existing paragraph. Pass `langcode` to continue an unpublished translation via Sentinel. Without `langcode`, canonical JSON:API is still gated on published-host children. Do not use it to change a paragraph a published host still pins. |
-| `drupal_draft_nested_components` | `bundle`, `id`, `field`, `parentId`, `childField`, `children` | Governed nested-paragraph draft (#421). When the inventory advertises `nested_replacement`, one `/mcp-draft` carries `meta.mcp_nested_replacement` (`parent` is `parentId`), the connector creates no paragraphs, and `dryRun` uses that preflight (`sentinel_draft`). Otherwise it creates new unpublished paragraphs in the host's default language and pins a new direct parent from one host `/mcp-draft` (relationship only, `moderation_state: draft`). The new parent keeps the published parent's other references and replaces only the child field. Never edits a live child and never sends nested UUIDs as `mcp_components`. `children` is the full new list: `keep`, `replace`, or `insert`; omitting a child drops it from the draft only. Copies non-default translations onto the new paragraphs. The first host draft needs MCP Sentinel 2.29.0 (`open_draft`); an existing working copy continues. On a host that does not advertise `nested_replacement`, `dryRun` checks paragraph-create permission, creates nothing, and does not evaluate the host payload. After a failed host write the result names the prepared UUIDs. `resumeParentId` retries the host pin only when that paragraph's fields, other references, and child revision pins match the request. A failure before a parent exists says to delete the prepared paragraphs. A lost re-read is uncertain, and the same UUID at another revision is not success. A reusable library item or `from_library` child is refused; update the library item with `drupal_entity_update`. |
 | `drupal_get_paragraph` | `paragraphType`, `id` | Fetch a single Paragraph by bundle + UUID. Pass `revisionId` (the host pin) to read that revision; a different served vid is an error, not a silent default-revision fallback. Pass `langcode` to read an unpublished working translation. Returns the redacted paragraph (including `fields.drupal_internal__revision_id`) plus a `ref` with `meta.target_revision_id` when known. |
 
 ### drupal_create_paragraph
@@ -859,6 +861,16 @@ The create/update tools return `relationshipData` that includes that meta key. H
   }
 }
 ```
+
+---
+
+## Nested
+
+Governed nested-paragraph draft (`src/tools/nested.js`). Replaces nested children by creating new unpublished paragraphs and pinning a new direct parent from the host node's unpublished draft. Direct (non-nested) component attributes stay on [`drupal_update_node`](#nodes) `components`.
+
+| Tool | Required params | Description |
+|------|----------------|-------------|
+| `drupal_draft_nested_components` | `bundle`, `id`, `field`, `parentId`, `childField`, `children` | Governed nested-paragraph draft (#421). When the inventory advertises `nested_replacement`, one `/mcp-draft` carries `meta.mcp_nested_replacement` (`parent` is `parentId`), the connector creates no paragraphs, and `dryRun` uses that preflight (`sentinel_draft`). Otherwise it creates new unpublished paragraphs in the host's default language and pins a new direct parent from one host `/mcp-draft` (relationship only, `moderation_state: draft`). The new parent keeps the published parent's other references and replaces only the child field. Never edits a live child and never sends nested UUIDs as `mcp_components`. `children` is the full new list: `keep`, `replace`, or `insert`; omitting a child drops it from the draft only. Copies non-default translations onto the new paragraphs. The first host draft needs MCP Sentinel 2.29.0 (`open_draft`); an existing working copy continues. On a host that does not advertise `nested_replacement`, `dryRun` checks paragraph-create permission, creates nothing, and does not evaluate the host payload. After a failed host write the result names the prepared UUIDs. `resumeParentId` retries the host pin only when that paragraph's fields, other references, and child revision pins match the request. A failure before a parent exists says to delete the prepared paragraphs. A lost re-read is uncertain, and the same UUID at another revision is not success. A reusable library item or `from_library` child is refused; update the library item with `drupal_entity_update`. |
 
 ---
 
