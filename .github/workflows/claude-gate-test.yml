@@ -1,0 +1,39 @@
+name: Claude gate test
+
+# Regression tests for the @claude actor gate (DEV-1197, Wilkes-Liberty/vault#852):
+# runs the gate against allowed/refused cases, checks claude.yml is wired to it,
+# and lints both with shellcheck and actionlint.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/claude.yml
+      - .github/workflows/claude-gate-test.yml
+      - .github/scripts/claude-actor-gate.sh
+      - .github/scripts/tests/test-claude-actor-gate.sh
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/claude.yml
+      - .github/workflows/claude-gate-test.yml
+      - .github/scripts/claude-actor-gate.sh
+      - .github/scripts/tests/test-claude-actor-gate.sh
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: shellcheck .github/scripts/claude-actor-gate.sh .github/scripts/tests/test-claude-actor-gate.sh
+      - name: Gate and workflow tests
+        run: bash .github/scripts/tests/test-claude-actor-gate.sh
+      - name: actionlint
+        # go run verifies the module against the Go checksum database.
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/claude.yml .github/workflows/claude-gate-test.yml
