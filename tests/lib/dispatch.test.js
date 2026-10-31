@@ -232,6 +232,35 @@ describe("securityMiddleware inbound entitlement (#178)", () => {
     expect(result.content[0].text).toMatch(/Access denied: Not entitled to invoke/);
   });
 
+  it("puts the named untabled-family reason on the Access denied envelope", async () => {
+    const name = "drupal_config_set_untabled";
+    const named = `Untabled privileged-family tool is refused (${name}).`;
+    allHandlers[name] = vi.fn();
+    try {
+      const result = await callTool(
+        name,
+        { site: "gov" },
+        { identity: reader, sites: granted, grants: { "content-agent": ["gov"] }, defaultSite: "gov" },
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe(`Access denied: ${named}`);
+      expect(result.content[0].text).not.toMatch(/Not entitled to invoke/);
+      expect(allHandlers[name]).not.toHaveBeenCalled();
+    } finally {
+      delete allHandlers[name];
+    }
+  });
+
+  it("returns Unknown tool for an untabled name before entitlement runs", async () => {
+    const result = await callTool(
+      "drupal_config_set_untabled",
+      { site: "gov" },
+      { identity: reader, sites: granted, grants: { "content-agent": ["gov"] }, defaultSite: "gov" },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Unknown tool "drupal_config_set_untabled"/);
+  });
+
   it("does not resolve the default site for an unscoped governance_status", async () => {
     vi.mocked(getSiteConfig).mockClear();
     const handler = vi.fn(async () => ({ sites: [] }));

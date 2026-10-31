@@ -169,34 +169,38 @@ function isUnresolvedNetworkPrincipal(identity) {
 export const UNTABLED_FAMILY_SCOPE_DENIAL = "denied:untabled-privileged-family";
 
 /**
- * Named refusal when an untabled sql/config-family name is consulted for a
- * non-local identity. Table hits and diagnostics are not refused here.
- * Network listeners refuse every untabled name before this runs.
+ * True for sql/config family prefixes. Does not look up the scope table.
  *
  * @param {string} toolName
- * @returns {string|null}
+ * @returns {boolean}
+ */
+function isPrivilegedFamilyPrefix(toolName) {
+  return toolName.startsWith("drupal_drush_sql_")
+    || toolName.startsWith("drupal_config_")
+    || toolName.startsWith("drupal_drush_config_");
+}
+
+/**
+ * Named refusal when an untabled sql/config-family name is consulted for a
+ * non-local identity. Table hits and diagnostics return null. Network
+ * listeners refuse every untabled name before this runs.
+ *
+ * @param {string} toolName
+ * @returns {string|null} Reason string, or null when this deny does not apply.
  */
 function untabledPrivilegedFamilyDenial(toolName) {
   if (DIAGNOSTIC_TOOLS.has(toolName)) return null;
-  const scopes = requiredScopesForTool(toolName);
-  if (scopes?.length) return null;
-  if (
-    toolName.startsWith("drupal_drush_sql_")
-    || toolName.startsWith("drupal_config_")
-    || toolName.startsWith("drupal_drush_config_")
-  ) {
-    return `Untabled privileged-family tool is refused (${toolName}).`;
-  }
-  return null;
+  if (requiredScopesForTool(toolName)?.length) return null;
+  if (!isPrivilegedFamilyPrefix(toolName)) return null;
+  return `Untabled privileged-family tool is refused (${toolName}).`;
 }
 
 /**
  * Inbound scope required to discover or invoke a tool. Diagnostics need none.
- * A TOOL_SCOPE_TABLE row wins and is byte-identical to master. This fallback
- * is not "stdio": it is consulted for a non-local identity on a non-network
- * surface (a JWT principal on stdio). Local operators stay unrestricted.
- * Network listeners refuse every untabled name in `networkToolScopeDenial`
- * before this function is consulted.
+ * A TOOL_SCOPE_TABLE row wins. This fallback is consulted for any non-local
+ * identity on a non-network surface (for example a JWT principal on stdio).
+ * Local operators stay unrestricted. Network listeners refuse every untabled
+ * name in `networkToolScopeDenial` before this function is consulted.
  *
  * Privileged families (`drupal_drush_sql_*`, `drupal_config_*`,
  * `drupal_drush_config_*`) have no safe single-scope fallback: scopes do
@@ -212,9 +216,8 @@ export function requiredScopeForTool(toolName) {
   if (DIAGNOSTIC_TOOLS.has(toolName)) return null;
   const scopes = requiredScopesForTool(toolName);
   if (scopes?.length) return scopes[0];
-  if (untabledPrivilegedFamilyDenial(toolName)) {
-    return UNTABLED_FAMILY_SCOPE_DENIAL;
-  }
+  // Table already missed. Prefix-only — do not look the table up again.
+  if (isPrivilegedFamilyPrefix(toolName)) return UNTABLED_FAMILY_SCOPE_DENIAL;
   if (isWriteLikeTool(toolName)) return "mcp_write";
   return "mcp_read";
 }
@@ -476,9 +479,6 @@ export function principalMayUseTool(toolName, identity, sites, grants) {
   }
   if (isLocalOperator(identity)) return true;
   if (DIAGNOSTIC_TOOLS.has(toolName)) return true;
-  // Privileged-family names with no table row are refused for every non-local
-  // identity. The sentinel from requiredScopeForTool is not grantable.
-  if (untabledPrivilegedFamilyDenial(toolName)) return false;
   if (!principalHasScope(identity, requiredScopeForTool(toolName))) return false;
   const entitled = resolveGrantedSites(identity, sites, grants);
   if (!entitled.length) return false;
@@ -633,6 +633,10 @@ export function assertPrincipalEntitlement({
     throw new SecurityError("Not entitled to invoke this tool.");
   }
   if (isLocalOperator(identity)) return null;
+  const familyDenial = untabledPrivilegedFamilyDenial(toolName);
+  if (familyDenial) {
+    throw new SecurityError(familyDenial);
+  }
   if (!principalMayUseTool(toolName, identity, sites, grants)) {
     throw new SecurityError(`Not entitled to invoke ${toolName}.`);
   }

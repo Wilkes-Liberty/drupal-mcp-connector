@@ -145,7 +145,7 @@ describe("requiredScopeForTool", () => {
 /**
  * Master's leftover untabled fallback, hardcoded. Do not import
  * requiredScopeForTool from principal.js to compute these — that is the
- * code under test. Prefix lists copy operations.js as of master 86c1ac2.
+ * code under test.
  */
 const MASTER_CONFIG_WRITE = Object.freeze([
   "drupal_config_set",
@@ -162,6 +162,8 @@ const MASTER_WRITE_BY_NAME = Object.freeze([
   "drupal_entity_update",
   "drupal_entity_delete",
 ]);
+// Copied from src/lib/operations.js WRITE_PREFIXES / DESTRUCTIVE_PREFIXES
+// at master 86c1ac2. Do not import operations.js to derive these.
 const MASTER_WRITE_PREFIXES = Object.freeze([
   "drupal_create_", "drupal_update_", "drupal_upload_",
   "drupal_block_", "drupal_drush_cache", "drupal_drush_cron",
@@ -250,6 +252,25 @@ describe("untabled privileged-family admission (non-local, non-network)", () => 
       expect(admits(name, [master])).toBe(false);
     },
   );
+
+  it("throws the named untabled-family reason, not the generic entitlement message", () => {
+    const toolName = "drupal_config_set_untabled";
+    const named = `Untabled privileged-family tool is refused (${toolName}).`;
+    try {
+      assertPrincipalEntitlement({
+        toolName,
+        args: {},
+        identity: identity({ scopes: ["mcp_config", "mcp_write"] }),
+        sites: entitled,
+        grants,
+      });
+      throw new Error("expected assertPrincipalEntitlement to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SecurityError);
+      expect(err.message).toBe(named);
+      expect(err.message).not.toMatch(/Not entitled to invoke/);
+    }
+  });
 
   const untabledSamples = [
     "drupal_config_set_untabled",
