@@ -633,6 +633,10 @@ export function assertPrincipalEntitlement({
     throw new SecurityError("Not entitled to invoke this tool.");
   }
   if (isLocalOperator(identity)) return null;
+  const familyDenial = untabledPrivilegedFamilyDenial(toolName);
+  if (familyDenial) {
+    throw new SecurityError(`Not entitled to invoke ${toolName}.`);
+  }
   if (!principalMayUseTool(toolName, identity, sites, grants)) {
     throw new SecurityError(`Not entitled to invoke ${toolName}.`);
   }
