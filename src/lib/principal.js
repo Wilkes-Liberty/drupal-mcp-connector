@@ -183,7 +183,10 @@ function isPrivilegedFamilyPrefix(toolName) {
 /**
  * Named refusal when an untabled sql/config-family name is consulted for a
  * non-local identity. Table hits and diagnostics return null. Network
- * listeners refuse every untabled name before this runs.
+ * dispatch refuses every untabled name in `networkToolScopeDenial`
+ * (`dispatch.js`) before `requiredScopeForTool` is consulted. A direct
+ * `assertPrincipalEntitlement` call on a network surface reaches this
+ * named reason first.
  *
  * @param {string} toolName
  * @returns {string|null} Reason string, or null when this deny does not apply.
@@ -204,10 +207,10 @@ function untabledPrivilegedFamilyDenial(toolName) {
  *
  * Privileged families (`drupal_drush_sql_*`, `drupal_config_*`,
  * `drupal_drush_config_*`) have no safe single-scope fallback: scopes do
- * not nest, so mapping them to `mcp_admin` / `mcp_config` would admit
- * tokens master denies. Those names return
+ * not nest, so a single family scope would admit tokens that lack the
+ * write or read scope the name would otherwise require. Those names return
  * {@link UNTABLED_FAMILY_SCOPE_DENIAL} (never `null`). Remaining untabled
- * names use `isWriteLikeTool` (`mcp_write`) or `mcp_read`, matching master.
+ * names use `isWriteLikeTool` (`mcp_write`) or `mcp_read`.
  *
  * @param {string} toolName
  * @returns {string|null}
