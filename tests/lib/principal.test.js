@@ -10,6 +10,7 @@ import {
   LOCAL_OPERATOR,
   requiredScopeForCall,
   requiredScopeForTool,
+  UNTABLED_FAMILY_SCOPE_DENIAL,
   resolveAuthoritativeTarget,
   resolveGrantedSiteNames,
   resolveActor,
@@ -19,6 +20,7 @@ import {
   visibleSiteTargets,
 } from "../../src/lib/principal.js";
 import { SecurityError } from "../../src/lib/security.js";
+import { requiredScopesForTool } from "../../src/lib/tool-scopes.js";
 
 const prod = {
   _name: "production",
@@ -89,6 +91,40 @@ describe("requiredScopeForTool", () => {
     expect(requiredScopeForTool("drupal_drush_sql_query")).toBe("mcp_admin");
   });
 
+  it("pins TOOL_SCOPE_TABLE rows for previously special-cased names", () => {
+    // Removing one of these rows fails this principal test, not only
+    // tests/lib/tool-scopes.test.js completeness.
+    expect(requiredScopesForTool("drupal_drush_sql_query")).toEqual(["mcp_admin"]);
+    expect(requiredScopesForTool("drupal_config_set")).toEqual(["mcp_config"]);
+    expect(requiredScopesForTool("drupal_drush_config_export")).toEqual(["mcp_config"]);
+    expect(requiredScopesForTool("drupal_drush_config_import")).toEqual(["mcp_config"]);
+    expect(requiredScopesForTool("drupal_config_get")).toEqual(["mcp_config_read"]);
+    expect(requiredScopesForTool("drupal_config_list")).toEqual(["mcp_config_read"]);
+    expect(requiredScopesForTool("drupal_drush_config_status")).toEqual(["mcp_config_read"]);
+    expect(requiredScopesForTool("drupal_entity_create")).toEqual(["mcp_write"]);
+    expect(requiredScopesForTool("drupal_entity_update")).toEqual(["mcp_write"]);
+    expect(requiredScopesForTool("drupal_entity_delete")).toEqual(["mcp_write"]);
+  });
+
+  it("denies untabled privileged-family names and keeps master fallbacks for the rest", () => {
+    // Network refuses every untabled name first. This is the non-local
+    // identity on a non-network surface. Privileged families are an explicit
+    // denial, not a grantable scope and not null.
+    expect(requiredScopeForTool("drupal_drush_sql_untabled")).toBe(UNTABLED_FAMILY_SCOPE_DENIAL);
+    expect(requiredScopeForTool("drupal_config_untabled")).toBe(UNTABLED_FAMILY_SCOPE_DENIAL);
+    expect(requiredScopeForTool("drupal_drush_config_untabled")).toBe(UNTABLED_FAMILY_SCOPE_DENIAL);
+    expect(requiredScopeForTool("drupal_probe_untabled")).toBe("mcp_read");
+    expect(requiredScopeForTool("drupal_create_untabled")).toBe("mcp_write");
+    expect(requiredScopeForTool("drupal_delete_untabled")).toBe("mcp_write");
+  });
+
+  it("never grants the untabled-family sentinel, even when a token lists it", () => {
+    expect(principalHasScope(
+      identity({ scopes: [UNTABLED_FAMILY_SCOPE_DENIAL] }),
+      UNTABLED_FAMILY_SCOPE_DENIAL,
+    )).toBe(false);
+  });
+
   it("requires mcp_write for a drupal_graphql mutation but mcp_read for a query", () => {
     expect(requiredScopeForCall("drupal_graphql", { query: "{ nodeQuery { entities { entityId } } }" })).toBe("mcp_read");
     expect(requiredScopeForCall("drupal_graphql", { query: "mutation { createArticle(input: {}) { entity { entityId } } }" })).toBe("mcp_write");
@@ -103,6 +139,167 @@ describe("requiredScopeForTool", () => {
     expect(principalHasScope(identity({ scopes: ["mcp_config_read"] }), "mcp_config")).toBe(false);
     expect(principalHasScope(identity({ scopes: ["mcp_config"] }), "mcp_config_read")).toBe(true);
     expect(principalHasScope(identity({ scopes: ["mcp_config"] }), "mcp_config")).toBe(true);
+  });
+});
+
+/**
+ * Master's leftover untabled fallback, hardcoded. Do not import
+ * requiredScopeForTool from principal.js to compute these — that is the
+ * code under test. Prefix lists copy operations.js as of master 86c1ac2.
+ */
+const MASTER_CONFIG_WRITE = Object.freeze([
+  "drupal_config_set",
+  "drupal_drush_config_export",
+  "drupal_drush_config_import",
+]);
+const MASTER_CONFIG_READ = Object.freeze([
+  "drupal_config_get",
+  "drupal_config_list",
+  "drupal_drush_config_status",
+]);
+const MASTER_WRITE_BY_NAME = Object.freeze([
+  "drupal_entity_create",
+  "drupal_entity_update",
+  "drupal_entity_delete",
+]);
+const MASTER_WRITE_PREFIXES = Object.freeze([
+  "drupal_create_", "drupal_update_", "drupal_upload_",
+  "drupal_block_", "drupal_drush_cache", "drupal_drush_cron",
+  "drupal_drush_config_export", "drupal_drush_config_import",
+  "drupal_drush_updatedb", "drupal_drush_module_enable",
+  "drupal_drush_module_disable", "drupal_drush_user_create",
+  "drupal_bulk_", "drupal_revert_", "drupal_schedule_", "drupal_set_", "drupal_draft_",
+  "drupal_config_set",
+]);
+const MASTER_DESTRUCTIVE_PREFIXES = Object.freeze([
+  "drupal_delete_",
+  "drupal_drush_module_disable",
+]);
+
+/**
+ * @param {string} toolName
+ * @returns {string|null}
+ */
+function masterRequiredScopeForUntabled(toolName) {
+  if (toolName === "drupal_list_sites" || toolName === "drupal_governance_status") return null;
+  if (toolName === "drupal_drush_sql_query") return "mcp_admin";
+  if (MASTER_CONFIG_WRITE.includes(toolName)) return "mcp_config";
+  if (MASTER_CONFIG_READ.includes(toolName)) return "mcp_config_read";
+  if (MASTER_WRITE_BY_NAME.includes(toolName)) return "mcp_write";
+  if (MASTER_DESTRUCTIVE_PREFIXES.some((prefix) => toolName.startsWith(prefix))) return "mcp_write";
+  if (MASTER_WRITE_PREFIXES.some((prefix) => toolName.startsWith(prefix))) return "mcp_write";
+  return "mcp_read";
+}
+
+/**
+ * @param {string[]} scopes
+ * @param {string|null} required
+ * @returns {boolean}
+ */
+function masterPrincipalHasScope(scopes, required) {
+  if (!required) return true;
+  if (scopes.includes(required)) return true;
+  if (required === "mcp_config_read" && scopes.includes("mcp_config")) return true;
+  return false;
+}
+
+const INBOUND_SCOPES = Object.freeze([
+  "mcp_read",
+  "mcp_write",
+  "mcp_config",
+  "mcp_config_read",
+  "mcp_admin",
+]);
+
+/** @returns {string[][]} */
+function inboundScopeSubsets() {
+  const subsets = [];
+  const total = 1 << INBOUND_SCOPES.length;
+  for (let mask = 0; mask < total; mask += 1) {
+    subsets.push(INBOUND_SCOPES.filter((_, index) => (mask & (1 << index)) !== 0));
+  }
+  return subsets;
+}
+
+describe("untabled privileged-family admission (non-local, non-network)", () => {
+  const grants = { "content-agent": ["development"] };
+  const entitled = [development];
+
+  /**
+   * @param {string} toolName
+   * @param {string[]} scopes
+   * @returns {boolean}
+   */
+  function admits(toolName, scopes) {
+    return principalMayUseTool(toolName, identity({ scopes }), entitled, grants);
+  }
+
+  const familyCases = [
+    { name: "drupal_config_set_untabled", family: "mcp_config", master: "mcp_write" },
+    { name: "drupal_drush_config_import_untabled", family: "mcp_config", master: "mcp_write" },
+    { name: "drupal_drush_sql_dump_untabled", family: "mcp_admin", master: "mcp_read" },
+    { name: "drupal_config_get_untabled", family: "mcp_config", master: "mcp_read" },
+    { name: "drupal_drush_config_status_untabled", family: "mcp_config", master: "mcp_read" },
+  ];
+
+  it.each(familyCases)(
+    "denies $name to a token holding only $family and to a token holding only $master",
+    ({ name, family, master }) => {
+      expect(masterRequiredScopeForUntabled(name)).toBe(master);
+      expect(admits(name, [family])).toBe(false);
+      expect(admits(name, [master])).toBe(false);
+    },
+  );
+
+  const untabledSamples = [
+    "drupal_config_set_untabled",
+    "drupal_drush_config_import_untabled",
+    "drupal_drush_sql_dump_untabled",
+    "drupal_config_get_untabled",
+    "drupal_drush_config_status_untabled",
+    "drupal_drush_config_export_untabled",
+    "drupal_probe_untabled",
+    "drupal_create_untabled",
+  ];
+
+  it("admits an untabled name only when master would also admit that scope subset", () => {
+    for (const toolName of untabledSamples) {
+      const masterRequired = masterRequiredScopeForUntabled(toolName);
+      const privilegedFamily = toolName.startsWith("drupal_drush_sql_")
+        || toolName.startsWith("drupal_config_")
+        || toolName.startsWith("drupal_drush_config_");
+      for (const scopes of inboundScopeSubsets()) {
+        const masterAdmits = masterPrincipalHasScope(scopes, masterRequired);
+        const prAdmits = admits(toolName, scopes);
+        expect(
+          !prAdmits || masterAdmits,
+          `${toolName} with [${scopes.join(", ") || "(none)"}]: PR admitted but master requires ${masterRequired}`,
+        ).toBe(true);
+        if (!privilegedFamily) {
+          expect(prAdmits).toBe(masterAdmits);
+        }
+      }
+    }
+  });
+});
+
+describe("siteAllowsTool readOnly write-like refusal", () => {
+  it("refuses a write-like tool on a readOnly site", () => {
+    const readOnlySite = {
+      _name: "readonly",
+      baseUrl: "https://readonly.example.com",
+      security: { preset: "content-editor", readOnly: true },
+    };
+    const writer = identity({ scopes: ["mcp_read", "mcp_write"] });
+    const grants = { "content-agent": ["readonly"] };
+    expect(principalMayUseTool("drupal_create_node", writer, [readOnlySite], grants)).toBe(false);
+    expect(principalMayUseTool("drupal_entity_create", writer, [readOnlySite], grants)).toBe(false);
+    expect(principalMayUseTool(
+      "drupal_create_node",
+      writer,
+      [prod],
+      { "content-agent": ["production"] },
+    )).toBe(true);
   });
 });
 
