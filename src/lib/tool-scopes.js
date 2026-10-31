@@ -43,9 +43,6 @@ function scoped(scope, names) {
  * would restore the fail-open default for a newly registered tool.
  */
 export const TOOL_SCOPE_TABLE = Object.freeze(Object.fromEntries([
-  ...scoped("mcp_admin", [
-    "drupal_drush_sql_query",
-  ]),
   ...scoped("mcp_config", [
     "drupal_config_set",
     // config:export writes the sync directory and refuses read-only sites;
