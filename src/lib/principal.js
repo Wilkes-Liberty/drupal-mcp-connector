@@ -15,7 +15,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getDefaultSiteName, getInboundGrants } from "./config.js";
-import { inferOperation, isWriteLikeCall } from "./operations.js";
+import { inferOperation, isWriteLikeCall, isWriteLikeTool } from "./operations.js";
 import { POLICY_DIGEST } from "./policy-promotion.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
 import { networkToolScopeDenial, requiredScopesForTool } from "./tool-scopes.js";
@@ -57,25 +57,6 @@ function tableHasKeys(table) {
 export const DIAGNOSTIC_TOOLS = new Set([
   "drupal_list_sites",
   "drupal_governance_status",
-]);
-
-const CONFIG_READ_TOOLS = new Set([
-  "drupal_config_get",
-  "drupal_config_list",
-  "drupal_drush_config_status",
-]);
-
-const CONFIG_WRITE_TOOLS = new Set([
-  "drupal_config_set",
-  "drupal_drush_config_export",
-  "drupal_drush_config_import",
-]);
-
-/** inferOperation() leaves these as "read"; they self-gate in-handler. */
-const WRITE_BY_NAME = new Set([
-  "drupal_entity_create",
-  "drupal_entity_update",
-  "drupal_entity_delete",
 ]);
 
 const FREE_FORM_TOOLS = new Set([
@@ -182,9 +163,9 @@ function isUnresolvedNetworkPrincipal(identity) {
 
 /**
  * Inbound scope required to discover or invoke a tool. Diagnostics need none.
- * Names in the explicit table (DEV-862) use that row. A name with no row
- * still returns `mcp_read` so stdio keeps the historical default; network
- * listeners refuse that name before this function is consulted.
+ * A TOOL_SCOPE_TABLE row wins. Untabled stdio names use inferOperation
+ * (`write`/`delete` → `mcp_write`, else `mcp_read`). Network listeners
+ * refuse untabled names before this function is consulted.
  *
  * @param {string} toolName
  * @returns {string|null}
@@ -193,10 +174,8 @@ export function requiredScopeForTool(toolName) {
   if (DIAGNOSTIC_TOOLS.has(toolName)) return null;
   const scopes = requiredScopesForTool(toolName);
   if (scopes?.length) return scopes[0];
-  if (toolName === "drupal_drush_sql_query") return "mcp_admin";
-  if (CONFIG_WRITE_TOOLS.has(toolName)) return "mcp_config";
-  if (CONFIG_READ_TOOLS.has(toolName)) return "mcp_config_read";
-  if (WRITE_BY_NAME.has(toolName)) return "mcp_write";
+  // Stdio default for a name the catalog has not tabled yet. Network
+  // listeners refuse that name in networkToolScopeDenial first.
   const op = inferOperation(toolName);
   if (op === "write" || op === "delete") return "mcp_write";
   return "mcp_read";
@@ -433,9 +412,10 @@ function siteAllowsTool(site, toolName) {
   if (toolName === "drupal_config_get" || toolName === "drupal_config_list") {
     return Boolean(sec.allowConfigRead);
   }
+  // Generic entity writes self-gate in-handler, so inferOperation leaves them
+  // as "read". isWriteLikeTool covers those names plus prefix write/delete.
+  if (isWriteLikeTool(toolName) && sec.readOnly) return false;
   const op = inferOperation(toolName);
-  const writeLike = op === "write" || op === "delete" || WRITE_BY_NAME.has(toolName);
-  if (writeLike && sec.readOnly) return false;
   if ((op === "delete" || toolName === "drupal_entity_delete") && !sec.allowDestructive) {
     return false;
   }

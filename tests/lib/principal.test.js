@@ -89,6 +89,14 @@ describe("requiredScopeForTool", () => {
     expect(requiredScopeForTool("drupal_drush_sql_query")).toBe("mcp_admin");
   });
 
+  it("defaults an untabled stdio name through inferOperation", () => {
+    // Network refuses these names first; this is the stdio fallback only.
+    // write/delete prefixes map to mcp_write; everything else is mcp_read.
+    expect(requiredScopeForTool("drupal_eval_unscoped")).toBe("mcp_read");
+    expect(requiredScopeForTool("drupal_create_untabled")).toBe("mcp_write");
+    expect(requiredScopeForTool("drupal_delete_untabled")).toBe("mcp_write");
+  });
+
   it("requires mcp_write for a drupal_graphql mutation but mcp_read for a query", () => {
     expect(requiredScopeForCall("drupal_graphql", { query: "{ nodeQuery { entities { entityId } } }" })).toBe("mcp_read");
     expect(requiredScopeForCall("drupal_graphql", { query: "mutation { createArticle(input: {}) { entity { entityId } } }" })).toBe("mcp_write");
