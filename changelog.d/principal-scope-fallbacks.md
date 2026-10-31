@@ -1,4 +1,4 @@
 ---
 section: Changed
 ---
-Drop leftover sql/config/entity-write scope fallbacks from `requiredScopeForTool`. Catalog names already have `TOOL_SCOPE_TABLE` rows; site write-like checks now use `isWriteLikeTool` so the generic entity-write list cannot drift.
+Collapse leftover sql/config/entity-write name lists in `requiredScopeForTool` onto `TOOL_SCOPE_TABLE`. Live catalog behavior is unchanged. Untabled stdio names fail closed by family (`drupal_drush_sql_*` needs `mcp_admin`; `drupal_config_*` / `drupal_drush_config_*` need `mcp_config`) and write-like names still need `mcp_write`. A missing registered row is also caught by `tests/lib/tool-scopes.test.js`.

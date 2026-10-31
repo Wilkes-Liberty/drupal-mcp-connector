@@ -19,6 +19,7 @@ import {
   visibleSiteTargets,
 } from "../../src/lib/principal.js";
 import { SecurityError } from "../../src/lib/security.js";
+import { requiredScopesForTool } from "../../src/lib/tool-scopes.js";
 
 const prod = {
   _name: "production",
@@ -89,10 +90,27 @@ describe("requiredScopeForTool", () => {
     expect(requiredScopeForTool("drupal_drush_sql_query")).toBe("mcp_admin");
   });
 
-  it("defaults an untabled stdio name through inferOperation", () => {
+  it("pins TOOL_SCOPE_TABLE rows for previously special-cased names", () => {
+    // Removing one of these rows fails this principal test, not only
+    // tests/lib/tool-scopes.test.js completeness.
+    expect(requiredScopesForTool("drupal_drush_sql_query")).toEqual(["mcp_admin"]);
+    expect(requiredScopesForTool("drupal_config_set")).toEqual(["mcp_config"]);
+    expect(requiredScopesForTool("drupal_drush_config_export")).toEqual(["mcp_config"]);
+    expect(requiredScopesForTool("drupal_drush_config_import")).toEqual(["mcp_config"]);
+    expect(requiredScopesForTool("drupal_config_get")).toEqual(["mcp_config_read"]);
+    expect(requiredScopesForTool("drupal_config_list")).toEqual(["mcp_config_read"]);
+    expect(requiredScopesForTool("drupal_drush_config_status")).toEqual(["mcp_config_read"]);
+    expect(requiredScopesForTool("drupal_entity_create")).toEqual(["mcp_write"]);
+    expect(requiredScopesForTool("drupal_entity_update")).toEqual(["mcp_write"]);
+    expect(requiredScopesForTool("drupal_entity_delete")).toEqual(["mcp_write"]);
+  });
+
+  it("defaults an untabled stdio name through family rules then write-like inference", () => {
     // Network refuses these names first; this is the stdio fallback only.
-    // write/delete prefixes map to mcp_write; everything else is mcp_read.
-    expect(requiredScopeForTool("drupal_eval_unscoped")).toBe("mcp_read");
+    expect(requiredScopeForTool("drupal_drush_sql_untabled")).toBe("mcp_admin");
+    expect(requiredScopeForTool("drupal_config_untabled")).toBe("mcp_config");
+    expect(requiredScopeForTool("drupal_drush_config_untabled")).toBe("mcp_config");
+    expect(requiredScopeForTool("drupal_probe_untabled")).toBe("mcp_read");
     expect(requiredScopeForTool("drupal_create_untabled")).toBe("mcp_write");
     expect(requiredScopeForTool("drupal_delete_untabled")).toBe("mcp_write");
   });

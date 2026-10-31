@@ -163,8 +163,12 @@ function isUnresolvedNetworkPrincipal(identity) {
 
 /**
  * Inbound scope required to discover or invoke a tool. Diagnostics need none.
- * A TOOL_SCOPE_TABLE row wins. Untabled stdio names use inferOperation
- * (`write`/`delete` → `mcp_write`, else `mcp_read`). Network listeners
+ * A TOOL_SCOPE_TABLE row wins. Untabled stdio names fail closed by family
+ * prefix, not by copied name lists: `drupal_drush_sql_*` → `mcp_admin`,
+ * `drupal_config_*` / `drupal_drush_config_*` → `mcp_config` (the strictest
+ * tabled scope of that family). Remaining names use `isWriteLikeTool`
+ * (`mcp_write`) so generic entity writes do not fall to `mcp_read` when
+ * their row is missing; everything else is `mcp_read`. Network listeners
  * refuse untabled names before this function is consulted.
  *
  * @param {string} toolName
@@ -176,8 +180,11 @@ export function requiredScopeForTool(toolName) {
   if (scopes?.length) return scopes[0];
   // Stdio default for a name the catalog has not tabled yet. Network
   // listeners refuse that name in networkToolScopeDenial first.
-  const op = inferOperation(toolName);
-  if (op === "write" || op === "delete") return "mcp_write";
+  if (toolName.startsWith("drupal_drush_sql_")) return "mcp_admin";
+  if (toolName.startsWith("drupal_config_") || toolName.startsWith("drupal_drush_config_")) {
+    return "mcp_config";
+  }
+  if (isWriteLikeTool(toolName)) return "mcp_write";
   return "mcp_read";
 }
 
