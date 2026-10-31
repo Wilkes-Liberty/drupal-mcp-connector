@@ -169,41 +169,14 @@ function isUnresolvedNetworkPrincipal(identity) {
 export const UNTABLED_FAMILY_SCOPE_DENIAL = "denied:untabled-privileged-family";
 
 /**
- * Named refusal when an untabled sql/config-family name is consulted for a
- * non-local identity. Table hits and diagnostics are not refused here.
- * Network listeners refuse every untabled name before this runs.
- *
- * @param {string} toolName
- * @returns {string|null}
- */
-function untabledPrivilegedFamilyDenial(toolName) {
-  if (DIAGNOSTIC_TOOLS.has(toolName)) return null;
-  const scopes = requiredScopesForTool(toolName);
-  if (scopes?.length) return null;
-  if (
-    toolName.startsWith("drupal_drush_sql_")
-    || toolName.startsWith("drupal_config_")
-    || toolName.startsWith("drupal_drush_config_")
-  ) {
-    return `Untabled privileged-family tool is refused (${toolName}).`;
-  }
-  return null;
-}
-
-/**
  * Inbound scope required to discover or invoke a tool. Diagnostics need none.
- * A TOOL_SCOPE_TABLE row wins and is byte-identical to master. This fallback
- * is not "stdio": it is consulted for a non-local identity on a non-network
- * surface (a JWT principal on stdio). Local operators stay unrestricted.
- * Network listeners refuse every untabled name in `networkToolScopeDenial`
- * before this function is consulted.
- *
- * Privileged families (`drupal_drush_sql_*`, `drupal_config_*`,
- * `drupal_drush_config_*`) have no safe single-scope fallback: scopes do
- * not nest, so mapping them to `mcp_admin` / `mcp_config` would admit
- * tokens master denies. Those names return
- * {@link UNTABLED_FAMILY_SCOPE_DENIAL} (never `null`). Remaining untabled
- * names use `isWriteLikeTool` (`mcp_write`) or `mcp_read`, matching master.
+ * A TOOL_SCOPE_TABLE row wins. Untabled stdio names fail closed by family
+ * prefix, not by copied name lists: `drupal_drush_sql_*` → `mcp_admin`,
+ * `drupal_config_*` / `drupal_drush_config_*` → `mcp_config` (the strictest
+ * tabled scope of that family). Remaining names use `isWriteLikeTool`
+ * (`mcp_write`) so generic entity writes do not fall to `mcp_read` when
+ * their row is missing; everything else is `mcp_read`. Network listeners
+ * refuse untabled names before this function is consulted.
  *
  * @param {string} toolName
  * @returns {string|null}
@@ -212,8 +185,10 @@ export function requiredScopeForTool(toolName) {
   if (DIAGNOSTIC_TOOLS.has(toolName)) return null;
   const scopes = requiredScopesForTool(toolName);
   if (scopes?.length) return scopes[0];
-  if (untabledPrivilegedFamilyDenial(toolName)) {
-    return UNTABLED_FAMILY_SCOPE_DENIAL;
+  // #527 weaker family fallback restored for red-proof only.
+  if (toolName.startsWith("drupal_drush_sql_")) return "mcp_admin";
+  if (toolName.startsWith("drupal_config_") || toolName.startsWith("drupal_drush_config_")) {
+    return "mcp_config";
   }
   if (isWriteLikeTool(toolName)) return "mcp_write";
   return "mcp_read";
@@ -239,8 +214,6 @@ export function requiredScopeForCall(toolName, args = {}) {
  * @returns {boolean}
  */
 export function principalHasScope(identity, scope) {
-  // The untabled-family sentinel is never grantable, even if a token lists it.
-  if (scope === UNTABLED_FAMILY_SCOPE_DENIAL) return false;
   if (!scope) return true;
   const scopes = identity?.scopes ?? [];
   if (scopes.includes(scope)) return true;
@@ -476,9 +449,6 @@ export function principalMayUseTool(toolName, identity, sites, grants) {
   }
   if (isLocalOperator(identity)) return true;
   if (DIAGNOSTIC_TOOLS.has(toolName)) return true;
-  // Privileged-family names with no table row are refused for every non-local
-  // identity. The sentinel from requiredScopeForTool is not grantable.
-  if (untabledPrivilegedFamilyDenial(toolName)) return false;
   if (!principalHasScope(identity, requiredScopeForTool(toolName))) return false;
   const entitled = resolveGrantedSites(identity, sites, grants);
   if (!entitled.length) return false;
