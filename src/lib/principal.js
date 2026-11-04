@@ -15,7 +15,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getDefaultSiteName, getInboundGrants } from "./config.js";
-import { inferOperation, isWriteLikeCall } from "./operations.js";
+import { inferOperation, isWriteLikeCall, isWriteLikeTool } from "./operations.js";
 import { POLICY_DIGEST } from "./policy-promotion.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
 import { networkToolScopeDenial, requiredScopesForTool } from "./tool-scopes.js";
@@ -57,25 +57,6 @@ function tableHasKeys(table) {
 export const DIAGNOSTIC_TOOLS = new Set([
   "drupal_list_sites",
   "drupal_governance_status",
-]);
-
-const CONFIG_READ_TOOLS = new Set([
-  "drupal_config_get",
-  "drupal_config_list",
-  "drupal_drush_config_status",
-]);
-
-const CONFIG_WRITE_TOOLS = new Set([
-  "drupal_config_set",
-  "drupal_drush_config_export",
-  "drupal_drush_config_import",
-]);
-
-/** inferOperation() leaves these as "read"; they self-gate in-handler. */
-const WRITE_BY_NAME = new Set([
-  "drupal_entity_create",
-  "drupal_entity_update",
-  "drupal_entity_delete",
 ]);
 
 const FREE_FORM_TOOLS = new Set([
@@ -181,10 +162,55 @@ function isUnresolvedNetworkPrincipal(identity) {
 }
 
 /**
+ * Explicit refusal for an untabled privileged-family name consulted by a
+ * non-local identity. Not a grantable scope. Distinct from `null`, which
+ * means no scope is required.
+ */
+export const UNTABLED_FAMILY_SCOPE_DENIAL = "denied:untabled-privileged-family";
+
+/**
+ * True for sql/config family prefixes. Does not look up the scope table.
+ *
+ * @param {string} toolName
+ * @returns {boolean}
+ */
+function isPrivilegedFamilyPrefix(toolName) {
+  return toolName.startsWith("drupal_drush_sql_")
+    || toolName.startsWith("drupal_config_")
+    || toolName.startsWith("drupal_drush_config_");
+}
+
+/**
+ * Named refusal when an untabled sql/config-family name is consulted for a
+ * non-local identity. Table hits and diagnostics return null. Network
+ * dispatch refuses every untabled name in `networkToolScopeDenial`
+ * (`dispatch.js`) before `requiredScopeForTool` is consulted. A direct
+ * `assertPrincipalEntitlement` call on a network surface reaches this
+ * named reason first.
+ *
+ * @param {string} toolName
+ * @returns {string|null} Reason string, or null when this deny does not apply.
+ */
+function untabledPrivilegedFamilyDenial(toolName) {
+  if (DIAGNOSTIC_TOOLS.has(toolName)) return null;
+  if (requiredScopesForTool(toolName)?.length) return null;
+  if (!isPrivilegedFamilyPrefix(toolName)) return null;
+  return `Untabled privileged-family tool is refused (${toolName}).`;
+}
+
+/**
  * Inbound scope required to discover or invoke a tool. Diagnostics need none.
- * Names in the explicit table (DEV-862) use that row. A name with no row
- * still returns `mcp_read` so stdio keeps the historical default; network
- * listeners refuse that name before this function is consulted.
+ * A TOOL_SCOPE_TABLE row wins. This fallback is consulted for any non-local
+ * identity on a non-network surface (for example a JWT principal on stdio).
+ * Local operators stay unrestricted. Network listeners refuse every untabled
+ * name in `networkToolScopeDenial` before this function is consulted.
+ *
+ * Privileged families (`drupal_drush_sql_*`, `drupal_config_*`,
+ * `drupal_drush_config_*`) have no safe single-scope fallback: scopes do
+ * not nest, so a single family scope would admit tokens that lack the
+ * write or read scope the name would otherwise require. Those names return
+ * {@link UNTABLED_FAMILY_SCOPE_DENIAL} (never `null`). Remaining untabled
+ * names use `isWriteLikeTool` (`mcp_write`) or `mcp_read`.
  *
  * @param {string} toolName
  * @returns {string|null}
@@ -193,12 +219,9 @@ export function requiredScopeForTool(toolName) {
   if (DIAGNOSTIC_TOOLS.has(toolName)) return null;
   const scopes = requiredScopesForTool(toolName);
   if (scopes?.length) return scopes[0];
-  if (toolName === "drupal_drush_sql_query") return "mcp_admin";
-  if (CONFIG_WRITE_TOOLS.has(toolName)) return "mcp_config";
-  if (CONFIG_READ_TOOLS.has(toolName)) return "mcp_config_read";
-  if (WRITE_BY_NAME.has(toolName)) return "mcp_write";
-  const op = inferOperation(toolName);
-  if (op === "write" || op === "delete") return "mcp_write";
+  // Table already missed. Prefix-only — do not look the table up again.
+  if (isPrivilegedFamilyPrefix(toolName)) return UNTABLED_FAMILY_SCOPE_DENIAL;
+  if (isWriteLikeTool(toolName)) return "mcp_write";
   return "mcp_read";
 }
 
@@ -222,6 +245,8 @@ export function requiredScopeForCall(toolName, args = {}) {
  * @returns {boolean}
  */
 export function principalHasScope(identity, scope) {
+  // The untabled-family sentinel is never grantable, even if a token lists it.
+  if (scope === UNTABLED_FAMILY_SCOPE_DENIAL) return false;
   if (!scope) return true;
   const scopes = identity?.scopes ?? [];
   if (scopes.includes(scope)) return true;
@@ -433,9 +458,10 @@ function siteAllowsTool(site, toolName) {
   if (toolName === "drupal_config_get" || toolName === "drupal_config_list") {
     return Boolean(sec.allowConfigRead);
   }
+  // Generic entity writes self-gate in-handler, so inferOperation leaves them
+  // as "read". isWriteLikeTool covers those names plus prefix write/delete.
+  if (isWriteLikeTool(toolName) && sec.readOnly) return false;
   const op = inferOperation(toolName);
-  const writeLike = op === "write" || op === "delete" || WRITE_BY_NAME.has(toolName);
-  if (writeLike && sec.readOnly) return false;
   if ((op === "delete" || toolName === "drupal_entity_delete") && !sec.allowDestructive) {
     return false;
   }
@@ -610,6 +636,10 @@ export function assertPrincipalEntitlement({
     throw new SecurityError("Not entitled to invoke this tool.");
   }
   if (isLocalOperator(identity)) return null;
+  const familyDenial = untabledPrivilegedFamilyDenial(toolName);
+  if (familyDenial) {
+    throw new SecurityError(familyDenial);
+  }
   if (!principalMayUseTool(toolName, identity, sites, grants)) {
     throw new SecurityError(`Not entitled to invoke ${toolName}.`);
   }
