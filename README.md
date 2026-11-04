@@ -69,7 +69,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 
 ## Features
 
-### 123 Tools Across 27 Modules
+### 124 Tools Across 28 Modules
 
 | Module | Tools |
 |--------|-------|
@@ -91,6 +91,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the backend abstraction
 | **Bulk** | Bulk create/update with per-item partial-failure reporting |
 | **Translations** | List, create, and revise published entity translations (`revise: true` on `drupal_create_translation`, MCP Sentinel 2.24.0+) |
 | **Paragraphs** | Create/update/get Paragraph components for embedding in host fields |
+| **Nested** | Governed nested-paragraph draft (`drupal_draft_nested_components`) — new unpublished children pinned from the host draft |
 | **Structure** | Menu links (list/create/update, incl. `parent` + `enabled`) + custom blocks (list/create) |
 | **Redirects** | Create active URL redirects (301/302) + update/repoint existing redirects (Redirect module) |
 | **Search** | Best-effort content search (title match; Search API/Solr-ready) |
@@ -435,7 +436,7 @@ an operator channel: keep the agent's credentials off it, and pin
 | [OAuth client_credentials](docs/oauth-client-credentials.md) | Production OAuth deploy: scope→role mapping, JSON:API writes, config persistence, secret handling, troubleshooting |
 | [Architecture](docs/architecture.md) | Backend abstraction, canonical model, and how to extend it |
 | [GraphQL Setup](docs/graphql-local-setup.md) | GraphQL Compose backend + local TLS notes |
-| [Tools Reference](docs/tools-reference.md) | Full reference for all 123 tools |
+| [Tools Reference](docs/tools-reference.md) | Full reference for all 124 tools |
 | [Security Guide](docs/security.md) | Presets, entity access control, field redaction |
 | [Security Hardening](docs/security-hardening.md) | Optional transport, identity, and secrets controls |
 | [Verification](docs/verification.md) | Prove a secure install: static + live checks, negative probes, evidence artefact, managed residuals |

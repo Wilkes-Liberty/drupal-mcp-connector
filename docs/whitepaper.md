@@ -203,7 +203,7 @@ Agencies, universities, and enterprises often run dozens of Drupal sites on a si
 
 ### What Ships Today
 
-The connector currently delivers **123 tools across 27 modules**, **3 MCP resources**, and **128 MCP prompts** (one per tool, plus 5 workflow prompts), targeting Drupal 10 and 11.
+The connector currently delivers **124 tools across 28 modules**, **3 MCP resources**, and **129 MCP prompts** (one per tool, plus 5 workflow prompts), targeting Drupal 10 and 11.
 
 | Module | Tools | Notes |
 |---|---|---|

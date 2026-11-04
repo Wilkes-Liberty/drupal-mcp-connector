@@ -17,7 +17,7 @@
 │        ┌────────────────┼─────────────────┐                       │
 │        ▼                ▼                 ▼                        │
 │   src/tools/       src/lib/           MCP primitives               │
-│   (123 tools)      backends/          Tools · Resources · Prompts  │
+│   (124 tools)      backends/          Tools · Resources · Prompts  │
 │                    + canonical/security                            │
 └──────────┬─────────────────────────────────────────────────────────┘
            │           backend abstraction (resolveBackend)
@@ -105,7 +105,7 @@ The GraphQL backend is introspection-driven and type-aware (handles irregular pl
 This server exposes all three MCP primitives.
 
 ### Tools
-Callable operations a client invokes on demand. All 123 tools follow the naming convention
+Callable operations a client invokes on demand. All 124 tools follow the naming convention
 `drupal_{operation}_{entity}` or `drupal_{module}_{action}`.
 
 ### Resources
@@ -123,6 +123,7 @@ Workflow templates exposed as slash-commands in MCP-aware clients:
 | Name | Description |
 |------|-------------|
 | `drupal-content-audit` | Full site content audit walkthrough |
+| `drupal-full-audit` | Composite content/links/config audit → prioritized action plan |
 | `drupal-create-article` | Guided article creation with field prompts |
 | `drupal-seo-fix` | Find and fix SEO gaps across content |
 | `drupal-user-cleanup` | Identify inactive/orphaned accounts |
