@@ -3,7 +3,8 @@
 #
 # Called by the "authorize" job in .github/workflows/claude.yml. Every value
 # comes in through the environment (never interpolated into the script), and
-# the only thing written back is allowed=true|false on $GITHUB_OUTPUT.
+# the only thing written back is allowed=true|false, plus attempt=<n> when
+# RUN_ATTEMPT is a positive integer, on $GITHUB_OUTPUT.
 #
 # Rules, all of which must hold (DEV-1197, Wilkes-Liberty/vault#852):
 #   - CLAUDE_ALLOWED_ACTORS (repo or org variable) names the humans who may
@@ -15,16 +16,26 @@
 #   - github.actor, github.triggering_actor and the event sender are all on
 #     the list (a re-run is checked against whoever pressed re-run).
 #   - The comment or review author is still OWNER, MEMBER or COLLABORATOR.
+#   - When RUN_ATTEMPT is set (the workflow always sets it), it must be a
+#     positive integer. The script records it beside the decision. A partial
+#     re-run reuses this job's outputs and only bumps github.run_attempt, so
+#     the Claude job starts only when the two still match.
 #
 # A refusal is not an error: the script exits 0 with allowed=false so the
 # Claude job is skipped instead of every stray @claude turning CI red.
 set -euo pipefail
 
 result=false
+# Empty unless this run passed a well-formed RUN_ATTEMPT. Written with the
+# decision so a later attempt cannot reuse allowed=true on its own.
+attempt=""
 
 emit() {
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf 'allowed=%s\n' "$result" >>"$GITHUB_OUTPUT"
+    if [[ -n "$attempt" ]]; then
+      printf 'attempt=%s\n' "$attempt" >>"$GITHUB_OUTPUT"
+    fi
   fi
   printf 'allowed=%s\n' "$result"
 }
@@ -45,6 +56,16 @@ lower() {
 valid_login() {
   [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?$ ]]
 }
+
+# Set only by the workflow, from github.run_attempt. Unset keeps the older
+# single-line output so callers that do not pass it still get a decision.
+# A present but malformed value fails closed and is not echoed.
+if [[ -v RUN_ATTEMPT ]]; then
+  if [[ ! "$RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]; then
+    deny "workflow run attempt is missing or malformed"
+  fi
+  attempt="$RUN_ATTEMPT"
+fi
 
 declare -A allowed=()
 # Split on commas and any whitespace; ignore empty entries.

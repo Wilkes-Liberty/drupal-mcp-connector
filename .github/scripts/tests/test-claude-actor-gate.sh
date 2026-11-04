@@ -56,8 +56,26 @@ run_gate() {
     fail "$name: gate exited non-zero"
     return
   fi
-  if [[ "$(cat "$out")" != "allowed=$expected" ]]; then
-    fail "$name: expected allowed=$expected, got '$(cat "$out")'"
+  local got_allowed
+  got_allowed="$(grep '^allowed=' "$out" || true)"
+  if [[ "$got_allowed" != "allowed=$expected" ]]; then
+    fail "$name: expected allowed=$expected, got '$got_allowed'"
+  fi
+  # RUN_ATTEMPT is optional for these cases. When it is a positive integer
+  # the gate must record it next to the decision, including on a refusal.
+  # Any other supplied value fails closed and must not be copied out.
+  if [[ -n "${vars[RUN_ATTEMPT]+x}" ]]; then
+    local got_attempt
+    got_attempt="$(grep '^attempt=' "$out" || true)"
+    if [[ "${vars[RUN_ATTEMPT]}" =~ ^[1-9][0-9]*$ ]]; then
+      if [[ "$got_attempt" != "attempt=${vars[RUN_ATTEMPT]}" ]]; then
+        fail "$name: expected attempt=${vars[RUN_ATTEMPT]}, got '$got_attempt'"
+      fi
+    elif [[ -n "$got_attempt" ]]; then
+      fail "$name: recorded a malformed run attempt"
+    fi
+  elif grep -q '^attempt=' "$out"; then
+    fail "$name: wrote attempt without RUN_ATTEMPT"
   fi
 }
 
@@ -85,10 +103,24 @@ run_gate false "CONTRIBUTOR association" AUTHOR_ASSOCIATION=CONTRIBUTOR
 run_gate false "NONE association" AUTHOR_ASSOCIATION=NONE
 run_gate false "missing association" -u AUTHOR_ASSOCIATION
 
+run_gate true "records the run attempt beside the decision" RUN_ATTEMPT=1
+run_gate true "records a later run attempt" RUN_ATTEMPT=2
+run_gate false "denial still records a valid attempt" RUN_ATTEMPT=3 ACTOR=mallory TRIGGERING_ACTOR=mallory SENDER_LOGIN=mallory
+run_gate false "zero run attempt fails closed" RUN_ATTEMPT=0
+run_gate false "empty run attempt fails closed" RUN_ATTEMPT=
+run_gate false "malformed run attempt fails closed" RUN_ATTEMPT=1x
+
 # The refusal log must not echo logins an outside account controls.
 run_gate false "log hygiene" ACTOR=mallory TRIGGERING_ACTOR=mallory SENDER_LOGIN=mallory
 if grep -q mallory "$scratch/log"; then
   fail "gate log echoed an actor login"
+fi
+
+# A rejected attempt value is caller-controlled on a hostile runner; the
+# fixed denial must not copy it into the log.
+run_gate false "attempt value is not logged" RUN_ATTEMPT=$'2\n::notice::pwned'
+if grep -q pwned "$scratch/log"; then
+  fail "gate log echoed the run attempt"
 fi
 
 # ---------------------------------------------------------------- workflow
@@ -103,8 +135,46 @@ check_workflow() {
     echo "authorize job does not run the gate script"
   grep -qE '^\s+needs: authorize$' "$file" ||
     echo "claude job does not depend on authorize"
-  grep -qE "^\s+if: needs\.authorize\.outputs\.allowed == 'true'$" "$file" ||
+  # shellcheck disable=SC2016 # a literal GitHub expression, not shell
+  grep -qF 'RUN_ATTEMPT: ${{ github.run_attempt }}' "$file" ||
+    echo "gate does not receive github.run_attempt"
+  # shellcheck disable=SC2016 # a literal GitHub expression, not shell
+  grep -qF 'attempt: ${{ steps.gate.outputs.attempt }}' "$file" ||
+    echo "attempt output is not taken from the gate step"
+  # The Claude job's if must require this attempt's gate output. A partial
+  # re-run freezes steps.gate.outputs and only changes github.run_attempt.
+  local claude_if
+  claude_if="$(awk '
+    /^  claude:/ { job = 1; next }
+    job && /^  [a-z0-9-]+:/ { job = 0 }
+    job && /^    if:/ { show = 1 }
+    show { print }
+    show && /^    [a-z]/ && !/^    if:/ { show = 0 }
+  ' "$file")"
+  grep -qF "needs.authorize.outputs.allowed == 'true'" <<<"$claude_if" ||
     echo "claude job is not conditioned on the gate output"
+  # shellcheck disable=SC2016 # a literal GitHub expression, not shell
+  grep -qF "needs.authorize.outputs.attempt == format('{0}', github.run_attempt)" <<<"$claude_if" ||
+    echo "claude job does not bind authorization to this run attempt"
+  # If a partial re-run still starts the job, the default-branch gate must
+  # refuse before the action. The PR checkout cannot be the script source.
+  local claude_body gate_at action_at
+  claude_body="$(awk '
+    /^  claude:/ { job = 1; next }
+    job && /^  [a-z0-9-]+:/ { job = 0 }
+    job { print }
+  ' "$file")"
+  grep -qF 'path: .gate' <<<"$claude_body" ||
+    echo "claude job does not isolate the default-branch gate checkout"
+  grep -qF 'bash .gate/.github/scripts/claude-actor-gate.sh' <<<"$claude_body" ||
+    echo "claude job does not re-run the trusted gate"
+  grep -qF "grep -qx 'allowed=true'" <<<"$claude_body" ||
+    echo "claude job does not fail closed when the fresh gate refuses"
+  gate_at="$(awk '/bash \.gate\/\.github\/scripts\/claude-actor-gate\.sh/ { print NR; exit }' <<<"$claude_body")"
+  action_at="$(awk '/anthropics\/claude-code-action/ { print NR; exit }' <<<"$claude_body")"
+  if [[ -z "$gate_at" || -z "$action_at" || "$gate_at" -ge "$action_at" ]]; then
+    echo "trusted gate does not run before the Claude action"
+  fi
   grep -qF "github.event.sender.type != 'Bot'" "$file" ||
     echo "Bot senders are not filtered before a runner starts"
   grep -qF "!endsWith(github.actor, '[bot]')" "$file" ||
@@ -163,6 +233,11 @@ plant() {
 }
 plant "allowlist removed" '/CLAUDE_ALLOWED_ACTORS: /d'
 plant "gate output ignored" "s/needs\.authorize\.outputs\.allowed == 'true'/always()/"
+plant "attempt binding removed" '/needs\.authorize\.outputs\.attempt/d'
+plant "run attempt not passed to the gate" '/RUN_ATTEMPT: /d'
+plant "in-job gate removed" '/bash \.gate\/\.github\/scripts\/claude-actor-gate\.sh/d'
+# shellcheck disable=SC2016 # a literal GitHub expression, not shell
+plant "attempt output re-read from the context" 's#attempt: \$\{\{ steps\.gate\.outputs\.attempt \}\}#attempt: ${{ github.run_attempt }}#'
 plant "write scope at workflow level" 's/^permissions: \{\}$/permissions: write-all/'
 plant "turn cap raised" 's/(max_turns: |--max-turns )[0-9]+/\150/'
 # shellcheck disable=SC2016 # a literal GitHub expression, not shell

@@ -13,6 +13,12 @@ name: Claude
 #     actor and the sender (comma- or whitespace-separated GitHub logins). Empty or
 #     unset means NO ONE can start a run: it fails closed;
 #   - a User sender (Bot senders and any login ending in [bot] are skipped).
+# A partial re-run ("Re-run failed jobs" or a single job) reuses this job's
+# outputs and does not re-check github.triggering_actor. The gate records
+# github.run_attempt, and the Claude job is scheduled only when that recorded
+# attempt is still the current one. If the job does start, it runs the same
+# default-branch gate again and stops before the action when the fresh check
+# refuses. Re-run all jobs to authorize a new attempt.
 # The rules live in .github/scripts/claude-actor-gate.sh and are tested by
 # .github/scripts/tests/test-claude-actor-gate.sh (workflow: claude-gate-test.yml).
 #
@@ -50,6 +56,9 @@ jobs:
       contents: read
     outputs:
       allowed: ${{ steps.gate.outputs.allowed }}
+      # Same step as `allowed`. A partial re-run reuses the step outputs and
+      # does not run this step again, so the recorded attempt stays put.
+      attempt: ${{ steps.gate.outputs.attempt }}
     steps:
       # Always the default branch's copy of the gate: on review events the
       # default ref is the PR merge commit, which a PR author controls.
@@ -68,11 +77,16 @@ jobs:
           SENDER_LOGIN: ${{ github.event.sender.login }}
           SENDER_TYPE: ${{ github.event.sender.type }}
           AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association || github.event.review.author_association }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: bash .github/scripts/claude-actor-gate.sh
 
   claude:
     needs: authorize
-    if: needs.authorize.outputs.allowed == 'true'
+    # `attempt` is the value authorize stored. It does not move when only
+    # this job is re-run, so a stale allowed=true cannot start it.
+    if: |
+      needs.authorize.outputs.allowed == 'true' &&
+      needs.authorize.outputs.attempt == format('{0}', github.run_attempt)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Only this job gets write scopes.
@@ -88,6 +102,30 @@ jobs:
       group: claude-${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: false
     steps:
+      # Review events check out the PR merge commit, which the author controls.
+      # Re-check the default-branch gate before any credentialed checkout.
+      - name: Checkout gate script (default branch)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          path: .gate
+      - name: Re-check the actor allowlist for this attempt
+        env:
+          CLAUDE_ALLOWED_ACTORS: ${{ vars.CLAUDE_ALLOWED_ACTORS }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          SENDER_LOGIN: ${{ github.event.sender.login }}
+          SENDER_TYPE: ${{ github.event.sender.type }}
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association || github.event.review.author_association }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          bash .gate/.github/scripts/claude-actor-gate.sh
+          grep -qx 'allowed=true' "$GITHUB_OUTPUT"
+          grep -Fqx "attempt=${RUN_ATTEMPT}" "$GITHUB_OUTPUT"
+
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
