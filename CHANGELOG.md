@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.5] - 2026-11-04
+
+### Security
+- `@claude` runs now require the commenter to be listed in the `CLAUDE_ALLOWED_ACTORS` repository or organization variable; when it is empty or unset no run starts. A partial workflow re-run cannot reuse an earlier authorization: the Claude job is scheduled only when the gate's recorded run attempt is still the current one, and it re-checks the allowlist before the action starts. Bot senders and logins ending in `[bot]` are skipped, write permissions are granted only to the Claude job, and the turn cap is set explicitly (Wilkes-Liberty/vault#852).
+- Collapse leftover sql/config/entity-write name lists in `requiredScopeForTool` onto `TOOL_SCOPE_TABLE`. Live catalog rows are unchanged. For a non-local identity on a non-network surface, untabled `drupal_drush_sql_*`, `drupal_config_*`, and `drupal_drush_config_*` names are refused with an explicit denial (never `null`). `assertPrincipalEntitlement` throws that named reason. Other untabled names still use `isWriteLikeTool` / `mcp_read`. Network listeners already refuse every untabled name. Stdio has no governance-denial audit sink; an untabled name with no handler returns Unknown tool before this gate.
+
+### Docs
+- Align the public catalog counts with the live registry after `nested.js` became the 28th tool module: 124 tools, 28 modules, and 129 MCP prompts (one per tool plus five workflow prompts). Name Nested in the README features table and tools-reference navigation, and list `drupal-full-audit` with the other built-in workflows.
+
 ## [5.4.4] - 2026-10-29
 
 ### Changed
