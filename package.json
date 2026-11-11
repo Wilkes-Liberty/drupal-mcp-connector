@@ -11,10 +11,12 @@
     "drupal-mcp-agent": "bin/drupal-mcp-agent.js",
     "drupal-mcp-anchor": "bin/drupal-mcp-anchor.js",
     "drupal-mcp-wizard": "bin/drupal-mcp-wizard.js",
-    "drupal-mcp-doctor": "bin/drupal-mcp-doctor.js"
+    "drupal-mcp-doctor": "bin/drupal-mcp-doctor.js",
+    "drupal-mcp-login": "bin/drupal-mcp-login.js"
   },
   "files": [
     "src/",
+    "docs/browser-sign-in.md",
     "scripts/generate-commands.js",
     "scripts/install-commands.js",
     ".agents/commands/",
