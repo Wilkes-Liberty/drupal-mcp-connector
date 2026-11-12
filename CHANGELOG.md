@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.5.0] - 2026-11-11
+
+### Added
+- Add `drupal-mcp-login` for local browser sign-in with PKCE and an exact loopback callback. Principal access tokens stay in memory until expiry; hosted transports and alternate credential fallback are refused (#541).
+
 ## [5.4.5] - 2026-11-04
 
 ### Security
