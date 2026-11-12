@@ -41,6 +41,11 @@ jobs:
       - name: npm run check
         run: npm run check
 
+      # #544: graphql 17.x dropped Node 20. A packed production install on
+      # this job's Node 20 runner must not warn EBADENGINE.
+      - name: Fresh pack install under Node 20
+        run: bash scripts/pack-install-smoke.sh
+
       - name: Principal-key vectors match mcp_sentinel
         env:
           GITHUB_TOKEN: ${{ github.token }}

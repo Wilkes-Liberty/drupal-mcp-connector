@@ -102,6 +102,8 @@ describe("advertised quality gate", () => {
     // is a mismatch with the required-check name.
     expect(nodeVersions(required)).toEqual(["20"]);
     expect(runCommands(required)).toContain("npm run check");
+    // #544: packed production install on the engines floor, not only on 24 LTS.
+    expect(runCommands(required)).toContain("bash scripts/pack-install-smoke.sh");
 
     // Same gate on 24 LTS, different display name, so branch protection
     // that keys on "(Node 20)" does not start requiring 24.
@@ -110,6 +112,7 @@ describe("advertised quality gate", () => {
     expect(node24).toMatch(/^\s{4}name: Lint, Syntax & Unit \(Node 24\)\s*$/m);
     expect(nodeVersions(node24)).toEqual(["24"]);
     expect(runCommands(node24)).toContain("npm run check");
+    expect(runCommands(node24)).not.toContain("bash scripts/pack-install-smoke.sh");
   });
 
   it("docs name the same CI and release quality gate as the workflows", () => {
