@@ -80,6 +80,7 @@
 
 import { serveStdio, StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
+import { assertLocalPkce } from "./lib/pkce-cli.js";
 import { listSiteNames, getTlsConfig, loadConfig, CLIENT_VERSION, SERVER_INFO } from "./lib/config.js";
 import { loadLocalSecrets, secretLoadFatalMessage, secretTableMismatchMessage } from "./lib/load-secrets.js";
 import {
@@ -335,6 +336,7 @@ const buildConnectorServer = createConnectorServerFactory({
 // ---------------------------------------------------------------------------
 
 const transport = process.env.MCP_TRANSPORT || "stdio";
+assertLocalPkce(loadConfig(), transport);
 const reportMcpTransportStage = (stage) => {
   console.error(`[drupal-mcp-connector] MCP ${stage} failed.`);
 };

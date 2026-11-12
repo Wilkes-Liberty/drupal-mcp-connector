@@ -12,6 +12,15 @@ import { resolve }                       from "node:path";
 import { validateBaseUrl }               from "./validate.js";
 import { SecurityError }                 from "./security.js";
 import { getAccessToken }                from "./oauth.js";
+import { getPkceToken, validatePkceConfig } from "./pkce-login.js";
+
+function validateSitePkce(site) {
+  if (!site.pkce) return;
+  validatePkceConfig(site.pkce);
+  if ([site.oauth, site.apiToken, site.apiTokenEnv, site.username, site.password].some(Boolean)) {
+    throw new Error("Invalid browser sign-in configuration: choose one authentication mode per site.");
+  }
+}
 
 // eslint-disable-next-line security/detect-non-literal-fs-filename -- fixed path relative to this module (the package's own package.json), not user input
 const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
@@ -99,11 +108,12 @@ function hasValidOauth(site) {
  * @throws {SecurityError} if the site is not HTTPS, or lacks a Bearer/OAuth credential.
  */
 export function assertSecureAuth(site) {
+  validateSitePkce(site);
   if (!site.requireSecureAuth) return;
   if (!String(site.baseUrl || "").startsWith("https://")) {
     throw new SecurityError(`Site "${site._name}": requireSecureAuth is set but baseUrl is not HTTPS.`);
   }
-  if (!site.apiToken && !hasValidOauth(site)) {
+  if (!site.apiToken && !hasValidOauth(site) && !site.pkce) {
     const siteName = site._name ?? "";
     if (site.oauth?.clientSecretEnv && !site.oauth.clientSecret) {
       throw new SecurityError(
@@ -191,7 +201,8 @@ function validateConfig(cfg) {
     // Enforce HTTPS for non-localhost — throws SecurityError for plain HTTP
     site.baseUrl = validateBaseUrl(site.baseUrl, name);
 
-    if (!site.apiToken && !(site.username && site.password) && !site.oauth) {
+    validateSitePkce(site);
+    if (!site.apiToken && !(site.username && site.password) && !site.oauth && !site.pkce) {
       console.warn(
         `[drupal-mcp-connector] Warning: site "${name}" has no apiToken, username/password, or oauth block. ` +
         "Unauthenticated requests will be limited to public content."
@@ -403,6 +414,8 @@ export function getInboundApprovalRequiredTools() {
  * @returns {object} Headers object
  */
 export function authHeaders(site) {
+  validateSitePkce(site);
+  if (site.pkce) return { Authorization: `Bearer ${getPkceToken(site)}` };
   if (site.apiToken) {
     return { Authorization: `Bearer ${site.apiToken}` };
   }
@@ -421,6 +434,8 @@ export function authHeaders(site) {
  * @returns {Promise<object>} Headers object
  */
 export async function authHeadersAsync(site) {
+  validateSitePkce(site);
+  if (site.pkce) return authHeaders(site);
   if (site.oauth) {
     return { Authorization: `Bearer ${await getAccessToken(site)}` };
   }

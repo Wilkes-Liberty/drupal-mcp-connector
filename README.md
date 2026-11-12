@@ -460,3 +460,6 @@ Found a vulnerability? See [SECURITY.md](SECURITY.md). Please do not open a publ
 ## License
 
 [MIT](LICENSE) © 2026 [Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda) and [Wilkes & Liberty, LLC](https://github.com/Wilkes-Liberty)
+
+Local principal sessions can use [browser sign-in with PKCE](docs/browser-sign-in.md)
+through the `drupal-mcp-login` stdio launcher.
