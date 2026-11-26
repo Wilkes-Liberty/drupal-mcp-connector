@@ -332,9 +332,9 @@ describe("hasScope — the empty-scope bypass is closed for governed setups (#18
   });
 
   it("denies a scope-gated config tool on a governed site with empty scopes", () => {
-    expect(() => assertConfigScope(governed(), "config:set system.site")).toThrow(SecurityError);
+    expect(() => assertConfigScope(governed(), "config:set system.site", { write: true })).toThrow(SecurityError);
     const scoped = governed({ oauth: { clientId: "dev-agent", scopes: ["mcp_read", "mcp_config"] } });
-    expect(() => assertConfigScope(scoped, "config:set system.site")).not.toThrow();
+    expect(() => assertConfigScope(scoped, "config:set system.site", { write: true })).not.toThrow();
   });
 
   it("accepts mcp_config_read for config reads and still refuses writes (#397)", () => {
@@ -345,6 +345,14 @@ describe("hasScope — the empty-scope bypass is closed for governed setups (#18
     const neither = governed({ oauth: { clientId: "content", scopes: ["mcp_read", "mcp_write"] } });
     expect(hasConfigReadScope(neither)).toBe(false);
     expect(() => assertConfigScope(neither, "config:get system.site")).toThrow(/mcp_config_read/);
+  });
+
+  it("refuses config reads for a token that only holds mcp_config (DEV-1349)", () => {
+    const writer = governed({ oauth: { clientId: "dev-agent", scopes: ["mcp_config"] } });
+    expect(hasConfigReadScope(writer)).toBe(false);
+    expect(hasScope(writer, "mcp_config")).toBe(true);
+    expect(() => assertConfigScope(writer, "config:get system.site")).toThrow(/mcp_config_read/);
+    expect(() => assertConfigScope(writer, "config:set system.site", { write: true })).not.toThrow();
   });
 });
 

@@ -134,10 +134,10 @@ describe("requiredScopeForTool", () => {
     expect(principalHasScope(reader, requiredScopeForCall("drupal_graphql", { query: "mutation { x }" }))).toBe(false);
   });
 
-  it("treats mcp_config as satisfying the read-only mcp_config_read scope (#397)", () => {
+  it("requires an exact mcp_config_read grant for config reads (DEV-1349)", () => {
     expect(principalHasScope(identity({ scopes: ["mcp_config_read"] }), "mcp_config_read")).toBe(true);
     expect(principalHasScope(identity({ scopes: ["mcp_config_read"] }), "mcp_config")).toBe(false);
-    expect(principalHasScope(identity({ scopes: ["mcp_config"] }), "mcp_config_read")).toBe(true);
+    expect(principalHasScope(identity({ scopes: ["mcp_config"] }), "mcp_config_read")).toBe(false);
     expect(principalHasScope(identity({ scopes: ["mcp_config"] }), "mcp_config")).toBe(true);
   });
 });
@@ -200,9 +200,7 @@ function masterRequiredScopeForUntabled(toolName) {
  */
 function masterPrincipalHasScope(scopes, required) {
   if (!required) return true;
-  if (scopes.includes(required)) return true;
-  if (required === "mcp_config_read" && scopes.includes("mcp_config")) return true;
-  return false;
+  return scopes.includes(required);
 }
 
 const INBOUND_SCOPES = Object.freeze([
@@ -462,6 +460,23 @@ describe("filterToolsByPrincipal", () => {
     ).map((d) => d.name);
     expect(visible).toContain("drupal_config_get");
     expect(visible).not.toContain("drupal_config_set");
+  });
+
+  it("hides config reads from a token that only holds mcp_config (DEV-1349)", () => {
+    const grants = { "content-agent": ["development"] };
+    const writer = identity({ scopes: ["mcp_config"] });
+    const visible = filterToolsByPrincipal(defs, sites, writer, grants).map((d) => d.name);
+    expect(visible).not.toContain("drupal_config_get");
+    expect(visible).toContain("drupal_config_set");
+    expect(principalMayUseTool("drupal_config_get", writer, sites, grants)).toBe(false);
+    expect(principalMayUseTool("drupal_config_set", writer, sites, grants)).toBe(true);
+    expect(() => assertPrincipalEntitlement({
+      toolName: "drupal_config_get",
+      args: { site: "development" },
+      identity: writer,
+      sites,
+      grants,
+    })).toThrow(/Not entitled to invoke drupal_config_get/);
   });
 
   it("hides write and config tools from a read-only principal", () => {

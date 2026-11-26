@@ -131,7 +131,7 @@
         "tokenUrl":        "/oauth/token",
         "clientId":        "developer-agent-development",
         "clientSecretEnv": "MCP_DEVELOPER_DEVELOPMENT_SECRET",
-        "scopes":          ["mcp_read", "mcp_write", "mcp_config"],
+        "scopes":          ["mcp_read", "mcp_write", "mcp_config", "mcp_config_read"],
         "grant":           "client_credentials"
       },
       "serverTools": { "url": "/mcp" },
@@ -163,7 +163,7 @@
         "tokenUrl":        "/oauth/token",
         "clientId":        "admin-agent-breakglass",
         "clientSecretEnv": "MCP_ADMIN_BREAKGLASS_SECRET",
-        "scopes":          ["mcp_read", "mcp_write", "mcp_config", "mcp_admin"],
+        "scopes":          ["mcp_read", "mcp_write", "mcp_config", "mcp_config_read", "mcp_admin"],
         "grant":           "client_credentials"
       },
       "serverTools": { "url": "/mcp" },
@@ -183,7 +183,7 @@
   "_server_tools": {
     "_comment": "serverTools.url is the JSON-RPC endpoint of the Drupal-side governed MCP tools (mcp_server_tool_bridge / mcp_sentinel), resolved against baseUrl. Required for drupal_config_get/list/set. The config-inspection audits will also use it (governed path) when present, but fall back to the drush bridge, so it is optional for the audits. Authenticated with the same OAuth bearer.",
     "_modules_comment": "Optional. serverTools.modules exposes Drupal module-owned tools through the generic registry. It is opt-in: a tool installed on the source, or listed in its catalog, is not exposed until it is named here. namespace is lowercase letters, digits and underscores, up to 24 characters. An alias follows the same rule, up to 48 characters. The namespace and alias together must be unique across configured sites. Each entry under tools is an alias with four required keys. name is the exact wire name from the source's tools/list; copy it, because bridge versions join the parts differently and the connector does not rewrite it. scope is the inbound scope a caller needs. operation is read, write or delete; it sets the public tool name (drupal_module_<operation>_<namespace>__<alias>) and the connector gate, whatever the source's own annotation says. capabilities lists extra connector gates (publish, configRead, configWrite, graphql, rawSql) and may be empty. These keys only narrow access; Drupal stays authoritative. To get slash-command stubs for the approved module tools, run `npm run install:commands -- --modules` from the directory that holds config/config.json. Optional serverTools.modules.workflows enables module-owned workflow prompts (drupal-<namespace>-<workflow>); a workflow may only name aliases already under tools. See docs/module-tools.md and docs/module-workflows.md.",
-    "_bindings_comment": "Optional. serverTools.bindings keeps a built-in command's public name while its implementation lives in a Drupal module. Each binding names an alias under serverTools.modules.tools on the same site. configGet, configList, configSet serve drupal_config_get/list/set and the config reports; codegenInspect, codegenDiff, codegenPreview serve drupal_codegen_inspect/diff/generate; sqlQuery serves drupal_drush_sql_query. Required alias policy: config and codegen aliases use scope mcp_config; get, list and the three codegen aliases are operation read with capability configRead; configSet is operation write with capability configWrite; sqlQuery is scope mcp_admin, operation read, capability rawSql, and still needs drushSsh.rawSql: \"governed\" on the site. Once a bindings object exists, every one of these commands resolves only through its binding: a missing or mismatched mapping refuses the command, with no fallback to another tool or to SSH. Configure the full set for the commands the site uses. Without a bindings object these commands keep their built-in transport. See docs/module-tools.md.",
+    "_bindings_comment": "Optional. serverTools.bindings keeps a built-in command's public name while its implementation lives in a Drupal module. Each binding names an alias under serverTools.modules.tools on the same site. configGet, configList, configSet serve drupal_config_get/list/set and the config reports; codegenInspect, codegenDiff, codegenPreview serve drupal_codegen_inspect/diff/generate; sqlQuery serves drupal_drush_sql_query. Required alias policy: get, list and the three codegen aliases use scope mcp_config_read, operation read, capability configRead; configSet uses scope mcp_config, operation write, capability configWrite; sqlQuery is scope mcp_admin, operation read, capability rawSql, and still needs drushSsh.rawSql: \"governed\" on the site. Once a bindings object exists, every one of these commands resolves only through its binding: a missing or mismatched mapping refuses the command, with no fallback to another tool or to SSH. Configure the full set for the commands the site uses. Without a bindings object these commands keep their built-in transport. See docs/module-tools.md.",
     "example": {
       "serverTools": {
         "url": "/mcp",
@@ -202,12 +202,12 @@
               "operation":    "write",
               "capabilities": []
             },
-            "get_config":       { "name": "tool_api__mcp_sentinel_config_get",            "scope": "mcp_config", "operation": "read",  "capabilities": ["configRead"] },
-            "list_config":      { "name": "tool_api__mcp_sentinel_config_list",           "scope": "mcp_config", "operation": "read",  "capabilities": ["configRead"] },
+            "get_config":       { "name": "tool_api__mcp_sentinel_config_get",            "scope": "mcp_config_read", "operation": "read",  "capabilities": ["configRead"] },
+            "list_config":      { "name": "tool_api__mcp_sentinel_config_list",           "scope": "mcp_config_read", "operation": "read",  "capabilities": ["configRead"] },
             "set_config":       { "name": "tool_api__mcp_sentinel_config_set",            "scope": "mcp_config", "operation": "write", "capabilities": ["configWrite"] },
-            "codegen_inspect":  { "name": "tool_api__graphql_compose_codegen_inspect",    "scope": "mcp_config", "operation": "read",  "capabilities": ["configRead"] },
-            "codegen_diff":     { "name": "tool_api__graphql_compose_codegen_diff",       "scope": "mcp_config", "operation": "read",  "capabilities": ["configRead"] },
-            "codegen_preview":  { "name": "tool_api__graphql_compose_codegen_preview",    "scope": "mcp_config", "operation": "read",  "capabilities": ["configRead"] },
+            "codegen_inspect":  { "name": "tool_api__graphql_compose_codegen_inspect",    "scope": "mcp_config_read", "operation": "read",  "capabilities": ["configRead"] },
+            "codegen_diff":     { "name": "tool_api__graphql_compose_codegen_diff",       "scope": "mcp_config_read", "operation": "read",  "capabilities": ["configRead"] },
+            "codegen_preview":  { "name": "tool_api__graphql_compose_codegen_preview",    "scope": "mcp_config_read", "operation": "read",  "capabilities": ["configRead"] },
             "sql_query":        { "name": "tool_api__mcp_sentinel_sql_query",             "scope": "mcp_admin",  "operation": "read",  "capabilities": ["rawSql"] }
           },
           "workflows": {

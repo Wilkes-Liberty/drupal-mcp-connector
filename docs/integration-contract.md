@@ -85,9 +85,11 @@ OAuth2 scopes partition connector operations. The two base scopes:
 | `mcp_read` | read / list / explain / introspect |
 | `mcp_write` | create / update / delete / write-class actions |
 
-Two further scopes key the governance tiers (see §5b): `mcp_config` (governed
-configuration) and `mcp_admin` (admin / break-glass). Scope names use the
-underscore form — the OAuth2 scope entity's `name` (e.g. `mcp_read`), per
+Two further scopes key the governance tiers (see §5b): `mcp_config_read` /
+`mcp_config` (governed configuration read vs write) and `mcp_admin` (admin /
+break-glass). A granted scope satisfies a required scope by exact match
+only (DEV-1349); the rule lives in `grantedScopesSatisfy`. Scope names use
+the underscore form — the OAuth2 scope entity's `name` (e.g. `mcp_read`), per
 [oauth-client-credentials.md](oauth-client-credentials.md).
 
 A governance layer MAY require these scopes per tool/operation. The token's
@@ -202,7 +204,7 @@ mirrored by the connector preset:
 | Tier | Sites | Scopes | Preset | Config |
 |------|-------|--------|--------|--------|
 | Content | `prod`, `staging` | `mcp_read`, `mcp_write` | `content-editor` | read-only |
-| Developer | `dev` | + `mcp_config` | `config-editor` | read + write |
+| Developer | `dev` | + `mcp_config_read`, `mcp_config` | `config-editor` | read + write |
 | Admin (break-glass) | `dev-admin` | + `mcp_admin` | `development` | read + write |
 
 `drupal_mcp_whoami` reports the effective tier, scopes, capabilities, and

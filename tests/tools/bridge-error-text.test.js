@@ -130,8 +130,8 @@ describe("tools behind a module binding", () => {
 
   it.each([["an HTML error page", htmlFailure], ["a tool failure", toolFailure]])(
     "gives config, Codegen and SQL a fixed refusal on %s", async (_label, reply) => {
-      bind("configGet", "tool_api__config_read", "mcp_config", ["configRead"]);
-      bind("codegenInspect", "tool_api__codegen_inspect", "mcp_config", ["configRead"]);
+      bind("configGet", "tool_api__config_read", "mcp_config_read", ["configRead"]);
+      bind("codegenInspect", "tool_api__codegen_inspect", "mcp_config_read", ["configRead"]);
       bind("sqlQuery", "tool_api__sql_query", "mcp_admin", ["rawSql"]);
       state.reply = reply();
       for (const call of [

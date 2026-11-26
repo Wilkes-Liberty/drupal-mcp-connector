@@ -8,6 +8,7 @@ import { loadSiteCatalogs, remainingCatalogListBudgetMs, workflowIdsFromSite } f
 import { buildDataFlowContext, consumeBudgetIfEnforced, DataFlowBudgetError, runWithDataFlow } from "./data-flow.js";
 import { listResolvableSiteConfigs, securityMiddleware } from "./dispatch.js";
 import { getRequestIdentity, principalHasScope, resolveGrantedSites } from "./principal.js";
+import { grantedScopesSatisfy } from "./scope-satisfaction.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
 import { assertSourceGovernance, listingSourceGovernanceAllowsSites, GovernanceError } from "./governance.js";
 import { toolError } from "./errors.js";
@@ -55,24 +56,9 @@ function entries(sites) {
   return result;
 }
 
-/**
- * Whether an inbound principal satisfies a module-tool policy scope.
- * A config *read* binding historically declared `mcp_config`; the read-only
- * `mcp_config_read` auditor scope is enough for those reads (#397).
- * @param {object|null} identity
- * @param {object} policy
- * @returns {boolean}
- */
-function principalHasPolicyScope(identity, policy) {
-  if (principalHasScope(identity, policy.scope)) return true;
-  return policy.operation === "read"
-    && policy.scope === "mcp_config"
-    && principalHasScope(identity, "mcp_config_read");
-}
-
 function allowed(entry, identity, sites, grants) {
   const { site, policy } = entry;
-  if (identity && (!principalHasPolicyScope(identity, policy) ||
+  if (identity && (!principalHasScope(identity, policy.scope) ||
       !resolveGrantedSites(identity, sites, grants).some((s) => s._name === site._name))) return false;
   const sec = resolveSecurityConfig(site);
   if (policy.operation !== "read" && sec.readOnly) return false;
@@ -174,18 +160,13 @@ export function isModuleTool(name) {
 
 /**
  * Whether a binding policy scope satisfies a compatibility required.scope.
- * Config reads accept either `mcp_config` or `mcp_config_read` (#397).
+ * Exact match (DEV-1349); see {@link grantedScopesSatisfy}.
  * @param {object} policy
  * @param {object} required
  * @returns {boolean}
  */
 function bindingScopeMatches(policy, required) {
-  if (policy.scope === required.scope) return true;
-  if (required.operation !== "read") return false;
-  const caps = required.capabilities ?? [];
-  if (!caps.includes("configRead")) return false;
-  const configReadScopes = new Set(["mcp_config", "mcp_config_read"]);
-  return configReadScopes.has(policy.scope) && configReadScopes.has(required.scope);
+  return grantedScopesSatisfy([policy.scope], required.scope);
 }
 
 /**

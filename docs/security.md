@@ -42,6 +42,14 @@ disagree. Module-owned tools (`drupal_module_*`) are gated by the `scope`
 declared in their binding policy instead of a table row. Stdio
 local-operator discovery is unchanged.
 
+A granted OAuth scope satisfies a required scope by exact string match
+only (DEV-1349). `mcp_config` does not include `mcp_config_read`. That
+rule is `grantedScopesSatisfy` in `src/lib/scope-satisfaction.js`, the
+same verdict mcp_sentinel applies when it stamps a tool with one exact
+scope. Tokens that only carry `mcp_config` lose config-read tools;
+grant `mcp_config_read` as well (and update read bindings to declare
+it) if those tools must keep working.
+
 ### Entity policy on specialized tools
 
 Connector entity allowlists and denylists apply to **specialized tools**
@@ -420,7 +428,7 @@ Give that role only what the connector needs — for read-only auditing, typical
 
 Grant additional permissions only as needed. Never grant `administer nodes`, `bypass content access`, or any `administer` permission to the API user.
 
-> With the **MCP Sentinel** module installed, bind this role to an `mcp_policy_profile` and issue the connector an OAuth token (Consumer with `mcp_read`/`mcp_write` scopes; add `mcp_config` for the dev/config tier, which the config tools require). Governance and audit then key off the authenticated role and scopes server-side. See the [MCP Sentinel project page](https://www.drupal.org/project/mcp_sentinel).
+> With the **MCP Sentinel** module installed, bind this role to an `mcp_policy_profile` and issue the connector an OAuth token (Consumer with `mcp_read`/`mcp_write` scopes; add `mcp_config_read` for config reads and `mcp_config` for config writes). Governance and audit then key off the authenticated role and scopes server-side. See the [MCP Sentinel project page](https://www.drupal.org/project/mcp_sentinel).
 
 ---
 

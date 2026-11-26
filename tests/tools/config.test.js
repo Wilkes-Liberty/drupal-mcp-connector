@@ -3,9 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Per-site fixtures keyed by name, so each test can pick a tier.
 const SITES = {
   prod:  { _name: "prod",  oauth: { scopes: ["mcp_read", "mcp_write"] },              serverTools: { url: "/mcp" }, security: { preset: "content-editor" } },
-  dev:   { _name: "dev",   oauth: { scopes: ["mcp_read", "mcp_write", "mcp_config"] }, serverTools: { url: "/mcp" }, security: { preset: "config-editor" } },
-  admin: { _name: "admin", oauth: { scopes: ["mcp_read", "mcp_write", "mcp_config", "mcp_admin"] }, serverTools: { url: "/mcp" }, security: { preset: "development" } },
+  dev:   { _name: "dev",   oauth: { scopes: ["mcp_read", "mcp_write", "mcp_config", "mcp_config_read"] }, serverTools: { url: "/mcp" }, security: { preset: "config-editor" } },
+  admin: { _name: "admin", oauth: { scopes: ["mcp_read", "mcp_write", "mcp_config", "mcp_config_read", "mcp_admin"] }, serverTools: { url: "/mcp" }, security: { preset: "development" } },
   auditor: { _name: "auditor", oauth: { scopes: ["mcp_config_read"] }, serverTools: { url: "/mcp" }, security: { preset: "auditor" } },
+  configWriter: { _name: "configWriter", oauth: { scopes: ["mcp_config"] }, serverTools: { url: "/mcp" }, security: { preset: "config-editor" } },
 };
 
 vi.mock("../../src/lib/config.js", () => ({
@@ -68,6 +69,15 @@ describe("config tools — governed via server-tool bridge", () => {
     await expect(handlers.drupal_config_set({ site: "auditor", name: "system.site", value: { name: "X" } }))
       .rejects.toBeInstanceOf(SecurityError);
     expect(callServerTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("config_get refuses a token that only holds mcp_config; config_set still accepts it (DEV-1349)", async () => {
+    callServerTool.mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
+    await expect(handlers.drupal_config_get({ site: "configWriter", name: "system.site" }))
+      .rejects.toBeInstanceOf(SecurityError);
+    expect(callServerTool).not.toHaveBeenCalled();
+    await handlers.drupal_config_set({ site: "configWriter", name: "system.site", value: { name: "X" } });
+    expect(callServerTool).toHaveBeenCalledWith(SITES.configWriter, "configSet", { name: "system.site", data: { name: "X" } });
   });
 
   it("config_list forwards an optional prefix", async () => {
@@ -267,10 +277,17 @@ describe("drupal_mcp_whoami", () => {
     expect(out.capabilities.publish).toBe(false);
   });
 
-  it("reports the developer tier with config read+write true (holds mcp_config)", async () => {
+  it("reports the developer tier with config read+write true (holds mcp_config and mcp_config_read)", async () => {
     const out = await handlers.drupal_mcp_whoami({ site: "dev" });
     expect(out.tier).toBe("developer");
     expect(out.capabilities.configRead).toBe(true);
+    expect(out.capabilities.configWrite).toBe(true);
+  });
+
+  it("reports configRead false for a token that only holds mcp_config (DEV-1349)", async () => {
+    const out = await handlers.drupal_mcp_whoami({ site: "configWriter" });
+    expect(out.tier).toBe("developer");
+    expect(out.capabilities.configRead).toBe(false);
     expect(out.capabilities.configWrite).toBe(true);
   });
 
