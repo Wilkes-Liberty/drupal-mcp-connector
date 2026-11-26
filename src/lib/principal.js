@@ -17,6 +17,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { getDefaultSiteName, getInboundGrants } from "./config.js";
 import { inferOperation, isWriteLikeCall, isWriteLikeTool } from "./operations.js";
 import { POLICY_DIGEST } from "./policy-promotion.js";
+import { grantedScopesSatisfy } from "./scope-satisfaction.js";
 import { resolveSecurityConfig, SecurityError } from "./security.js";
 import { networkToolScopeDenial, requiredScopesForTool } from "./tool-scopes.js";
 import { lookupWorkflow } from "./workflow-index.js";
@@ -247,12 +248,7 @@ export function requiredScopeForCall(toolName, args = {}) {
 export function principalHasScope(identity, scope) {
   // The untabled-family sentinel is never grantable, even if a token lists it.
   if (scope === UNTABLED_FAMILY_SCOPE_DENIAL) return false;
-  if (!scope) return true;
-  const scopes = identity?.scopes ?? [];
-  if (scopes.includes(scope)) return true;
-  // Write-capable mcp_config includes the read-only auditor scope (#397).
-  if (scope === "mcp_config_read" && scopes.includes("mcp_config")) return true;
-  return false;
+  return grantedScopesSatisfy(identity?.scopes ?? [], scope);
 }
 
 function grantNameList(values) {

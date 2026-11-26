@@ -1,5 +1,7 @@
 import { parse } from "graphql";
 
+import { grantedScopesSatisfy } from "./scope-satisfaction.js";
+
 /**
  * Security layer — connector-level access control.
  *
@@ -485,7 +487,7 @@ export function assertConfigWriteAllowed(secConfig) {
  */
 export function hasScope(site, scope) {
   const scopes = site?.oauth?.scopes ?? [];
-  if (scopes.length > 0) return scopes.includes(scope);
+  if (scopes.length > 0) return grantedScopesSatisfy(scopes, scope);
   // Empty or absent scopes. For a GOVERNED product setup — a site that claims
   // source governance, or configures OAuth at all — that is not "every scope";
   // it is an unnamed grant, and treating it as a wildcard was a bypass of the
@@ -512,31 +514,20 @@ function isGovernedSetup(site) {
 }
 
 /**
- * Whether the site's token can read config: `mcp_config` (read+write) or
- * the read-only `mcp_config_read` auditor scope (#397).
+ * Whether the site's token can read config. Exact match: `mcp_config_read`
+ * only (DEV-1349). `mcp_config` is the write scope and does not imply read.
  * @param {object} site Resolved site config.
  * @returns {boolean}
  */
 export function hasConfigReadScope(site) {
-  return hasScope(site, "mcp_config") || hasScope(site, "mcp_config_read");
-}
-
-/**
- * Inbound / binding scope to send for a config *read* (get/list/reports/codegen).
- * Prefer `mcp_config` so existing write-capable bindings keep matching; a
- * read-only token sends `mcp_config_read`.
- * @param {object} site Resolved site config.
- * @returns {string}
- */
-export function configReadBindingScope(site) {
-  return hasScope(site, "mcp_config") ? "mcp_config" : "mcp_config_read";
+  return hasScope(site, "mcp_config_read");
 }
 
 /**
  * Gate the config tools on OAuth scope. Writes require `mcp_config`.
- * Reads accept `mcp_config` or the read-only `mcp_config_read` (#397).
- * When OAuth scopes are configured and neither is present, fail fast rather
- * than dispatching a call the server will deny.
+ * Reads require `mcp_config_read` (DEV-1349). When OAuth scopes are
+ * configured and the matching scope is missing, fail fast rather than
+ * dispatching a call the server will deny.
  * @param {object} site Resolved site config.
  * @param {string} operationLabel Label used in the error message.
  * @param {{write?: boolean}} [opts] `write: true` requires `mcp_config`.
@@ -556,9 +547,9 @@ export function assertConfigScope(site, operationLabel, { write = false } = {}) 
   }
   if (!hasConfigReadScope(site)) {
     throw new SecurityError(
-      "Config reads require the 'mcp_config' or 'mcp_config_read' OAuth scope " +
-      "(config-editor / Developer tier, or a read-only auditor token); " +
-      "this token does not carry either. " +
+      "Config reads require the 'mcp_config_read' OAuth scope " +
+      "(a read-only auditor token, or a developer token that also carries " +
+      "mcp_config_read); this token does not carry it. " +
       `Operation blocked: ${operationLabel}.`
     );
   }

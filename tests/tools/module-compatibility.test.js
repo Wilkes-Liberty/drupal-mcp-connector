@@ -33,7 +33,7 @@ describe("module-owned compatibility commands", () => {
     });
     expect(state.call).toHaveBeenCalledWith(state.site, binding, {
       bundles: ["article"], skip_fields: ["field_secret"],
-    }, { operation: "read", scope: "mcp_config", capabilities: ["configRead"] });
+    }, { operation: "read", scope: "mcp_config_read", capabilities: ["configRead"] });
     expect(result.wroteFiles).toBe(false);
     expect(result.command).toBe(`module:${binding}`);
     expect(JSON.parse(result.output).artefacts["example.ts"]).toContain("Example");

@@ -27,7 +27,7 @@ import {
   listingSourceGovernanceAllows,
   listingSourceGovernanceAllowsSites,
 } from "../../src/lib/governance.js";
-import { createModuleToolRegistry, configuredModuleTools } from "../../src/lib/module-tools.js";
+import { createModuleToolRegistry, configuredModuleTools, resolveModuleBinding } from "../../src/lib/module-tools.js";
 import { resetDataFlowBudgets } from "../../src/lib/data-flow.js";
 import { clearSiteCatalogCache } from "../../src/lib/site-catalog.js";
 
@@ -205,6 +205,37 @@ describe("module-owned tool registry", () => {
     expect(await registry.list(context())).toEqual([]);
     expect((await registry.call("drupal_module_write_stage__asset", {}, context())).isError).toBe(true);
     expect(call).not.toHaveBeenCalled();
+  });
+
+  it("hides a mcp_config_read module tool from a token that only holds mcp_config (DEV-1349)", async () => {
+    const site = state.sites[0];
+    site.security = { preset: "config-editor", readOnly: false, allowConfigRead: true };
+    site.serverTools.modules.tools = {
+      relationship: {
+        name: "tool_api.relationship", operation: "read", scope: "mcp_config_read", capabilities: ["configRead"],
+      },
+    };
+    const writer = { ...context(), identity: { ...context().identity, scopes: ["mcp_config"] } };
+    const reader = { ...context(), identity: { ...context().identity, scopes: ["mcp_config_read"] } };
+    expect(await registry.list(writer)).toEqual([]);
+    expect(await registry.list(reader)).toHaveLength(1);
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires an exact binding scope match for config reads (DEV-1349)", () => {
+    const site = state.sites[0];
+    site.security.allowConfigRead = true;
+    site.serverTools.modules.tools.relationship = {
+      name: "tool_api.relationship", operation: "read", scope: "mcp_config", capabilities: ["configRead"],
+    };
+    site.serverTools.bindings = { configGet: "relationship" };
+    expect(() => resolveModuleBinding(site, "configGet", {
+      operation: "read", scope: "mcp_config_read", capabilities: ["configRead"],
+    })).toThrow(/contract/);
+    site.serverTools.modules.tools.relationship.scope = "mcp_config_read";
+    expect(resolveModuleBinding(site, "configGet", {
+      operation: "read", scope: "mcp_config_read", capabilities: ["configRead"],
+    }).alias).toBe("relationship");
   });
 
   it("requires each configured capability even when the credential scope matches", async () => {

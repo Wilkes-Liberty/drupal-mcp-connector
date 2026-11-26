@@ -118,12 +118,12 @@ describe("config/config.example.json — the shipped secure default", () => {
 
     /** What each compatibility command requires of its bound alias. */
     const CONTRACTS = new Map([
-      ["configGet", { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }],
-      ["configList", { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }],
+      ["configGet", { operation: "read", scope: "mcp_config_read", capabilities: ["configRead"] }],
+      ["configList", { operation: "read", scope: "mcp_config_read", capabilities: ["configRead"] }],
       ["configSet", { operation: "write", scope: "mcp_config", capabilities: ["configWrite"] }],
-      ["codegenInspect", { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }],
-      ["codegenDiff", { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }],
-      ["codegenPreview", { operation: "read", scope: "mcp_config", capabilities: ["configRead"] }],
+      ["codegenInspect", { operation: "read", scope: "mcp_config_read", capabilities: ["configRead"] }],
+      ["codegenDiff", { operation: "read", scope: "mcp_config_read", capabilities: ["configRead"] }],
+      ["codegenPreview", { operation: "read", scope: "mcp_config_read", capabilities: ["configRead"] }],
       ["sqlQuery", { operation: "read", scope: "mcp_admin", capabilities: ["rawSql"] }],
     ]);
 

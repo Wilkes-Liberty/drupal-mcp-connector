@@ -60,9 +60,11 @@ to an alias in the same site's `serverTools.modules.tools` object:
 }
 ```
 
-Get/list require operation `read` and capability `configRead`; their inbound
-scope may be `mcp_config` or the read-only `mcp_config_read` (#397). Set
-requires operation `write`, scope `mcp_config`, and capability `configWrite`.
+Get/list require operation `read`, scope `mcp_config_read`, and capability
+`configRead`. Set requires operation `write`, scope `mcp_config`, and
+capability `configWrite`. Scope matching is exact (DEV-1349): a binding
+that still declares `mcp_config` on a read alias does not satisfy
+`mcp_config_read`.
 Each alias's `name` is the exact approved source tool name, not a
 connector constant. Existing config-set clients still pass `value`; the
 compatibility adapter supplies that map as the module's `data` argument.
@@ -91,9 +93,9 @@ binding resolution, so an absent mapping refuses the command.
 
 | Binding | Public command | Inbound scope | Capability | Drupal action |
 |---|---|---|---|---|
-| `codegenInspect` | `drupal_codegen_inspect` | `mcp_config` | `configRead` | `graphql_compose_codegen_inspect` |
-| `codegenDiff` | `drupal_codegen_diff` | `mcp_config` | `configRead` | `graphql_compose_codegen_diff` |
-| `codegenPreview` | `drupal_codegen_generate` | `mcp_config` | `configRead` | `graphql_compose_codegen_preview` |
+| `codegenInspect` | `drupal_codegen_inspect` | `mcp_config_read` | `configRead` | `graphql_compose_codegen_inspect` |
+| `codegenDiff` | `drupal_codegen_diff` | `mcp_config_read` | `configRead` | `graphql_compose_codegen_diff` |
+| `codegenPreview` | `drupal_codegen_generate` | `mcp_config_read` | `configRead` | `graphql_compose_codegen_preview` |
 | `sqlQuery` | `drupal_drush_sql_query` | `mcp_admin` | `rawSql` | `mcp_sentinel_sql_query` |
 
 All four require operation `read`. Map each binding to a configured alias and

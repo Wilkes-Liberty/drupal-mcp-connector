@@ -519,10 +519,12 @@ Read-only audit and analysis tools. All respect the security config.
 
 Governed configuration tools mediated by Drupal's authoritative server-side MCP tools
 (via the `serverTools.url` JSON-RPC bridge — **not** drush). Config **reads**
-(`config_get` / `config_list`) accept **`mcp_config`** or the read-only
-**`mcp_config_read`** auditor scope (#397). Config **writes** (`config_set`)
-still require `mcp_config` (config-editor / Developer tier). A content-tier
-token (`mcp_read` / `mcp_write` only) is denied on all of them. Each tool is
+(`config_get` / `config_list`) require the read-only **`mcp_config_read`**
+scope. Config **writes** (`config_set`) require **`mcp_config`**. The two
+scopes do not imply each other (DEV-1349): a token that only holds
+`mcp_config` is refused for reads, matching mcp_sentinel. Grant both on a
+developer consumer that must read and write config. A content-tier token
+(`mcp_read` / `mcp_write` only) is denied on all of them. Each tool is
 additionally gated by the site's connector-side config caps (`allowConfigRead` /
 `allowConfigWrite`) as a defence-in-depth second layer. When OAuth scopes are
 configured, the connector checks the matching scope up front and refuses
@@ -531,8 +533,8 @@ without it rather than dispatching a call the server will deny. Requires a
 
 | Tool | Required params | Cap | Description |
 |------|----------------|-----|-------------|
-| `drupal_config_get` | `name` | configRead + `mcp_config` or `mcp_config_read` | Read one config object (e.g. `system.site`). |
-| `drupal_config_list` | — | configRead + `mcp_config` or `mcp_config_read` | List config object names; optional `prefix`. |
+| `drupal_config_get` | `name` | configRead + `mcp_config_read` | Read one config object (e.g. `system.site`). |
+| `drupal_config_list` | — | configRead + `mcp_config_read` | List config object names; optional `prefix`. |
 | `drupal_config_set` | `name`, `value` | configWrite + `mcp_config` | Set a config value (governed + audited server-side). Refuses `core.extension` unless the operator set `security.allowCoreExtensionChange`; see [Changes to core.extension](security.md#changes-to-coreextension). |
 | `drupal_mcp_whoami` | — | — | Report effective tier, preset, scopes, capabilities, and resolved `target` (`name`, `baseUrl`, `source`) for a site. |
 
